@@ -1,0 +1,9 @@
+=== Scan Tokens ===
+
+ScanToken { token: Identifier("main"), index: 6 }
+ScanToken { token: OpenBrace, index: 8 }
+ScanToken { token: Identifier("println"), index: 20 }
+ScanToken { token: OpenParen, index: 21 }
+ScanToken { token: StringLiteral("Hello World!"), index: 35 }
+ScanToken { token: CloseParen, index: 36 }
+ScanToken { token: CloseBrace, index: 38 }
