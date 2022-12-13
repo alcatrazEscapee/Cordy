@@ -1,0 +1,35 @@
+
+=== Scan Errors ===
+
+ScanError { error: InvalidCharacter('$'), index: 42 }
+ScanError { error: InvalidCharacter('#'), index: 45 }
+ScanError { error: InvalidCharacter('@'), index: 75 }
+ScanError { error: InvalidCharacter('$'), index: 102 }
+ScanError { error: InvalidCharacter('$'), index: 180 }
+
+=== Formatted Scan Errors ===
+
+Invalid character: '$'
+  at line 1 (invalid_character.aocl)
+$
+^--- here
+
+Invalid character: '#'
+  at line 2 (invalid_character.aocl)
+#
+^--- here
+
+Invalid character: '@'
+  at line 3 (invalid_character.aocl)
+/* this one is fine $#@ */ @ /* that one is not */
+                           ^--- here
+
+Invalid character: '$'
+  at line 5 (invalid_character.aocl)
+$ // at the beginning of a line
+^--- here
+
+Invalid character: '$'
+  at line 6 (invalid_character.aocl)
+/* and as the last character of a line -> */ $
+                                             ^--- here

@@ -1,0 +1,11 @@
+*
+!*/
+!/.gitignore
+
+!/Cargo.toml
+!/Cargo.lock
+
+!/resources/**/*.aocl
+!/resources/**/*.scan
+
+!/src/**/*.rs
