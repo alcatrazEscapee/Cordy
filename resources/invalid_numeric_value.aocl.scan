@@ -1,19 +1,17 @@
 === Scan Tokens ===
 
-ScanToken { token: Identifier("main"), index: 6 }
-ScanToken { token: OpenBrace, index: 8 }
-ScanToken { token: KeywordLet, index: 17 }
-ScanToken { token: Identifier("x"), index: 19 }
-ScanToken { token: Equals, index: 21 }
-ScanToken { token: CloseBrace, index: 59 }
+KeywordLet
+Identifier("x")
+Equals
 
 === Scan Errors ===
 
-ScanError { error: InvalidNumericValue(ParseIntError { kind: PosOverflow }), index: 43 }
+ScanError { error: InvalidNumericValue(ParseIntError { kind: PosOverflow }), lineno: 0 }
 
 === Formatted Scan Errors ===
 
 Invalid numeric value: number too large to fit in target type
-  at line 2 (invalid_numeric_value.aocl)
-    let x = 999999999999999999999 // too large
-                                ^--- here
+  at: line 1 (invalid_numeric_value.aocl)
+  at:
+
+let x = 999999999999999999999 // too large

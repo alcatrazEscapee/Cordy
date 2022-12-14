@@ -1,19 +1,18 @@
 === Scan Tokens ===
 
-ScanToken { token: Identifier("main"), index: 4 }
-ScanToken { token: OpenBrace, index: 6 }
-ScanToken { token: KeywordLet, index: 15 }
-ScanToken { token: Identifier("x"), index: 17 }
-ScanToken { token: Equals, index: 19 }
-ScanToken { token: StringLiteral("... this doesn't end\r\n}"), index: 45 }
+KeywordLet
+Identifier("x")
+Equals
+StringLiteral("... this doesn't end")
 
 === Scan Errors ===
 
-ScanError { error: UnterminatedStringLiteral, index: 45 }
+ScanError { error: UnterminatedStringLiteral, lineno: 0 }
 
 === Formatted Scan Errors ===
 
 Unterminated string literal (missing a closing single quote)
-  at line 2 (unterminated_string_literal.aocl)
-}
-^--- here
+  at: line 1 (unterminated_string_literal.aocl)
+  at:
+
+let x = '... this doesn\'t end

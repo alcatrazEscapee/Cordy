@@ -1,5 +1,5 @@
 === Scan Tokens ===
 
-ScanToken { token: Identifier("main"), index: 4 }
-ScanToken { token: OpenBrace, index: 6 }
-ScanToken { token: CloseBrace, index: 7 }
+Identifier("main")
+OpenBrace
+CloseBrace

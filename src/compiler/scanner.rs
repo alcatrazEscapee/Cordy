@@ -4,16 +4,16 @@ use std::num::ParseIntError;
 use std::str::Chars;
 
 use self::ScanErrorType::{*};
-use self::ScanTokenType::{*};
+use self::ScanToken::{*};
 
 
 pub fn scan(text: &String) -> ScanResult {
     let mut scanner: Scanner = Scanner {
         chars: text.chars().peekable(),
-        index: 0,
-
         tokens: Vec::new(),
         errors: Vec::new(),
+
+        lineno: 0
     };
     scanner.scan();
     ScanResult {
@@ -24,25 +24,18 @@ pub fn scan(text: &String) -> ScanResult {
 
 
 pub struct ScanResult {
-    tokens: Vec<ScanToken>,
-    errors: Vec<ScanError>
+    pub tokens: Vec<ScanToken>,
+    pub errors: Vec<ScanError>
 }
 
-struct Scanner<'a> {
-    chars: Peekable<Chars<'a>>,
-    index: usize,
 
-    tokens: Vec<ScanToken>,
-    errors: Vec<ScanError>,
-}
-
-#[derive(Debug)]
+#[derive(Eq, PartialEq, Debug, Clone)]
 pub struct ScanError {
     error: ScanErrorType,
-    index: usize,
+    lineno: usize,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Eq, PartialEq, Debug, Clone)]
 pub enum ScanErrorType {
     InvalidNumericPrefix(char),
     InvalidNumericValue(ParseIntError),
@@ -61,14 +54,8 @@ impl ScanError {
     }
 }
 
-#[derive(Debug)]
-pub struct ScanToken {
-    token: ScanTokenType,
-    index: usize,
-}
-
-#[derive(Ord, PartialOrd, Eq, PartialEq, Debug, Clone)]
-pub enum ScanTokenType {
+#[derive(Eq, PartialEq, Debug)]
+pub enum ScanToken {
     // Special
     Identifier(String),
     StringLiteral(String),
@@ -76,7 +63,7 @@ pub enum ScanTokenType {
 
     // Keywords
     KeywordLet,
-    KeywordConst,
+    KeywordFn,
     KeywordIf,
     KeywordElif,
     KeywordElse,
@@ -84,6 +71,15 @@ pub enum ScanTokenType {
     KeywordFor,
     KeywordIn,
     KeywordIs,
+    KeywordBreak,
+    KeywordContinue,
+    KeywordTrue,
+    KeywordFalse,
+    KeywordNil,
+    KeywordStruct,
+    KeywordInt,
+    KeywordStr,
+    KeywordBool,
 
     // Syntax
     Equals,
@@ -135,6 +131,18 @@ pub enum ScanTokenType {
     Dot,
     Colon,
     Arrow,
+    Underscore,
+
+    NewLine,
+}
+
+
+struct Scanner<'a> {
+    chars: Peekable<Chars<'a>>,
+    tokens: Vec<ScanToken>,
+    errors: Vec<ScanError>,
+
+    lineno: usize,
 }
 
 
@@ -310,7 +318,7 @@ impl<'a> Scanner<'a> {
                        '%' => match self.peek() {
                            Some('=') => self.push_skip(ModEquals),
                            _ => self.push(Mod)
-                       }
+                       },
 
 
                        '(' => self.push(OpenParen),
@@ -323,6 +331,7 @@ impl<'a> Scanner<'a> {
                        ',' => self.push(Comma),
                        '.' => self.push(Dot),
                        ':' => self.push(Colon),
+                       '_' => self.push(Underscore),
 
                        e => self.push_err(InvalidCharacter(e))
                    }
@@ -334,9 +343,9 @@ impl<'a> Scanner<'a> {
 
     fn screen_identifier(self: &mut Self, buffer: Vec<char>) {
         let string: String = buffer.iter().collect();
-        let token: ScanTokenType = match string.as_str() {
+        let token: ScanToken = match string.as_str() {
             "let" => KeywordLet,
-            "const" => KeywordConst,
+            "fn" => KeywordFn,
             "if" => KeywordIf,
             "elif" => KeywordElif,
             "else" => KeywordElse,
@@ -344,6 +353,15 @@ impl<'a> Scanner<'a> {
             "for" => KeywordFor,
             "in" => KeywordIn,
             "is" => KeywordIs,
+            "break" => KeywordBreak,
+            "continue" => KeywordContinue,
+            "true" => KeywordTrue,
+            "false" => KeywordFalse,
+            "nil" => KeywordNil,
+            "struct" => KeywordStruct,
+            "int" => KeywordInt,
+            "str" => KeywordStr,
+            "bool" => KeywordBool,
             _ => Identifier(string)
         };
         self.push(token);
@@ -358,24 +376,20 @@ impl<'a> Scanner<'a> {
     }
 
 
-    fn push(self: &mut Self, token: ScanTokenType) {
-        self.tokens.push(ScanToken {
-            token,
-            index: self.index
-        });
+    fn push(self: &mut Self, token: ScanToken) {
+        self.tokens.push(token);
     }
 
-    fn push_skip(self: &mut Self, token: ScanTokenType) {
+    fn push_skip(self: &mut Self, token: ScanToken) {
         self.push(token);
         self.skip();
     }
 
-
     fn push_err(self: &mut Self, error: ScanErrorType) {
         self.errors.push(ScanError {
             error,
-            index: self.index,
-        })
+            lineno: self.lineno,
+        });
     }
 
 
@@ -402,7 +416,10 @@ impl<'a> Scanner<'a> {
     /// Also see `advance()`
     fn advance(self: &mut Self) -> Option<char> {
         let c: Option<char> = self.chars.next();
-        if c.is_some() { self.index += 1; }
+        if let Some('\n') = c {
+            self.lineno += 1;
+            self.push(NewLine);
+        }
         c
     }
 
@@ -416,13 +433,13 @@ impl<'a> Scanner<'a> {
 #[cfg(test)]
 mod tests {
     use std::{env, fs};
-    use crate::compiler::{error_reporting, scanner};
-    use crate::compiler::scanner::{ScanResult, ScanTokenType};
-    use crate::compiler::scanner::ScanTokenType::{*};
+    use crate::compiler::scanner;
+    use crate::compiler::scanner::{ScanResult, ScanToken};
+    use crate::compiler::scanner::ScanToken::{*};
 
     #[test] fn test_str_empty() { run_str("", vec![]); }
 
-    #[test] fn test_str_keywords() { run_str("let const if elif else loop for in is", vec![KeywordLet, KeywordConst, KeywordIf, KeywordElif, KeywordElse, KeywordLoop, KeywordFor, KeywordIn, KeywordIs]); }
+    #[test] fn test_str_keywords() { run_str("let fn if elif else loop for in is break continue true false nil struct int str bool", vec![KeywordLet, KeywordFn, KeywordIf, KeywordElif, KeywordElse, KeywordLoop, KeywordFor, KeywordIn, KeywordIs, KeywordBreak, KeywordContinue, KeywordTrue, KeywordFalse, KeywordNil, KeywordStruct, KeywordInt, KeywordStr, KeywordBool]); }
     #[test] fn test_str_identifiers() { run_str("foobar big_bad_wolf ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz", vec![Identifier(String::from("foobar")), Identifier(String::from("big_bad_wolf")), Identifier(String::from("ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz"))]); }
 
     #[test] fn test_str_ints() { run_str("1234 654 10_00_00", vec![Int(1234), Int(654), Int(100000)]); }
@@ -439,13 +456,12 @@ mod tests {
     #[test] fn test_str_groupings() { run_str("( [ { } ] )", vec![OpenParen, OpenSquareBracket, OpenBrace, CloseBrace, CloseSquareBracket, CloseParen]); }
     #[test] fn test_str_syntax() { run_str(". , -> - > :", vec![Dot, Comma, Arrow, Minus, GreaterThan, Colon]); }
 
-    fn run_str(text: &str, tokens: Vec<ScanTokenType>) {
+    fn run_str(text: &str, tokens: Vec<ScanToken>) {
         let result: ScanResult = scanner::scan(&String::from(text));
         assert!(result.errors.is_empty());
         assert_eq!(result.tokens
             .into_iter()
-            .map(|t| t.token)
-            .collect::<Vec<ScanTokenType>>(), tokens);
+            .collect::<Vec<ScanToken>>(), tokens);
     }
 
 
@@ -484,9 +500,12 @@ mod tests {
             lines.push(String::from("\n=== Formatted Scan Errors ===\n"));
             let mut source: String = String::from(path);
             source.push_str(".aocl");
+            let src_lines: Vec<&str> = text.lines().collect();
             for error in &result.errors {
                 lines.push(error.format_error());
-                lines.push(error_reporting::find_error_in_source(&text, error.index, Some(&source)));
+                lines.push(format!("  at: line {} ({})\n  at:\n", error.lineno + 1, &source));
+                lines.push(String::from(*src_lines.get(error.lineno).unwrap()));
+                lines.push(String::new());
             }
         }
 
