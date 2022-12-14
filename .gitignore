@@ -6,6 +6,6 @@
 !/Cargo.lock
 
 !/resources/**/*.aocl
-!/resources/**/*.scan
+!/resources/**/*.trace
 
 !/src/**/*.rs
