@@ -1,0 +1,76 @@
+=== Parse Tokens ===
+
+Identifier("x")
+Int(1)
+Nil
+OpAdd
+StoreValue
+NewLine
+Identifier("x")
+Nil
+UnarySub
+StoreValue
+NewLine
+Identifier("x")
+Identifier("print")
+Nil
+OpFuncCompose
+StoreValue
+NewLine
+Identifier("x")
+Identifier("print")
+StoreValue
+NewLine
+Identifier("x")
+Identifier("print")
+Int(4)
+Nil
+OpFuncEval(2)
+StoreValue
+NewLine
+Identifier("x")
+Identifier("print")
+Int(5)
+OpFuncEval(1)
+StoreValue
+NewLine
+
+=== Parse Errors ===
+
+ParserError { error: ExpectedExpressionTerminal(Plus), lineno: 0 }
+ParserError { error: ExpectedExpressionTerminal(Plus), lineno: 1 }
+ParserError { error: ExpectedExpressionTerminal(Dot), lineno: 2 }
+ParserError { error: ExpectedExpressionTerminal(Comma), lineno: 4 }
+ParserError { error: ExpectedCommaOrEndOfArguments(Int(6)), lineno: 5 }
+
+=== Formatted Parse Errors ===
+
+Expected an expression terminal, got '+' token instead
+  at: line 1 (invalid_expressions.aocl)
+  at:
+
+{ x = 1 + + 3 }
+
+Expected an expression terminal, got '+' token instead
+  at: line 2 (invalid_expressions.aocl)
+  at:
+
+{ x = - + 2 }
+
+Expected an expression terminal, got '.' token instead
+  at: line 3 (invalid_expressions.aocl)
+  at:
+
+{ x = print .. 3 }
+
+Expected an expression terminal, got ',' token instead
+  at: line 5 (invalid_expressions.aocl)
+  at:
+
+{ x = print (4 ,, 5) }
+
+Expected a ',' or ')' after function invocation, got integer '6' instead
+  at: line 6 (invalid_expressions.aocl)
+  at:
+
+{ x = print (5 6) }

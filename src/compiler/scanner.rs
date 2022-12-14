@@ -31,8 +31,8 @@ pub struct ScanResult {
 
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub struct ScanError {
-    error: ScanErrorType,
-    lineno: usize,
+    pub error: ScanErrorType,
+    pub lineno: usize,
 }
 
 #[derive(Eq, PartialEq, Debug, Clone)]
@@ -54,7 +54,7 @@ impl ScanError {
     }
 }
 
-#[derive(Eq, PartialEq, Debug)]
+#[derive(Eq, PartialEq, Debug, Clone)]
 pub enum ScanToken {
     // Special
     Identifier(String),
@@ -432,8 +432,7 @@ impl<'a> Scanner<'a> {
 
 #[cfg(test)]
 mod tests {
-    use std::{env, fs};
-    use crate::compiler::scanner;
+    use crate::compiler::{scanner, test_common};
     use crate::compiler::scanner::{ScanResult, ScanToken};
     use crate::compiler::scanner::ScanToken::{*};
 
@@ -469,21 +468,13 @@ mod tests {
     #[test] fn test_hello_world() { run("hello_world"); }
     #[test] fn test_invalid_character() { run("invalid_character"); }
     #[test] fn test_invalid_numeric_value() { run("invalid_numeric_value"); }
-    #[test] fn test_noop() { run("noop"); }
     #[test] fn test_unterminated_string_literal() { run("unterminated_string_literal"); }
 
 
     fn run(path: &'static str) {
-        let mut root: String = env::var("CARGO_MANIFEST_DIR").unwrap();
-        root.push_str("\\resources\\");
-        root.push_str(path);
-        root.push_str(".aocl");
-
-        let text: String = fs::read_to_string(&root).unwrap();
+        let root: String = test_common::get_test_resource_path("scanner", path);
+        let text: String = test_common::get_test_resource_src(&root);
         let result: ScanResult = scanner::scan(&text);
-
-        let mut actual_path: String = root.clone();
-        actual_path.push_str(".out");
 
         let mut lines: Vec<String> = Vec::new();
         if !result.tokens.is_empty() {
@@ -509,17 +500,6 @@ mod tests {
             }
         }
 
-        let actual: String = lines.join("\n");
-
-        fs::write(actual_path, &actual).unwrap();
-
-        let mut expected_path: String = root.clone();
-        expected_path.push_str(".scan");
-
-        let expected: String = fs::read_to_string(expected_path).unwrap();
-
-        let expected_lines: Vec<&str> = expected.lines().collect();
-        let actual_lines: Vec<&str> = actual.lines().collect();
-        assert_eq!(expected_lines, actual_lines);
+        test_common::compare_test_resource_content(&root, lines);
     }
 }

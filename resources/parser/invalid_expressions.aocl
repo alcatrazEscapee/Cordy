@@ -1,0 +1,6 @@
+{ x = 1 + + 3 }
+{ x = - + 2 }
+{ x = print .. 3 }
+{ x = print 3 }
+{ x = print (4 ,, 5) }
+{ x = print (5 6) }
