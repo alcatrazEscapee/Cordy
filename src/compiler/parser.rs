@@ -313,6 +313,8 @@ impl Parser {
                 Some(Mul) => Some(OpMul),
                 Some(Div) => Some(OpDiv),
                 Some(Mod) => Some(OpMod),
+                Some(Pow) => Some(OpPow),
+                Some(KeywordIs) => Some(OpIs),
                 _ => None
             };
             match maybe_op {
@@ -639,7 +641,7 @@ mod tests {
     use crate::compiler::{parser, scanner, test_common};
     use crate::compiler::scanner::ScanResult;
     use crate::compiler::parser::{Parser, ParserResult};
-    use crate::{error_reporter, stdlib};
+    use crate::{reporting, stdlib};
     use crate::vm::Opcode;
 
     use crate::vm::Opcode::{*};
@@ -650,6 +652,7 @@ mod tests {
     #[test] fn test_str_unary_minus() { run_expr("-3", vec![Int(3), UnarySub]); }
     #[test] fn test_str_binary_mul() { run_expr("3 * 6", vec![Int(3), Int(6), OpMul]); }
     #[test] fn test_str_binary_div() { run_expr("20 / 4 / 5", vec![Int(20), Int(4), OpDiv, Int(5), OpDiv]); }
+    #[test] fn test_str_binary_pow() { run_expr("2 ** 10", vec![Int(2), Int(10), OpPow]); }
     #[test] fn test_str_binary_minus() { run_expr("6 - 7", vec![Int(6), Int(7), OpSub]); }
     #[test] fn test_str_binary_and_unary_minus() { run_expr("15 -- 7", vec![Int(15), Int(7), UnarySub, OpSub]); }
     #[test] fn test_str_binary_add_and_mod() { run_expr("1 + 2 % 3", vec![Int(1), Int(2), Int(3), OpMod, OpAdd]); }
@@ -715,9 +718,8 @@ mod tests {
             let mut source: String = String::from(path);
             source.push_str(".aocl");
             let src_lines: Vec<&str> = text.lines().collect();
-            println!("src_lines {:?} / {:?}", src_lines.len(), src_lines);
             for error in &parse_result.errors {
-                lines.push(error_reporter::format_parse_error(&src_lines, &source, error));
+                lines.push(reporting::format_parse_error(&src_lines, &source, error));
             }
         }
 

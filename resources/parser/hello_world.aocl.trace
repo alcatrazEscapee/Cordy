@@ -4,3 +4,4 @@ Bound(PrintOut)
 Str("Hello World!")
 OpFuncEval(1)
 Pop
+Exit

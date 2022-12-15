@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 
+use crate::vm::{IO, RuntimeErrorType, Stack};
+use crate::vm::value::Value;
+
 use crate::stdlib::StdBinding::{*};
-use crate::vm::Value;
 
 /// Build a `Node` containing all native bindings for the interpreter runtime.
 /// This is used in the parser in order to replace raw identifiers with their bound enum value.
@@ -11,14 +13,22 @@ pub fn bindings() -> StdBindingTree {
             ("out", leaf(PrintOut)),
             ("err", leaf(PrintErr)),
         ])),
+        ("nil", leaf(Nil)),
+        ("bool", leaf(Bool)),
+        ("int", leaf(Int)),
+        ("str", leaf(Str)),
     ])
 }
 
 /// Looks up the semantic name of a binding. This is the result of calling `print->out . str` for example
-pub fn lookup_binding(b: StdBinding) -> &'static str {
+pub fn lookup_binding(b: &StdBinding) -> &'static str {
     match b {
         PrintOut => "print->out",
         PrintErr => "print->err",
+        Nil => "nil",
+        Bool => "bool",
+        Int => "int",
+        Str => "str"
     }
 }
 
@@ -27,6 +37,10 @@ pub fn lookup_binding(b: StdBinding) -> &'static str {
 pub enum StdBinding {
     PrintOut,
     PrintErr,
+    Nil,
+    Bool,
+    Int,
+    Str,
 }
 
 
@@ -45,42 +59,89 @@ impl StdBindingTree {
     }
 }
 
-
-pub fn invoke_binding_0(binding: StdBinding) -> Value {
-    match binding {
-        PrintOut => {
-            println!();
-            Value::Nil
-        },
-        PrintErr => {
-            eprintln!();
-            Value::Nil
-        },
+pub fn invoke_type_binding(bound: StdBinding, arg: Value) -> Result<Value, RuntimeErrorType> {
+    match bound {
+        Nil => Ok(Value::Bool(arg.is_nil())),
+        Bool => Ok(Value::Bool(arg.is_bool())),
+        Int => Ok(Value::Bool(arg.is_int())),
+        Str => Ok(Value::Bool(arg.is_str())),
+        _ => Err(RuntimeErrorType::TypeErrorBinaryIs(arg, Value::Binding(bound)))
     }
 }
 
-/// **Implementation Note:** This takes `args` in reverse order, so `args[0]` will be the last argument, `args[args.len() - 1]` will be the first, etc.
-pub fn invoke_binding_n(binding: StdBinding, args: Vec<Value>) -> Value {
-    match binding {
+pub fn invoke_func_binding<S>(bound: StdBinding, nargs: u8, vm: &mut S) -> Result<Value, RuntimeErrorType> where
+    S : Stack,
+    S : IO {
+    match bound {
         PrintOut => {
-            let mut it = args.iter();
-            if let Some(v) = it.next() {
-                println!("{}", v.as_str());
-                for v0 in it {
-                    println!(" {}", v0.as_str());
+            match nargs {
+                0 => vm.println0(),
+                1 => {
+                    let s = vm.pop().as_str();
+                    vm.println(s)
+                },
+                _ => {
+                    let mut rev = Vec::with_capacity(nargs as usize);
+                    for _ in 0..nargs {
+                        rev.push(vm.pop().as_str());
+                    }
+                    vm.print(rev.pop().unwrap());
+                    for _ in 1..nargs {
+                        vm.print(format!(" {}", rev.pop().unwrap()));
+                    }
+                    vm.println0();
                 }
             }
-            Value::Nil
+            Ok(Value::Nil)
         },
         PrintErr => {
-            let mut it = args.iter();
-            if let Some(v) = it.next() {
-                eprintln!("{}", v.as_str());
-                for v0 in it {
-                    eprintln!(" {}", v0.as_str());
+            match nargs {
+                0 => eprintln!(),
+                1 => eprintln!("{}", vm.pop().as_str()),
+                _ => {
+                    let mut rev = Vec::with_capacity(nargs as usize);
+                    for _ in 0..nargs {
+                        rev.push(vm.pop().as_str());
+                    }
+                    eprint!("{}", rev.pop().unwrap());
+                    for _ in 1..nargs {
+                        eprint!(" {}", rev.pop().unwrap());
+                    }
+                    eprintln!();
                 }
             }
-            Value::Nil
+            Ok(Value::Nil)
+        },
+        Bool => {
+            if nargs != 1 {
+                return Err(RuntimeErrorType::IncorrectNumberOfArguments(bound.clone(), nargs, 1))
+            }
+            let a1: Value = vm.pop();
+            Ok(Value::Bool(a1.as_bool()))
+        },
+        Int => {
+            if nargs != 1 {
+                return Err(RuntimeErrorType::IncorrectNumberOfArguments(bound.clone(), nargs, 1))
+            }
+            let a1: Value = vm.pop();
+            match &a1 {
+                Value::Nil => Ok(Value::Int(0)),
+                Value::Bool(b) => Ok(Value::Int(if *b { 1 } else { 0 })),
+                Value::Int(_) => Ok(a1),
+                Value::Str(s) => match s.parse::<i64>() {
+                    Ok(i) => Ok(Value::Int(i)),
+                    Err(_) => Err(RuntimeErrorType::TypeErrorCannotConvertToInt(a1)),
+                },
+                _ => Err(RuntimeErrorType::TypeErrorCannotConvertToInt(a1)),
+            }
+        },
+        Str => {
+            if nargs != 1 {
+                return Err(RuntimeErrorType::IncorrectNumberOfArguments(bound.clone(), nargs, 1))
+            }
+            let a1: Value = vm.pop();
+            Ok(Value::Str(a1.as_str()))
         }
+        _ => Err(RuntimeErrorType::BindingIsNotFunctionEvaluable(bound.clone()))
     }
 }

@@ -1,15 +1,15 @@
-use std::fs;
-use crate::error_reporter::ErrorReporter;
+use std::{fs, io};
 
+use crate::reporting::ErrorReporter;
 use crate::vm::VirtualMachine;
 
-
-mod compiler;
-mod stdlib;
-mod vm;
+pub mod compiler;
+pub mod stdlib;
+pub mod vm;
 
 pub mod trace;
-pub mod error_reporter;
+pub mod reporting;
+
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -60,14 +60,24 @@ fn main() {
         };
 
         let compiled = match compiler::compile(file_ref, &text) {
-            Some(t) => t,
-            None => return
+            Ok(c) => c,
+            Err(errors) => {
+                for e in errors {
+                    eprintln!("{}", e);
+                }
+                return
+            }
         };
 
-        let mut vm: VirtualMachine = VirtualMachine::new(compiled.code);
-        match vm.run() {
+        let result = {
+            let stdin = io::stdin().lock();
+            let stdout = io::stdout();
+            let mut vm = VirtualMachine::new(compiled, stdin, stdout);
+            vm.run()
+        };
+        match result {
             Err(e) => {
-                eprintln!("Error!\n\n{}", ErrorReporter::new(&text, file_ref).format_runtime_error(&e))
+                eprintln!("{}", ErrorReporter::new(&text, file_ref).format_runtime_error(&e))
             },
             Ok(_) => {}
         }

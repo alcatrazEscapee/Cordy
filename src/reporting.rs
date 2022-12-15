@@ -1,6 +1,13 @@
 use crate::compiler::parser::{ParserError, ParserErrorType};
 use crate::compiler::scanner::{ScanError, ScanErrorType, ScanToken};
-use crate::vm::{RuntimeError, RuntimeErrorType};
+use crate::stdlib;
+use crate::stdlib::StdBinding;
+use crate::vm::{Opcode, RuntimeError, RuntimeErrorType};
+
+const FORMAT_RESET: &'static str = ""; //\x1B[0m";
+const FORMAT_BOLD: &'static str = ""; //\x1B[1m";
+const FORMAT_RED: &'static str = ""; // \x1B[31m";
+
 
 pub struct ErrorReporter<'a> {
     lines: Vec<&'a str>,
@@ -29,7 +36,7 @@ impl<'a> ErrorReporter<'a> {
 }
 
 pub fn format_scan_error(source_lines: &Vec<&str>, source_file: &String, error: &ScanError) -> String {
-    let mut text: String = error.format_error();
+    let mut text: String = format!("{}{}{}{}", FORMAT_RED, FORMAT_BOLD, error.format_error(), FORMAT_RESET);
     text.push_str(format!("\n  at: line {} ({})\n  at:\n\n", error.lineno + 1, source_file).as_str());
     text.push_str(source_lines.get(error.lineno).map(|t| *t).unwrap_or(""));
     text.push('\n');
@@ -37,7 +44,7 @@ pub fn format_scan_error(source_lines: &Vec<&str>, source_file: &String, error: 
 }
 
 pub fn format_parse_error(source_lines: &Vec<&str>, source_file: &String, error: &ParserError) -> String {
-    let mut text: String = error.format_error();
+    let mut text: String = format!("{}{}{}{}", FORMAT_RED, FORMAT_BOLD, error.format_error(), FORMAT_RESET);
     text.push_str(format!("\n  at: line {} ({})\n  at:\n\n", error.lineno + 1, &source_file).as_str());
     text.push_str(source_lines.get(error.lineno).map(|t| *t).unwrap_or(""));
     text.push('\n');
@@ -45,7 +52,7 @@ pub fn format_parse_error(source_lines: &Vec<&str>, source_file: &String, error:
 }
 
 pub fn format_runtime_error(source_lines: &Vec<&str>, source_file: &String, error: &RuntimeError) -> String {
-    let mut text: String = error.format_error();
+    let mut text: String = format!("{}{}{}{}", FORMAT_RED, FORMAT_BOLD, error.format_error(), FORMAT_RESET);
     text.push_str(format!("\n  at: line {} ({})\n  at:\n\n", error.lineno + 1, &source_file).as_str());
     text.push_str(source_lines.get(error.lineno).map(|t| *t).unwrap_or(""));
     text.push('\n');
@@ -57,14 +64,40 @@ trait AsError {
     fn format_error(self: &Self) -> String;
 }
 
-impl AsError for ScanError {
+
+impl AsError for RuntimeError {
     fn format_error(self: &Self) -> String {
         match &self.error {
-            ScanErrorType::InvalidNumericPrefix(c) => format!("Invalid numeric prefix: '0{}'", c),
-            ScanErrorType::InvalidNumericValue(e) => format!("Invalid numeric value: {}", e),
-            ScanErrorType::InvalidCharacter(c) => format!("Invalid character: '{}'", c),
-            ScanErrorType::UnterminatedStringLiteral => String::from("Unterminated string literal (missing a closing single quote)")
+            RuntimeErrorType::ValueIsNotFunctionEvaluable(v) => format!("Tried to evaluate '{}' of type '{}' but it is not a function.", v.as_type_str(), v.as_str()),
+            RuntimeErrorType::BindingIsNotFunctionEvaluable(b) => format!("Tried to evaluate '{}' but it is not an evaluable function.", b.format_error()),
+            RuntimeErrorType::IncorrectNumberOfArguments(b, e, a) => format!("Function '{}' requires {} parameters but {} were present.", b.format_error(), e, a),
+            RuntimeErrorType::TypeErrorUnaryOp(op, v) => format!("TypeError: Argument to unary '{}' must be an int, got '{}' of type '{}'", op.format_error(), v.as_str(), v.as_type_str()),
+            RuntimeErrorType::TypeErrorBinaryOp(op, l, r) => format!("TypeError: Cannot {} '{}' of type '{}' and '{}' of type '{}'", op.format_error(), l.as_str(), l.as_type_str(), r.as_str(), r.as_type_str()),
+            RuntimeErrorType::TypeErrorBinaryIs(l, r) => format!("TypeError: Object '{}' of type '{}' is not a type and cannot be used with binary 'is' on '{}' of type '{}'", r.as_str(), r.as_type_str(), l.as_str(), l.as_type_str()),
+            RuntimeErrorType::TypeErrorCannotConvertToInt(v) => format!("TypeError: Cannot convert '{}' of type '{}' to an int", v.as_str(), v.as_type_str()),
         }
+    }
+}
+
+impl AsError for Opcode {
+    fn format_error(self: &Self) -> String {
+        String::from(match self {
+            Opcode::UnarySub => "-",
+            Opcode::UnaryLogicalNot => "!",
+            Opcode::UnaryBitwiseNot => "~",
+            Opcode::OpDiv => "divide",
+            Opcode::OpMul => "multiply",
+            Opcode::OpMod => "modulo",
+            Opcode::OpAdd => "add",
+            Opcode::OpSub => "subtract",
+            op => panic!("AsError not implemented for opcode {:?}", op)
+        })
+    }
+}
+
+impl AsError for StdBinding {
+    fn format_error(self: &Self) -> String {
+        String::from(stdlib::lookup_binding(self))
     }
 }
 
@@ -82,12 +115,13 @@ impl AsError for ParserError {
     }
 }
 
-impl AsError for RuntimeError {
+impl AsError for ScanError {
     fn format_error(self: &Self) -> String {
         match &self.error {
-            RuntimeErrorType::ValueIsNotFunctionEvaluable(v) => format!("Tried to evaluate '{}' of type '{}' but it is not a function.", v.as_type_str(), v.as_str()),
-            RuntimeErrorType::TypeErrorExpectedInt(v) => format!("TypeError: '{}' of type '{}' is not an int", v.as_str(), v.as_type_str()),
-            RuntimeErrorType::TypeErrorExpectedBool(v) => format!("TypeError: '{}' of type '{}' is not a bool", v.as_str(), v.as_type_str()),
+            ScanErrorType::InvalidNumericPrefix(c) => format!("Invalid numeric prefix: '0{}'", c),
+            ScanErrorType::InvalidNumericValue(e) => format!("Invalid numeric value: {}", e),
+            ScanErrorType::InvalidCharacter(c) => format!("Invalid character: '{}'", c),
+            ScanErrorType::UnterminatedStringLiteral => String::from("Unterminated string literal (missing a closing single quote)")
         }
     }
 }

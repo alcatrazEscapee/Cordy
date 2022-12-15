@@ -180,7 +180,11 @@ impl<'a> Scanner<'a> {
                                     }
                                     self.screen_int(buffer, 2);
                                 },
-                                Some(e) => self.push_err(InvalidNumericPrefix(e)),
+                                Some(e @ ('a'..='z' | 'A'..='Z' | '0'..='9' | '_')) => self.push_err(InvalidNumericPrefix(e)),
+                                Some(_) => {
+                                    // Don't consume, as this isn't part of the number, just a '0' literal followed by some other syntax
+                                    self.push(Int(0));
+                                }
                                 _ => {}
                             }
                        }
@@ -427,7 +431,7 @@ impl<'a> Scanner<'a> {
 mod tests {
     use crate::compiler::{scanner, test_common};
     use crate::compiler::scanner::{ScanResult, ScanToken};
-    use crate::error_reporter;
+    use crate::reporting;
 
     use crate::compiler::scanner::ScanToken::{*};
 
@@ -437,7 +441,7 @@ mod tests {
     #[test] fn test_str_keywords() { run_str("let fn if elif else loop for in is break continue true false nil struct exit", vec![KeywordLet, KeywordFn, KeywordIf, KeywordElif, KeywordElse, KeywordLoop, KeywordFor, KeywordIn, KeywordIs, KeywordBreak, KeywordContinue, KeywordTrue, KeywordFalse, KeywordNil, KeywordStruct, KeywordExit]); }
     #[test] fn test_str_identifiers() { run_str("foobar big_bad_wolf ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz", vec![Identifier(String::from("foobar")), Identifier(String::from("big_bad_wolf")), Identifier(String::from("ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz"))]); }
 
-    #[test] fn test_str_ints() { run_str("1234 654 10_00_00", vec![Int(1234), Int(654), Int(100000)]); }
+    #[test] fn test_str_ints() { run_str("1234 654 10_00_00 0 1", vec![Int(1234), Int(654), Int(100000), Int(0), Int(1)]); }
     #[test] fn test_str_binary_ints() { run_str("0b11011011 0b0 0b1 0b1_01", vec![Int(0b11011011), Int(0b0), Int(0b1), Int(0b101)]); }
     #[test] fn test_str_hex_ints() { run_str("0x12345678 0xabcdef90 0xABCDEF 0xF_f", vec![Int(0x12345678), Int(0xabcdef90), Int(0xABCDEF), Int(0xFF)])}
 
@@ -490,7 +494,7 @@ mod tests {
             source.push_str(".aocl");
             let src_lines: Vec<&str> = text.lines().collect();
             for error in &result.errors {
-                lines.push(error_reporter::format_scan_error(&src_lines, &source, error))
+                lines.push(reporting::format_scan_error(&src_lines, &source, error))
             }
         }
 

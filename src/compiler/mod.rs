@@ -1,22 +1,24 @@
 use crate::compiler::parser::ParserResult;
 use crate::compiler::scanner::ScanResult;
-use crate::error_reporter::ErrorReporter;
+use crate::reporting::ErrorReporter;
 use crate::stdlib;
+use crate::vm::Opcode;
 
 pub mod scanner;
 pub mod parser;
 
 
-pub fn compile(source: &String, text: &String) -> Option<ParserResult> {
+pub fn compile(source: &String, text: &String) -> Result<Vec<Opcode>, Vec<String>> {
+    let mut errors: Vec<String> = Vec::new();
 
     // Scan
     let scan_result: ScanResult = scanner::scan(text);
     if !scan_result.errors.is_empty() {
-        let reporter: ErrorReporter = ErrorReporter::new(text, source);
+        let rpt: ErrorReporter = ErrorReporter::new(text, source);
         for error in &scan_result.errors {
-            println!("{}", reporter.format_scan_error(&error));
+            errors.push(rpt.format_scan_error(&error));
         }
-        return None
+        return Err(errors);
     }
 
     // Load Native Bindings
@@ -25,15 +27,15 @@ pub fn compile(source: &String, text: &String) -> Option<ParserResult> {
     // Parse
     let parse_result: ParserResult = parser::parse(bindings, scan_result);
     if !parse_result.errors.is_empty() {
-        let reporter: ErrorReporter = ErrorReporter::new(text, source);
+        let rpt: ErrorReporter = ErrorReporter::new(text, source);
         for error in &parse_result.errors {
-            println!("{}", reporter.format_parse_error(&error));
+            errors.push(rpt.format_parse_error(&error));
         }
-        return None
+        return Err(errors);
     }
 
     // Compilation Successful
-    Some(parse_result)
+    Ok(parse_result.code)
 }
 
 
