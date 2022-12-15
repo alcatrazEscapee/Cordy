@@ -75,6 +75,7 @@ impl AsError for RuntimeError {
             RuntimeErrorType::TypeErrorBinaryOp(op, l, r) => format!("TypeError: Cannot {} '{}' of type '{}' and '{}' of type '{}'", op.format_error(), l.as_str(), l.as_type_str(), r.as_str(), r.as_type_str()),
             RuntimeErrorType::TypeErrorBinaryIs(l, r) => format!("TypeError: Object '{}' of type '{}' is not a type and cannot be used with binary 'is' on '{}' of type '{}'", r.as_str(), r.as_type_str(), l.as_str(), l.as_type_str()),
             RuntimeErrorType::TypeErrorCannotConvertToInt(v) => format!("TypeError: Cannot convert '{}' of type '{}' to an int", v.as_str(), v.as_type_str()),
+            RuntimeErrorType::TypeErrorCannotCompare(l, r) => format!("TypeError: Cannot compare '{}' of type '{}' to and '{}' of type '{}'", l.as_str(), l.as_type_str(), r.as_str(), r.as_type_str()),
         }
     }
 }
@@ -90,6 +91,8 @@ impl AsError for Opcode {
             Opcode::OpMod => "modulo",
             Opcode::OpAdd => "add",
             Opcode::OpSub => "subtract",
+            Opcode::OpLeftShift => "left shift",
+            Opcode::OpRightShift => "right shift",
             op => panic!("AsError not implemented for opcode {:?}", op)
         })
     }
@@ -110,7 +113,11 @@ impl AsError for ParserError {
             ParserErrorType::Expecting(e, a) => format!("Expected a {}, got {} instead", e.format_error(), a.format_error()),
             ParserErrorType::ExpectedExpressionTerminal(e) => format!("Expected an expression terminal, got {} instead", e.format_error()),
             ParserErrorType::ExpectedCommaOrEndOfArguments(e) => format!("Expected a ',' or ')' after function invocation, got {} instead", e.format_error()),
-            ParserErrorType::ExpectedStatement(e) => format!("Expecting a statement, got {} instead", e.format_error())
+            ParserErrorType::ExpectedStatement(e) => format!("Expecting a statement, got {} instead", e.format_error()),
+            ParserErrorType::ExpectedVariableNameAfterLet(e) => format!("Expecting a variable name after 'let' keyword, got {} instead", e.format_error()),
+            ParserErrorType::GlobalVariableConflictWithBinding(e) => format!("Declaration for 'let {}' conflicts with builtin function of the same name", e),
+            ParserErrorType::GlobalVariableConflictWithGlobal(e) => format!("Declaration for 'let {}' conflicts with existing global variable of the same name", e),
+            ParserErrorType::AssignmentToNotVariable(e) => format!("Cannot to assign to '{}' as it is not a global or local variable", e),
         }
     }
 }
@@ -200,6 +207,7 @@ impl AsError for ScanToken {
             ScanToken::Colon => String::from("':' token"),
             ScanToken::Arrow => String::from("'->' token"),
             ScanToken::Underscore => String::from("'_' token"),
+            ScanToken::Semicolon => String::from("';' token"),
 
             ScanToken::NewLine => String::from("new line"),
         }

@@ -120,6 +120,7 @@ pub enum ScanToken {
     Colon,
     Arrow,
     Underscore,
+    Semicolon,
 
     NewLine,
 }
@@ -331,6 +332,7 @@ impl<'a> Scanner<'a> {
                        '.' => self.push(Dot),
                        ':' => self.push(Colon),
                        '_' => self.push(Underscore),
+                       ';' => self.push(Semicolon),
 
                        e => self.push_err(InvalidCharacter(e))
                    }

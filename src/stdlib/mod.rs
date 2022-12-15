@@ -17,6 +17,7 @@ pub fn bindings() -> StdBindingTree {
         ("bool", leaf(Bool)),
         ("int", leaf(Int)),
         ("str", leaf(Str)),
+        ("repr", leaf(Repr)),
     ])
 }
 
@@ -28,7 +29,8 @@ pub fn lookup_binding(b: &StdBinding) -> &'static str {
         Nil => "nil",
         Bool => "bool",
         Int => "int",
-        Str => "str"
+        Str => "str",
+        Repr => "repr"
     }
 }
 
@@ -41,6 +43,7 @@ pub enum StdBinding {
     Bool,
     Int,
     Str,
+    Repr,
 }
 
 
@@ -69,9 +72,18 @@ pub fn invoke_type_binding(bound: StdBinding, arg: Value) -> Result<Value, Runti
     }
 }
 
+
 pub fn invoke_func_binding<S>(bound: StdBinding, nargs: u8, vm: &mut S) -> Result<Value, RuntimeErrorType> where
     S : Stack,
-    S : IO {
+    S : IO
+{
+    macro_rules! pop_args {
+        ($a1:ident) => {
+            if nargs != 1 { return Err(RuntimeErrorType::IncorrectNumberOfArguments(bound.clone(), nargs, 1)); }
+            let $a1: Value = vm.pop();
+        };
+    }
+
     match bound {
         PrintOut => {
             match nargs {
@@ -113,17 +125,11 @@ pub fn invoke_func_binding<S>(bound: StdBinding, nargs: u8, vm: &mut S) -> Resul
             Ok(Value::Nil)
         },
         Bool => {
-            if nargs != 1 {
-                return Err(RuntimeErrorType::IncorrectNumberOfArguments(bound.clone(), nargs, 1))
-            }
-            let a1: Value = vm.pop();
+            pop_args!(a1);
             Ok(Value::Bool(a1.as_bool()))
         },
         Int => {
-            if nargs != 1 {
-                return Err(RuntimeErrorType::IncorrectNumberOfArguments(bound.clone(), nargs, 1))
-            }
-            let a1: Value = vm.pop();
+            pop_args!(a1);
             match &a1 {
                 Value::Nil => Ok(Value::Int(0)),
                 Value::Bool(b) => Ok(Value::Int(if *b { 1 } else { 0 })),
@@ -136,11 +142,12 @@ pub fn invoke_func_binding<S>(bound: StdBinding, nargs: u8, vm: &mut S) -> Resul
             }
         },
         Str => {
-            if nargs != 1 {
-                return Err(RuntimeErrorType::IncorrectNumberOfArguments(bound.clone(), nargs, 1))
-            }
-            let a1: Value = vm.pop();
+            pop_args!(a1);
             Ok(Value::Str(a1.as_str()))
+        },
+        Repr => {
+            pop_args!(a1);
+            Ok(Value::Str(a1.as_repr_str()))
         }
         _ => Err(RuntimeErrorType::BindingIsNotFunctionEvaluable(bound.clone()))
     }

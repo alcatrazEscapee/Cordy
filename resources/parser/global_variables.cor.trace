@@ -1,0 +1,54 @@
+=== Globals ===
+
+"a" : 0
+"b" : 1
+"c" : 2
+"d" : 3
+"e" : 4
+"f" : 5
+"g" : 6
+"h" : 7
+"i" : 8
+"j" : 9
+
+=== Parse Tokens ===
+
+LoadGlobal(0)
+LineNumber(1)
+Nil
+StoreValue
+LoadGlobal(1)
+LineNumber(2)
+Nil
+StoreValue
+LoadGlobal(2)
+Nil
+StoreValue
+LoadGlobal(3)
+LineNumber(3)
+Nil
+StoreValue
+LoadGlobal(4)
+Int(3)
+LineNumber(4)
+StoreValue
+LoadGlobal(5)
+Nil
+LineNumber(5)
+StoreValue
+LoadGlobal(6)
+Int(6)
+Int(5)
+LineNumber(6)
+OpAdd
+StoreValue
+LoadGlobal(7)
+Nil
+StoreValue
+LoadGlobal(8)
+True
+StoreValue
+LoadGlobal(9)
+False
+StoreValue
+Exit

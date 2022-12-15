@@ -1,5 +1,6 @@
 use std::io::{BufRead, Write};
 use crate::{stdlib, trace};
+use crate::compiler::parser::ParserResult;
 use crate::stdlib::StdBinding;
 use crate::vm::value::Value;
 
@@ -13,9 +14,11 @@ pub(crate) mod value;
 pub enum Opcode {
 
     // Stack Operations
-    StoreValue, // ... name, value] -> set name = value; -> ...]
     Dupe, // ... x, y, z] -> ... x, y, z, z]
     Pop,
+
+    PushGlobal(usize),
+    StoreGlobal(usize),
 
     // Push
     Nil,
@@ -90,7 +93,8 @@ pub enum RuntimeErrorType {
     TypeErrorUnaryOp(Opcode, Value),
     TypeErrorBinaryOp(Opcode, Value, Value),
     TypeErrorBinaryIs(Value, Value),
-    TypeErrorCannotConvertToInt(Value)
+    TypeErrorCannotConvertToInt(Value),
+    TypeErrorCannotCompare(Value, Value),
 }
 
 
@@ -99,6 +103,8 @@ pub struct VirtualMachine<R, W> {
     ip: usize,
     code: Vec<Opcode>,
     stack: Vec<Value>,
+
+    globals: Vec<Value>,
 
     lineno: usize,
 
@@ -111,11 +117,12 @@ impl<R, W> VirtualMachine<R, W> where
     R: BufRead,
     W: Write {
 
-    pub fn new(code: Vec<Opcode>, read: R, write: W) -> VirtualMachine<R, W> {
+    pub fn new(parser_result: ParserResult, read: R, write: W) -> VirtualMachine<R, W> {
         VirtualMachine {
             ip: 0,
-            code,
+            code: parser_result.code,
             stack: Vec::new(),
+            globals: vec!(Value::Nil; parser_result.globals.len()),
             lineno: 0,
             read,
             write,
@@ -127,6 +134,27 @@ impl<R, W> VirtualMachine<R, W> where
             let op: &Opcode = self.code.get(self.ip).unwrap();
             self.ip += 1;
             match op {
+                // Stack Manipulations
+                Dupe => {
+                    trace::trace_interpreter!("stack dupe {}: {}", self.peek(0).as_str(), self.peek(0).as_type_str());
+                    self.push(self.peek(0).clone());
+                }
+                Pop => {
+                    trace::trace_interpreter!("stack pop {}: {}", self.peek(0).as_str(), self.peek(0).as_type_str());
+                    self.pop();
+                },
+
+                PushGlobal(gid) => {
+                    trace::trace_interpreter!("push global {:?}", gid);
+                    self.push(self.globals[*gid].clone());
+                },
+                StoreGlobal(gid) => {
+                    trace::trace_interpreter!("store global {:?}", gid);
+                    let g: usize = *gid;
+                    self.globals[g] = self.pop();
+                }
+
+
                 // Push Operations
                 Nil => {
                     trace::trace_interpreter!("push nil");
@@ -254,9 +282,123 @@ impl<R, W> VirtualMachine<R, W> where
                     }
                 },
 
+                OpLeftShift => {
+                    trace::trace_interpreter!("op binary <<");
+                    let a2: Value = self.pop();
+                    let a1: Value = self.pop();
+                    match (a1, a2) {
+                        (Value::Int(i1), Value::Int(i2)) => self.push(Value::Int(if i2 >= 0 { i1 << i2 } else {i1 >> (-i2)})),
+                        (l, r) => return self.error(TypeErrorBinaryOp(OpLeftShift, l, r))
+                    }
+                },
+                OpRightShift => {
+                    trace::trace_interpreter!("op binary >>");
+                    let a2: Value = self.pop();
+                    let a1: Value = self.pop();
+                    match (a1, a2) {
+                        (Value::Int(i1), Value::Int(i2)) => self.push(Value::Int(if i2 >= 0 { i1 >> i2 } else {i1 << (-i2)})),
+                        (l, r) => return self.error(TypeErrorBinaryOp(OpRightShift, l, r))
+                    }
+                },
+
+                OpLessThan => {
+                    trace::trace_interpreter!("op binary <");
+                    let a2: Value = self.pop();
+                    let a1: Value = self.pop();
+                    match a1.is_less_than(&a2) {
+                        Ok(v) => self.push(Value::Bool(v)),
+                        Err(e) => return self.error(e)
+                    }
+                },
+                OpGreaterThan => {
+                    trace::trace_interpreter!("op binary >");
+                    let a2: Value = self.pop();
+                    let a1: Value = self.pop();
+                    match a1.is_less_than_or_equal(&a2) {
+                        Ok(v) => self.push(Value::Bool(!v)),
+                        Err(e) => return self.error(e)
+                    }
+                },
+                OpLessThanEqual => {
+                    trace::trace_interpreter!("op binary <=");
+                    let a2: Value = self.pop();
+                    let a1: Value = self.pop();
+                    match a1.is_less_than_or_equal(&a2) {
+                        Ok(v) => self.push(Value::Bool(v)),
+                        Err(e) => return self.error(e)
+                    }
+                },
+                OpGreaterThanEqual => {
+                    trace::trace_interpreter!("op binary >=");
+                    let a2: Value = self.pop();
+                    let a1: Value = self.pop();
+                    match a1.is_less_than(&a2) {
+                        Ok(v) => self.push(Value::Bool(!v)),
+                        Err(e) => return self.error(e)
+                    }
+                },
+                OpEqual => {
+                    trace::trace_interpreter!("op binary ==");
+                    let a2: Value = self.pop();
+                    let a1: Value = self.pop();
+                    self.push(Value::Bool(a1.is_equal(&a2)));
+                },
+                OpNotEqual => {
+                    trace::trace_interpreter!("op binary !=");
+                    let a2: Value = self.pop();
+                    let a1: Value = self.pop();
+                    self.push(Value::Bool(!a1.is_equal(&a2)));
+                },
+
+                OpBitwiseAnd => {
+                    trace::trace_interpreter!("op binary &");
+                    let a2: Value = self.pop();
+                    let a1: Value = self.pop();
+                    match (a1, a2) {
+                        (Value::Int(i1), Value::Int(i2)) => self.push(Value::Int(i1 & i2)),
+                        (l, r) => return self.error(TypeErrorBinaryOp(OpBitwiseAnd, l, r))
+                    }
+                },
+                OpBitwiseOr => {
+                    trace::trace_interpreter!("op binary |");
+                    let a2: Value = self.pop();
+                    let a1: Value = self.pop();
+                    match (a1, a2) {
+                        (Value::Int(i1), Value::Int(i2)) => self.push(Value::Int(i1 | i2)),
+                        (l, r) => return self.error(TypeErrorBinaryOp(OpBitwiseAnd, l, r))
+                    }
+                },
+                OpBitwiseXor => {
+                    trace::trace_interpreter!("op binary ^");
+                    let a2: Value = self.pop();
+                    let a1: Value = self.pop();
+                    match (a1, a2) {
+                        (Value::Int(i1), Value::Int(i2)) => self.push(Value::Int(i1 ^ i2)),
+                        (l, r) => return self.error(TypeErrorBinaryOp(OpBitwiseAnd, l, r))
+                    }
+                },
+
+                OpFuncCompose => {
+                    trace::trace_interpreter!("op binary .");
+                    let f: Value = self.pop();
+                    match f {
+                        Value::Binding(b) => {
+                            match stdlib::invoke_func_binding(b, 1, self) {
+                                Ok(ret) => {
+                                    // invoke_func_binding() will pop `nargs` arguments off the stack and pass them to the provided function
+                                    // Unlike `OpFuncEval`, we have already popped the binding off the stack initially
+                                    self.push(ret); // Then push the return value
+                                },
+                                Err(e) => return self.error(e),
+                            }
+                        },
+                        _ => return self.error(ValueIsNotFunctionEvaluable(f.clone())),
+                    }
+                },
+
 
                 OpFuncEval(nargs) => {
-                    trace::trace_interpreter!("op function evaluate n = {}", a);
+                    trace::trace_interpreter!("op function evaluate n = {}", nargs);
                     let f: &Value = self.peek(*nargs as usize);
                     match f {
                         Value::Binding(b) => {
@@ -271,11 +413,6 @@ impl<R, W> VirtualMachine<R, W> where
                         }
                         _ => return self.error(ValueIsNotFunctionEvaluable(f.clone())),
                     }
-                }
-
-                Pop => {
-                    trace::trace_interpreter!("stack pop {}", self.peek().as_str());
-                    self.pop();
                 },
 
                 LineNumber(lineno) => self.lineno = *lineno,
@@ -346,7 +483,7 @@ impl<R, W> Stack for VirtualMachine<R, W> {
 #[cfg(test)]
 mod test {
     use crate::{compiler, ErrorReporter, VirtualMachine};
-    use crate::vm::{Opcode, RuntimeError};
+    use crate::vm::RuntimeError;
 
     #[test] fn test_empty() { run_str("", ""); }
     #[test] fn test_hello_world() { run_str("print('hello world!')", "hello world!\n"); }
@@ -360,13 +497,21 @@ mod test {
     #[test] fn test_print_div_mod_int() { run_str("print(3 / 2, 3 / 3, -3 / 2, 10 % 3, 11 % 3, 12 % 3)", "1 1 -1 1 2 0\n"); }
     #[test] fn test_print_div_by_zero() { run_str("print(15 / 0)", "TypeError: Cannot divide '15' of type 'int' and '0' of type 'int'\n  at: line 1 (<test>)\n  at:\n\nprint(15 / 0)\n"); }
     #[test] fn test_print_mod_by_zero() { run_str("print(15 % 0)", "TypeError: Cannot modulo '15' of type 'int' and '0' of type 'int'\n  at: line 1 (<test>)\n  at:\n\nprint(15 % 0)\n"); }
-
+    #[test] fn test_print_left_right_shift() { run_str("print(1 << 10, 16 >> 1, 16 << -1, 1 >> -10)", "1024 8 8 1024\n"); }
+    #[test] fn test_print_compare_ints() { run_str("print(1 < 3, -5 < -10, 6 > 7, 6 > 4)", "true false false true\n"); }
+    #[test] fn test_print_compare_ints_2() { run_str("print(1 <= 3, -5 < -10, 3 <= 3, 2 >= 2, 6 >= 7, 6 >= 4, 6 <= 6, 8 >= 8)", "true false true true false true true true\n"); }
+    #[test] fn test_print_equal_ints() { run_str("print(1 == 3, -5 == -10, 3 != 3, 2 == 2, 6 != 7)", "false false false true true\n"); }
+    #[test] fn test_print_compare_bools() { run_str("print(false < false, false < true, true < false, true < true)", "false true false false\n"); }
+    #[test] fn test_print_compare_bools_2() { run_str("print(false <= false, false >= true, true >= false, true <= true)", "true false true true\n"); }
+    #[test] fn test_print_bitwise_ops() { run_str("print(0b111 & 0b100, 0b1100 | 0b1010, 0b1100 ^ 0b1010)", "4 14 6\n"); }
+    #[test] fn test_print_compose() { run_str("print . print", "print->out\n"); }
+    #[test] fn test_print_compose_str() { run_str("'hello world' . print", "hello world\n"); }
 
 
     fn run_str(code: &'static str, expected: &'static str) {
         let text: &String = &String::from(code);
         let source: &String = &String::from("<test>");
-        let compile: Vec<Opcode> = compiler::compile(source, text).unwrap();
+        let compile= compiler::compile(source, text).unwrap();
         let mut buf: Vec<u8> = Vec::new();
         let mut vm = VirtualMachine::new(compile, &b""[..], &mut buf);
 

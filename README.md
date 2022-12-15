@@ -17,8 +17,7 @@ And replace the values for the traces you want to enable with `on`:
 
 ### To-Do
 
-- Finish implementing binary operators
-- More stdlib functions (int, etc)
+- Finish implementing binary operators - all that is left is short-circuiting operators
 - Implement `->` binding resolution
 - Global and Local (block scoped) variables
 - Partial function evaluation
