@@ -22,5 +22,17 @@ macro_rules! trace_interpreter {
     };
 }
 
+macro_rules! trace_interpreter_stack {
+    ($($e:expr),+) => {
+        {
+            #[cfg(trace_interpreter_stack = "on")]
+            {
+                println!($($e),+)
+            }
+        }
+    };
+}
+
 pub(crate) use trace_parser;
 pub(crate) use trace_interpreter;
+pub(crate) use trace_interpreter_stack;
