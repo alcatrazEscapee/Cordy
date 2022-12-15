@@ -5,41 +5,42 @@ Int(1)
 Nil
 OpAdd
 StoreValue
-NewLine
+LineNumber(1)
 Identifier("x")
 Nil
 UnarySub
 StoreValue
-NewLine
+LineNumber(2)
 Identifier("x")
-Identifier("print")
+Bound(PrintOut)
 Nil
 OpFuncCompose
 StoreValue
-NewLine
+LineNumber(3)
 Identifier("x")
-Identifier("print")
+Bound(PrintOut)
 StoreValue
-NewLine
+LineNumber(4)
 Identifier("x")
-Identifier("print")
+Bound(PrintOut)
 Int(4)
 Nil
 OpFuncEval(2)
 StoreValue
-NewLine
+LineNumber(5)
 Identifier("x")
-Identifier("print")
+Bound(PrintOut)
 Int(5)
 OpFuncEval(1)
 StoreValue
-NewLine
+LineNumber(6)
 
 === Parse Errors ===
 
 ParserError { error: ExpectedExpressionTerminal(Plus), lineno: 0 }
 ParserError { error: ExpectedExpressionTerminal(Plus), lineno: 1 }
 ParserError { error: ExpectedExpressionTerminal(Dot), lineno: 2 }
+ParserError { error: ExpectedStatement(Int(3)), lineno: 3 }
 ParserError { error: ExpectedExpressionTerminal(Comma), lineno: 4 }
 ParserError { error: ExpectedCommaOrEndOfArguments(Int(6)), lineno: 5 }
 
@@ -62,6 +63,12 @@ Expected an expression terminal, got '.' token instead
   at:
 
 { x = print .. 3 }
+
+Expecting a statement, got integer '3' instead
+  at: line 4 (invalid_expressions.aocl)
+  at:
+
+{ x = print 3 }
 
 Expected an expression terminal, got ',' token instead
   at: line 5 (invalid_expressions.aocl)

@@ -1,11 +1,63 @@
 use crate::compiler::parser::{ParserError, ParserErrorType};
 use crate::compiler::scanner::{ScanError, ScanErrorType, ScanToken};
+use crate::vm::{RuntimeError, RuntimeErrorType};
 
-pub trait CompilerError {
+pub struct ErrorReporter<'a> {
+    lines: Vec<&'a str>,
+    src: &'a String,
+}
+
+impl<'a> ErrorReporter<'a> {
+    pub fn new(text: &'a String, src: &'a String) -> ErrorReporter<'a> {
+        ErrorReporter {
+            lines: text.lines().collect(),
+            src
+        }
+    }
+
+    pub fn format_scan_error(self: &Self, error: &ScanError) -> String {
+        format_scan_error(&self.lines, self.src, error)
+    }
+
+    pub fn format_parse_error(self: &Self, error: &ParserError) -> String {
+        format_parse_error(&self.lines, self.src, error)
+    }
+
+    pub fn format_runtime_error(self: &Self, error: &RuntimeError) -> String {
+        format_runtime_error(&self.lines, self.src, error)
+    }
+}
+
+pub fn format_scan_error(source_lines: &Vec<&str>, source_file: &String, error: &ScanError) -> String {
+    let mut text: String = error.format_error();
+    text.push_str(format!("\n  at: line {} ({})\n  at:\n\n", error.lineno + 1, source_file).as_str());
+    text.push_str(source_lines.get(error.lineno).map(|t| *t).unwrap_or(""));
+    text.push('\n');
+    text
+}
+
+pub fn format_parse_error(source_lines: &Vec<&str>, source_file: &String, error: &ParserError) -> String {
+    let mut text: String = error.format_error();
+    text.push_str(format!("\n  at: line {} ({})\n  at:\n\n", error.lineno + 1, &source_file).as_str());
+    text.push_str(source_lines.get(error.lineno).map(|t| *t).unwrap_or(""));
+    text.push('\n');
+    text
+}
+
+pub fn format_runtime_error(source_lines: &Vec<&str>, source_file: &String, error: &RuntimeError) -> String {
+    let mut text: String = error.format_error();
+    text.push_str(format!("\n  at: line {} ({})\n  at:\n\n", error.lineno + 1, &source_file).as_str());
+    text.push_str(source_lines.get(error.lineno).map(|t| *t).unwrap_or(""));
+    text.push('\n');
+    text
+}
+
+
+trait AsError {
     fn format_error(self: &Self) -> String;
 }
 
-impl CompilerError for ScanError {
+impl AsError for ScanError {
     fn format_error(self: &Self) -> String {
         match &self.error {
             ScanErrorType::InvalidNumericPrefix(c) => format!("Invalid numeric prefix: '0{}'", c),
@@ -16,19 +68,31 @@ impl CompilerError for ScanError {
     }
 }
 
-impl CompilerError for ParserError {
+impl AsError for ParserError {
     fn format_error(self: &Self) -> String {
         match &self.error {
             ParserErrorType::UnexpectedEoF => String::from("Unexpected end of file."),
             ParserErrorType::UnexpectedEoFExpecting(e) => format!("Unexpected end of file, was expecting {}.", e.format_error()),
+            ParserErrorType::UnexpectedTokenAfterEoF(e) => format!("Unexpected {} after parsing finished", e.format_error()),
             ParserErrorType::Expecting(e, a) => format!("Expected a {}, got {} instead", e.format_error(), a.format_error()),
             ParserErrorType::ExpectedExpressionTerminal(e) => format!("Expected an expression terminal, got {} instead", e.format_error()),
             ParserErrorType::ExpectedCommaOrEndOfArguments(e) => format!("Expected a ',' or ')' after function invocation, got {} instead", e.format_error()),
+            ParserErrorType::ExpectedStatement(e) => format!("Expecting a statement, got {} instead", e.format_error())
         }
     }
 }
 
-impl CompilerError for ScanToken {
+impl AsError for RuntimeError {
+    fn format_error(self: &Self) -> String {
+        match &self.error {
+            RuntimeErrorType::ValueIsNotFunctionEvaluable(v) => format!("Tried to evaluate '{}' of type '{}' but it is not a function.", v.as_type_str(), v.as_str()),
+            RuntimeErrorType::TypeErrorExpectedInt(v) => format!("TypeError: '{}' of type '{}' is not an int", v.as_str(), v.as_type_str()),
+            RuntimeErrorType::TypeErrorExpectedBool(v) => format!("TypeError: '{}' of type '{}' is not a bool", v.as_str(), v.as_type_str()),
+        }
+    }
+}
+
+impl AsError for ScanToken {
     fn format_error(self: &Self) -> String {
         match &self {
             ScanToken::Identifier(s) => format!("identifier \'{}\'", s),
@@ -50,9 +114,7 @@ impl CompilerError for ScanToken {
             ScanToken::KeywordFalse => String::from("'false' keyword"),
             ScanToken::KeywordNil => String::from("'nil' keyword"),
             ScanToken::KeywordStruct => String::from("'struct' keyword"),
-            ScanToken::KeywordInt => String::from("'int' keyword"),
-            ScanToken::KeywordStr => String::from("'str' keyword"),
-            ScanToken::KeywordBool => String::from("'bool' keyword"),
+            ScanToken::KeywordExit => String::from("'exit' keyword"),
 
             ScanToken::Equals => String::from("'=' token"),
             ScanToken::PlusEquals => String::from("'+=' token"),

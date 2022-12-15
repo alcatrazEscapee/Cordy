@@ -43,16 +43,6 @@ pub enum ScanErrorType {
     UnterminatedStringLiteral,
 }
 
-impl ScanError {
-    fn format_error(self: &Self) -> String {
-        match &self.error {
-            InvalidNumericPrefix(c) => format!("Invalid numeric prefix: '0{}'", c),
-            InvalidNumericValue(e) => format!("Invalid numeric value: {}", e),
-            InvalidCharacter(c) => format!("Invalid character: '{}'", c),
-            UnterminatedStringLiteral => String::from("Unterminated string literal (missing a closing single quote)")
-        }
-    }
-}
 
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub enum ScanToken {
@@ -77,9 +67,7 @@ pub enum ScanToken {
     KeywordFalse,
     KeywordNil,
     KeywordStruct,
-    KeywordInt,
-    KeywordStr,
-    KeywordBool,
+    KeywordExit,
 
     // Syntax
     Equals,
@@ -212,15 +200,22 @@ impl<'a> Scanner<'a> {
                        '\'' => {
                            let mut buffer: Vec<char> = Vec::new();
                            let mut escaped: bool = false;
+                           let lineno: usize = self.lineno;
                            loop {
                                match self.advance() {
                                    Some('\'') if !escaped => break,
                                    Some('\\') if !escaped => {
                                        escaped = true;
                                    }
+                                   Some('\r') => {}, // Don't include '\r' in strings which include newlines
                                    Some(c0) => buffer.push(c0),
                                    None => {
-                                       self.push_err(UnterminatedStringLiteral);
+                                       // Manually report this error at the source point, not at the destination point of the string
+                                       // It makes it much easier to read.
+                                       self.errors.push(ScanError {
+                                           error: UnterminatedStringLiteral,
+                                           lineno,
+                                       });
                                        break
                                    }
                                }
@@ -359,9 +354,7 @@ impl<'a> Scanner<'a> {
             "false" => KeywordFalse,
             "nil" => KeywordNil,
             "struct" => KeywordStruct,
-            "int" => KeywordInt,
-            "str" => KeywordStr,
-            "bool" => KeywordBool,
+            "exit" => KeywordExit,
             _ => Identifier(string)
         };
         self.push(token);
@@ -434,11 +427,14 @@ impl<'a> Scanner<'a> {
 mod tests {
     use crate::compiler::{scanner, test_common};
     use crate::compiler::scanner::{ScanResult, ScanToken};
+    use crate::error_reporter;
+
     use crate::compiler::scanner::ScanToken::{*};
+
 
     #[test] fn test_str_empty() { run_str("", vec![]); }
 
-    #[test] fn test_str_keywords() { run_str("let fn if elif else loop for in is break continue true false nil struct int str bool", vec![KeywordLet, KeywordFn, KeywordIf, KeywordElif, KeywordElse, KeywordLoop, KeywordFor, KeywordIn, KeywordIs, KeywordBreak, KeywordContinue, KeywordTrue, KeywordFalse, KeywordNil, KeywordStruct, KeywordInt, KeywordStr, KeywordBool]); }
+    #[test] fn test_str_keywords() { run_str("let fn if elif else loop for in is break continue true false nil struct exit", vec![KeywordLet, KeywordFn, KeywordIf, KeywordElif, KeywordElse, KeywordLoop, KeywordFor, KeywordIn, KeywordIs, KeywordBreak, KeywordContinue, KeywordTrue, KeywordFalse, KeywordNil, KeywordStruct, KeywordExit]); }
     #[test] fn test_str_identifiers() { run_str("foobar big_bad_wolf ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz", vec![Identifier(String::from("foobar")), Identifier(String::from("big_bad_wolf")), Identifier(String::from("ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz"))]); }
 
     #[test] fn test_str_ints() { run_str("1234 654 10_00_00", vec![Int(1234), Int(654), Int(100000)]); }
@@ -468,6 +464,7 @@ mod tests {
     #[test] fn test_hello_world() { run("hello_world"); }
     #[test] fn test_invalid_character() { run("invalid_character"); }
     #[test] fn test_invalid_numeric_value() { run("invalid_numeric_value"); }
+    #[test] fn test_string_with_newlines() { run("string_with_newlines"); }
     #[test] fn test_unterminated_string_literal() { run("unterminated_string_literal"); }
 
 
@@ -493,10 +490,7 @@ mod tests {
             source.push_str(".aocl");
             let src_lines: Vec<&str> = text.lines().collect();
             for error in &result.errors {
-                lines.push(error.format_error());
-                lines.push(format!("  at: line {} ({})\n  at:\n", error.lineno + 1, &source));
-                lines.push(String::from(*src_lines.get(error.lineno).unwrap()));
-                lines.push(String::new());
+                lines.push(error_reporter::format_scan_error(&src_lines, &source, error))
             }
         }
 

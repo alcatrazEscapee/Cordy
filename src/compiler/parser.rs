@@ -2,89 +2,27 @@ use std::iter::Peekable;
 use std::vec::IntoIter;
 
 use crate::compiler::scanner::{ScanResult, ScanToken};
-
-use crate::compiler::scanner::ScanToken::{*};
-use crate::compiler::parser::ParserToken::{*};
-use crate::compiler::parser::ParserErrorType::{*};
+use crate::stdlib::{StdBinding, StdBindingTree};
+use crate::vm::Opcode;
 use crate::trace;
 
+use crate::compiler::scanner::ScanToken::{*};
+use crate::compiler::parser::ParserErrorType::{*};
+use crate::vm::Opcode::{*};
 
-pub fn parse(scan_result: ScanResult) -> ParserResult {
-    let mut parser: Parser = Parser {
-        input: scan_result.tokens.into_iter().peekable(),
-        output: Vec::new(),
 
-        lineno: 0,
-
-        errors: Vec::new(),
-        error: false,
-    };
+pub fn parse(bindings: StdBindingTree, scan_result: ScanResult) -> ParserResult {
+    let mut parser: Parser = Parser::new(bindings, scan_result.tokens);
     parser.parse();
     ParserResult {
-        tokens: parser.output,
+        code: parser.output,
         errors: parser.errors,
     }
 }
 
 pub struct ParserResult {
-    pub tokens: Vec<ParserToken>,
+    pub code: Vec<Opcode>,
     pub errors: Vec<ParserError>,
-}
-
-
-#[derive(Eq, PartialEq, Debug, Clone)]
-pub enum ParserToken {
-
-    // Stack Operations
-    StoreValue, // ... name, value] -> set name = value; -> ...]
-    Dupe, // ... x, y, z] -> ... x, y, z, z]
-
-    // Push
-    Nil,
-    True,
-    False,
-    Int(i64),
-    Str(String),
-    Identifier(String),
-
-    // Unary Operators
-    UnarySub,
-    UnaryLogicalNot,
-    UnaryBitwiseNot,
-
-    // Binary Operators
-    // Ordered by precedence, highest to lowest
-    OpFuncEval(u8),
-    OpArrayEval(u8),
-
-    OpMul,
-    OpDiv,
-    OpMod,
-    OpPow,
-
-    OpAdd,
-    OpSub,
-
-    OpLeftShift,
-    OpRightShift,
-
-    OpLessThan,
-    OpGreaterThan,
-    OpLessThanEqual,
-    OpGreaterThanEqual,
-    OpEqual,
-    OpNotEqual,
-
-    OpBitwiseAnd,
-    OpBitwiseOr,
-    OpBitwiseXor,
-
-    OpFuncCompose,
-
-    OpLogicalAnd,
-    OpLogicalOr,
-
-    NewLine,
 }
 
 #[derive(Eq, PartialEq, Debug, Clone)]
@@ -97,31 +35,53 @@ pub struct ParserError {
 pub enum ParserErrorType {
     UnexpectedEoF,
     UnexpectedEoFExpecting(ScanToken),
+    UnexpectedTokenAfterEoF(ScanToken),
 
     Expecting(ScanToken, ScanToken),
 
     ExpectedExpressionTerminal(ScanToken),
     ExpectedCommaOrEndOfArguments(ScanToken),
+    ExpectedStatement(ScanToken),
 }
 
 
 struct Parser {
+    bindings: StdBindingTree,
     input: Peekable<IntoIter<ScanToken>>,
-    output: Vec<ParserToken>,
+    output: Vec<Opcode>,
     errors: Vec<ParserError>,
 
     lineno: usize,
 
-    /// If we are in error recover mode, this flag is set
-    error: bool,
+    error: bool, // If we are in error recover mode, this flag is set
+    lookahead: Option<ScanToken> // A token we pretend 'push back onto' the input iterator
 }
 
 
 impl Parser {
 
+    fn new(bindings: StdBindingTree, tokens: Vec<ScanToken>) -> Parser {
+        Parser {
+            bindings,
+            input: tokens.into_iter().peekable(),
+            output: Vec::new(),
+            errors: Vec::new(),
+
+            lineno: 0,
+
+            error: false,
+            lookahead: None,
+        }
+    }
+
     fn parse(self: &mut Self) {
         trace::trace_parser!("rule <root>");
         self.parse_statements();
+        if let Some(t) = self.peek() {
+            let token: ScanToken = t.clone();
+            self.push_err(UnexpectedTokenAfterEoF(token));
+        }
+        self.push(Exit);
     }
 
     fn parse_statements(self: &mut Self) {
@@ -135,7 +95,17 @@ impl Parser {
                 Some(KeywordFor) => self.parse_for(),
                 Some(ScanToken::Identifier(_)) => self.parse_assignment(),
                 Some(OpenBrace) => self.parse_block_statement(),
-                _ => break
+                Some(CloseBrace) => break, // Don't consume, but break if we're in an error mode
+                Some(KeywordExit) => {
+                    self.advance();
+                    self.push(Exit);
+                }
+                Some(t) => {
+                    let token: ScanToken = t.clone();
+                    self.push_err(ExpectedStatement(token));
+                    self.advance();
+                }
+                None => break,
             }
         }
     }
@@ -158,7 +128,6 @@ impl Parser {
     }
 
     fn parse_let(self: &mut Self) {
-        self.parse_pattern();
         if self.accept(Equals) {
             self.parse_expression();
         }
@@ -180,7 +149,6 @@ impl Parser {
     }
 
     fn parse_for(self: &mut Self) {
-        self.parse_pattern();
         self.expect(KeywordIn);
         self.parse_expression();
         self.parse_block_statement();
@@ -189,13 +157,13 @@ impl Parser {
     fn parse_assignment(self: &mut Self) {
         let name: String = self.take_identifier();
         if let Some(Equals) = self.peek() { // Assignment Statement
-            self.push(ParserToken::Identifier(name));
+            self.push(Opcode::Identifier(name));
             self.advance();
             self.parse_expression();
             self.push(StoreValue);
             return
         }
-        let maybe_op: Option<ParserToken> = match self.peek() {
+        let maybe_op: Option<Opcode> = match self.peek() {
             Some(PlusEquals) => Some(OpAdd),
             Some(MinusEquals) => Some(OpSub),
             Some(MulEquals) => Some(OpMul),
@@ -210,19 +178,20 @@ impl Parser {
             _ => None
         };
         if let Some(op) = maybe_op { // Assignment Expression i.e. a += 3
-            self.push(ParserToken::Identifier(name));
+            self.push(Opcode::Identifier(name));
             self.push(Dupe);
             self.advance();
             self.parse_expression();
             self.push(op);
             self.push(StoreValue);
+            return;
         }
-    }
-
-
-    fn parse_pattern(self: &mut Self) {
-        // todo
-        //self.expect_identifier();
+        // In this case, we matched (and consumed) <name> without a following '=' or other assignment operator.
+        // This must be part of an expression, but we need to first push the lookahead identifier.
+        // A bare expression that starts with an identifier token also must end with a `Pop` opcode.
+        self.push_lookahead(ScanToken::Identifier(name));
+        self.parse_expression();
+        self.push(Pop);
     }
 
     fn parse_expression(self: &mut Self) {
@@ -241,11 +210,15 @@ impl Parser {
             Some(KeywordFalse) => self.advance_push(False),
             Some(ScanToken::Int(_)) => {
                 let int: i64 = self.take_int();
-                self.push(ParserToken::Int(int));
+                self.push(Opcode::Int(int));
             },
             Some(ScanToken::Identifier(_)) => {
                 let string: String = self.take_identifier();
-                self.push(ParserToken::Identifier(string));
+                if let Some(binding) = self.locate_binding(&string) {
+                    self.push(Bound(binding));
+                } else {
+                    self.push(Opcode::Identifier(string));
+                }
             },
             Some(StringLiteral(_)) => {
                 let string = self.take_str();
@@ -271,9 +244,9 @@ impl Parser {
     fn parse_expr_2_unary(self: &mut Self) {
         trace::trace_parser!("rule <expr-2>");
         // Prefix operators
-        let mut stack: Vec<ParserToken> = Vec::new();
+        let mut stack: Vec<Opcode> = Vec::new();
         loop {
-            let maybe_op: Option<ParserToken> = match self.peek() {
+            let maybe_op: Option<Opcode> = match self.peek() {
                 Some(Minus) => Some(UnarySub),
                 Some(BitwiseNot) => Some(UnaryBitwiseNot),
                 Some(LogicalNot) => Some(UnaryLogicalNot),
@@ -336,7 +309,7 @@ impl Parser {
         trace::trace_parser!("rule <expr-3>");
         self.parse_expr_2_unary();
         loop {
-            let maybe_op: Option<ParserToken> = match self.peek() {
+            let maybe_op: Option<Opcode> = match self.peek() {
                 Some(Mul) => Some(OpMul),
                 Some(Div) => Some(OpDiv),
                 Some(Mod) => Some(OpMod),
@@ -357,7 +330,7 @@ impl Parser {
         trace::trace_parser!("rule <expr-4>");
         self.parse_expr_3();
         loop {
-            let maybe_op: Option<ParserToken> = match self.peek() {
+            let maybe_op: Option<Opcode> = match self.peek() {
                 Some(Plus) => Some(OpAdd),
                 Some(Minus) => Some(OpSub),
                 _ => None
@@ -377,7 +350,7 @@ impl Parser {
         trace::trace_parser!("rule <expr-5>");
         self.parse_expr_4();
         loop {
-            let maybe_op: Option<ParserToken> = match self.peek() {
+            let maybe_op: Option<Opcode> = match self.peek() {
                 Some(LeftShift) => Some(OpLeftShift),
                 Some(RightShift) => Some(OpRightShift),
                 _ => None
@@ -397,7 +370,7 @@ impl Parser {
         trace::trace_parser!("rule <expr-6>");
         self.parse_expr_5();
         loop {
-            let maybe_op: Option<ParserToken> = match self.peek() {
+            let maybe_op: Option<Opcode> = match self.peek() {
                 Some(LessThan) => Some(OpLessThan),
                 Some(LessThanEquals) => Some(OpLessThanEqual),
                 Some(GreaterThan) => Some(OpGreaterThan),
@@ -421,7 +394,7 @@ impl Parser {
         trace::trace_parser!("rule <expr-7>");
         self.parse_expr_6();
         loop {
-            let maybe_op: Option<ParserToken> = match self.peek() {
+            let maybe_op: Option<Opcode> = match self.peek() {
                 Some(BitwiseAnd) => Some(OpBitwiseAnd),
                 Some(BitwiseOr) => Some(OpBitwiseOr),
                 Some(BitwiseXor) => Some(OpBitwiseXor),
@@ -442,7 +415,7 @@ impl Parser {
         trace::trace_parser!("rule <expr-8>");
         self.parse_expr_7();
         loop {
-            let maybe_op: Option<ParserToken> = match self.peek() {
+            let maybe_op: Option<Opcode> = match self.peek() {
                 Some(Dot) => Some(OpFuncCompose),
                 _ => None
             };
@@ -461,7 +434,7 @@ impl Parser {
         trace::trace_parser!("rule <expr-9>");
         self.parse_expr_8();
         loop {
-            let maybe_op: Option<ParserToken> = match self.peek() {
+            let maybe_op: Option<Opcode> = match self.peek() {
                 Some(LogicalAnd) => Some(OpLogicalAnd),
                 Some(LogicalOr) => Some(OpLogicalOr),
                 _ => None
@@ -476,6 +449,15 @@ impl Parser {
             }
         }
     }
+
+
+    // ===== Semantic Analysis ===== //
+
+
+    fn locate_binding(self: &mut Self, name: &String) -> Option<StdBinding> {
+        self.bindings.children.as_ref().unwrap().get(name.as_str()).map(|b| b.binding.unwrap())
+    }
+
 
     // ===== Parser Core ===== //
 
@@ -498,7 +480,7 @@ impl Parser {
         match self.peek() {
             Some(t) if t == &token => {
                 trace::trace_parser!("expect {:?} -> pass", token);
-                self.input.next();
+                self.raw_next();
             }
             Some(t) => {
                 let t0: ScanToken = t.clone();
@@ -523,16 +505,16 @@ impl Parser {
         }
         loop { // Then if we fail, start resync
             self.skip_new_line();
-            match self.input.peek() {
+            match self.raw_peek() {
                 Some(t) if *t == token => {
                     trace::trace_parser!("expect_resync {:?} -> synced", token);
                     self.error = false;
-                    self.input.next();
+                    self.raw_next();
                     break;
                 },
-                Some(t) => {
-                    trace::trace_parser!("expect_resync {:?} -> discarding {:?}", token, t);
-                    self.input.next();
+                Some(_t) => {
+                    trace::trace_parser!("expect_resync {:?} -> discarding {:?}", token, _t);
+                    self.raw_next();
                 },
                 None => break
             }
@@ -540,7 +522,7 @@ impl Parser {
     }
 
     /// Advances the token stream and pushes the provided token to the output stream.
-    fn advance_push(self: &mut Self, token: ParserToken) {
+    fn advance_push(self: &mut Self, token: Opcode) {
         self.advance();
         self.push(token);
     }
@@ -581,7 +563,7 @@ impl Parser {
             return None
         }
         self.skip_new_line();
-        self.input.peek()
+        self.raw_peek()
     }
 
     /// Like `advance()` but discards the result.
@@ -596,24 +578,25 @@ impl Parser {
         }
         self.skip_new_line();
         trace::trace_parser!("advance {:?}", self.input.peek());
-        self.input.next()
+        self.raw_next()
     }
 
     fn skip_new_line(self: &mut Self) {
-        while let Some(ScanToken::NewLine) = self.input.peek() {
+        while let Some(NewLine) = self.raw_peek() {
             trace::trace_parser!("advance NewLine L{}", self.lineno);
-            self.input.next();
+            self.raw_next();
             self.lineno += 1;
-            self.output.push(ParserToken::NewLine);
+            self.output.push(LineNumber(self.lineno));
         }
     }
 
-    /// Pushes a new token into the output stream
-    fn push(self: &mut Self, token: ParserToken) {
+    /// Pushes a new token into the output stream.
+    fn push(self: &mut Self, token: Opcode) {
         trace::trace_parser!("push {:?}", token);
         self.output.push(token);
     }
 
+    /// Pushes a new error token into the output error stream.
     fn push_err(self: &mut Self, error: ParserErrorType) {
         trace::trace_parser!("push_err (error = {}) {:?}", self.error, error);
         if !self.error {
@@ -624,16 +607,42 @@ impl Parser {
         }
         self.error = true;
     }
+
+    /// Inserts a scan token back into the input stream.
+    /// This is required as we technically have a lookahead 2 parser.
+    fn push_lookahead(self: &mut Self, token: ScanToken) {
+        assert!(self.lookahead.is_none());
+        self.lookahead = Some(token);
+    }
+
+    // ===== Interactions with `input` ===== //
+
+    fn raw_next(self: &mut Self) -> Option<ScanToken> {
+        if self.lookahead.is_some() {
+            trace::trace_parser!("take lookahead");
+            return self.lookahead.take();
+        }
+        self.input.next()
+    }
+
+    fn raw_peek(self: &mut Self) -> Option<&ScanToken> {
+        if self.lookahead.is_some() {
+            return self.lookahead.as_ref();
+        }
+        self.input.peek()
+    }
 }
 
 
 #[cfg(test)]
 mod tests {
-    use crate::compiler::{test_common, scanner, parser};
-    use crate::compiler::error_reporter::CompilerError;
+    use crate::compiler::{parser, scanner, test_common};
     use crate::compiler::scanner::ScanResult;
-    use crate::compiler::parser::{Parser, ParserResult, ParserToken};
-    use crate::compiler::parser::ParserToken::{*};
+    use crate::compiler::parser::{Parser, ParserResult};
+    use crate::{error_reporter, stdlib};
+    use crate::vm::Opcode;
+
+    use crate::vm::Opcode::{*};
 
     #[test] fn test_str_empty() { run_expr("", vec![Nil]); }
     #[test] fn test_str_int() { run_expr("123", vec![Int(123)]); }
@@ -662,25 +671,19 @@ mod tests {
     #[test] fn test_str_function_call_unary_op_precedence_with_parens() { run_expr("(- foo) ()", vec![Identifier(String::from("foo")), UnarySub, OpFuncEval(0)]); }
     #[test] fn test_str_function_call_unary_op_precedence_with_parens_2() { run_expr("- (foo () )", vec![Identifier(String::from("foo")), OpFuncEval(0), UnarySub]); }
     #[test] fn test_str_function_call_binary_op_precedence() { run_expr("foo ( 1 ) + ( 2 ( 3 ) )", vec![Identifier(String::from("foo")), Int(1), OpFuncEval(1), Int(2), Int(3), OpFuncEval(1), OpAdd]); }
+    #[test] fn test_str_function_call_parens_1() { run_expr("foo . bar (1 + 3) (5)", vec![Identifier(String::from("foo")), Identifier(String::from("bar")), Int(1), Int(3), OpAdd, OpFuncEval(1), Int(5), OpFuncEval(1), OpFuncCompose]); }
+    #[test] fn test_str_function_call_parens_2() { run_expr("( foo . bar (1 + 3) ) (5)", vec![Identifier(String::from("foo")), Identifier(String::from("bar")), Int(1), Int(3), OpAdd, OpFuncEval(1), OpFuncCompose, Int(5), OpFuncEval(1)]); }
 
     #[test] fn test_empty() { run("empty"); }
     #[test] fn test_expressions() { run("expressions"); }
     #[test] fn test_hello_world() { run("hello_world"); }
     #[test] fn test_invalid_expressions() { run("invalid_expressions"); }
 
-    fn run_expr(text: &str, tokens: Vec<ParserToken>) {
+    fn run_expr(text: &str, tokens: Vec<Opcode>) {
         let result: ScanResult = scanner::scan(&String::from(text));
         assert!(result.errors.is_empty());
 
-        let mut parser: Parser = Parser {
-            input: result.tokens.into_iter().peekable(),
-            output: Vec::new(),
-            errors: Vec::new(),
-
-            lineno: 0,
-
-            error: false,
-        };
+        let mut parser: Parser = Parser::new(stdlib::bindings(), result.tokens);
 
         parser.parse_expression();
 
@@ -694,12 +697,12 @@ mod tests {
         let scan_result: ScanResult = scanner::scan(&text);
         assert!(scan_result.errors.is_empty());
 
-        let parse_result: ParserResult = parser::parse(scan_result);
+        let parse_result: ParserResult = parser::parse(stdlib::bindings(), scan_result);
 
         let mut lines: Vec<String> = Vec::new();
-        if !parse_result.tokens.is_empty() {
+        if !parse_result.code.is_empty() {
             lines.push(String::from("=== Parse Tokens ===\n"));
-            for token in parse_result.tokens {
+            for token in parse_result.code {
                 lines.push(format!("{:?}", token));
             }
         }
@@ -714,10 +717,7 @@ mod tests {
             let src_lines: Vec<&str> = text.lines().collect();
             println!("src_lines {:?} / {:?}", src_lines.len(), src_lines);
             for error in &parse_result.errors {
-                lines.push(error.format_error());
-                lines.push(format!("  at: line {} ({})\n  at:\n", error.lineno + 1, &source));
-                lines.push(src_lines.get(error.lineno).map(|s| String::from(*s)).unwrap_or_else(|| format!("Unknown line {}", error.lineno)));
-                lines.push(String::new());
+                lines.push(error_reporter::format_parse_error(&src_lines, &source, error));
             }
         }
 
