@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::iter::Peekable;
 use std::vec::IntoIter;
 
@@ -17,12 +18,14 @@ pub fn parse(bindings: StdBindingTree, scan_result: ScanResult) -> ParserResult 
     ParserResult {
         code: parser.output,
         errors: parser.errors,
+        globals: parser.globals,
     }
 }
 
 pub struct ParserResult {
     pub code: Vec<Opcode>,
     pub errors: Vec<ParserError>,
+    pub globals: HashMap<String, usize>,
 }
 
 #[derive(Eq, PartialEq, Debug, Clone)]
@@ -42,19 +45,37 @@ pub enum ParserErrorType {
     ExpectedExpressionTerminal(ScanToken),
     ExpectedCommaOrEndOfArguments(ScanToken),
     ExpectedStatement(ScanToken),
+    ExpectedVariableNameAfterLet(ScanToken),
+
+    GlobalVariableConflictWithBinding(String),
+    GlobalVariableConflictWithGlobal(String),
+
+    AssignmentToNotVariable(String),
 }
 
 
 struct Parser {
-    bindings: StdBindingTree,
+    bindings: HashMap<&'static str, StdBindingTree>,
     input: Peekable<IntoIter<ScanToken>>,
     output: Vec<Opcode>,
     errors: Vec<ParserError>,
 
     lineno: usize,
 
-    error: bool, // If we are in error recover mode, this flag is set
-    lookahead: Option<ScanToken> // A token we pretend 'push back onto' the input iterator
+    error_recovery: bool, // If we are in error recover mode, this flag is set
+    multiple_expression_statements_per_line: bool, // If a expression statement has already been parsed before a new line or ';', this flag is set
+    lookahead: Option<ScanToken>, // A token we pretend 'push back onto' the input iterator
+
+    globals: HashMap<String, usize>,
+}
+
+#[derive(Eq, PartialEq, Debug, Clone)]
+enum VariableType {
+    //StructOrDerivedBinding, // this one is complicated, since it is a type based dispatch against user defined types...
+    LocalVariable(usize),
+    GlobalVariable(usize),
+    TopLevelBinding(StdBinding),
+    None,
 }
 
 
@@ -62,15 +83,18 @@ impl Parser {
 
     fn new(bindings: StdBindingTree, tokens: Vec<ScanToken>) -> Parser {
         Parser {
-            bindings,
+            bindings: bindings.children.unwrap(),
             input: tokens.into_iter().peekable(),
             output: Vec::new(),
             errors: Vec::new(),
 
             lineno: 0,
 
-            error: false,
+            error_recovery: false,
+            multiple_expression_statements_per_line: false,
             lookahead: None,
+
+            globals: HashMap::new(),
         }
     }
 
@@ -99,12 +123,12 @@ impl Parser {
                 Some(KeywordExit) => {
                     self.advance();
                     self.push(Exit);
-                }
-                Some(t) => {
-                    let token: ScanToken = t.clone();
-                    self.push_err(ExpectedStatement(token));
+                },
+                Some(Semicolon) => {
+                    self.multiple_expression_statements_per_line = false;
                     self.advance();
-                }
+                },
+                Some(_) => self.parse_expression_statement(),
                 None => break,
             }
         }
@@ -128,8 +152,44 @@ impl Parser {
     }
 
     fn parse_let(self: &mut Self) {
-        if self.accept(Equals) {
-            self.parse_expression();
+        self.advance();
+        loop {
+            // For now, assume that all variables are global
+            let store_op: Opcode = match self.peek() {
+                Some(ScanToken::Identifier(_)) => {
+                    let name: String = self.take_identifier();
+                    let gid: usize = match self.declare_global(&name) {
+                        Some(g) => g,
+                        None => break
+                    };
+                    StoreGlobal(gid)
+                },
+                Some(t) => {
+                    let token: ScanToken = t.clone();
+                    self.push_err(ExpectedVariableNameAfterLet(token));
+                    break
+                },
+                None => break
+            };
+
+            match self.peek() {
+                Some(Equals) => { // x = <expr>, so parse the expression
+                    self.advance();
+                    self.multiple_expression_statements_per_line = true;
+                    self.parse_expression();
+                },
+                _ => self.push(Nil), // Initialize to 'nil'
+            }
+
+            self.push(store_op);
+
+            match self.peek() {
+                Some(Comma) => { // Multiple declarations
+                    self.advance();
+                    self.multiple_expression_statements_per_line = false;
+                },
+                _ => break,
+            }
         }
     }
 
@@ -156,14 +216,8 @@ impl Parser {
 
     fn parse_assignment(self: &mut Self) {
         let name: String = self.take_identifier();
-        if let Some(Equals) = self.peek() { // Assignment Statement
-            self.push(Opcode::Identifier(name));
-            self.advance();
-            self.parse_expression();
-            self.push(StoreValue);
-            return
-        }
         let maybe_op: Option<Opcode> = match self.peek() {
+            Some(Equals) => Some(OpEqual), // Fake operator
             Some(PlusEquals) => Some(OpAdd),
             Some(MinusEquals) => Some(OpSub),
             Some(MulEquals) => Some(OpMul),
@@ -177,21 +231,51 @@ impl Parser {
             Some(PowEquals) => Some(OpPow),
             _ => None
         };
-        if let Some(op) = maybe_op { // Assignment Expression i.e. a += 3
-            self.push(Opcode::Identifier(name));
-            self.push(Dupe);
+        if let Some(op) = maybe_op {
+
+            // Resolve the variable name
+            let store_op: Opcode = match self.resolve_identifier(&name) {
+                VariableType::GlobalVariable(gid) => StoreGlobal(gid),
+                _ => {
+                    let token: String = name.clone();
+                    self.push_err(AssignmentToNotVariable(token));
+                    return
+                }
+            };
+            if op != OpEqual { // Only 'Dupe' in assignment expressions
+                self.push(Dupe);
+            }
             self.advance();
+            self.multiple_expression_statements_per_line = true;
             self.parse_expression();
-            self.push(op);
-            self.push(StoreValue);
-            return;
+            if op != OpEqual { // Only push the operator in assignment expressions
+                self.push(op);
+            }
+            self.push(store_op);
+        } else {
+            // In this case, we matched (and consumed) <name> without a following '=' or other assignment operator.
+            // This must be part of an expression, but we need to first push the lookahead identifier.
+            // A bare expression that starts with an identifier token also must end with a `Pop` opcode.
+            self.push_lookahead(ScanToken::Identifier(name));
+            self.parse_expression_statement();
         }
-        // In this case, we matched (and consumed) <name> without a following '=' or other assignment operator.
-        // This must be part of an expression, but we need to first push the lookahead identifier.
-        // A bare expression that starts with an identifier token also must end with a `Pop` opcode.
-        self.push_lookahead(ScanToken::Identifier(name));
-        self.parse_expression();
-        self.push(Pop);
+    }
+
+    fn parse_expression_statement(self: &mut Self) {
+        trace::trace_parser!("rule <expression-statement>");
+        match self.peek() {
+            Some(t) => {
+                let token: ScanToken = t.clone();
+                if !self.multiple_expression_statements_per_line {
+                    self.multiple_expression_statements_per_line = true;
+                    self.parse_expression();
+                    self.push(Pop);
+                } else {
+                    self.push_err(ExpectedStatement(token))
+                }
+            },
+            None => {},
+        }
     }
 
     fn parse_expression(self: &mut Self) {
@@ -214,10 +298,10 @@ impl Parser {
             },
             Some(ScanToken::Identifier(_)) => {
                 let string: String = self.take_identifier();
-                if let Some(binding) = self.locate_binding(&string) {
-                    self.push(Bound(binding));
-                } else {
-                    self.push(Opcode::Identifier(string));
+                match self.resolve_identifier(&string) {
+                    VariableType::GlobalVariable(gid) => self.push(PushGlobal(gid)),
+                    VariableType::TopLevelBinding(b) => self.push(Bound(b)),
+                    _ => self.push(Opcode::Identifier(string))
                 }
             },
             Some(StringLiteral(_)) => {
@@ -455,11 +539,38 @@ impl Parser {
 
     // ===== Semantic Analysis ===== //
 
+    fn declare_global(self: &mut Self, name: &String) -> Option<usize> {
+        // Global variables must not conflict with known top-level bindings, or other global variables
+        // Otherwise they are allowed
+        if self.bindings.contains_key(name.as_str()) {
+            self.push_err(GlobalVariableConflictWithBinding(name.clone()));
+            return None;
+        }
+        if self.globals.contains_key(name) {
+            self.push_err(GlobalVariableConflictWithGlobal(name.clone()));
+            return None;
+        }
 
-    fn locate_binding(self: &mut Self, name: &String) -> Option<StdBinding> {
-        self.bindings.children.as_ref().unwrap().get(name.as_str()).map(|b| b.binding.unwrap())
+        // Declaration successful! Enter it in the globals table
+        let gid: usize = self.globals.len();
+        self.globals.insert(name.clone(), gid);
+        Some(gid)
     }
 
+    fn resolve_identifier(self: &mut Self, name: &String) -> VariableType {
+        // Resolution Strategy
+        // 1. Struct Fields and Derived Bindings
+        // 2. Local Variables
+        // 3. Global Variables
+        // 4. Top Level Bindings
+        if let Some(gid) = self.globals.get(name) {
+            return VariableType::GlobalVariable(*gid);
+        }
+        if let Some(b) = self.bindings.get(name.as_str()).map(|b| b.binding.unwrap()) {
+            return VariableType::TopLevelBinding(b);
+        }
+        VariableType::None
+    }
 
     // ===== Parser Core ===== //
 
@@ -510,7 +621,7 @@ impl Parser {
             match self.raw_peek() {
                 Some(t) if *t == token => {
                     trace::trace_parser!("expect_resync {:?} -> synced", token);
-                    self.error = false;
+                    self.error_recovery = false;
                     self.raw_next();
                     break;
                 },
@@ -561,7 +672,7 @@ impl Parser {
     /// Note that this function only returns a read-only reference to the underlying token, suitable for matching
     /// If the token data needs to be unboxed, i.e. as with `Identifier` tokens, it must be extracted only via `advance()`
     fn peek(self: &mut Self) -> Option<&ScanToken> {
-        if self.error {
+        if self.error_recovery {
             return None
         }
         self.skip_new_line();
@@ -575,7 +686,7 @@ impl Parser {
 
     /// Advances and returns the next incoming token.
     fn advance(self: &mut Self) -> Option<ScanToken> {
-        if self.error {
+        if self.error_recovery {
             return None
         }
         self.skip_new_line();
@@ -589,6 +700,7 @@ impl Parser {
             self.raw_next();
             self.lineno += 1;
             self.output.push(LineNumber(self.lineno));
+            self.multiple_expression_statements_per_line = false;
         }
     }
 
@@ -600,14 +712,14 @@ impl Parser {
 
     /// Pushes a new error token into the output error stream.
     fn push_err(self: &mut Self, error: ParserErrorType) {
-        trace::trace_parser!("push_err (error = {}) {:?}", self.error, error);
-        if !self.error {
+        trace::trace_parser!("push_err (error = {}) {:?}", self.error_recovery, error);
+        if !self.error_recovery {
             self.errors.push(ParserError {
                 error,
                 lineno: self.lineno,
             });
         }
-        self.error = true;
+        self.error_recovery = true;
     }
 
     /// Inserts a scan token back into the input stream.
@@ -642,6 +754,7 @@ mod tests {
     use crate::compiler::scanner::ScanResult;
     use crate::compiler::parser::{Parser, ParserResult};
     use crate::{reporting, stdlib};
+    use crate::stdlib::StdBinding;
     use crate::vm::Opcode;
 
     use crate::vm::Opcode::{*};
@@ -676,9 +789,11 @@ mod tests {
     #[test] fn test_str_function_call_binary_op_precedence() { run_expr("foo ( 1 ) + ( 2 ( 3 ) )", vec![Identifier(String::from("foo")), Int(1), OpFuncEval(1), Int(2), Int(3), OpFuncEval(1), OpAdd]); }
     #[test] fn test_str_function_call_parens_1() { run_expr("foo . bar (1 + 3) (5)", vec![Identifier(String::from("foo")), Identifier(String::from("bar")), Int(1), Int(3), OpAdd, OpFuncEval(1), Int(5), OpFuncEval(1), OpFuncCompose]); }
     #[test] fn test_str_function_call_parens_2() { run_expr("( foo . bar (1 + 3) ) (5)", vec![Identifier(String::from("foo")), Identifier(String::from("bar")), Int(1), Int(3), OpAdd, OpFuncEval(1), OpFuncCompose, Int(5), OpFuncEval(1)]); }
+    #[test] fn test_str_function_composition_with_is() { run_expr("'123' . int is int . print", vec![Str(String::from("123")), Bound(StdBinding::Int), Bound(StdBinding::Int), OpIs, OpFuncCompose, Bound(StdBinding::PrintOut), OpFuncCompose]); }
 
     #[test] fn test_empty() { run("empty"); }
     #[test] fn test_expressions() { run("expressions"); }
+    #[test] fn test_global_variables() { run("global_variables"); }
     #[test] fn test_hello_world() { run("hello_world"); }
     #[test] fn test_invalid_expressions() { run("invalid_expressions"); }
 
@@ -703,6 +818,16 @@ mod tests {
         let parse_result: ParserResult = parser::parse(stdlib::bindings(), scan_result);
 
         let mut lines: Vec<String> = Vec::new();
+        if !parse_result.globals.is_empty() {
+            lines.push(String::from("=== Globals ===\n"));
+            let mut globals = parse_result.globals.iter().collect::<Vec<(&String, &usize)>>();
+            globals.sort_by_key(|(_, u)| *u);
+            for (global, gid) in globals {
+                lines.push(format!("{:?} : {:?}", global, gid));
+            }
+            lines.push(String::new());
+        }
+
         if !parse_result.code.is_empty() {
             lines.push(String::from("=== Parse Tokens ===\n"));
             for token in parse_result.code {

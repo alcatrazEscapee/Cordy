@@ -1,0 +1,7 @@
+let a
+let b
+let c, d
+let e = 3
+let f = nil
+let g = 6 + 5
+let h = nil, i = true, j = false

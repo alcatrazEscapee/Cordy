@@ -1,84 +1,92 @@
+=== Globals ===
+
+"x" : 0
+
 === Parse Tokens ===
 
-Identifier("x")
+LoadGlobal(0)
+LineNumber(1)
+Nil
+StoreValue
+LoadGlobal(0)
 Int(1)
 Nil
 OpAdd
 StoreValue
-LineNumber(1)
-Identifier("x")
+LineNumber(2)
+LoadGlobal(0)
 Nil
 UnarySub
 StoreValue
-LineNumber(2)
-Identifier("x")
+LineNumber(3)
+LoadGlobal(0)
 Bound(PrintOut)
 Nil
 OpFuncCompose
 StoreValue
-LineNumber(3)
-Identifier("x")
+LineNumber(4)
+LoadGlobal(0)
 Bound(PrintOut)
 StoreValue
-LineNumber(4)
-Identifier("x")
+LineNumber(5)
+LoadGlobal(0)
 Bound(PrintOut)
 Int(4)
 Nil
 OpFuncEval(2)
 StoreValue
-LineNumber(5)
-Identifier("x")
+LineNumber(6)
+LoadGlobal(0)
 Bound(PrintOut)
 Int(5)
 OpFuncEval(1)
 StoreValue
-LineNumber(6)
+LineNumber(7)
 Exit
 
 === Parse Errors ===
 
-ParserError { error: ExpectedExpressionTerminal(Plus), lineno: 0 }
 ParserError { error: ExpectedExpressionTerminal(Plus), lineno: 1 }
-ParserError { error: ExpectedExpressionTerminal(Dot), lineno: 2 }
-ParserError { error: ExpectedStatement(Int(3)), lineno: 3 }
-ParserError { error: ExpectedExpressionTerminal(Comma), lineno: 4 }
-ParserError { error: ExpectedCommaOrEndOfArguments(Int(6)), lineno: 5 }
+ParserError { error: ExpectedExpressionTerminal(Plus), lineno: 2 }
+ParserError { error: ExpectedExpressionTerminal(Dot), lineno: 3 }
+ParserError { error: ExpectedStatement(Int(3)), lineno: 4 }
+ParserError { error: ExpectedExpressionTerminal(Comma), lineno: 5 }
+ParserError { error: ExpectedCommaOrEndOfArguments(Int(6)), lineno: 6 }
 
 === Formatted Parse Errors ===
-
-Expected an expression terminal, got '+' token instead
-  at: line 1 (invalid_expressions.cor)
-  at:
-
-{ x = 1 + + 3 }
 
 Expected an expression terminal, got '+' token instead
   at: line 2 (invalid_expressions.cor)
   at:
 
+{ x = 1 + + 3 }
+
+Expected an expression terminal, got '+' token instead
+  at: line 3 (invalid_expressions.cor)
+  at:
+
 { x = - + 2 }
 
 Expected an expression terminal, got '.' token instead
-  at: line 3 (invalid_expressions.cor)
+  at: line 4 (invalid_expressions.cor)
   at:
 
 { x = print .. 3 }
 
 Expecting a statement, got integer '3' instead
-  at: line 4 (invalid_expressions.cor)
+  at: line 5 (invalid_expressions.cor)
   at:
 
 { x = print 3 }
 
 Expected an expression terminal, got ',' token instead
-  at: line 5 (invalid_expressions.cor)
+  at: line 6 (invalid_expressions.cor)
   at:
 
 { x = print (4 ,, 5) }
 
 Expected a ',' or ')' after function invocation, got integer '6' instead
-  at: line 6 (invalid_expressions.cor)
+  at: line 7 (invalid_expressions.cor)
   at:
 
 { x = print (5 6) }

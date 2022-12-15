@@ -1,6 +1,14 @@
+=== Globals ===
+
+"x" : 0
+
 === Parse Tokens ===
 
-Identifier("x")
+LoadGlobal(0)
+LineNumber(1)
+Nil
+StoreValue
+LoadGlobal(0)
 Int(1)
 Int(2)
 Int(3)
@@ -11,8 +19,8 @@ Int(5)
 OpDiv
 OpSub
 StoreValue
-LineNumber(1)
-Identifier("x")
+LineNumber(2)
+LoadGlobal(0)
 Identifier("foo")
 Identifier("bar")
 Int(1)
@@ -21,14 +29,14 @@ OpAdd
 OpFuncEval(1)
 OpFuncCompose
 Identifier("baz")
-Identifier("x")
+LoadGlobal(0)
 OpFuncEval(1)
 OpFuncCompose
 Identifier("z")
 OpFuncCompose
 StoreValue
-LineNumber(2)
-Identifier("x")
+LineNumber(3)
+LoadGlobal(0)
 Identifier("three")
 Identifier("four")
 OpFuncCompose

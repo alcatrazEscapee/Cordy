@@ -2,13 +2,12 @@ use crate::compiler::parser::ParserResult;
 use crate::compiler::scanner::ScanResult;
 use crate::reporting::ErrorReporter;
 use crate::stdlib;
-use crate::vm::Opcode;
 
 pub mod scanner;
 pub mod parser;
 
 
-pub fn compile(source: &String, text: &String) -> Result<Vec<Opcode>, Vec<String>> {
+pub fn compile(source: &String, text: &String) -> Result<ParserResult, Vec<String>> {
     let mut errors: Vec<String> = Vec::new();
 
     // Scan
@@ -35,7 +34,7 @@ pub fn compile(source: &String, text: &String) -> Result<Vec<Opcode>, Vec<String
     }
 
     // Compilation Successful
-    Ok(parse_result.code)
+    Ok(parse_result)
 }
 
 
