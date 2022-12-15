@@ -1,8 +1,40 @@
+use crate::compiler::parser::ParserResult;
+use crate::compiler::scanner::ScanResult;
+use crate::error_reporter::ErrorReporter;
+use crate::stdlib;
 
-mod scanner;
-mod parser;
+pub mod scanner;
+pub mod parser;
 
-mod error_reporter;
+
+pub fn compile(source: &String, text: &String) -> Option<ParserResult> {
+
+    // Scan
+    let scan_result: ScanResult = scanner::scan(text);
+    if !scan_result.errors.is_empty() {
+        let reporter: ErrorReporter = ErrorReporter::new(text, source);
+        for error in &scan_result.errors {
+            println!("{}", reporter.format_scan_error(&error));
+        }
+        return None
+    }
+
+    // Load Native Bindings
+    let bindings = stdlib::bindings();
+
+    // Parse
+    let parse_result: ParserResult = parser::parse(bindings, scan_result);
+    if !parse_result.errors.is_empty() {
+        let reporter: ErrorReporter = ErrorReporter::new(text, source);
+        for error in &parse_result.errors {
+            println!("{}", reporter.format_parse_error(&error));
+        }
+        return None
+    }
+
+    // Compilation Successful
+    Some(parse_result)
+}
 
 
 #[cfg(test)]

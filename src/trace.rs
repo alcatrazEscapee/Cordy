@@ -11,4 +11,16 @@ macro_rules! trace_parser {
     };
 }
 
+macro_rules! trace_interpreter {
+    ($($e:expr),+) => {
+        {
+            #[cfg(trace_interpreter = "on")]
+            {
+                println!($($e),+)
+            }
+        }
+    };
+}
+
 pub(crate) use trace_parser;
+pub(crate) use trace_interpreter;

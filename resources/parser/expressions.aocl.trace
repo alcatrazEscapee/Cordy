@@ -11,7 +11,7 @@ Int(5)
 OpDiv
 OpSub
 StoreValue
-NewLine
+LineNumber(1)
 Identifier("x")
 Identifier("foo")
 Identifier("bar")
@@ -27,7 +27,7 @@ OpFuncCompose
 Identifier("z")
 OpFuncCompose
 StoreValue
-NewLine
+LineNumber(2)
 Identifier("x")
 Identifier("three")
 Identifier("four")
