@@ -18,31 +18,31 @@ ScanError { error: InvalidCharacter('$'), lineno: 6 }
 === Formatted Scan Errors ===
 
 Invalid character: '$'
-  at: line 2 (invalid_character.aocl)
+  at: line 2 (invalid_character.cor)
   at:
 
 $
 
 Invalid character: '#'
-  at: line 3 (invalid_character.aocl)
+  at: line 3 (invalid_character.cor)
   at:
 
 #
 
 Invalid character: '@'
-  at: line 4 (invalid_character.aocl)
+  at: line 4 (invalid_character.cor)
   at:
 
 /* this one is fine $#@ */ @ /* that one is not */
 
 Invalid character: '$'
-  at: line 6 (invalid_character.aocl)
+  at: line 6 (invalid_character.cor)
   at:
 
 $ // at the beginning of a line
 
 Invalid character: '$'
-  at: line 7 (invalid_character.aocl)
+  at: line 7 (invalid_character.cor)
   at:
 
 /* and as the last character of a line -> */ $

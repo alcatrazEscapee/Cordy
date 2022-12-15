@@ -49,7 +49,7 @@ mod test_common {
         root.push_str(source);
         root.push('\\');
         root.push_str(path);
-        root.push_str(".aocl");
+        root.push_str(".cor");
         root
     }
 

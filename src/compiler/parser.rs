@@ -716,7 +716,7 @@ mod tests {
             }
             lines.push(String::from("\n=== Formatted Parse Errors ===\n"));
             let mut source: String = String::from(path);
-            source.push_str(".aocl");
+            source.push_str(".cor");
             let src_lines: Vec<&str> = text.lines().collect();
             for error in &parse_result.errors {
                 lines.push(reporting::format_parse_error(&src_lines, &source, error));

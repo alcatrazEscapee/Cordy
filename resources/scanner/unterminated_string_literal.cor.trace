@@ -16,7 +16,7 @@ ScanError { error: UnterminatedStringLiteral, lineno: 0 }
 === Formatted Scan Errors ===
 
 Unterminated string literal (missing a closing single quote)
-  at: line 1 (unterminated_string_literal.aocl)
+  at: line 1 (unterminated_string_literal.cor)
   at:
 
 let x = '... this doesn\'t end

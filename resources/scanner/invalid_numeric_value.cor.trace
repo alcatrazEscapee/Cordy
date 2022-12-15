@@ -11,7 +11,7 @@ ScanError { error: InvalidNumericValue(ParseIntError { kind: PosOverflow }), lin
 === Formatted Scan Errors ===
 
 Invalid numeric value: number too large to fit in target type
-  at: line 1 (invalid_numeric_value.aocl)
+  at: line 1 (invalid_numeric_value.cor)
   at:
 
 let x = 999999999999999999999 // too large
