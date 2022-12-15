@@ -2,10 +2,12 @@
 !*/
 !/.gitignore
 
+!/README.md
+
 !/Cargo.toml
 !/Cargo.lock
 
-!/resources/**/*.aocl
-!/resources/**/*.trace
+!/resources/**/*.cor
+!/resources/**/*.cor.trace
 
 !/src/**/*.rs
