@@ -1,0 +1,11 @@
+let x, y, i = 0
+x = 1
+y = 1
+
+loop {
+    x . print
+    y = x + y
+    x = y - x
+    if i > 20 { break }
+    i += 1
+}

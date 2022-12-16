@@ -3,7 +3,7 @@ use std::iter::Peekable;
 use std::vec::IntoIter;
 
 use crate::compiler::scanner::{ScanResult, ScanToken};
-use crate::stdlib::{StdBinding, StdBindingTree};
+use crate::stdlib::StdBinding;
 use crate::vm::Opcode;
 use crate::trace;
 
@@ -12,7 +12,7 @@ use crate::compiler::parser::ParserErrorType::{*};
 use crate::vm::Opcode::{*};
 
 
-pub fn parse(bindings: StdBindingTree, scan_result: ScanResult) -> ParserResult {
+pub fn parse(bindings: HashMap<&'static str, StdBinding>, scan_result: ScanResult) -> ParserResult {
     let mut parser: Parser = Parser::new(bindings, scan_result.tokens);
     parser.parse();
     ParserResult {
@@ -51,11 +51,13 @@ pub enum ParserErrorType {
     GlobalVariableConflictWithGlobal(String),
 
     AssignmentToNotVariable(String),
+    BreakOutsideOfLoop,
+    ContinueOutsideOfLoop,
 }
 
 
 struct Parser {
-    bindings: HashMap<&'static str, StdBindingTree>,
+    bindings: HashMap<&'static str, StdBinding>,
     input: Peekable<IntoIter<ScanToken>>,
     output: Vec<Opcode>,
     errors: Vec<ParserError>,
@@ -67,6 +69,12 @@ struct Parser {
     lookahead: Option<ScanToken>, // A token we pretend 'push back onto' the input iterator
 
     globals: HashMap<String, usize>,
+
+    // Loop stack
+    // Each frame represents a single loop, which `break` and `continue` statements refer to
+    // `continue` jumps back to the beginning of the loop, aka the first `usize` (loop start)
+    // `break` statements jump back to the end of the loop, which needs to be patched later. The values to be patched record themselves in the stack at the current loop level
+    loops: Vec<(usize, Vec<usize>)>,
 }
 
 #[derive(Eq, PartialEq, Debug, Clone)]
@@ -81,9 +89,9 @@ enum VariableType {
 
 impl Parser {
 
-    fn new(bindings: StdBindingTree, tokens: Vec<ScanToken>) -> Parser {
+    fn new(bindings: HashMap<&'static str, StdBinding>, tokens: Vec<ScanToken>) -> Parser {
         Parser {
-            bindings: bindings.children.unwrap(),
+            bindings,
             input: tokens.into_iter().peekable(),
             output: Vec::new(),
             errors: Vec::new(),
@@ -95,6 +103,7 @@ impl Parser {
             lookahead: None,
 
             globals: HashMap::new(),
+            loops: Vec::new(),
         }
     }
 
@@ -114,9 +123,11 @@ impl Parser {
             match self.peek() {
                 Some(KeywordFn) => self.parse_function(),
                 Some(KeywordLet) => self.parse_let(),
-                Some(KeywordIf) => self.parse_if(),
+                Some(KeywordIf) => self.parse_if_statement(),
                 Some(KeywordLoop) => self.parse_loop(),
                 Some(KeywordFor) => self.parse_for(),
+                Some(KeywordBreak) => self.parse_break_statement(),
+                Some(KeywordContinue) => self.parse_continue_statement(),
                 Some(ScanToken::Identifier(_)) => self.parse_assignment(),
                 Some(OpenBrace) => self.parse_block_statement(),
                 Some(CloseBrace) => break, // Don't consume, but break if we're in an error mode
@@ -138,6 +149,7 @@ impl Parser {
         trace::trace_parser!("rule <block-statement>");
         self.expect(OpenBrace);
         self.parse_statements();
+        self.multiple_expression_statements_per_line = false;
         self.expect_resync(CloseBrace);
     }
 
@@ -178,7 +190,9 @@ impl Parser {
                     self.multiple_expression_statements_per_line = true;
                     self.parse_expression();
                 },
-                _ => self.push(Nil), // Initialize to 'nil'
+                _ => {
+                    self.push(Nil); // Initialize to 'nil'
+                },
             }
 
             self.push(store_op);
@@ -193,25 +207,105 @@ impl Parser {
         }
     }
 
-    fn parse_if(self: &mut Self) {
+    fn parse_if_statement(self: &mut Self) {
+        // Translation:
+        // if <expr> {       | JumpIfFalsePop L1
+        //     <statements>  | <statements>
+        // }                 | L1:
+        //                   |
+        // if <expr> {       | JumpIfFalsePop L1
+        //     <statements>  | <statements> ; Jump L2
+        // } else <expr> {   | L1:
+        //     <statements>  | <statements>
+        // }                 | L2:
+
+        trace::trace_parser!("rule <if-statement>");
+        self.advance();
         self.parse_expression();
+        let jump_if_false: usize = self.reserve(); // placeholder for jump to the beginning of an if branch, if it exists
         self.parse_block_statement();
-        while self.accept(KeywordElif) {
-            self.parse_block_statement()
-        }
-        if self.accept(KeywordElse) {
-            self.parse_block_statement()
+
+        // `elif` can be de-sugared to else { if <expr> { ... } else { ... } }
+        // The additional scope around the else {} can be dropped as it doesn't contain anything already in a scope
+        // So if we hit `elif`, we emit what we would for `else`, then recurse, then once we return, patch the final jump.
+        match self.peek() {
+            Some(KeywordElif) => {
+                // Don't advance, as `parse_if_statement()` will advance the first token
+                let jump: usize = self.reserve();
+                let after_if: usize = self.next_opcode();
+                self.output[jump_if_false] = JumpIfFalsePop(after_if);
+                self.parse_if_statement();
+                let after_else: usize = self.next_opcode();
+                self.output[jump] = Jump(after_else);
+            },
+            Some(KeywordElse) => {
+                // `else` is present, so we first insert an unconditional jump, parse the next block, then fix the first jump
+                self.advance();
+                let jump: usize = self.reserve();
+                let after_if: usize = self.next_opcode();
+                self.output[jump_if_false] = JumpIfFalsePop(after_if);
+                self.parse_block_statement();
+                let after_else: usize = self.next_opcode();
+                self.output[jump] = Jump(after_else);
+            },
+            _ => {
+                // No `else`, so we patch the original jump to jump to here
+                let after: usize = self.next_opcode();
+                self.output[jump_if_false] = JumpIfFalsePop(after);
+            },
         }
     }
 
     fn parse_loop(self: &mut Self) {
-        self.parse_block_statement()
+
+        // Translation:
+        // loop {            | L1:
+        //     <statements>  | <statements>
+        //     break         | Jump L2  -> Push onto loop stack, fix at end
+        //     continue      | Jump L1  -> Set immediately, using the loop start value
+        //     <statements>  | <statements>
+        // }                 | Jump L1 ; L2:
+        self.advance();
+
+        let loop_start: usize = self.next_opcode(); // Top of the loop, push onto the loop stack
+        self.loops.push((loop_start, Vec::new()));
+
+        self.parse_block_statement(); // Inner loop statements, and jump back to front
+        self.push(Jump(loop_start));
+
+        let loop_end: usize = self.next_opcode(); // After the jump, the next opcode is 'end of loop'. Repair all break statements
+        let break_opcodes: Vec<usize> = self.loops.pop().unwrap().1;
+        for break_opcode in break_opcodes {
+            self.output[break_opcode] = Jump(loop_end);
+        }
     }
 
     fn parse_for(self: &mut Self) {
         self.expect(KeywordIn);
         self.parse_expression();
         self.parse_block_statement();
+    }
+
+    fn parse_break_statement(self: &mut Self) {
+        self.advance();
+        match self.loops.last() {
+            Some(_) => {
+                let jump: usize = self.reserve();
+                self.loops.last_mut().unwrap().1.push(jump);
+            },
+            None => self.push_err(BreakOutsideOfLoop),
+        }
+    }
+
+    fn parse_continue_statement(self: &mut Self) {
+        self.advance();
+        match self.loops.last() {
+            Some((loop_start, _)) => {
+                let jump_to: usize = *loop_start;
+                self.push(Jump(jump_to));
+            },
+            None => self.push_err(ContinueOutsideOfLoop),
+        }
     }
 
     fn parse_assignment(self: &mut Self) {
@@ -234,16 +328,16 @@ impl Parser {
         if let Some(op) = maybe_op {
 
             // Resolve the variable name
-            let store_op: Opcode = match self.resolve_identifier(&name) {
-                VariableType::GlobalVariable(gid) => StoreGlobal(gid),
+            let (store_op, push_op) = match self.resolve_identifier(&name) {
+                VariableType::GlobalVariable(gid) => (StoreGlobal(gid), PushGlobal(gid)),
                 _ => {
                     let token: String = name.clone();
                     self.push_err(AssignmentToNotVariable(token));
                     return
                 }
             };
-            if op != OpEqual { // Only 'Dupe' in assignment expressions
-                self.push(Dupe);
+            if op != OpEqual { // Only load the value in assignment expressions
+                self.push(push_op);
             }
             self.advance();
             self.multiple_expression_statements_per_line = true;
@@ -302,7 +396,7 @@ impl Parser {
                     VariableType::GlobalVariable(gid) => self.push(PushGlobal(gid)),
                     VariableType::TopLevelBinding(b) => self.push(Bound(b)),
                     _ => self.push(Opcode::Identifier(string))
-                }
+                };
             },
             Some(StringLiteral(_)) => {
                 let string = self.take_str();
@@ -520,24 +614,34 @@ impl Parser {
         trace::trace_parser!("rule <expr-9>");
         self.parse_expr_8();
         loop {
-            let maybe_op: Option<Opcode> = match self.peek() {
-                Some(LogicalAnd) => Some(OpLogicalAnd),
-                Some(LogicalOr) => Some(OpLogicalOr),
-                _ => None
-            };
-            match maybe_op {
-                Some(op) => {
+            match self.peek() {
+                Some(LogicalAnd) => {
                     self.advance();
+                    let jump_if_false: usize = self.reserve();
+                    self.push(Pop);
                     self.parse_expr_8();
-                    self.push(op);
+                    let jump_to: usize = self.next_opcode();
+                    self.output[jump_if_false] = JumpIfFalse(jump_to);
                 },
-                None => break
+                Some(LogicalOr) => {
+                    self.advance();
+                    let jump_if_true: usize = self.reserve();
+                    self.push(Pop);
+                    self.parse_expr_8();
+                    let jump_to: usize = self.next_opcode();
+                    self.output[jump_if_true] = JumpIfTrue(jump_to);
+                },
+                _ => break
             }
         }
     }
 
 
     // ===== Semantic Analysis ===== //
+
+    fn next_opcode(self: &Self) -> usize {
+        self.output.len()
+    }
 
     fn declare_global(self: &mut Self, name: &String) -> Option<usize> {
         // Global variables must not conflict with known top-level bindings, or other global variables
@@ -566,8 +670,8 @@ impl Parser {
         if let Some(gid) = self.globals.get(name) {
             return VariableType::GlobalVariable(*gid);
         }
-        if let Some(b) = self.bindings.get(name.as_str()).map(|b| b.binding.unwrap()) {
-            return VariableType::TopLevelBinding(b);
+        if let Some(b) = self.bindings.get(name.as_str()) {
+            return VariableType::TopLevelBinding(*b);
         }
         VariableType::None
     }
@@ -704,7 +808,16 @@ impl Parser {
         }
     }
 
+    /// Reserves a space in the output code by inserting a `Noop` token
+    /// Returns an index to the token, which can later be used to set the correct value
+    fn reserve(self: &mut Self) -> usize {
+        trace::trace_parser!("reserve at {}", self.output.len() - 1);
+        self.output.push(Noop);
+        self.output.len() - 1
+    }
+
     /// Pushes a new token into the output stream.
+    /// Returns the index of the token pushed, which allows callers to later mutate that token if they need to.
     fn push(self: &mut Self, token: Opcode) {
         trace::trace_parser!("push {:?}", token);
         self.output.push(token);
@@ -789,13 +902,22 @@ mod tests {
     #[test] fn test_str_function_call_binary_op_precedence() { run_expr("foo ( 1 ) + ( 2 ( 3 ) )", vec![Identifier(String::from("foo")), Int(1), OpFuncEval(1), Int(2), Int(3), OpFuncEval(1), OpAdd]); }
     #[test] fn test_str_function_call_parens_1() { run_expr("foo . bar (1 + 3) (5)", vec![Identifier(String::from("foo")), Identifier(String::from("bar")), Int(1), Int(3), OpAdd, OpFuncEval(1), Int(5), OpFuncEval(1), OpFuncCompose]); }
     #[test] fn test_str_function_call_parens_2() { run_expr("( foo . bar (1 + 3) ) (5)", vec![Identifier(String::from("foo")), Identifier(String::from("bar")), Int(1), Int(3), OpAdd, OpFuncEval(1), OpFuncCompose, Int(5), OpFuncEval(1)]); }
-    #[test] fn test_str_function_composition_with_is() { run_expr("'123' . int is int . print", vec![Str(String::from("123")), Bound(StdBinding::Int), Bound(StdBinding::Int), OpIs, OpFuncCompose, Bound(StdBinding::PrintOut), OpFuncCompose]); }
+    #[test] fn test_str_function_composition_with_is() { run_expr("'123' . int is int . print", vec![Str(String::from("123")), Bound(StdBinding::Int), Bound(StdBinding::Int), OpIs, OpFuncCompose, Bound(StdBinding::Print), OpFuncCompose]); }
 
     #[test] fn test_empty() { run("empty"); }
     #[test] fn test_expressions() { run("expressions"); }
     #[test] fn test_global_variables() { run("global_variables"); }
+    #[test] fn test_global_assignments() { run("global_assignments"); }
     #[test] fn test_hello_world() { run("hello_world"); }
+    #[test] fn test_if_statement_1() { run("if_statement_1"); }
+    #[test] fn test_if_statement_2() { run("if_statement_2"); }
+    #[test] fn test_if_statement_3() { run("if_statement_3"); }
+    #[test] fn test_if_statement_4() { run("if_statement_4"); }
     #[test] fn test_invalid_expressions() { run("invalid_expressions"); }
+    #[test] fn test_loop_1() { run("loop_1"); }
+    #[test] fn test_loop_2() { run("loop_2"); }
+    #[test] fn test_loop_3() { run("loop_3"); }
+    #[test] fn test_loop_4() { run("loop_4"); }
 
     fn run_expr(text: &str, tokens: Vec<Opcode>) {
         let result: ScanResult = scanner::scan(&String::from(text));
@@ -830,8 +952,8 @@ mod tests {
 
         if !parse_result.code.is_empty() {
             lines.push(String::from("=== Parse Tokens ===\n"));
-            for token in parse_result.code {
-                lines.push(format!("{:?}", token));
+            for (ip, token) in parse_result.code.iter().enumerate() {
+                lines.push(format!("{:0>4} {:?}", ip, token));
             }
         }
         if !parse_result.errors.is_empty() {

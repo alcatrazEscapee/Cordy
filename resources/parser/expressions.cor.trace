@@ -4,49 +4,47 @@
 
 === Parse Tokens ===
 
-LoadGlobal(0)
-LineNumber(1)
-Nil
-StoreValue
-LoadGlobal(0)
-Int(1)
-Int(2)
-Int(3)
-OpMul
-OpAdd
-Int(4)
-Int(5)
-OpDiv
-OpSub
-StoreValue
-LineNumber(2)
-LoadGlobal(0)
-Identifier("foo")
-Identifier("bar")
-Int(1)
-Int(2)
-OpAdd
-OpFuncEval(1)
-OpFuncCompose
-Identifier("baz")
-LoadGlobal(0)
-OpFuncEval(1)
-OpFuncCompose
-Identifier("z")
-OpFuncCompose
-StoreValue
-LineNumber(3)
-LoadGlobal(0)
-Identifier("three")
-Identifier("four")
-OpFuncCompose
-Int(1)
-Int(2)
-OpGreaterThan
-OpLogicalAnd
-Int(6)
-Int(7)
-OpGreaterThanEqual
-OpLogicalOr
-StoreValue
-Exit
+0000 LineNumber(1)
+0001 Nil
+0002 StoreGlobal(0)
+0003 Int(1)
+0004 Int(2)
+0005 Int(3)
+0006 OpMul
+0007 OpAdd
+0008 Int(4)
+0009 Int(5)
+0010 OpDiv
+0011 OpSub
+0012 StoreGlobal(0)
+0013 LineNumber(2)
+0014 Identifier("foo")
+0015 Identifier("bar")
+0016 Int(1)
+0017 Int(2)
+0018 OpAdd
+0019 OpFuncEval(1)
+0020 OpFuncCompose
+0021 Identifier("baz")
+0022 PushGlobal(0)
+0023 OpFuncEval(1)
+0024 OpFuncCompose
+0025 Identifier("z")
+0026 OpFuncCompose
+0027 StoreGlobal(0)
+0028 LineNumber(3)
+0029 Identifier("three")
+0030 Identifier("four")
+0031 OpFuncCompose
+0032 JumpIfFalse(37)
+0033 Pop
+0034 Int(1)
+0035 Int(2)
+0036 OpGreaterThan
+0037 JumpIfTrue(42)
+0038 Pop
+0039 Int(6)
+0040 Int(7)
+0041 OpGreaterThanEqual
+0042 StoreGlobal(0)
+0043 Exit

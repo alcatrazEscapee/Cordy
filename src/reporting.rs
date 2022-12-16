@@ -76,6 +76,9 @@ impl AsError for RuntimeError {
             RuntimeErrorType::TypeErrorBinaryIs(l, r) => format!("TypeError: Object '{}' of type '{}' is not a type and cannot be used with binary 'is' on '{}' of type '{}'", r.as_str(), r.as_type_str(), l.as_str(), l.as_type_str()),
             RuntimeErrorType::TypeErrorCannotConvertToInt(v) => format!("TypeError: Cannot convert '{}' of type '{}' to an int", v.as_str(), v.as_type_str()),
             RuntimeErrorType::TypeErrorCannotCompare(l, r) => format!("TypeError: Cannot compare '{}' of type '{}' to and '{}' of type '{}'", l.as_str(), l.as_type_str(), r.as_str(), r.as_type_str()),
+            RuntimeErrorType::TypeErrorFunc1(e, v1) => format!("TypeError: incorrect arguments for {}, got '{}' of type '{}' instead", e, v1.as_str(), v1.as_type_str()),
+            RuntimeErrorType::TypeErrorFunc2(e, v1, v2) => format!("TypeError: incorrect arguments for {}, got '{}' of type '{}', '{}' of type '{}' instead", e, v1.as_str(), v1.as_type_str(), v2.as_str(), v2.as_type_str()),
+            RuntimeErrorType::TypeErrorFunc3(e, v1, v2, v3) => format!("TypeError: incorrect arguments for {}, got '{}' of type '{}', '{}' of type '{}', '{}' of type '{}' instead", e, v1.as_str(), v1.as_type_str(), v2.as_str(), v2.as_type_str(), v3.as_str(), v3.as_type_str()),
         }
     }
 }
@@ -118,6 +121,8 @@ impl AsError for ParserError {
             ParserErrorType::GlobalVariableConflictWithBinding(e) => format!("Declaration for 'let {}' conflicts with builtin function of the same name", e),
             ParserErrorType::GlobalVariableConflictWithGlobal(e) => format!("Declaration for 'let {}' conflicts with existing global variable of the same name", e),
             ParserErrorType::AssignmentToNotVariable(e) => format!("Cannot to assign to '{}' as it is not a global or local variable", e),
+            ParserErrorType::BreakOutsideOfLoop => String::from("Invalid 'break' statement outside of an enclosing loop"),
+            ParserErrorType::ContinueOutsideOfLoop => String::from("Invalid 'continue' statement outside of an enclosing loop"),
         }
     }
 }

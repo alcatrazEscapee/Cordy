@@ -68,9 +68,7 @@ mod test_common {
         expected_path.push_str(".trace");
 
         let expected: String = fs::read_to_string(expected_path).unwrap();
-        let expected_lines: Vec<&str> = expected.lines().collect();
-        let actual_lines: Vec<&str> = actual.lines().collect();
 
-        assert_eq!(expected_lines, actual_lines);
+        assert_eq!(actual, expected.replace("\r", ""));
     }
 }

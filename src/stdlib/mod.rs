@@ -5,45 +5,65 @@ use crate::vm::value::Value;
 
 use crate::stdlib::StdBinding::{*};
 
+
+mod lib_str;
+
+
 /// Build a `Node` containing all native bindings for the interpreter runtime.
 /// This is used in the parser in order to replace raw identifiers with their bound enum value.
-pub fn bindings() -> StdBindingTree {
-    root([
-        ("print", node(PrintOut, [
-            ("out", leaf(PrintOut)),
-            ("err", leaf(PrintErr)),
-        ])),
-        ("nil", leaf(Nil)),
-        ("bool", leaf(Bool)),
-        ("int", leaf(Int)),
-        ("str", leaf(Str)),
-        ("repr", leaf(Repr)),
+pub fn bindings() -> HashMap<&'static str, StdBinding> {
+    HashMap::from([
+        ("print", Print),
+        ("nil", Nil),
+        ("bool", Bool),
+        ("int", Int),
+        ("str", Str),
+        ("repr", Repr),
+        ("to_lower", ToLower),
+        ("to_upper", ToUpper),
+        ("replace", Replace),
+        ("trim", Trim),
+        ("index_of", IndexOf),
+        ("count_of", CountOf),
     ])
 }
 
 /// Looks up the semantic name of a binding. This is the result of calling `print->out . str` for example
 pub fn lookup_binding(b: &StdBinding) -> &'static str {
     match b {
-        PrintOut => "print->out",
-        PrintErr => "print->err",
+        Print => "print",
         Nil => "nil",
         Bool => "bool",
         Int => "int",
         Str => "str",
-        Repr => "repr"
+        Repr => "repr",
+        ToLower => "to_lower",
+        ToUpper => "to_upper",
+        Replace => "replace",
+        Trim => "trim",
+        IndexOf => "index_of",
+        CountOf => "count_of",
+
     }
 }
 
 /// The enum containing all bindings as they are represented at runtime.
 #[derive(Eq, PartialEq, Debug, Clone, Copy)]
 pub enum StdBinding {
-    PrintOut,
-    PrintErr,
+    Print,
     Nil,
     Bool,
     Int,
     Str,
     Repr,
+
+    // lib_str
+    ToLower,
+    ToUpper,
+    Replace,
+    Trim,
+    IndexOf,
+    CountOf,
 }
 
 
@@ -82,10 +102,21 @@ pub fn invoke_func_binding<S>(bound: StdBinding, nargs: u8, vm: &mut S) -> Resul
             if nargs != 1 { return Err(RuntimeErrorType::IncorrectNumberOfArguments(bound.clone(), nargs, 1)); }
             let $a1: Value = vm.pop();
         };
+        ($a1:ident,$a2:ident) => {
+            if nargs != 2 { return Err(RuntimeErrorType::IncorrectNumberOfArguments(bound.clone(), nargs, 2)); }
+            let $a2: Value = vm.pop();
+            let $a1: Value = vm.pop();
+        };
+        ($a1:ident,$a2:ident,$a3:ident) => {
+            if nargs != 3 { return Err(RuntimeErrorType::IncorrectNumberOfArguments(bound.clone(), nargs, 3)); }
+            let $a3: Value = vm.pop();
+            let $a2: Value = vm.pop();
+            let $a1: Value = vm.pop();
+        };
     }
 
     match bound {
-        PrintOut => {
+        Print => {
             match nargs {
                 0 => vm.println0(),
                 1 => {
@@ -102,24 +133,6 @@ pub fn invoke_func_binding<S>(bound: StdBinding, nargs: u8, vm: &mut S) -> Resul
                         vm.print(format!(" {}", rev.pop().unwrap()));
                     }
                     vm.println0();
-                }
-            }
-            Ok(Value::Nil)
-        },
-        PrintErr => {
-            match nargs {
-                0 => eprintln!(),
-                1 => eprintln!("{}", vm.pop().as_str()),
-                _ => {
-                    let mut rev = Vec::with_capacity(nargs as usize);
-                    for _ in 0..nargs {
-                        rev.push(vm.pop().as_str());
-                    }
-                    eprint!("{}", rev.pop().unwrap());
-                    for _ in 1..nargs {
-                        eprint!(" {}", rev.pop().unwrap());
-                    }
-                    eprintln!();
                 }
             }
             Ok(Value::Nil)
@@ -148,7 +161,16 @@ pub fn invoke_func_binding<S>(bound: StdBinding, nargs: u8, vm: &mut S) -> Resul
         Repr => {
             pop_args!(a1);
             Ok(Value::Str(a1.as_repr_str()))
-        }
+        },
+
+        // lib_str
+        ToLower => { pop_args!(a1); lib_str::to_lower(a1) },
+        ToUpper => { pop_args!(a1); lib_str::to_upper(a1) },
+        Replace => { pop_args!(a1, a2, a3); lib_str::replace(a1, a2, a3) },
+        Trim => { pop_args!(a1); lib_str::trim(a1) },
+        IndexOf => { pop_args!(a1, a2); lib_str::index_of(a1, a2) },
+        CountOf => { pop_args!(a1, a2); lib_str::count_of(a1, a2) },
+
         _ => Err(RuntimeErrorType::BindingIsNotFunctionEvaluable(bound.clone()))
     }
 }

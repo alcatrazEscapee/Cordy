@@ -12,8 +12,6 @@ pub enum Value {
     Int(i64),
     Str(String),
     Binding(StdBinding),
-    Global(usize), // Internal values only, they should never appear in user code
-    Local(usize),
 }
 
 
@@ -26,7 +24,6 @@ impl Value {
             Int(i) => i.to_string(),
             Str(s) => s.clone(),
             Binding(b) => String::from(stdlib::lookup_binding(b)),
-            v => panic!("Not implemented for type {:?}", v),
         }
     }
 
@@ -38,7 +35,6 @@ impl Value {
             Int(i) => i.to_string(),
             Str(s) => format!("'{}'", s),
             Binding(b) => String::from(stdlib::lookup_binding(b)),
-            v => panic!("Not implemented for type {:?}", v),
         }
     }
 
@@ -50,7 +46,6 @@ impl Value {
             Int(_) => "int",
             Str(_) => "str",
             Binding(_) => "{binding}",
-            v => panic!("Not implemented for type {:?}", v),
         })
     }
 
@@ -61,7 +56,6 @@ impl Value {
             Int(i) => *i != 0,
             Str(s) => !s.is_empty(),
             Binding(_) => true,
-            v => panic!("Not implemented for type {:?}", v),
         }
     }
 

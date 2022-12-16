@@ -1,0 +1,20 @@
+=== Parse Tokens ===
+
+0000 Int(5)
+0001 Int(3)
+0002 OpLessThan
+0003 JumpIfFalsePop(11)
+0004 LineNumber(1)
+0005 Bound(Print)
+0006 Str("yes")
+0007 OpFuncEval(1)
+0008 LineNumber(2)
+0009 Pop
+0010 Jump(17)
+0011 LineNumber(3)
+0012 Bound(Print)
+0013 Str("no")
+0014 OpFuncEval(1)
+0015 LineNumber(4)
+0016 Pop
+0017 Exit

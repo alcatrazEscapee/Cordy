@@ -4,45 +4,38 @@
 
 === Parse Tokens ===
 
-LoadGlobal(0)
-LineNumber(1)
-Nil
-StoreValue
-LoadGlobal(0)
-Int(1)
-Nil
-OpAdd
-StoreValue
-LineNumber(2)
-LoadGlobal(0)
-Nil
-UnarySub
-StoreValue
-LineNumber(3)
-LoadGlobal(0)
-Bound(PrintOut)
-Nil
-OpFuncCompose
-StoreValue
-LineNumber(4)
-LoadGlobal(0)
-Bound(PrintOut)
-StoreValue
-LineNumber(5)
-LoadGlobal(0)
-Bound(PrintOut)
-Int(4)
-Nil
-OpFuncEval(2)
-StoreValue
-LineNumber(6)
-LoadGlobal(0)
-Bound(PrintOut)
-Int(5)
-OpFuncEval(1)
-StoreValue
-LineNumber(7)
-Exit
+0000 LineNumber(1)
+0001 Nil
+0002 StoreGlobal(0)
+0003 Int(1)
+0004 Nil
+0005 OpAdd
+0006 StoreGlobal(0)
+0007 LineNumber(2)
+0008 Nil
+0009 UnarySub
+0010 StoreGlobal(0)
+0011 LineNumber(3)
+0012 Bound(Print)
+0013 Nil
+0014 OpFuncCompose
+0015 StoreGlobal(0)
+0016 LineNumber(4)
+0017 Bound(Print)
+0018 StoreGlobal(0)
+0019 LineNumber(5)
+0020 Bound(Print)
+0021 Int(4)
+0022 Nil
+0023 OpFuncEval(2)
+0024 StoreGlobal(0)
+0025 LineNumber(6)
+0026 Bound(Print)
+0027 Int(5)
+0028 OpFuncEval(1)
+0029 StoreGlobal(0)
+0030 LineNumber(7)
+0031 Exit
 
 === Parse Errors ===
 
