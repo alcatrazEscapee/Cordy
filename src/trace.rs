@@ -5,6 +5,7 @@ macro_rules! trace_parser {
         {
             #[cfg(trace_parser = "on")]
             {
+                print!("[parser] ");
                 println!($($e),+)
             }
         }
@@ -16,7 +17,8 @@ macro_rules! trace_interpreter {
         {
             #[cfg(trace_interpreter = "on")]
             {
-                println!($($e),+)
+                print!("[vm] ");
+                println!($($e),+);
             }
         }
     };
@@ -27,7 +29,8 @@ macro_rules! trace_interpreter_stack {
         {
             #[cfg(trace_interpreter_stack = "on")]
             {
-                println!($($e),+)
+                print!("[stack] ");
+                println!($($e),+);
             }
         }
     };

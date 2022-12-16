@@ -213,7 +213,18 @@ impl<'a> Scanner<'a> {
                                        escaped = true;
                                    }
                                    Some('\r') => {}, // Don't include '\r' in strings which include newlines
-                                   Some(c0) => buffer.push(c0),
+                                   Some('n') if escaped => {
+                                       buffer.push('\n');
+                                       escaped = false;
+                                   },
+                                   Some('t') if escaped => {
+                                       buffer.push('\t');
+                                       escaped = false;
+                                   },
+                                   Some(c0) => {
+                                       buffer.push(c0);
+                                       escaped = false;
+                                   }
                                    None => {
                                        // Manually report this error at the source point, not at the destination point of the string
                                        // It makes it much easier to read.
@@ -439,14 +450,12 @@ mod tests {
 
 
     #[test] fn test_str_empty() { run_str("", vec![]); }
-
     #[test] fn test_str_keywords() { run_str("let fn if elif else loop for in is break continue true false nil struct exit", vec![KeywordLet, KeywordFn, KeywordIf, KeywordElif, KeywordElse, KeywordLoop, KeywordFor, KeywordIn, KeywordIs, KeywordBreak, KeywordContinue, KeywordTrue, KeywordFalse, KeywordNil, KeywordStruct, KeywordExit]); }
     #[test] fn test_str_identifiers() { run_str("foobar big_bad_wolf ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz", vec![Identifier(String::from("foobar")), Identifier(String::from("big_bad_wolf")), Identifier(String::from("ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz"))]); }
-
+    #[test] fn test_str_literals() { run_str("'abc' 'a \n 3' '\\''", vec![StringLiteral(String::from("abc")), NewLine, StringLiteral(String::from("a \n 3")), StringLiteral(String::from("'"))]); }
     #[test] fn test_str_ints() { run_str("1234 654 10_00_00 0 1", vec![Int(1234), Int(654), Int(100000), Int(0), Int(1)]); }
     #[test] fn test_str_binary_ints() { run_str("0b11011011 0b0 0b1 0b1_01", vec![Int(0b11011011), Int(0b0), Int(0b1), Int(0b101)]); }
     #[test] fn test_str_hex_ints() { run_str("0x12345678 0xabcdef90 0xABCDEF 0xF_f", vec![Int(0x12345678), Int(0xabcdef90), Int(0xABCDEF), Int(0xFF)])}
-
     #[test] fn test_str_unary_operators() { run_str("! ~", vec![LogicalNot, BitwiseNot]); }
     #[test] fn test_str_comparison_operators() { run_str("> < >= > = <= < =", vec![GreaterThan, LessThan, GreaterThanEquals, GreaterThan, Equals, LessThanEquals, LessThan, Equals]); }
     #[test] fn test_str_equality_operators() { run_str("!= ! = == =", vec![NotEquals, LogicalNot, Equals, DoubleEquals, Equals]); }

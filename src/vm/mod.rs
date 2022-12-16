@@ -2,6 +2,7 @@ use std::io::{BufRead, Write};
 use crate::{stdlib, trace};
 use crate::compiler::parser::ParserResult;
 use crate::stdlib::StdBinding;
+use crate::trace::trace_interpreter_stack;
 use crate::vm::value::Value;
 
 use crate::vm::Opcode::{*};
@@ -12,6 +13,15 @@ pub(crate) mod value;
 
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub enum Opcode {
+
+    Noop,
+
+    // Flow Control
+    // These only peek() the stack
+    JumpIfFalse(usize),
+    JumpIfFalsePop(usize),
+    JumpIfTrue(usize),
+    Jump(usize),
 
     // Stack Operations
     Dupe, // ... x, y, z] -> ... x, y, z, z]
@@ -69,10 +79,8 @@ pub enum Opcode {
     OpLogicalAnd,
     OpLogicalOr,
 
-    // Debug
+    // Special
     LineNumber(usize),
-
-    // Flow Control
     Exit,
 }
 
@@ -95,6 +103,9 @@ pub enum RuntimeErrorType {
     TypeErrorBinaryIs(Value, Value),
     TypeErrorCannotConvertToInt(Value),
     TypeErrorCannotCompare(Value, Value),
+    TypeErrorFunc1(&'static str, Value),
+    TypeErrorFunc2(&'static str, Value, Value),
+    TypeErrorFunc3(&'static str, Value, Value, Value),
 }
 
 
@@ -134,6 +145,37 @@ impl<R, W> VirtualMachine<R, W> where
             let op: &Opcode = self.code.get(self.ip).unwrap();
             self.ip += 1;
             match op {
+                // Flow Control
+                // All jumps are absolute (because we don't have variable length instructions and it's easy to do so)
+                JumpIfFalse(ip) => {
+                    trace::trace_interpreter!("jump if false {} -> {}", self.peek(0).as_str(), ip);
+                    let jump: usize = *ip;
+                    let a1: &Value = self.peek(0);
+                    if !a1.as_bool() {
+                        self.ip = jump;
+                    }
+                },
+                JumpIfFalsePop(ip) => {
+                    trace::trace_interpreter!("jump if false {} -> {}", self.peek(0).as_str(), ip);
+                    let jump: usize = *ip;
+                    let a1: Value = self.pop();
+                    if !a1.as_bool() {
+                        self.ip = jump;
+                    }
+                },
+                JumpIfTrue(ip) => {
+                    trace::trace_interpreter!("jump if true {} -> {}", self.peek(0).as_str(), ip);
+                    let jump: usize = *ip;
+                    let a1: &Value = self.peek(0);
+                    if a1.as_bool() {
+                        self.ip = jump;
+                    }
+                }
+                Jump(ip) => {
+                    trace::trace_interpreter!("jump -> {}", ip);
+                    self.ip = *ip;
+                }
+
                 // Stack Manipulations
                 Dupe => {
                     trace::trace_interpreter!("stack dupe {}: {}", self.peek(0).as_str(), self.peek(0).as_type_str());
@@ -421,6 +463,7 @@ impl<R, W> VirtualMachine<R, W> where
                 _ => panic!("Unimplemented {:?}", op)
             }
         }
+        trace::trace_interpreter_stack!("interpreter final stack [{}]", self.stack.iter().rev().map(|t| format!("{}: {}", t.as_str(), t.as_type_str())).collect::<Vec<String>>().join(", "));
         Ok(())
     }
 
@@ -485,27 +528,42 @@ mod test {
     use crate::{compiler, ErrorReporter, VirtualMachine};
     use crate::vm::RuntimeError;
 
-    #[test] fn test_empty() { run_str("", ""); }
-    #[test] fn test_hello_world() { run_str("print('hello world!')", "hello world!\n"); }
-    #[test] fn test_empty_print() { run_str("print()", "\n"); }
-    #[test] fn test_print_strings() { run_str("print('first', 'second', 'third')", "first second third\n"); }
-    #[test] fn test_print_other_args() { run_str("print(nil, -1, 1, true, false, 'test', print)", "nil -1 1 true false test print->out\n"); }
-    #[test] fn test_print_unary_ops() { run_str("print(-1, --1, ---1, ~3, ~~3, !true, !!true)", "-1 1 -1 -4 3 false true\n"); }
-    #[test] fn test_print_add_str() { run_str("print(('a' + 'b') + (3 + 4) + (' hello' + 3) + (' and' + true + nil))", "ab7 hello3 andtruenil\n"); }
-    #[test] fn test_print_mul_str() { run_str("print('abc' * 3)", "abcabcabc\n"); }
-    #[test] fn test_print_add_sub_mul_div_int() { run_str("print(5 - 3, 12 + 5, 3 * 9, 16 / 3)", "2 17 27 5\n"); }
-    #[test] fn test_print_div_mod_int() { run_str("print(3 / 2, 3 / 3, -3 / 2, 10 % 3, 11 % 3, 12 % 3)", "1 1 -1 1 2 0\n"); }
-    #[test] fn test_print_div_by_zero() { run_str("print(15 / 0)", "TypeError: Cannot divide '15' of type 'int' and '0' of type 'int'\n  at: line 1 (<test>)\n  at:\n\nprint(15 / 0)\n"); }
-    #[test] fn test_print_mod_by_zero() { run_str("print(15 % 0)", "TypeError: Cannot modulo '15' of type 'int' and '0' of type 'int'\n  at: line 1 (<test>)\n  at:\n\nprint(15 % 0)\n"); }
-    #[test] fn test_print_left_right_shift() { run_str("print(1 << 10, 16 >> 1, 16 << -1, 1 >> -10)", "1024 8 8 1024\n"); }
-    #[test] fn test_print_compare_ints() { run_str("print(1 < 3, -5 < -10, 6 > 7, 6 > 4)", "true false false true\n"); }
-    #[test] fn test_print_compare_ints_2() { run_str("print(1 <= 3, -5 < -10, 3 <= 3, 2 >= 2, 6 >= 7, 6 >= 4, 6 <= 6, 8 >= 8)", "true false true true false true true true\n"); }
-    #[test] fn test_print_equal_ints() { run_str("print(1 == 3, -5 == -10, 3 != 3, 2 == 2, 6 != 7)", "false false false true true\n"); }
-    #[test] fn test_print_compare_bools() { run_str("print(false < false, false < true, true < false, true < true)", "false true false false\n"); }
-    #[test] fn test_print_compare_bools_2() { run_str("print(false <= false, false >= true, true >= false, true <= true)", "true false true true\n"); }
-    #[test] fn test_print_bitwise_ops() { run_str("print(0b111 & 0b100, 0b1100 | 0b1010, 0b1100 ^ 0b1010)", "4 14 6\n"); }
-    #[test] fn test_print_compose() { run_str("print . print", "print->out\n"); }
-    #[test] fn test_print_compose_str() { run_str("'hello world' . print", "hello world\n"); }
+    #[test] fn test_str_empty() { run_str("", ""); }
+    #[test] fn test_str_hello_world() { run_str("print('hello world!')", "hello world!\n"); }
+    #[test] fn test_str_empty_print() { run_str("print()", "\n"); }
+    #[test] fn test_str_strings() { run_str("print('first', 'second', 'third')", "first second third\n"); }
+    #[test] fn test_str_other_args() { run_str("print(nil, -1, 1, true, false, 'test', print)", "nil -1 1 true false test print\n"); }
+    #[test] fn test_str_unary_ops() { run_str("print(-1, --1, ---1, ~3, ~~3, !true, !!true)", "-1 1 -1 -4 3 false true\n"); }
+    #[test] fn test_str_add_str() { run_str("print(('a' + 'b') + (3 + 4) + (' hello' + 3) + (' and' + true + nil))", "ab7 hello3 andtruenil\n"); }
+    #[test] fn test_str_mul_str() { run_str("print('abc' * 3)", "abcabcabc\n"); }
+    #[test] fn test_str_add_sub_mul_div_int() { run_str("print(5 - 3, 12 + 5, 3 * 9, 16 / 3)", "2 17 27 5\n"); }
+    #[test] fn test_str_div_mod_int() { run_str("print(3 / 2, 3 / 3, -3 / 2, 10 % 3, 11 % 3, 12 % 3)", "1 1 -1 1 2 0\n"); }
+    #[test] fn test_str_div_by_zero() { run_str("print(15 / 0)", "TypeError: Cannot divide '15' of type 'int' and '0' of type 'int'\n  at: line 1 (<test>)\n  at:\n\nprint(15 / 0)\n"); }
+    #[test] fn test_str_mod_by_zero() { run_str("print(15 % 0)", "TypeError: Cannot modulo '15' of type 'int' and '0' of type 'int'\n  at: line 1 (<test>)\n  at:\n\nprint(15 % 0)\n"); }
+    #[test] fn test_str_left_right_shift() { run_str("print(1 << 10, 16 >> 1, 16 << -1, 1 >> -10)", "1024 8 8 1024\n"); }
+    #[test] fn test_str_compare_ints() { run_str("print(1 < 3, -5 < -10, 6 > 7, 6 > 4)", "true false false true\n"); }
+    #[test] fn test_str_compare_ints_2() { run_str("print(1 <= 3, -5 < -10, 3 <= 3, 2 >= 2, 6 >= 7, 6 >= 4, 6 <= 6, 8 >= 8)", "true false true true false true true true\n"); }
+    #[test] fn test_str_equal_ints() { run_str("print(1 == 3, -5 == -10, 3 != 3, 2 == 2, 6 != 7)", "false false false true true\n"); }
+    #[test] fn test_str_compare_bools() { run_str("print(false < false, false < true, true < false, true < true)", "false true false false\n"); }
+    #[test] fn test_str_compare_bools_2() { run_str("print(false <= false, false >= true, true >= false, true <= true)", "true false true true\n"); }
+    #[test] fn test_str_bitwise_ops() { run_str("print(0b111 & 0b100, 0b1100 | 0b1010, 0b1100 ^ 0b1010)", "4 14 6\n"); }
+    #[test] fn test_str_compose() { run_str("print . print", "print\n"); }
+    #[test] fn test_str_compose_str() { run_str("'hello world' . print", "hello world\n"); }
+    #[test] fn test_str_if_1() { run_str("if 1 < 2 { print('yes') } else { print ('no') }", "yes\n"); }
+    #[test] fn test_str_if_2() { run_str("if 1 < -2 { print('yes') } else { print ('no') }", "no\n"); }
+    #[test] fn test_str_if_3() { run_str("if true { print('yes') } print('and also')", "yes\nand also\n"); }
+    #[test] fn test_str_if_4() { run_str("if 1 < -2 { print('yes') } print('and also')", "and also\n"); }
+    #[test] fn test_str_if_5() { run_str("if 0 { print('yes') }", ""); }
+    #[test] fn test_str_if_6() { run_str("if 1 { print('yes') }", "yes\n"); }
+    #[test] fn test_str_if_7() { run_str("if 'string' { print('yes') }", "yes\n"); }
+    #[test] fn test_str_if_8() { run_str("if 1 < 0 { print('yes') } elif 1 { print('hi') } else { print('hehe')", "hi\n"); }
+    #[test] fn test_str_if_9() { run_str("if 1 < 0 { print('yes') } elif 2 < 0 { print('hi') } else { print('hehe')", "hehe\n"); }
+    #[test] fn test_str_if_10() { run_str("if 1 { print('yes') } elif true { print('hi') } else { print('hehe')", "yes\n"); }
+    #[test] fn test_short_circuiting_1() { run_str("if true && print('yes') { print('no') }", "yes\n"); }
+    #[test] fn test_short_circuiting_2() { run_str("if false && print('also no') { print('no') }", ""); }
+    #[test] fn test_short_circuiting_3() { run_str("if true && (print('yes') || true) { print('also yes') }", "yes\nalso yes\n"); }
+    #[test] fn test_short_circuiting_4() { run_str("if false || print('yes') { print('no') }", "yes\n"); }
+    #[test] fn test_short_circuiting_5() { run_str("if true || print('no') { print('yes') }", "yes\n"); }
 
 
     fn run_str(code: &'static str, expected: &'static str) {
@@ -516,6 +574,8 @@ mod test {
         let mut vm = VirtualMachine::new(compile, &b""[..], &mut buf);
 
         let result: Result<(), RuntimeError> = vm.run();
+        assert!(vm.stack.is_empty() || result.is_err());
+
         let mut output: String = String::from_utf8(buf).unwrap();
 
         match result {

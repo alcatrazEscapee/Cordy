@@ -13,42 +13,32 @@
 
 === Parse Tokens ===
 
-LoadGlobal(0)
-LineNumber(1)
-Nil
-StoreValue
-LoadGlobal(1)
-LineNumber(2)
-Nil
-StoreValue
-LoadGlobal(2)
-Nil
-StoreValue
-LoadGlobal(3)
-LineNumber(3)
-Nil
-StoreValue
-LoadGlobal(4)
-Int(3)
-LineNumber(4)
-StoreValue
-LoadGlobal(5)
-Nil
-LineNumber(5)
-StoreValue
-LoadGlobal(6)
-Int(6)
-Int(5)
-LineNumber(6)
-OpAdd
-StoreValue
-LoadGlobal(7)
-Nil
-StoreValue
-LoadGlobal(8)
-True
-StoreValue
-LoadGlobal(9)
-False
-StoreValue
-Exit
+0000 LineNumber(1)
+0001 Nil
+0002 StoreGlobal(0)
+0003 LineNumber(2)
+0004 Nil
+0005 StoreGlobal(1)
+0006 Nil
+0007 StoreGlobal(2)
+0008 LineNumber(3)
+0009 Nil
+0010 StoreGlobal(3)
+0011 Int(3)
+0012 LineNumber(4)
+0013 StoreGlobal(4)
+0014 Nil
+0015 LineNumber(5)
+0016 StoreGlobal(5)
+0017 Int(6)
+0018 Int(5)
+0019 LineNumber(6)
+0020 OpAdd
+0021 StoreGlobal(6)
+0022 Nil
+0023 StoreGlobal(7)
+0024 True
+0025 StoreGlobal(8)
+0026 False
+0027 StoreGlobal(9)
+0028 Exit

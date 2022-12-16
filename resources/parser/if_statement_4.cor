@@ -1,0 +1,7 @@
+if false {
+    print('one')
+} elif true {
+    print('two')
+} else {
+    print('three')
+}
