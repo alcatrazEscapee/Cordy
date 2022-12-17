@@ -44,6 +44,8 @@ pub enum ParserErrorType {
 
     ExpectedExpressionTerminal(ScanToken),
     ExpectedCommaOrEndOfArguments(ScanToken),
+    ExpectedCommaOrEndOfList(ScanToken),
+    ExpectedColonOrEndOfSlice(ScanToken),
     ExpectedStatement(ScanToken),
     ExpectedVariableNameAfterLet(ScanToken),
 
@@ -154,16 +156,11 @@ impl Parser {
     }
 
     fn parse_function(self: &mut Self) {
-        // todo
-        //self.expect_identifier();
-        if self.accept(OpenParen) {
-            // todo:
-            //self.parse_function_parameters();
-        }
-        self.parse_block_statement();
+        panic!("Functions not implemented in parser");
     }
 
     fn parse_let(self: &mut Self) {
+        trace::trace_parser!("rule <let-statement>");
         self.advance();
         loop {
             // For now, assume that all variables are global
@@ -257,6 +254,7 @@ impl Parser {
     }
 
     fn parse_loop(self: &mut Self) {
+        trace::trace_parser!("<loop-statement>");
 
         // Translation:
         // loop {            | L1:
@@ -281,12 +279,11 @@ impl Parser {
     }
 
     fn parse_for(self: &mut Self) {
-        self.expect(KeywordIn);
-        self.parse_expression();
-        self.parse_block_statement();
+        panic!("for statements not implemented in parser");
     }
 
     fn parse_break_statement(self: &mut Self) {
+        trace::trace_parser!("rule <break-statement>");
         self.advance();
         match self.loops.last() {
             Some(_) => {
@@ -298,6 +295,7 @@ impl Parser {
     }
 
     fn parse_continue_statement(self: &mut Self) {
+        trace::trace_parser!("rule <continue-statement>");
         self.advance();
         match self.loops.last() {
             Some((loop_start, _)) => {
@@ -309,6 +307,7 @@ impl Parser {
     }
 
     fn parse_assignment(self: &mut Self) {
+        trace::trace_parser!("rule <assignment-statement>");
         let name: String = self.take_identifier();
         let maybe_op: Option<Opcode> = match self.peek() {
             Some(Equals) => Some(OpEqual), // Fake operator
@@ -407,6 +406,31 @@ impl Parser {
                 self.parse_expression();
                 self.expect(CloseParen);
             },
+            Some(OpenSquareBracket) => {
+                self.advance();
+                let mut length: usize = 0;
+                loop {
+                    match self.peek() {
+                        Some(CloseSquareBracket) => break,
+                        Some(_) => {
+                            self.parse_expression();
+                            length += 1;
+                            match self.peek() {
+                                Some(Comma) => self.skip(), // Allow trailing commas, as this loops to the top again
+                                Some(CloseSquareBracket) => {}, // Skip
+                                Some(t) => {
+                                    let token: ScanToken = t.clone();
+                                    self.push_err(ExpectedCommaOrEndOfList(token))
+                                }
+                                None => break
+                            }
+                        },
+                        None => break,
+                    }
+                }
+                self.push(List(length));
+                self.expect(CloseSquareBracket);
+            },
             Some(e) => {
                 let token: ScanToken = e.clone();
                 self.push(Nil);
@@ -473,11 +497,77 @@ impl Parser {
                     self.push(OpFuncEval(count));
                 },
                 Some(OpenSquareBracket) => {
-                    // todo: slices, and slices with a step
-                    self.advance();
-                    self.parse_expression();
-                    self.push(OpIndex);
+                    self.advance(); // Consume the square bracket
+
+                    // Consumed `[` so far
+                    match self.peek() {
+                        Some(Colon) => { // No first argument, so push zero. Don't consume the colon as it's the seperator
+                            self.push(Nil);
+                        },
+                        _ => self.parse_expression(), // Otherwise we require a first expression
+                    }
+
+                    // Consumed `[` <expression> so far
+                    match self.peek() {
+                        Some(CloseSquareBracket) => { // One argument, so push OpIndex and exit the statement
+                            self.advance();
+                            self.push(OpIndex);
+                            continue;
+                        },
+                        Some(Colon) => { // At least two arguments, so continue parsing
+                            self.advance();
+                        },
+                        Some(t) => { // Anything else was a syntax error
+                            let token: ScanToken = t.clone();
+                            self.push_err(ExpectedColonOrEndOfSlice(token));
+                            continue
+                        },
+                        _ => self.expect(CloseSquareBracket),
+                    }
+
+                    // Consumed `[` <expression> `:` so far
+                    match self.peek() {
+                        Some(Colon) => { // No second argument, but we have a third argument, so push -1. Don't consume the colon as it's the seperator
+                            self.push(Nil);
+                        },
+                        Some(CloseSquareBracket) => { // No second argument, so push -1 and then exit
+                            self.push(Nil);
+                            self.advance();
+                            self.push(OpSlice);
+                            continue
+                        }
+                        _ => self.parse_expression(), // As we consumed `:`, we require a second expression
+                    }
+
+                    // Consumed `[` <expression> `:` <expression> so far
+                    match self.peek() {
+                        Some(CloseSquareBracket) => { // Two arguments, so push OpSlice and exit the statement
+                            self.advance();
+                            self.push(OpSlice);
+                            continue;
+                        },
+                        Some(Colon) => {
+                            // Three arguments, so continue parsing
+                            self.advance();
+                        },
+                        Some(t) => { // Anything else was a syntax error
+                            let token: ScanToken = t.clone();
+                            self.push_err(ExpectedColonOrEndOfSlice(token));
+                            continue;
+                        },
+                        _ => self.expect(CloseSquareBracket),
+                    }
+
+                    // Consumed `[` <expression> `:` <expression> `:` so far
+                    match self.peek() {
+                        Some(CloseSquareBracket) => { // Three arguments + default value for slice
+                            self.push(Nil);
+                        },
+                        _ => self.parse_expression(),
+                    }
+
                     self.expect(CloseSquareBracket);
+                    self.push(OpSliceWithStep);
                 },
                 _ => break
             }
@@ -913,6 +1003,18 @@ mod tests {
     #[test] fn test_and() { run_expr("1 < 2 and 3 < 4", vec![Int(1), Int(2), OpLessThan, JumpIfFalse(8), Pop, Int(3), Int(4), OpLessThan]); }
     #[test] fn test_or() { run_expr("1 < 2 or 3 < 4", vec![Int(1), Int(2), OpLessThan, JumpIfTrue(8), Pop, Int(3), Int(4), OpLessThan]); }
     #[test] fn test_precedence_1() { run_expr("1 . 2 & 3 > 4", vec![Int(1), Int(2), Int(3), OpBitwiseAnd, OpFuncCompose, Int(4), OpGreaterThan]); }
+    #[test] fn test_slice_01() { run_expr("1 [::]", vec![Int(1), Nil, Nil, Nil, OpSliceWithStep]); }
+    #[test] fn test_slice_02() { run_expr("1 [2::]", vec![Int(1), Int(2), Nil, Nil, OpSliceWithStep]); }
+    #[test] fn test_slice_03() { run_expr("1 [:3:]", vec![Int(1), Nil, Int(3), Nil, OpSliceWithStep]); }
+    #[test] fn test_slice_04() { run_expr("1 [::4]", vec![Int(1), Nil, Nil, Int(4), OpSliceWithStep]); }
+    #[test] fn test_slice_05() { run_expr("1 [2:3:]", vec![Int(1), Int(2), Int(3), Nil, OpSliceWithStep]); }
+    #[test] fn test_slice_06() { run_expr("1 [2::3]", vec![Int(1), Int(2), Nil, Int(3), OpSliceWithStep]); }
+    #[test] fn test_slice_07() { run_expr("1 [:3:4]", vec![Int(1), Nil, Int(3), Int(4), OpSliceWithStep]); }
+    #[test] fn test_slice_08() { run_expr("1 [2:3:4]", vec![Int(1), Int(2), Int(3), Int(4), OpSliceWithStep]); }
+    #[test] fn test_slice_09() { run_expr("1 [:]", vec![Int(1), Nil, Nil, OpSlice]); }
+    #[test] fn test_slice_10() { run_expr("1 [2:]", vec![Int(1), Int(2), Nil, OpSlice]); }
+    #[test] fn test_slice_11() { run_expr("1 [:3]", vec![Int(1), Nil, Int(3), OpSlice]); }
+    #[test] fn test_slice_12() { run_expr("1 [2:3]", vec![Int(1), Int(2), Int(3), OpSlice]); }
 
     #[test] fn test_empty() { run("empty"); }
     #[test] fn test_expressions() { run("expressions"); }

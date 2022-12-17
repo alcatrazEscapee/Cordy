@@ -36,6 +36,7 @@ pub enum Opcode {
     Int(i64),
     Str(String),
     Bound(StdBinding),
+    List(usize),
 
     // todo: remove / replace with other things
     Identifier(String),
@@ -75,6 +76,8 @@ pub enum Opcode {
 
     OpFuncCompose,
     OpIndex,
+    OpSlice,
+    OpSliceWithStep,
 
     // Special
     LineNumber(usize),
@@ -94,12 +97,16 @@ pub enum RuntimeErrorType {
     BindingIsNotFunctionEvaluable(StdBinding),
 
     IncorrectNumberOfArguments(StdBinding, u8, u8),
+    IndexOutOfBounds(i64, usize),
+    SliceStepZero,
 
     TypeErrorUnaryOp(Opcode, Value),
     TypeErrorBinaryOp(Opcode, Value, Value),
     TypeErrorBinaryIs(Value, Value),
     TypeErrorCannotConvertToInt(Value),
     TypeErrorCannotCompare(Value, Value),
+    TypeErrorCannotSlice(Value),
+    TypeErrorSliceArgMustBeInt(&'static str, Value),
     TypeErrorFunc1(&'static str, Value),
     TypeErrorFunc2(&'static str, Value, Value),
     TypeErrorFunc3(&'static str, Value, Value, Value),
@@ -219,6 +226,16 @@ impl<R, W> VirtualMachine<R, W> where
                     trace::trace_interpreter!("push {}", Value::Binding(*b).as_debug_str());
                     self.push(Value::Binding(*b));
                 },
+                List(n) => {
+                    trace::trace_interpreter!("push [n={}]", n);
+                    // List values are present on the stack in-order
+                    // So we need to splice the last n values of the stack into it's own list
+                    let start: usize = self.stack.len() - *n;
+                    let end: usize = self.stack.len();
+                    let list: Vec<Value> = self.stack.splice(start..end, std::iter::empty())
+                        .collect::<Vec<Value>>();
+                    self.push(Value::list(list));
+                }
 
                 // Unary Operators
                 UnarySub => {
@@ -310,6 +327,14 @@ impl<R, W> VirtualMachine<R, W> where
                     let a1: Value = self.pop();
                     match (a1, a2) {
                         (Value::Int(i1), Value::Int(i2)) => self.push(Value::Int(i1 + i2)),
+                        (Value::List(l1), Value::List(l2)) => {
+                            let list1 = (*l1).borrow();
+                            let list2 = (*l2).borrow();
+                            let mut list3: Vec<Value> = Vec::with_capacity(list1.len() + list2.len());
+                            list3.extend(list1.iter().cloned());
+                            list3.extend(list2.iter().cloned());
+                            self.push(Value::list(list3))
+                        },
                         (Value::Str(s1), r) => self.push(Value::Str(format!("{}{}", s1, r.as_str()))),
                         (l, Value::Str(s2)) => self.push(Value::Str(format!("{}{}", l.as_str(), s2))),
                         (l, r) => return self.error(TypeErrorBinaryOp(OpAdd, l, r)),
@@ -506,8 +531,32 @@ impl<R, W> VirtualMachine<R, W> where
                     let a2: Value = self.pop();
                     let a1: Value = self.pop();
                     match (a1, a2) {
-                        (Value::List(l), Value::Int(r)) => self.push((*l).borrow()[r as usize].clone()),
+                        (Value::List(l), Value::Int(r)) => match stdlib::lib_list::list_index(l, r) {
+                            Ok(v) => self.push(v),
+                            Err(e) => return self.error(e),
+                        },
                         (l, r) => return self.error(TypeErrorBinaryOp(OpIndex, l, r))
+                    }
+                },
+                OpSlice => {
+                    trace::trace_interpreter!("op [:]");
+                    let a3: Value = self.pop();
+                    let a2: Value = self.pop();
+                    let a1: Value = self.pop();
+                    match stdlib::lib_list::list_slice(a1, a2, a3, Value::Int(1)) {
+                        Ok(v) => self.push(v),
+                        Err(e) => return self.error(e),
+                    }
+                },
+                OpSliceWithStep => {
+                    trace::trace_interpreter!("op [::]");
+                    let a4: Value = self.pop();
+                    let a3: Value = self.pop();
+                    let a2: Value = self.pop();
+                    let a1: Value = self.pop();
+                    match stdlib::lib_list::list_slice(a1, a2, a3, a4) {
+                        Ok(v) => self.push(v),
+                        Err(e) => return self.error(e),
                     }
                 },
 
@@ -595,23 +644,23 @@ mod test {
     #[test] fn test_str_div_by_zero() { run_str("print(15 / 0)", "TypeError: Cannot divide '15' of type 'int' and '0' of type 'int'\n  at: line 1 (<test>)\n  at:\n\nprint(15 / 0)\n"); }
     #[test] fn test_str_mod_by_zero() { run_str("print(15 % 0)", "TypeError: Cannot modulo '15' of type 'int' and '0' of type 'int'\n  at: line 1 (<test>)\n  at:\n\nprint(15 % 0)\n"); }
     #[test] fn test_str_left_right_shift() { run_str("print(1 << 10, 16 >> 1, 16 << -1, 1 >> -10)", "1024 8 8 1024\n"); }
-    #[test] fn test_str_compare_ints() { run_str("print(1 < 3, -5 < -10, 6 > 7, 6 > 4)", "true false false true\n"); }
+    #[test] fn test_str_compare_ints_1() { run_str("print(1 < 3, -5 < -10, 6 > 7, 6 > 4)", "true false false true\n"); }
     #[test] fn test_str_compare_ints_2() { run_str("print(1 <= 3, -5 < -10, 3 <= 3, 2 >= 2, 6 >= 7, 6 >= 4, 6 <= 6, 8 >= 8)", "true false true true false true true true\n"); }
     #[test] fn test_str_equal_ints() { run_str("print(1 == 3, -5 == -10, 3 != 3, 2 == 2, 6 != 7)", "false false false true true\n"); }
-    #[test] fn test_str_compare_bools() { run_str("print(false < false, false < true, true < false, true < true)", "false true false false\n"); }
+    #[test] fn test_str_compare_bools_1() { run_str("print(false < false, false < true, true < false, true < true)", "false true false false\n"); }
     #[test] fn test_str_compare_bools_2() { run_str("print(false <= false, false >= true, true >= false, true <= true)", "true false true true\n"); }
     #[test] fn test_str_bitwise_ops() { run_str("print(0b111 & 0b100, 0b1100 | 0b1010, 0b1100 ^ 0b1010)", "4 14 6\n"); }
     #[test] fn test_str_compose() { run_str("print . print", "print\n"); }
     #[test] fn test_str_compose_str() { run_str("'hello world' . print", "hello world\n"); }
-    #[test] fn test_str_if_1() { run_str("if 1 < 2 { print('yes') } else { print ('no') }", "yes\n"); }
-    #[test] fn test_str_if_2() { run_str("if 1 < -2 { print('yes') } else { print ('no') }", "no\n"); }
-    #[test] fn test_str_if_3() { run_str("if true { print('yes') } print('and also')", "yes\nand also\n"); }
-    #[test] fn test_str_if_4() { run_str("if 1 < -2 { print('yes') } print('and also')", "and also\n"); }
-    #[test] fn test_str_if_5() { run_str("if 0 { print('yes') }", ""); }
-    #[test] fn test_str_if_6() { run_str("if 1 { print('yes') }", "yes\n"); }
-    #[test] fn test_str_if_7() { run_str("if 'string' { print('yes') }", "yes\n"); }
-    #[test] fn test_str_if_8() { run_str("if 1 < 0 { print('yes') } elif 1 { print('hi') } else { print('hehe')", "hi\n"); }
-    #[test] fn test_str_if_9() { run_str("if 1 < 0 { print('yes') } elif 2 < 0 { print('hi') } else { print('hehe')", "hehe\n"); }
+    #[test] fn test_str_if_01() { run_str("if 1 < 2 { print('yes') } else { print ('no') }", "yes\n"); }
+    #[test] fn test_str_if_02() { run_str("if 1 < -2 { print('yes') } else { print ('no') }", "no\n"); }
+    #[test] fn test_str_if_03() { run_str("if true { print('yes') } print('and also')", "yes\nand also\n"); }
+    #[test] fn test_str_if_04() { run_str("if 1 < -2 { print('yes') } print('and also')", "and also\n"); }
+    #[test] fn test_str_if_05() { run_str("if 0 { print('yes') }", ""); }
+    #[test] fn test_str_if_06() { run_str("if 1 { print('yes') }", "yes\n"); }
+    #[test] fn test_str_if_07() { run_str("if 'string' { print('yes') }", "yes\n"); }
+    #[test] fn test_str_if_08() { run_str("if 1 < 0 { print('yes') } elif 1 { print('hi') } else { print('hehe')", "hi\n"); }
+    #[test] fn test_str_if_09() { run_str("if 1 < 0 { print('yes') } elif 2 < 0 { print('hi') } else { print('hehe')", "hehe\n"); }
     #[test] fn test_str_if_10() { run_str("if 1 { print('yes') } elif true { print('hi') } else { print('hehe')", "yes\n"); }
     #[test] fn test_str_short_circuiting_1() { run_str("if true and print('yes') { print('no') }", "yes\n"); }
     #[test] fn test_str_short_circuiting_2() { run_str("if false and print('also no') { print('no') }", ""); }
@@ -624,9 +673,63 @@ mod test {
     #[test] fn test_str_partial_func_4() { run_str("let x = replace ('a', 'o') ; 'apples and bananas' . x . print", "opples ond bononos\n"); }
     #[test] fn test_str_partial_func_5() { run_str("let x = replace ('a', 'o') ; print(x('apples and bananas'))", "opples ond bononos\n"); }
     #[test] fn test_str_partial_func_6() { run_str("('o' . replace('a')) ('apples and bananas') . print", "opples ond bononos\n"); }
+    #[test] fn test_str_list_len() { run_str("[1, 2, 3] . len . print", "3\n"); }
+    #[test] fn test_str_str_len() { run_str("'12345' . len . print", "5\n"); }
+    #[test] fn test_str_list_print() { run_str("[1, 2, '3'] . print", "[1, 2, 3]\n"); }
+    #[test] fn test_str_list_repr_print() { run_str("['1', 2, '3'] . repr . print", "['1', 2, '3']\n"); }
+    #[test] fn test_str_list_add() { run_str("[1, 2, 3] + [4, 5, 6] . print", "[1, 2, 3, 4, 5, 6]\n"); }
+    #[test] fn test_str_empty_list() { run_str("[] . print", "[]\n"); }
+    #[test] fn test_str_list_and_index() { run_str("[1, 2, 3] [1] . print", "2\n"); }
+    #[test] fn test_str_list_index_out_of_bounds() { run_str("[1, 2, 3] [3] . print", "Index '3' is out of bounds for list of length [0, 3)\n  at: line 1 (<test>)\n  at:\n\n[1, 2, 3] [3] . print\n"); }
+    #[test] fn test_str_list_index_negative() { run_str("[1, 2, 3] [-1] . print", "3\n"); }
+    #[test] fn test_str_list_slice_01() { run_str("[1, 2, 3, 4] [:] . print", "[1, 2, 3, 4]\n"); }
+    #[test] fn test_str_list_slice_02() { run_str("[1, 2, 3, 4] [::] . print", "[1, 2, 3, 4]\n"); }
+    #[test] fn test_str_list_slice_03() { run_str("[1, 2, 3, 4] [::1] . print", "[1, 2, 3, 4]\n"); }
+    #[test] fn test_str_list_slice_04() { run_str("[1, 2, 3, 4] [1:] . print", "[2, 3, 4]\n"); }
+    #[test] fn test_str_list_slice_05() { run_str("[1, 2, 3, 4] [:2] . print", "[1, 2]\n"); }
+    #[test] fn test_str_list_slice_06() { run_str("[1, 2, 3, 4] [0:] . print", "[1, 2, 3, 4]\n"); }
+    #[test] fn test_str_list_slice_07() { run_str("[1, 2, 3, 4] [:4] . print", "[1, 2, 3, 4]\n"); }
+    #[test] fn test_str_list_slice_08() { run_str("[1, 2, 3, 4] [1:3] . print", "[2, 3]\n"); }
+    #[test] fn test_str_list_slice_09() { run_str("[1, 2, 3, 4] [2:4] . print", "[3, 4]\n"); }
+    #[test] fn test_str_list_slice_10() { run_str("[1, 2, 3, 4] [0:2] . print", "[1, 2]\n"); }
+    #[test] fn test_str_list_slice_11() { run_str("[1, 2, 3, 4] [:-1] . print", "[1, 2, 3]\n"); }
+    #[test] fn test_str_list_slice_12() { run_str("[1, 2, 3, 4] [:-2] . print", "[1, 2]\n"); }
+    #[test] fn test_str_list_slice_13() { run_str("[1, 2, 3, 4] [-2:] . print", "[3, 4]\n"); }
+    #[test] fn test_str_list_slice_14() { run_str("[1, 2, 3, 4] [-3:] . print", "[2, 3, 4]\n"); }
+    #[test] fn test_str_list_slice_15() { run_str("[1, 2, 3, 4] [::2] . print", "[1, 3]\n"); }
+    #[test] fn test_str_list_slice_16() { run_str("[1, 2, 3, 4] [::3] . print", "[1, 4]\n"); }
+    #[test] fn test_str_list_slice_17() { run_str("[1, 2, 3, 4] [::4] . print", "[1]\n"); }
+    #[test] fn test_str_list_slice_18() { run_str("[1, 2, 3, 4] [1::2] . print", "[2, 4]\n"); }
+    #[test] fn test_str_list_slice_19() { run_str("[1, 2, 3, 4] [1:3:2] . print", "[2]\n"); }
+    #[test] fn test_str_list_slice_20() { run_str("[1, 2, 3, 4] [:-1:2] . print", "[1, 3]\n"); }
+    #[test] fn test_str_list_slice_21() { run_str("[1, 2, 3, 4] [1:-1:3] . print", "[2]\n"); }
+    #[test] fn test_str_list_slice_22() { run_str("[1, 2, 3, 4] [::-1] . print", "[4, 3, 2, 1]\n"); }
+    #[test] fn test_str_list_slice_23() { run_str("[1, 2, 3, 4] [1::-1] . print", "[2, 1]\n"); }
+    #[test] fn test_str_list_slice_24() { run_str("[1, 2, 3, 4] [:2:-1] . print", "[4]\n"); }
+    #[test] fn test_str_list_slice_25() { run_str("[1, 2, 3, 4] [3:1:-1] . print", "[4, 3]\n"); }
+    #[test] fn test_str_list_slice_26() { run_str("[1, 2, 3, 4] [-1:-2:-1] . print", "[4]\n"); }
+    #[test] fn test_str_list_slice_27() { run_str("[1, 2, 3, 4] [-2::-1] . print", "[3, 2, 1]\n"); }
+    #[test] fn test_str_list_slice_28() { run_str("[1, 2, 3, 4] [:-3:-1] . print", "[4, 3]\n"); }
+    #[test] fn test_str_list_slice_29() { run_str("[1, 2, 3, 4] [::-2] . print", "[4, 2]\n"); }
+    #[test] fn test_str_list_slice_30() { run_str("[1, 2, 3, 4] [::-3] . print", "[4, 1]\n"); }
+    #[test] fn test_str_list_slice_31() { run_str("[1, 2, 3, 4] [::-4] . print", "[4]\n"); }
+    #[test] fn test_str_list_slice_32() { run_str("[1, 2, 3, 4] [-2::-2] . print", "[3, 1]\n"); }
+    #[test] fn test_str_list_slice_33() { run_str("[1, 2, 3, 4] [-3::-2] . print", "[2]\n"); }
+    #[test] fn test_str_list_slice_34() { run_str("[1, 2, 3, 4] [1:1] . print", "[]\n"); }
+    #[test] fn test_str_list_slice_35() { run_str("[1, 2, 3, 4] [-1:-1] . print", "[]\n"); }
+    #[test] fn test_str_list_slice_36() { run_str("[1, 2, 3, 4] [-1:1:] . print", "[]\n"); }
+    #[test] fn test_str_list_slice_37() { run_str("[1, 2, 3, 4] [1:1:-1] . print", "[]\n"); }
+    #[test] fn test_str_list_slice_38() { run_str("[1, 2, 3, 4] [-2:2:-3] . print", "[]\n"); }
+    #[test] fn test_str_list_slice_39() { run_str("[1, 2, 3, 4] [-1:1:-1] . print", "[4, 3]\n"); }
+    #[test] fn test_str_list_slice_40() { run_str("[1, 2, 3, 4] [1:-1:-1] . print", "[]\n"); }
+    #[test] fn test_str_list_slice_41() { run_str("[1, 2, 3, 4] [1:10:1] . print", "[2, 3, 4]\n"); }
+    #[test] fn test_str_list_slice_42() { run_str("[1, 2, 3, 4] [10:1:-1] . print", "[4, 3]\n"); }
+    #[test] fn test_str_list_slice_43() { run_str("[1, 2, 3, 4] [-10:1] . print", "[1]\n"); }
+    #[test] fn test_str_list_slice_44() { run_str("[1, 2, 3, 4] [1:-10:-1] . print", "[2, 1]\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }
+    #[test] fn test_append_large_lists() { run("append_large_lists"); }
     #[test] fn test_fibonacci() { run("fibonacci"); }
 
     fn run_str(code: &'static str, expected: &'static str) {

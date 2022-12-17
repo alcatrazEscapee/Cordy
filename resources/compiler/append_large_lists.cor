@@ -1,0 +1,8 @@
+let i = 0
+let ls = [1, 2, 3, 4, 5]
+loop {
+	if i > 10 { break }
+	ls += ls
+	i += 1
+}
+ls . len . print
