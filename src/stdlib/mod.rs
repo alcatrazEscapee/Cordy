@@ -8,7 +8,8 @@ use crate::stdlib::StdBinding::{*};
 use crate::vm::value::Value::PartialBinding;
 
 
-mod lib_str;
+pub mod lib_str;
+pub mod lib_list;
 
 
 /// Build a `Node` containing all native bindings for the interpreter runtime.
@@ -176,7 +177,7 @@ pub fn invoke<S>(bound: StdBinding, nargs: u8, vm: &mut S) -> Result<Value, Runt
         Read => dispatch!({
             // todo: this doesn't work
             let stdin = io::stdin();
-            let mut it = stdin.lines();
+            let it = stdin.lines();
             Ok(Value::Str(it.map(|t| String::from(t.unwrap())).collect::<Vec<String>>().join("\n")))
         }),
         ReadText => dispatch!(a1, match a1 {
