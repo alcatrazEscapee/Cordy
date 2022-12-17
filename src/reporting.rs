@@ -3,6 +3,7 @@ use crate::compiler::scanner::{ScanError, ScanErrorType, ScanToken};
 use crate::stdlib;
 use crate::stdlib::StdBinding;
 use crate::vm::{Opcode, RuntimeError, RuntimeErrorType};
+use crate::vm::value::Value;
 
 const FORMAT_RESET: &'static str = ""; //\x1B[0m";
 const FORMAT_BOLD: &'static str = ""; //\x1B[1m";
@@ -68,22 +69,28 @@ trait AsError {
 impl AsError for RuntimeError {
     fn format_error(self: &Self) -> String {
         match &self.error {
-            RuntimeErrorType::ValueIsNotFunctionEvaluable(v) => format!("Tried to evaluate '{}' of type '{}' but it is not a function.", v.as_type_str(), v.as_str()),
+            RuntimeErrorType::ValueIsNotFunctionEvaluable(v) => format!("Tried to evaluate {} but it is not a function.", v.format_error()),
             RuntimeErrorType::BindingIsNotFunctionEvaluable(b) => format!("Tried to evaluate '{}' but it is not an evaluable function.", b.format_error()),
             RuntimeErrorType::IncorrectNumberOfArguments(b, e, a) => format!("Function '{}' requires {} parameters but {} were present.", b.format_error(), e, a),
             RuntimeErrorType::IndexOutOfBounds(i, ln) => format!("Index '{}' is out of bounds for list of length [0, {})", i, ln),
             RuntimeErrorType::SliceStepZero => String::from("Cannot slice a list with a step of 0"),
-            RuntimeErrorType::TypeErrorUnaryOp(op, v) => format!("TypeError: Argument to unary '{}' must be an int, got '{}' of type '{}'", op.format_error(), v.as_str(), v.as_type_str()),
-            RuntimeErrorType::TypeErrorBinaryOp(op, l, r) => format!("TypeError: Cannot {} '{}' of type '{}' and '{}' of type '{}'", op.format_error(), l.as_str(), l.as_type_str(), r.as_str(), r.as_type_str()),
-            RuntimeErrorType::TypeErrorBinaryIs(l, r) => format!("TypeError: Object '{}' of type '{}' is not a type and cannot be used with binary 'is' on '{}' of type '{}'", r.as_str(), r.as_type_str(), l.as_str(), l.as_type_str()),
-            RuntimeErrorType::TypeErrorCannotConvertToInt(v) => format!("TypeError: Cannot convert '{}' of type '{}' to an int", v.as_str(), v.as_type_str()),
-            RuntimeErrorType::TypeErrorCannotCompare(l, r) => format!("TypeError: Cannot compare '{}' of type '{}' to and '{}' of type '{}'", l.as_str(), l.as_type_str(), r.as_str(), r.as_type_str()),
-            RuntimeErrorType::TypeErrorCannotSlice(ls) => format!("TypeError: Cannot slice '{}' of type '{}'", ls.as_str(), ls.as_type_str()),
-            RuntimeErrorType::TypeErrorSliceArgMustBeInt(e, v) => format!("TypeError: Cannot slice list with {} argument '{}' of type '{}'", e, v.as_str(), v.as_type_str()),
-            RuntimeErrorType::TypeErrorFunc1(e, v1) => format!("TypeError: incorrect arguments for {}, got '{}' of type '{}' instead", e, v1.as_str(), v1.as_type_str()),
-            RuntimeErrorType::TypeErrorFunc2(e, v1, v2) => format!("TypeError: incorrect arguments for {}, got '{}' of type '{}', '{}' of type '{}' instead", e, v1.as_str(), v1.as_type_str(), v2.as_str(), v2.as_type_str()),
-            RuntimeErrorType::TypeErrorFunc3(e, v1, v2, v3) => format!("TypeError: incorrect arguments for {}, got '{}' of type '{}', '{}' of type '{}', '{}' of type '{}' instead", e, v1.as_str(), v1.as_type_str(), v2.as_str(), v2.as_type_str(), v3.as_str(), v3.as_type_str()),
+            RuntimeErrorType::TypeErrorUnaryOp(op, v) => format!("TypeError: Argument to unary '{}' must be an int, got {}", op.format_error(), v.format_error()),
+            RuntimeErrorType::TypeErrorBinaryOp(op, l, r) => format!("TypeError: Cannot {} {} and {}", op.format_error(), l.format_error(), r.format_error()),
+            RuntimeErrorType::TypeErrorBinaryIs(l, r) => format!("TypeError: {} is not a type and cannot be used with binary 'is' on {}", r.format_error(), l.format_error()),
+            RuntimeErrorType::TypeErrorCannotConvertToInt(v) => format!("TypeError: Cannot convert {} to an int", v.format_error()),
+            RuntimeErrorType::TypeErrorCannotCompare(l, r) => format!("TypeError: Cannot compare {} to {}", l.format_error(), r.format_error()),
+            RuntimeErrorType::TypeErrorCannotSlice(ls) => format!("TypeError: Cannot slice {}", ls.format_error()),
+            RuntimeErrorType::TypeErrorSliceArgMustBeInt(e, v) => format!("TypeError: Cannot slice list with {} argument {}", e, v.format_error()),
+            RuntimeErrorType::TypeErrorFunc1(e, v1) => format!("TypeError: incorrect arguments for {}, got {} instead", e, v1.format_error()),
+            RuntimeErrorType::TypeErrorFunc2(e, v1, v2) => format!("TypeError: incorrect arguments for {}, got '{}, {} instead", e, v1.format_error(), v2.format_error()),
+            RuntimeErrorType::TypeErrorFunc3(e, v1, v2, v3) => format!("TypeError: incorrect arguments for {}, got {}, {}, {} instead", e, v1.format_error(), v2.format_error(), v3.format_error()),
         }
+    }
+}
+
+impl AsError for Value {
+    fn format_error(self: &Self) -> String {
+        format!("'{}' of type '{}'", self.as_str(), self.as_type_str())
     }
 }
 
