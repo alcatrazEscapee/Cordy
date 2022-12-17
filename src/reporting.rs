@@ -96,6 +96,7 @@ impl AsError for Opcode {
             Opcode::OpSub => "subtract",
             Opcode::OpLeftShift => "left shift",
             Opcode::OpRightShift => "right shift",
+            Opcode::OpIndex => "array index",
             op => panic!("AsError not implemented for opcode {:?}", op)
         })
     }

@@ -2,7 +2,6 @@ use std::io::{BufRead, Write};
 use crate::{stdlib, trace};
 use crate::compiler::parser::ParserResult;
 use crate::stdlib::StdBinding;
-use crate::trace::trace_interpreter_stack;
 use crate::vm::value::Value;
 
 use crate::vm::Opcode::{*};
@@ -75,9 +74,7 @@ pub enum Opcode {
     OpBitwiseXor,
 
     OpFuncCompose,
-
-    OpLogicalAnd,
-    OpLogicalOr,
+    OpIndex,
 
     // Special
     LineNumber(usize),
@@ -148,7 +145,7 @@ impl<R, W> VirtualMachine<R, W> where
                 // Flow Control
                 // All jumps are absolute (because we don't have variable length instructions and it's easy to do so)
                 JumpIfFalse(ip) => {
-                    trace::trace_interpreter!("jump if false {} -> {}", self.peek(0).as_str(), ip);
+                    trace::trace_interpreter!("jump if false {} -> {}", self.stack.last().unwrap().as_debug_str(), ip);
                     let jump: usize = *ip;
                     let a1: &Value = self.peek(0);
                     if !a1.as_bool() {
@@ -156,7 +153,7 @@ impl<R, W> VirtualMachine<R, W> where
                     }
                 },
                 JumpIfFalsePop(ip) => {
-                    trace::trace_interpreter!("jump if false {} -> {}", self.peek(0).as_str(), ip);
+                    trace::trace_interpreter!("jump if false {} -> {}", self.stack.last().unwrap().as_debug_str(), ip);
                     let jump: usize = *ip;
                     let a1: Value = self.pop();
                     if !a1.as_bool() {
@@ -164,7 +161,7 @@ impl<R, W> VirtualMachine<R, W> where
                     }
                 },
                 JumpIfTrue(ip) => {
-                    trace::trace_interpreter!("jump if true {} -> {}", self.peek(0).as_str(), ip);
+                    trace::trace_interpreter!("jump if true {} -> {}", self.stack.last().unwrap().as_debug_str(), ip);
                     let jump: usize = *ip;
                     let a1: &Value = self.peek(0);
                     if a1.as_bool() {
@@ -178,11 +175,11 @@ impl<R, W> VirtualMachine<R, W> where
 
                 // Stack Manipulations
                 Dupe => {
-                    trace::trace_interpreter!("stack dupe {}: {}", self.peek(0).as_str(), self.peek(0).as_type_str());
+                    trace::trace_interpreter!("stack dupe {}", self.stack.last().unwrap().as_debug_str());
                     self.push(self.peek(0).clone());
                 }
                 Pop => {
-                    trace::trace_interpreter!("stack pop {}: {}", self.peek(0).as_str(), self.peek(0).as_type_str());
+                    trace::trace_interpreter!("stack pop {}", self.stack.last().unwrap().as_debug_str());
                     self.pop();
                 },
 
@@ -211,15 +208,15 @@ impl<R, W> VirtualMachine<R, W> where
                     self.push(Value::Bool(false));
                 },
                 Int(i) => {
-                    trace::trace_interpreter!("push int {}", i);
+                    trace::trace_interpreter!("push {}", i);
                     self.push(Value::Int(*i));
                 },
                 Str(s) => {
-                    trace::trace_interpreter!("push str {}", s);
+                    trace::trace_interpreter!("push '{}'", s);
                     self.push(Value::Str(s.clone()))
                 }
                 Bound(b) => {
-                    trace::trace_interpreter!("push binding for {:?}", b);
+                    trace::trace_interpreter!("push {}", Value::Binding(*b).as_debug_str());
                     self.push(Value::Binding(*b));
                 },
 
@@ -294,10 +291,14 @@ impl<R, W> VirtualMachine<R, W> where
                     let a1: Value = self.pop();
                     match a2 {
                         Value::Binding(b) => {
-                            match stdlib::invoke_type_binding(b, a1) {
-                                Ok(ret) => self.push(ret),
-                                Err(e) => return self.error(e),
-                            }
+                            let ret: Value = match b {
+                                StdBinding::Nil => Value::Bool(a1.is_nil()),
+                                StdBinding::Bool => Value::Bool(a1.is_bool()),
+                                StdBinding::Int => Value::Bool(a1.is_int()),
+                                StdBinding::Str => Value::Bool(a1.is_str()),
+                                _ => return self.error(TypeErrorBinaryIs(a1, Value::Binding(b)))
+                            };
+                            self.push(ret);
                         },
                         _ => return self.error(TypeErrorBinaryIs(a1, a2))
                     }
@@ -425,35 +426,88 @@ impl<R, W> VirtualMachine<R, W> where
                     let f: Value = self.pop();
                     match f {
                         Value::Binding(b) => {
-                            match stdlib::invoke_func_binding(b, 1, self) {
-                                Ok(ret) => {
-                                    // invoke_func_binding() will pop `nargs` arguments off the stack and pass them to the provided function
-                                    // Unlike `OpFuncEval`, we have already popped the binding off the stack initially
-                                    self.push(ret); // Then push the return value
-                                },
+                            // invoke_func_binding() will pop `nargs` arguments off the stack and pass them to the provided function
+                            // Unlike `OpFuncEval`, we have already popped the binding off the stack initially
+                            match stdlib::invoke(b, 1, self) {
+                                Ok(ret) => self.push(ret),
                                 Err(e) => return self.error(e),
                             }
                         },
+                        Value::PartialBinding(b, nargs) => {
+                            // Need to consume the arguments and set up the stack for calling as if all partial arguments were just pushed
+                            // Top of the stack contains `argN+1`, and `nargs` contains `[argN, argN-1, ... arg1]`
+                            // After this, it should contain `[..., arg1, arg2, ... argN, argN+1]
+                            let held: Value = self.pop();
+                            let partial_args: u8 = nargs.len() as u8;
+                            for arg in nargs.into_iter().rev() {
+                                self.push(arg);
+                            }
+                            self.push(held);
+
+                            // invoke_func_binding() will pop `nargs` arguments off the stack and pass them to the provided function
+                            // Unlike `OpFuncEval`, we have already popped the binding off the stack initially
+                            match stdlib::invoke(b, partial_args + 1, self) {
+                                Ok(ret) => self.push(ret),
+                                Err(e) => return self.error(e),
+                            }
+
+                        }
                         _ => return self.error(ValueIsNotFunctionEvaluable(f.clone())),
                     }
                 },
 
 
-                OpFuncEval(nargs) => {
-                    trace::trace_interpreter!("op function evaluate n = {}", nargs);
-                    let f: &Value = self.peek(*nargs as usize);
+                OpFuncEval(nargs_borrow) => {
+                    trace::trace_interpreter!("op function evaluate n = {}", nargs_borrow);
+                    let nargs: u8 = *nargs_borrow;
+                    let f: &Value = self.peek(nargs as usize);
                     match f {
                         Value::Binding(b) => {
-                            match stdlib::invoke_func_binding(*b, *nargs, self) {
-                                Ok(ret) => {
-                                    // invoke_func_binding() will pop `nargs` arguments off the stack and pass them to the provided function
-                                    self.pop(); // Pop the binding
-                                    self.push(ret); // Then push the return value
+                            match stdlib::invoke(*b, nargs, self) {
+                                Ok(v) => {
+                                    self.pop();
+                                    self.push(v)
+                                },
+                                Err(e) => return self.error(e),
+                            }
+                        },
+                        Value::PartialBinding(b, _) => {
+                            // Need to consume the arguments and set up the stack for calling as if all partial arguments were just pushed
+                            // Surgically extract the binding via std::mem::replace
+                            let binding: StdBinding = *b;
+                            let i: usize = self.stack.len() - 1 - nargs as usize;
+                            let args: Vec<Value> = match std::mem::replace(&mut self.stack[i], Value::Nil) {
+                                Value::PartialBinding(_, x) => x,
+                                _ => panic!("Stack corruption")
+                            };
+
+                            // Splice the args from the binding back into the stack, in the correct order
+                            // When evaluating a partial function the vm stack will contain [..., argN+1, ... argM]
+                            // The partial args will contain the vector [argN, argN-1, ... arg1]
+                            // After this, the vm stack should contain the args [..., arg1, arg2, ... argM]
+                            let j: usize = self.stack.len() - nargs as usize;
+                            let partial_args: u8 = args.len() as u8;
+                            self.stack.splice(j..j, args.into_iter().rev());
+
+                            match stdlib::invoke(binding, nargs + partial_args, self) {
+                                Ok(v) => {
+                                    self.pop();
+                                    self.push(v);
                                 },
                                 Err(e) => return self.error(e),
                             }
                         }
                         _ => return self.error(ValueIsNotFunctionEvaluable(f.clone())),
+                    }
+                },
+
+                OpIndex => {
+                    trace::trace_interpreter!("op []");
+                    let a2: Value = self.pop();
+                    let a1: Value = self.pop();
+                    match (a1, a2) {
+                        (Value::List(l), Value::Int(r)) => self.push((*l).borrow()[r as usize].clone()),
+                        (l, r) => return self.error(TypeErrorBinaryOp(OpIndex, l, r))
                     }
                 },
 
@@ -463,7 +517,7 @@ impl<R, W> VirtualMachine<R, W> where
                 _ => panic!("Unimplemented {:?}", op)
             }
         }
-        trace::trace_interpreter_stack!("interpreter final stack [{}]", self.stack.iter().rev().map(|t| format!("{}: {}", t.as_str(), t.as_type_str())).collect::<Vec<String>>().join(", "));
+        trace::trace_interpreter_stack!(": [{}]", self.stack.iter().rev().map(|t| t.as_debug_str()).collect::<Vec<String>>().join(", "));
         Ok(())
     }
 
@@ -502,22 +556,22 @@ impl<R, W> Stack for VirtualMachine<R, W> {
 
     /// Peeks at the top element of the stack, or an element `offset` down from the top
     fn peek(self: &Self, offset: usize) -> &Value {
-        trace::trace_interpreter_stack!("stack peek({}) {} : [{}]", offset, self.stack.len(), self.stack.iter().rev().map(|t| format!("{}: {}", t.as_str(), t.as_type_str())).collect::<Vec<String>>().join(", "));
+        trace::trace_interpreter_stack!(": [{}]", self.stack.iter().rev().map(|t| t.as_debug_str()).collect::<Vec<String>>().join(", "));
+        trace::trace_interpreter_stack!("peek({}) -> {}", offset, self.stack[self.stack.len() - 1 - offset].as_debug_str());
         self.stack.get(self.stack.len() - 1 - offset).unwrap()
     }
 
     /// Pops the top of the stack
     fn pop(self: &mut Self) -> Value {
-        trace::trace_interpreter_stack!("stack pop() {} : [{}]", self.stack.len(), self.stack.iter().rev().map(|t| format!("{}: {}", t.as_str(), t.as_type_str())).collect::<Vec<String>>().join(", "));
-        match self.stack.pop() {
-            Some(v) => v,
-            None => panic!("Stack underflow!")
-        }
+        trace::trace_interpreter_stack!(": [{}]", self.stack.iter().rev().map(|t| t.as_debug_str()).collect::<Vec<String>>().join(", "));
+        trace::trace_interpreter_stack!("pop() -> {}", self.stack.last().unwrap().as_debug_str());
+        self.stack.pop().unwrap()
     }
 
     /// Push a value onto the stack
     fn push(self: &mut Self, value: Value) {
-        trace::trace_interpreter_stack!("stack push({}) {} : [{}]", format!("{}: {}", value.as_str(), value.as_type_str()), self.stack.len(), self.stack.iter().rev().map(|t| format!("{}: {}", t.as_str(), t.as_type_str())).collect::<Vec<String>>().join(", "));
+        trace::trace_interpreter_stack!(": [{}]", self.stack.iter().rev().map(|t| t.as_debug_str()).collect::<Vec<String>>().join(", "));
+        trace::trace_interpreter_stack!("push({})", value.as_debug_str());
         self.stack.push(value);
     }
 }
@@ -525,7 +579,7 @@ impl<R, W> Stack for VirtualMachine<R, W> {
 
 #[cfg(test)]
 mod test {
-    use crate::{compiler, ErrorReporter, VirtualMachine};
+    use crate::{compiler, ErrorReporter, trace, VirtualMachine};
     use crate::vm::RuntimeError;
 
     #[test] fn test_str_empty() { run_str("", ""); }
@@ -559,12 +613,21 @@ mod test {
     #[test] fn test_str_if_8() { run_str("if 1 < 0 { print('yes') } elif 1 { print('hi') } else { print('hehe')", "hi\n"); }
     #[test] fn test_str_if_9() { run_str("if 1 < 0 { print('yes') } elif 2 < 0 { print('hi') } else { print('hehe')", "hehe\n"); }
     #[test] fn test_str_if_10() { run_str("if 1 { print('yes') } elif true { print('hi') } else { print('hehe')", "yes\n"); }
-    #[test] fn test_short_circuiting_1() { run_str("if true && print('yes') { print('no') }", "yes\n"); }
-    #[test] fn test_short_circuiting_2() { run_str("if false && print('also no') { print('no') }", ""); }
-    #[test] fn test_short_circuiting_3() { run_str("if true && (print('yes') || true) { print('also yes') }", "yes\nalso yes\n"); }
-    #[test] fn test_short_circuiting_4() { run_str("if false || print('yes') { print('no') }", "yes\n"); }
-    #[test] fn test_short_circuiting_5() { run_str("if true || print('no') { print('yes') }", "yes\n"); }
+    #[test] fn test_str_short_circuiting_1() { run_str("if true and print('yes') { print('no') }", "yes\n"); }
+    #[test] fn test_str_short_circuiting_2() { run_str("if false and print('also no') { print('no') }", ""); }
+    #[test] fn test_str_short_circuiting_3() { run_str("if true and (print('yes') or true) { print('also yes') }", "yes\nalso yes\n"); }
+    #[test] fn test_str_short_circuiting_4() { run_str("if false or print('yes') { print('no') }", "yes\n"); }
+    #[test] fn test_str_short_circuiting_5() { run_str("if true or print('no') { print('yes') }", "yes\n"); }
+    #[test] fn test_str_partial_func_1() { run_str("'apples and bananas' . replace ('a', 'o') . print", "opples ond bononos\n"); }
+    #[test] fn test_str_partial_func_2() { run_str("'apples and bananas' . replace ('a') ('o') . print", "opples ond bononos\n"); }
+    #[test] fn test_str_partial_func_3() { run_str("print('apples and bananas' . replace ('a') ('o'))", "opples ond bononos\n"); }
+    #[test] fn test_str_partial_func_4() { run_str("let x = replace ('a', 'o') ; 'apples and bananas' . x . print", "opples ond bononos\n"); }
+    #[test] fn test_str_partial_func_5() { run_str("let x = replace ('a', 'o') ; print(x('apples and bananas'))", "opples ond bononos\n"); }
+    #[test] fn test_str_partial_func_6() { run_str("('o' . replace('a')) ('apples and bananas') . print", "opples ond bononos\n"); }
 
+
+    #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }
+    #[test] fn test_fibonacci() { run("fibonacci"); }
 
     fn run_str(code: &'static str, expected: &'static str) {
         let text: &String = &String::from(code);
@@ -584,5 +647,23 @@ mod test {
         }
 
         assert_eq!(expected, output.as_str());
+    }
+
+    fn run(path: &'static str) {
+        let root: &String = &trace::test::get_test_resource_path("compiler", path);
+        let text: &String = &trace::test::get_test_resource_src(&root);
+
+        let compile= compiler::compile(root, text).unwrap();
+
+        let mut buf: Vec<u8> = Vec::new();
+        let mut vm = VirtualMachine::new(compile, &b""[..], &mut buf);
+
+        let result: Result<(), RuntimeError> = vm.run();
+        assert!(vm.stack.is_empty());
+        assert!(result.is_ok());
+
+        let output: String = String::from_utf8(buf).unwrap();
+
+        trace::test::compare_test_resource_content(&root, output.split("\n").map(|s| String::from(s)).collect::<Vec<String>>());
     }
 }
