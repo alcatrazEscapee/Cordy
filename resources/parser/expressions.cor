@@ -1,4 +1,4 @@
 let x
 { x = 1 + 2 * 3 - 4 / 5 }
 { x = foo . bar (1 + 2) . baz (x) . z }
-{ x = three . four && 1 > 2 || 6 >= 7 }
+{ x = three . four and 1 > 2 or 6 >= 7 }

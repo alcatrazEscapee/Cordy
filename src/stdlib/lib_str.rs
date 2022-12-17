@@ -40,3 +40,10 @@ pub fn count_of(v0: Value, v1: Value) -> Result<Value, RuntimeErrorType> {
     }
 }
 
+pub fn split(v0: Value, v1: Value) -> Result<Value, RuntimeErrorType> {
+    match (&v0, &v1) {
+        (Str(a0), Str(a1)) => Ok(Value::list(a1.split(a0).map(|v| Str(String::from(v))).collect::<Vec<Value>>())),
+        _ => Err(RuntimeErrorType::TypeErrorFunc2("split(str, str): [str]", v0, v1))
+    }
+}
+

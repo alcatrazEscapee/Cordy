@@ -80,7 +80,7 @@ struct Parser {
 #[derive(Eq, PartialEq, Debug, Clone)]
 enum VariableType {
     //StructOrDerivedBinding, // this one is complicated, since it is a type based dispatch against user defined types...
-    LocalVariable(usize),
+    //LocalVariable(usize), // Not implemented
     GlobalVariable(usize),
     TopLevelBinding(StdBinding),
     None,
@@ -404,9 +404,9 @@ impl Parser {
             },
             Some(OpenParen) => {
                 self.advance();
-                self.parse_expr_9();
+                self.parse_expression();
                 self.expect(CloseParen);
-            }
+            },
             Some(e) => {
                 let token: ScanToken = e.clone();
                 self.push(Nil);
@@ -415,7 +415,7 @@ impl Parser {
             _ => {
                 self.push(Nil);
                 self.push_err(UnexpectedEoF)
-            }
+            },
         }
     }
 
@@ -472,7 +472,13 @@ impl Parser {
                     }
                     self.push(OpFuncEval(count));
                 },
-                Some(OpenSquareBracket) => panic!("Unimplemented array or slice syntax"),
+                Some(OpenSquareBracket) => {
+                    // todo: slices, and slices with a step
+                    self.advance();
+                    self.parse_expression();
+                    self.push(OpIndex);
+                    self.expect(CloseSquareBracket);
+                },
                 _ => break
             }
         }
@@ -551,12 +557,9 @@ impl Parser {
         self.parse_expr_5();
         loop {
             let maybe_op: Option<Opcode> = match self.peek() {
-                Some(LessThan) => Some(OpLessThan),
-                Some(LessThanEquals) => Some(OpLessThanEqual),
-                Some(GreaterThan) => Some(OpGreaterThan),
-                Some(GreaterThanEquals) => Some(OpGreaterThanEqual),
-                Some(DoubleEquals) => Some(OpEqual),
-                Some(NotEquals) => Some(OpNotEqual),
+                Some(BitwiseAnd) => Some(OpBitwiseAnd),
+                Some(BitwiseOr) => Some(OpBitwiseOr),
+                Some(BitwiseXor) => Some(OpBitwiseXor),
                 _ => None
             };
             match maybe_op {
@@ -575,9 +578,7 @@ impl Parser {
         self.parse_expr_6();
         loop {
             let maybe_op: Option<Opcode> = match self.peek() {
-                Some(BitwiseAnd) => Some(OpBitwiseAnd),
-                Some(BitwiseOr) => Some(OpBitwiseOr),
-                Some(BitwiseXor) => Some(OpBitwiseXor),
+                Some(Dot) => Some(OpFuncCompose),
                 _ => None
             };
             match maybe_op {
@@ -596,7 +597,12 @@ impl Parser {
         self.parse_expr_7();
         loop {
             let maybe_op: Option<Opcode> = match self.peek() {
-                Some(Dot) => Some(OpFuncCompose),
+                Some(LessThan) => Some(OpLessThan),
+                Some(LessThanEquals) => Some(OpLessThanEqual),
+                Some(GreaterThan) => Some(OpGreaterThan),
+                Some(GreaterThanEquals) => Some(OpGreaterThanEqual),
+                Some(DoubleEquals) => Some(OpEqual),
+                Some(NotEquals) => Some(OpNotEqual),
                 _ => None
             };
             match maybe_op {
@@ -863,12 +869,13 @@ impl Parser {
 
 #[cfg(test)]
 mod tests {
-    use crate::compiler::{parser, scanner, test_common};
+    use crate::compiler::{parser, scanner};
     use crate::compiler::scanner::ScanResult;
     use crate::compiler::parser::{Parser, ParserResult};
     use crate::{reporting, stdlib};
     use crate::stdlib::StdBinding;
     use crate::vm::Opcode;
+    use crate::trace;
 
     use crate::vm::Opcode::{*};
 
@@ -903,6 +910,9 @@ mod tests {
     #[test] fn test_str_function_call_parens_1() { run_expr("foo . bar (1 + 3) (5)", vec![Identifier(String::from("foo")), Identifier(String::from("bar")), Int(1), Int(3), OpAdd, OpFuncEval(1), Int(5), OpFuncEval(1), OpFuncCompose]); }
     #[test] fn test_str_function_call_parens_2() { run_expr("( foo . bar (1 + 3) ) (5)", vec![Identifier(String::from("foo")), Identifier(String::from("bar")), Int(1), Int(3), OpAdd, OpFuncEval(1), OpFuncCompose, Int(5), OpFuncEval(1)]); }
     #[test] fn test_str_function_composition_with_is() { run_expr("'123' . int is int . print", vec![Str(String::from("123")), Bound(StdBinding::Int), Bound(StdBinding::Int), OpIs, OpFuncCompose, Bound(StdBinding::Print), OpFuncCompose]); }
+    #[test] fn test_and() { run_expr("1 < 2 and 3 < 4", vec![Int(1), Int(2), OpLessThan, JumpIfFalse(8), Pop, Int(3), Int(4), OpLessThan]); }
+    #[test] fn test_or() { run_expr("1 < 2 or 3 < 4", vec![Int(1), Int(2), OpLessThan, JumpIfTrue(8), Pop, Int(3), Int(4), OpLessThan]); }
+    #[test] fn test_precedence_1() { run_expr("1 . 2 & 3 > 4", vec![Int(1), Int(2), Int(3), OpBitwiseAnd, OpFuncCompose, Int(4), OpGreaterThan]); }
 
     #[test] fn test_empty() { run("empty"); }
     #[test] fn test_expressions() { run("expressions"); }
@@ -931,8 +941,8 @@ mod tests {
     }
 
     fn run(path: &'static str) {
-        let root: String = test_common::get_test_resource_path("parser", path);
-        let text: String = test_common::get_test_resource_src(&root);
+        let root: String = trace::test::get_test_resource_path("parser", path);
+        let text: String = trace::test::get_test_resource_src(&root);
 
         let scan_result: ScanResult = scanner::scan(&text);
         assert!(scan_result.errors.is_empty());
@@ -970,6 +980,6 @@ mod tests {
             }
         }
 
-        test_common::compare_test_resource_content(&root, lines);
+        trace::test::compare_test_resource_content(&root, lines);
     }
 }

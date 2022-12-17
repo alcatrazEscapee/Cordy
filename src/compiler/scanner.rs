@@ -314,12 +314,10 @@ impl<'a> Scanner<'a> {
                        },
                        '|' => match self.peek() {
                            Some('=') => self.push_skip(OrEquals),
-                           Some('|') => self.push_skip(LogicalOr),
                            _ => self.push(BitwiseOr)
                        },
                        '&' => match self.peek() {
                            Some('=') => self.push_skip(AndEquals),
-                           Some('&') => self.push_skip(LogicalAnd),
                            _ => self.push(BitwiseAnd)
                        },
                        '^' => match self.peek() {
@@ -372,7 +370,9 @@ impl<'a> Scanner<'a> {
             "nil" => KeywordNil,
             "struct" => KeywordStruct,
             "exit" => KeywordExit,
-            _ => Identifier(string)
+            "and" => LogicalAnd,
+            "or" => LogicalOr,
+             _ => Identifier(string)
         };
         self.push(token);
     }
@@ -442,9 +442,10 @@ impl<'a> Scanner<'a> {
 
 #[cfg(test)]
 mod tests {
-    use crate::compiler::{scanner, test_common};
+    use crate::compiler::{scanner};
     use crate::compiler::scanner::{ScanResult, ScanToken};
     use crate::reporting;
+    use crate::trace;
 
     use crate::compiler::scanner::ScanToken::{*};
 
@@ -459,7 +460,7 @@ mod tests {
     #[test] fn test_str_unary_operators() { run_str("! ~", vec![LogicalNot, BitwiseNot]); }
     #[test] fn test_str_comparison_operators() { run_str("> < >= > = <= < =", vec![GreaterThan, LessThan, GreaterThanEquals, GreaterThan, Equals, LessThanEquals, LessThan, Equals]); }
     #[test] fn test_str_equality_operators() { run_str("!= ! = == =", vec![NotEquals, LogicalNot, Equals, DoubleEquals, Equals]); }
-    #[test] fn test_str_binary_logical_operators() { run_str("&& & || |", vec![LogicalAnd, BitwiseAnd, LogicalOr, BitwiseOr]); }
+    #[test] fn test_str_binary_logical_operators() { run_str("and & or |", vec![LogicalAnd, BitwiseAnd, LogicalOr, BitwiseOr]); }
     #[test] fn test_str_arithmetic_operators() { run_str("+ - += -= * = *= / = /=", vec![Plus, Minus, PlusEquals, MinusEquals, Mul, Equals, MulEquals, Div, Equals, DivEquals]); }
     #[test] fn test_str_other_arithmetic_operators() { run_str("% %= ** *= **= * *=", vec![Mod, ModEquals, Pow, MulEquals, PowEquals, Mul, MulEquals]); }
     #[test] fn test_str_bitwise_operators() { run_str("| ^ ~ & &= |= ^=", vec![BitwiseOr, BitwiseXor, BitwiseNot, BitwiseAnd, AndEquals, OrEquals, XorEquals]); }
@@ -484,8 +485,8 @@ mod tests {
 
 
     fn run(path: &'static str) {
-        let root: String = test_common::get_test_resource_path("scanner", path);
-        let text: String = test_common::get_test_resource_src(&root);
+        let root: String = trace::test::get_test_resource_path("scanner", path);
+        let text: String = trace::test::get_test_resource_src(&root);
         let result: ScanResult = scanner::scan(&text);
 
         let mut lines: Vec<String> = Vec::new();
@@ -509,6 +510,6 @@ mod tests {
             }
         }
 
-        test_common::compare_test_resource_content(&root, lines);
+        trace::test::compare_test_resource_content(&root, lines);
     }
 }
