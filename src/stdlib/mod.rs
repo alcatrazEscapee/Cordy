@@ -1,12 +1,11 @@
 use std::collections::HashMap;
 use std::{fs, io};
 
-use crate::vm::{IO, RuntimeErrorType, Stack};
+use crate::vm::{IO, Stack};
 use crate::vm::value::Value;
+use crate::vm::error::RuntimeErrorType;
 
-use crate::stdlib::StdBinding::{*};
-use crate::vm::value::Value::PartialBinding;
-
+use StdBinding::{*};
 
 pub mod lib_str;
 pub mod lib_list;
@@ -178,15 +177,15 @@ pub fn invoke<S>(bound: StdBinding, nargs: u8, vm: &mut S) -> Result<Value, Runt
             // todo: this doesn't work
             let stdin = io::stdin();
             let it = stdin.lines();
-            Ok(Value::Str(it.map(|t| String::from(t.unwrap())).collect::<Vec<String>>().join("\n")))
+            Ok(Value::Str(Box::new(it.map(|t| String::from(t.unwrap())).collect::<Vec<String>>().join("\n"))))
         }),
         ReadText => dispatch!(a1, match a1 {
-            Value::Str(s1) => Ok(Value::Str(fs::read_to_string(s1).unwrap().replace("\r", ""))), // todo: error handling?
+            Value::Str(s1) => Ok(Value::Str(Box::new(fs::read_to_string(s1.as_ref()).unwrap().replace("\r", "")))), // todo: error handling?
             _ => Err(RuntimeErrorType::TypeErrorFunc1("read_text(str) -> str", a1)),
         }),
         WriteText => dispatch!(a1, a2, match (&a1, &a2) {
             (Value::Str(s1), Value::Str(s2)) => {
-                fs::write(s1, s2).unwrap();
+                fs::write(s1.as_ref(), s2.as_ref()).unwrap();
                 Ok(Value::Nil)
             },
             _ => Err(RuntimeErrorType::TypeErrorFunc1("write_text(str, str) -> str", a1.clone())),
@@ -202,8 +201,8 @@ pub fn invoke<S>(bound: StdBinding, nargs: u8, vm: &mut S) -> Result<Value, Runt
             },
             _ => Err(RuntimeErrorType::TypeErrorCannotConvertToInt(a1)),
         }),
-        Str => dispatch!(a1, Ok(Value::Str(a1.as_str()))),
-        Repr => dispatch!(a1, Ok(Value::Str(a1.as_repr_str()))),
+        Str => dispatch!(a1, Ok(Value::Str(Box::new(a1.as_str())))),
+        Repr => dispatch!(a1, Ok(Value::Str(Box::new(a1.as_repr_str())))),
         Len => dispatch!(a1, match &a1 {
             Value::Str(s) => Ok(Value::Int(s.len() as i64)),
             Value::List(l) => Ok(Value::Int((*l).borrow().len() as i64)),
@@ -229,9 +228,9 @@ fn wrap_as_partial<S>(bound: StdBinding, nargs: u8, vm: &mut S) -> Result<Value,
 {
     // vm stack will contain [..., arg1, arg2, ... argN]
     // popping in order will populate the vector with [argN, argN-1, ... arg1]
-    let mut args: Vec<Value> = Vec::with_capacity(nargs as usize);
+    let mut args: Vec<Box<Value>> = Vec::with_capacity(nargs as usize);
     for _ in 0..nargs {
-        args.push(vm.pop().clone());
+        args.push(Box::new(vm.pop().clone()));
     }
-    Ok(PartialBinding(bound, args))
+    Ok(Value::PartialBinding(bound, Box::new(args)))
 }

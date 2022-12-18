@@ -1,117 +1,18 @@
 use std::io::{BufRead, Write};
+use error::{RuntimeError, RuntimeErrorType};
+
 use crate::{stdlib, trace};
 use crate::compiler::parser::ParserResult;
 use crate::stdlib::StdBinding;
-use crate::vm::value::Value;
+use opcode::Opcode;
+use value::Value;
 
-use crate::vm::Opcode::{*};
-use crate::vm::RuntimeErrorType::{*};
+use Opcode::{*};
+use RuntimeErrorType::{*};
 
-pub(crate) mod value;
-
-
-#[derive(Eq, PartialEq, Debug, Clone)]
-pub enum Opcode {
-
-    Noop,
-
-    // Flow Control
-    // These only peek() the stack
-    JumpIfFalse(usize),
-    JumpIfFalsePop(usize),
-    JumpIfTrue(usize),
-    Jump(usize),
-
-    // Stack Operations
-    Dupe, // ... x, y, z] -> ... x, y, z, z]
-    Pop,
-
-    PushGlobal(usize),
-    StoreGlobal(usize),
-
-    // Push
-    Nil,
-    True,
-    False,
-    Int(i64),
-    Str(String),
-    Bound(StdBinding),
-    List(usize),
-
-    // todo: remove / replace with other things
-    Identifier(String),
-
-    // Unary Operators
-    UnarySub,
-    UnaryLogicalNot,
-    UnaryBitwiseNot,
-
-    // Binary Operators
-    // Ordered by precedence, highest to lowest
-    OpFuncEval(u8),
-    OpArrayEval(u8),
-
-    OpMul,
-    OpDiv,
-    OpMod,
-    OpPow,
-    OpIs,
-
-    OpAdd,
-    OpSub,
-
-    OpLeftShift,
-    OpRightShift,
-
-    OpLessThan,
-    OpGreaterThan,
-    OpLessThanEqual,
-    OpGreaterThanEqual,
-    OpEqual,
-    OpNotEqual,
-
-    OpBitwiseAnd,
-    OpBitwiseOr,
-    OpBitwiseXor,
-
-    OpFuncCompose,
-    OpIndex,
-    OpSlice,
-    OpSliceWithStep,
-
-    // Special
-    LineNumber(usize),
-    Exit,
-}
-
-#[derive(Eq, PartialEq, Debug, Clone)]
-pub struct RuntimeError {
-    pub error: RuntimeErrorType,
-    pub lineno: usize,
-    ip: usize,
-}
-
-#[derive(Eq, PartialEq, Debug, Clone)]
-pub enum RuntimeErrorType {
-    ValueIsNotFunctionEvaluable(Value),
-    BindingIsNotFunctionEvaluable(StdBinding),
-
-    IncorrectNumberOfArguments(StdBinding, u8, u8),
-    IndexOutOfBounds(i64, usize),
-    SliceStepZero,
-
-    TypeErrorUnaryOp(Opcode, Value),
-    TypeErrorBinaryOp(Opcode, Value, Value),
-    TypeErrorBinaryIs(Value, Value),
-    TypeErrorCannotConvertToInt(Value),
-    TypeErrorCannotCompare(Value, Value),
-    TypeErrorCannotSlice(Value),
-    TypeErrorSliceArgMustBeInt(&'static str, Value),
-    TypeErrorFunc1(&'static str, Value),
-    TypeErrorFunc2(&'static str, Value, Value),
-    TypeErrorFunc3(&'static str, Value, Value, Value),
-}
-
+pub mod value;
+pub mod opcode;
+pub mod error;
 
 
 pub struct VirtualMachine<R, W> {
@@ -120,8 +21,10 @@ pub struct VirtualMachine<R, W> {
     stack: Vec<Value>,
 
     globals: Vec<Value>,
+    strings: Vec<String>,
+    constants: Vec<i64>,
 
-    lineno: usize,
+    lineno: u16,
 
     read: R,
     write: W,
@@ -138,6 +41,8 @@ impl<R, W> VirtualMachine<R, W> where
             code: parser_result.code,
             stack: Vec::new(),
             globals: vec!(Value::Nil; parser_result.globals.len()),
+            strings: parser_result.strings,
+            constants: parser_result.constants,
             lineno: 0,
             read,
             write,
@@ -153,7 +58,7 @@ impl<R, W> VirtualMachine<R, W> where
                 // All jumps are absolute (because we don't have variable length instructions and it's easy to do so)
                 JumpIfFalse(ip) => {
                     trace::trace_interpreter!("jump if false {} -> {}", self.stack.last().unwrap().as_debug_str(), ip);
-                    let jump: usize = *ip;
+                    let jump: usize = *ip as usize;
                     let a1: &Value = self.peek(0);
                     if !a1.as_bool() {
                         self.ip = jump;
@@ -161,7 +66,7 @@ impl<R, W> VirtualMachine<R, W> where
                 },
                 JumpIfFalsePop(ip) => {
                     trace::trace_interpreter!("jump if false {} -> {}", self.stack.last().unwrap().as_debug_str(), ip);
-                    let jump: usize = *ip;
+                    let jump: usize = *ip as usize;
                     let a1: Value = self.pop();
                     if !a1.as_bool() {
                         self.ip = jump;
@@ -169,7 +74,7 @@ impl<R, W> VirtualMachine<R, W> where
                 },
                 JumpIfTrue(ip) => {
                     trace::trace_interpreter!("jump if true {} -> {}", self.stack.last().unwrap().as_debug_str(), ip);
-                    let jump: usize = *ip;
+                    let jump: usize = *ip as usize;
                     let a1: &Value = self.peek(0);
                     if a1.as_bool() {
                         self.ip = jump;
@@ -177,7 +82,7 @@ impl<R, W> VirtualMachine<R, W> where
                 }
                 Jump(ip) => {
                     trace::trace_interpreter!("jump -> {}", ip);
-                    self.ip = *ip;
+                    self.ip = *ip as usize;
                 }
 
                 // Stack Manipulations
@@ -192,12 +97,13 @@ impl<R, W> VirtualMachine<R, W> where
 
                 PushGlobal(gid) => {
                     trace::trace_interpreter!("push global {:?}", gid);
-                    self.push(self.globals[*gid].clone());
+                    let gid = *gid as usize;
+                    self.push(self.globals[gid].clone());
                 },
                 StoreGlobal(gid) => {
                     trace::trace_interpreter!("store global {:?}", gid);
-                    let g: usize = *gid;
-                    self.globals[g] = self.pop();
+                    let gid: usize = *gid as usize;
+                    self.globals[gid] = self.pop();
                 }
 
 
@@ -214,23 +120,29 @@ impl<R, W> VirtualMachine<R, W> where
                     trace::trace_interpreter!("push false");
                     self.push(Value::Bool(false));
                 },
-                Int(i) => {
+                Int(cid) => {
                     trace::trace_interpreter!("push {}", i);
-                    self.push(Value::Int(*i));
-                },
-                Str(s) => {
-                    trace::trace_interpreter!("push '{}'", s);
-                    self.push(Value::Str(s.clone()))
+                    let cid: usize = *cid as usize;
+                    let value: i64 = self.constants[cid];
+                    self.push(Value::Int(value));
+                }
+                Str(sid) => {
+                    trace::trace_interpreter!("push '{}'", self.constants[sid]);
+                    let sid: usize = *sid as usize;
+                    let str: String = self.strings[sid].clone();
+                    self.push(Value::Str(Box::new(str)));
                 }
                 Bound(b) => {
                     trace::trace_interpreter!("push {}", Value::Binding(*b).as_debug_str());
                     self.push(Value::Binding(*b));
                 },
-                List(n) => {
+                List(cid) => {
                     trace::trace_interpreter!("push [n={}]", n);
                     // List values are present on the stack in-order
                     // So we need to splice the last n values of the stack into it's own list
-                    let start: usize = self.stack.len() - *n;
+                    let cid: usize = *cid as usize;
+                    let length: usize = self.constants[cid] as usize;
+                    let start: usize = self.stack.len() - length;
                     let end: usize = self.stack.len();
                     let list: Vec<Value> = self.stack.splice(start..end, std::iter::empty())
                         .collect::<Vec<Value>>();
@@ -270,8 +182,8 @@ impl<R, W> VirtualMachine<R, W> where
                     let a1: Value = self.pop();
                     match (a1, a2) {
                         (Value::Int(i1), Value::Int(i2)) => self.push(Value::Int(i1 * i2)),
-                        (Value::Str(s1), Value::Int(i2)) if i2 > 0 => self.push(Value::Str(s1.repeat(i2 as usize))),
-                        (Value::Int(i1), Value::Str(s2)) if i1 > 0 => self.push(Value::Str(s2.repeat(i1 as usize))),
+                        (Value::Str(s1), Value::Int(i2)) if i2 > 0 => self.push(Value::Str(Box::new(s1.repeat(i2 as usize)))),
+                        (Value::Int(i1), Value::Str(s2)) if i1 > 0 => self.push(Value::Str(Box::new(s2.repeat(i1 as usize)))),
                         (l, r) => return self.error(TypeErrorBinaryOp(OpMul, l, r))
                     }
                 },
@@ -335,8 +247,8 @@ impl<R, W> VirtualMachine<R, W> where
                             list3.extend(list2.iter().cloned());
                             self.push(Value::list(list3))
                         },
-                        (Value::Str(s1), r) => self.push(Value::Str(format!("{}{}", s1, r.as_str()))),
-                        (l, Value::Str(s2)) => self.push(Value::Str(format!("{}{}", l.as_str(), s2))),
+                        (Value::Str(s1), r) => self.push(Value::Str(Box::new(format!("{}{}", s1, r.as_str())))),
+                        (l, Value::Str(s2)) => self.push(Value::Str(Box::new(format!("{}{}", l.as_str(), s2)))),
                         (l, r) => return self.error(TypeErrorBinaryOp(OpAdd, l, r)),
                     }
                 },
@@ -465,7 +377,7 @@ impl<R, W> VirtualMachine<R, W> where
                             let held: Value = self.pop();
                             let partial_args: u8 = nargs.len() as u8;
                             for arg in nargs.into_iter().rev() {
-                                self.push(arg);
+                                self.push(*arg);
                             }
                             self.push(held);
 
@@ -501,8 +413,8 @@ impl<R, W> VirtualMachine<R, W> where
                             // Surgically extract the binding via std::mem::replace
                             let binding: StdBinding = *b;
                             let i: usize = self.stack.len() - 1 - nargs as usize;
-                            let args: Vec<Value> = match std::mem::replace(&mut self.stack[i], Value::Nil) {
-                                Value::PartialBinding(_, x) => x,
+                            let args: Vec<Box<Value>> = match std::mem::replace(&mut self.stack[i], Value::Nil) {
+                                Value::PartialBinding(_, x) => *x,
                                 _ => panic!("Stack corruption")
                             };
 
@@ -512,7 +424,7 @@ impl<R, W> VirtualMachine<R, W> where
                             // After this, the vm stack should contain the args [..., arg1, arg2, ... argM]
                             let j: usize = self.stack.len() - nargs as usize;
                             let partial_args: u8 = args.len() as u8;
-                            self.stack.splice(j..j, args.into_iter().rev());
+                            self.stack.splice(j..j, args.into_iter().map(|t| *t).rev());
 
                             match stdlib::invoke(binding, nargs + partial_args, self) {
                                 Ok(v) => {
@@ -560,7 +472,7 @@ impl<R, W> VirtualMachine<R, W> where
                     }
                 },
 
-                LineNumber(lineno) => self.lineno = *lineno,
+                LineNumber(lineno) => self.lineno = *lineno as u16,
                 Exit => break,
 
                 _ => panic!("Unimplemented {:?}", op)
@@ -575,7 +487,6 @@ impl<R, W> VirtualMachine<R, W> where
         Err(RuntimeError {
             error,
             lineno: self.lineno,
-            ip: self.ip
         })
     }
 }
@@ -629,7 +540,7 @@ impl<R, W> Stack for VirtualMachine<R, W> {
 #[cfg(test)]
 mod test {
     use crate::{compiler, ErrorReporter, trace, VirtualMachine};
-    use crate::vm::RuntimeError;
+    use crate::vm::error::RuntimeError;
 
     #[test] fn test_str_empty() { run_str("", ""); }
     #[test] fn test_str_hello_world() { run_str("print('hello world!')", "hello world!\n"); }

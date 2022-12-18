@@ -24,14 +24,14 @@
 0008 LineNumber(3)
 0009 Nil
 0010 StoreGlobal(3)
-0011 Int(3)
+0011 Int(0 -> 3)
 0012 LineNumber(4)
 0013 StoreGlobal(4)
 0014 Nil
 0015 LineNumber(5)
 0016 StoreGlobal(5)
-0017 Int(6)
-0018 Int(5)
+0017 Int(1 -> 6)
+0018 Int(2 -> 5)
 0019 LineNumber(6)
 0020 OpAdd
 0021 StoreGlobal(6)

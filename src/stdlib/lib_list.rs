@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::vm::RuntimeErrorType;
+use crate::vm::error::RuntimeErrorType;
 use crate::vm::value::Value;
 
 use RuntimeErrorType::{*};
@@ -22,7 +22,7 @@ macro_rules! slice_arg {
 pub fn list_index(list_ref: Rc<RefCell<Vec<Value>>>, r: i64) -> Result<Value, RuntimeErrorType> {
     let list = (*list_ref).borrow();
     let index: usize = if r < 0 { (list.len() as i64 + r) as usize } else { r as usize };
-    if 0 <= index && index < list.len() {
+    if index < list.len() {
         Ok(list[index].clone())
     } else {
         Err(IndexOutOfBounds(r, list.len()))
@@ -85,6 +85,7 @@ fn safe_get(list: &Vec<Value>, index: i64) -> Option<&Value> {
     }
 }
 
+#[inline(always)]
 fn rev_range(start_high_inclusive: i64, stop_low_exclusive: i64) -> impl Iterator<Item = i64> {
     let mut start: i64 = start_high_inclusive;
     let end: i64 = stop_low_exclusive;

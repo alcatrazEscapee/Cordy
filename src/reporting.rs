@@ -2,7 +2,8 @@ use crate::compiler::parser::{ParserError, ParserErrorType};
 use crate::compiler::scanner::{ScanError, ScanErrorType, ScanToken};
 use crate::stdlib;
 use crate::stdlib::StdBinding;
-use crate::vm::{Opcode, RuntimeError, RuntimeErrorType};
+use crate::vm::error::{RuntimeError, RuntimeErrorType};
+use crate::vm::opcode::Opcode;
 use crate::vm::value::Value;
 
 const FORMAT_RESET: &'static str = ""; //\x1B[0m";
@@ -55,7 +56,7 @@ pub fn format_parse_error(source_lines: &Vec<&str>, source_file: &String, error:
 pub fn format_runtime_error(source_lines: &Vec<&str>, source_file: &String, error: &RuntimeError) -> String {
     let mut text: String = format!("{}{}{}{}", FORMAT_RED, FORMAT_BOLD, error.format_error(), FORMAT_RESET);
     text.push_str(format!("\n  at: line {} ({})\n  at:\n\n", error.lineno + 1, &source_file).as_str());
-    text.push_str(source_lines.get(error.lineno).map(|t| *t).unwrap_or(""));
+    text.push_str(source_lines.get(error.lineno as usize).map(|t| *t).unwrap_or(""));
     text.push('\n');
     text
 }

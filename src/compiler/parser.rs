@@ -4,12 +4,12 @@ use std::vec::IntoIter;
 
 use crate::compiler::scanner::{ScanResult, ScanToken};
 use crate::stdlib::StdBinding;
-use crate::vm::Opcode;
+use crate::vm::opcode::Opcode;
 use crate::trace;
 
-use crate::compiler::scanner::ScanToken::{*};
-use crate::compiler::parser::ParserErrorType::{*};
-use crate::vm::Opcode::{*};
+use ScanToken::{*};
+use ParserErrorType::{*};
+use Opcode::{*};
 
 
 pub fn parse(bindings: HashMap<&'static str, StdBinding>, scan_result: ScanResult) -> ParserResult {
@@ -19,13 +19,18 @@ pub fn parse(bindings: HashMap<&'static str, StdBinding>, scan_result: ScanResul
         code: parser.output,
         errors: parser.errors,
         globals: parser.globals,
+        strings: parser.strings,
+        constants: parser.constants,
     }
 }
 
 pub struct ParserResult {
     pub code: Vec<Opcode>,
     pub errors: Vec<ParserError>,
-    pub globals: HashMap<String, usize>,
+
+    pub globals: HashMap<String, u16>,
+    pub strings: Vec<String>,
+    pub constants: Vec<i64>,
 }
 
 #[derive(Eq, PartialEq, Debug, Clone)]
@@ -70,20 +75,22 @@ struct Parser {
     multiple_expression_statements_per_line: bool, // If a expression statement has already been parsed before a new line or ';', this flag is set
     lookahead: Option<ScanToken>, // A token we pretend 'push back onto' the input iterator
 
-    globals: HashMap<String, usize>,
+    globals: HashMap<String, u16>,
+    strings: Vec<String>,
+    constants: Vec<i64>,
 
     // Loop stack
     // Each frame represents a single loop, which `break` and `continue` statements refer to
     // `continue` jumps back to the beginning of the loop, aka the first `usize` (loop start)
     // `break` statements jump back to the end of the loop, which needs to be patched later. The values to be patched record themselves in the stack at the current loop level
-    loops: Vec<(usize, Vec<usize>)>,
+    loops: Vec<(u16, Vec<u16>)>,
 }
 
 #[derive(Eq, PartialEq, Debug, Clone)]
 enum VariableType {
     //StructOrDerivedBinding, // this one is complicated, since it is a type based dispatch against user defined types...
     //LocalVariable(usize), // Not implemented
-    GlobalVariable(usize),
+    GlobalVariable(u16),
     TopLevelBinding(StdBinding),
     None,
 }
@@ -105,6 +112,9 @@ impl Parser {
             lookahead: None,
 
             globals: HashMap::new(),
+            strings: Vec::new(),
+            constants: Vec::new(),
+
             loops: Vec::new(),
         }
     }
@@ -167,7 +177,7 @@ impl Parser {
             let store_op: Opcode = match self.peek() {
                 Some(ScanToken::Identifier(_)) => {
                     let name: String = self.take_identifier();
-                    let gid: usize = match self.declare_global(&name) {
+                    let gid: u16 = match self.declare_global(&name) {
                         Some(g) => g,
                         None => break
                     };
@@ -219,7 +229,7 @@ impl Parser {
         trace::trace_parser!("rule <if-statement>");
         self.advance();
         self.parse_expression();
-        let jump_if_false: usize = self.reserve(); // placeholder for jump to the beginning of an if branch, if it exists
+        let jump_if_false: u16 = self.reserve(); // placeholder for jump to the beginning of an if branch, if it exists
         self.parse_block_statement();
 
         // `elif` can be de-sugared to else { if <expr> { ... } else { ... } }
@@ -228,27 +238,27 @@ impl Parser {
         match self.peek() {
             Some(KeywordElif) => {
                 // Don't advance, as `parse_if_statement()` will advance the first token
-                let jump: usize = self.reserve();
-                let after_if: usize = self.next_opcode();
-                self.output[jump_if_false] = JumpIfFalsePop(after_if);
+                let jump: u16 = self.reserve();
+                let after_if: u16 = self.next_opcode();
+                self.output[jump_if_false as usize] = JumpIfFalsePop(after_if);
                 self.parse_if_statement();
-                let after_else: usize = self.next_opcode();
-                self.output[jump] = Jump(after_else);
+                let after_else: u16 = self.next_opcode();
+                self.output[jump as usize] = Jump(after_else);
             },
             Some(KeywordElse) => {
                 // `else` is present, so we first insert an unconditional jump, parse the next block, then fix the first jump
                 self.advance();
-                let jump: usize = self.reserve();
-                let after_if: usize = self.next_opcode();
-                self.output[jump_if_false] = JumpIfFalsePop(after_if);
+                let jump: u16 = self.reserve();
+                let after_if: u16 = self.next_opcode();
+                self.output[jump_if_false as usize] = JumpIfFalsePop(after_if);
                 self.parse_block_statement();
-                let after_else: usize = self.next_opcode();
-                self.output[jump] = Jump(after_else);
+                let after_else: u16 = self.next_opcode();
+                self.output[jump as usize] = Jump(after_else);
             },
             _ => {
                 // No `else`, so we patch the original jump to jump to here
-                let after: usize = self.next_opcode();
-                self.output[jump_if_false] = JumpIfFalsePop(after);
+                let after: u16 = self.next_opcode();
+                self.output[jump_if_false as usize] = JumpIfFalsePop(after);
             },
         }
     }
@@ -265,16 +275,16 @@ impl Parser {
         // }                 | Jump L1 ; L2:
         self.advance();
 
-        let loop_start: usize = self.next_opcode(); // Top of the loop, push onto the loop stack
+        let loop_start: u16 = self.next_opcode(); // Top of the loop, push onto the loop stack
         self.loops.push((loop_start, Vec::new()));
 
         self.parse_block_statement(); // Inner loop statements, and jump back to front
         self.push(Jump(loop_start));
 
-        let loop_end: usize = self.next_opcode(); // After the jump, the next opcode is 'end of loop'. Repair all break statements
-        let break_opcodes: Vec<usize> = self.loops.pop().unwrap().1;
+        let loop_end: u16 = self.next_opcode(); // After the jump, the next opcode is 'end of loop'. Repair all break statements
+        let break_opcodes: Vec<u16> = self.loops.pop().unwrap().1;
         for break_opcode in break_opcodes {
-            self.output[break_opcode] = Jump(loop_end);
+            self.output[break_opcode as usize] = Jump(loop_end);
         }
     }
 
@@ -287,7 +297,7 @@ impl Parser {
         self.advance();
         match self.loops.last() {
             Some(_) => {
-                let jump: usize = self.reserve();
+                let jump: u16 = self.reserve();
                 self.loops.last_mut().unwrap().1.push(jump);
             },
             None => self.push_err(BreakOutsideOfLoop),
@@ -299,7 +309,7 @@ impl Parser {
         self.advance();
         match self.loops.last() {
             Some((loop_start, _)) => {
-                let jump_to: usize = *loop_start;
+                let jump_to: u16 = *loop_start;
                 self.push(Jump(jump_to));
             },
             None => self.push_err(ContinueOutsideOfLoop),
@@ -387,19 +397,21 @@ impl Parser {
             Some(KeywordFalse) => self.advance_push(False),
             Some(ScanToken::Int(_)) => {
                 let int: i64 = self.take_int();
-                self.push(Opcode::Int(int));
+                let cid: u16 = self.declare_constant(int);
+                self.push(Opcode::Int(cid));
             },
             Some(ScanToken::Identifier(_)) => {
                 let string: String = self.take_identifier();
                 match self.resolve_identifier(&string) {
                     VariableType::GlobalVariable(gid) => self.push(PushGlobal(gid)),
                     VariableType::TopLevelBinding(b) => self.push(Bound(b)),
-                    _ => self.push(Opcode::Identifier(string))
+                    _ => self.push(Opcode::Identifier)
                 };
             },
             Some(StringLiteral(_)) => {
-                let string = self.take_str();
-                self.push(Str(string));
+                let string: String = self.take_str();
+                let sid: u16 = self.declare_string(string);
+                self.push(Str(sid));
             },
             Some(OpenParen) => {
                 self.advance();
@@ -408,7 +420,7 @@ impl Parser {
             },
             Some(OpenSquareBracket) => {
                 self.advance();
-                let mut length: usize = 0;
+                let mut length: i64 = 0;
                 loop {
                     match self.peek() {
                         Some(CloseSquareBracket) => break,
@@ -428,6 +440,7 @@ impl Parser {
                         None => break,
                     }
                 }
+                let length: u16 = self.declare_constant(length);
                 self.push(List(length));
                 self.expect(CloseSquareBracket);
             },
@@ -713,19 +726,19 @@ impl Parser {
             match self.peek() {
                 Some(LogicalAnd) => {
                     self.advance();
-                    let jump_if_false: usize = self.reserve();
+                    let jump_if_false: u16 = self.reserve();
                     self.push(Pop);
                     self.parse_expr_8();
-                    let jump_to: usize = self.next_opcode();
-                    self.output[jump_if_false] = JumpIfFalse(jump_to);
+                    let jump_to: u16 = self.next_opcode();
+                    self.output[jump_if_false as usize] = JumpIfFalse(jump_to);
                 },
                 Some(LogicalOr) => {
                     self.advance();
-                    let jump_if_true: usize = self.reserve();
+                    let jump_if_true: u16 = self.reserve();
                     self.push(Pop);
                     self.parse_expr_8();
-                    let jump_to: usize = self.next_opcode();
-                    self.output[jump_if_true] = JumpIfTrue(jump_to);
+                    let jump_to: u16 = self.next_opcode();
+                    self.output[jump_if_true as usize] = JumpIfTrue(jump_to);
                 },
                 _ => break
             }
@@ -735,11 +748,21 @@ impl Parser {
 
     // ===== Semantic Analysis ===== //
 
-    fn next_opcode(self: &Self) -> usize {
-        self.output.len()
+    fn declare_string(self: &mut Self, str: String) -> u16 {
+        self.strings.push(str);
+        (self.strings.len() - 1) as u16
     }
 
-    fn declare_global(self: &mut Self, name: &String) -> Option<usize> {
+    fn declare_constant(self: &mut Self, int: i64) -> u16 {
+        self.constants.push(int);
+        (self.constants.len() - 1) as u16
+    }
+
+    fn next_opcode(self: &Self) -> u16 {
+        self.output.len() as u16
+    }
+
+    fn declare_global(self: &mut Self, name: &String) -> Option<u16> {
         // Global variables must not conflict with known top-level bindings, or other global variables
         // Otherwise they are allowed
         if self.bindings.contains_key(name.as_str()) {
@@ -752,7 +775,7 @@ impl Parser {
         }
 
         // Declaration successful! Enter it in the globals table
-        let gid: usize = self.globals.len();
+        let gid: u16 = self.globals.len() as u16;
         self.globals.insert(name.clone(), gid);
         Some(gid)
     }
@@ -772,19 +795,8 @@ impl Parser {
         VariableType::None
     }
 
+
     // ===== Parser Core ===== //
-
-
-    /// If the given token is present, accept it and return `true`. Otherwise, do nothing and return `false`.
-    fn accept(self: &mut Self, token: ScanToken) -> bool {
-        match self.peek() {
-            Some(t) if *t == token => {
-                self.advance();
-                true
-            }
-            _ => false
-        }
-    }
 
 
     /// If the given token is present, accept it. Otherwise, flag an error and enter error recovery mode.
@@ -899,17 +911,17 @@ impl Parser {
             trace::trace_parser!("advance NewLine L{}", self.lineno);
             self.raw_next();
             self.lineno += 1;
-            self.output.push(LineNumber(self.lineno));
+            self.output.push(LineNumber(self.lineno as u16));
             self.multiple_expression_statements_per_line = false;
         }
     }
 
     /// Reserves a space in the output code by inserting a `Noop` token
     /// Returns an index to the token, which can later be used to set the correct value
-    fn reserve(self: &mut Self) -> usize {
+    fn reserve(self: &mut Self) -> u16 {
         trace::trace_parser!("reserve at {}", self.output.len() - 1);
         self.output.push(Noop);
-        self.output.len() - 1
+        (self.output.len() - 1) as u16
     }
 
     /// Pushes a new token into the output stream.
@@ -964,14 +976,14 @@ mod tests {
     use crate::compiler::parser::{Parser, ParserResult};
     use crate::{reporting, stdlib};
     use crate::stdlib::StdBinding;
-    use crate::vm::Opcode;
+    use crate::vm::opcode::Opcode;
     use crate::trace;
 
-    use crate::vm::Opcode::{*};
+    use crate::vm::opcode::Opcode::{*};
 
     #[test] fn test_str_empty() { run_expr("", vec![Nil]); }
     #[test] fn test_str_int() { run_expr("123", vec![Int(123)]); }
-    #[test] fn test_str_str() { run_expr("'abc'", vec![Str(String::from("abc"))]); }
+    #[test] fn test_str_str() { run_expr("'abc'", vec![Str(0)]); }
     #[test] fn test_str_unary_minus() { run_expr("-3", vec![Int(3), UnarySub]); }
     #[test] fn test_str_binary_mul() { run_expr("3 * 6", vec![Int(3), Int(6), OpMul]); }
     #[test] fn test_str_binary_div() { run_expr("20 / 4 / 5", vec![Int(20), Int(4), OpDiv, Int(5), OpDiv]); }
@@ -982,24 +994,24 @@ mod tests {
     #[test] fn test_str_binary_add_and_mod_rev() { run_expr("1 % 2 + 3", vec![Int(1), Int(2), OpMod, Int(3), OpAdd]); }
     #[test] fn test_str_binary_shifts() { run_expr("1 << 2 >> 3", vec![Int(1), Int(2), OpLeftShift, Int(3), OpRightShift]); }
     #[test] fn test_str_binary_shifts_and_operators() { run_expr("1 & 2 << 3 | 5", vec![Int(1), Int(2), Int(3), OpLeftShift, OpBitwiseAnd, Int(5), OpBitwiseOr]); }
-    #[test] fn test_str_function_composition() { run_expr("a . b", vec![Identifier(String::from("a")), Identifier(String::from("b")), OpFuncCompose]); }
+    #[test] fn test_str_function_composition() { run_expr("a . b", vec![Identifier, Identifier, OpFuncCompose]); }
     #[test] fn test_str_precedence_with_parens() { run_expr("(1 + 2) * 3", vec![Int(1), Int(2), OpAdd, Int(3), OpMul]); }
     #[test] fn test_str_precedence_with_parens_2() { run_expr("6 / (5 - 3)", vec![Int(6), Int(5), Int(3), OpSub, OpDiv]); }
     #[test] fn test_str_precedence_with_parens_3() { run_expr("-(1 - 3)", vec![Int(1), Int(3), OpSub, UnarySub]); }
-    #[test] fn test_str_function_no_args() { run_expr("foo", vec![Identifier(String::from("foo"))]); }
-    #[test] fn test_str_function_one_arg() { run_expr("foo(1)", vec![Identifier(String::from("foo")), Int(1), OpFuncEval(1)]); }
-    #[test] fn test_str_function_many_args() { run_expr("foo(1,2,3)", vec![Identifier(String::from("foo")), Int(1), Int(2), Int(3), OpFuncEval(3)]); }
+    #[test] fn test_str_function_no_args() { run_expr("foo", vec![Identifier]); }
+    #[test] fn test_str_function_one_arg() { run_expr("foo(1)", vec![Identifier, Int(1), OpFuncEval(1)]); }
+    #[test] fn test_str_function_many_args() { run_expr("foo(1,2,3)", vec![Identifier, Int(1), Int(2), Int(3), OpFuncEval(3)]); }
     #[test] fn test_str_multiple_unary_ops() { run_expr("- ~ ! 1", vec![Int(1), UnaryLogicalNot, UnaryBitwiseNot, UnarySub]); }
-    #[test] fn test_str_multiple_function_calls() { run_expr("foo (1) (2) (3)", vec![Identifier(String::from("foo")), Int(1), OpFuncEval(1), Int(2), OpFuncEval(1), Int(3), OpFuncEval(1)]); }
-    #[test] fn test_str_multiple_function_calls_some_args() { run_expr("foo () (1) (2, 3)", vec![Identifier(String::from("foo")), OpFuncEval(0), Int(1), OpFuncEval(1), Int(2), Int(3), OpFuncEval(2)]); }
-    #[test] fn test_str_multiple_function_calls_no_args() { run_expr("foo () () ()", vec![Identifier(String::from("foo")), OpFuncEval(0), OpFuncEval(0), OpFuncEval(0)]); }
-    #[test] fn test_str_function_call_unary_op_precedence() { run_expr("- foo ()", vec![Identifier(String::from("foo")), OpFuncEval(0), UnarySub]); }
-    #[test] fn test_str_function_call_unary_op_precedence_with_parens() { run_expr("(- foo) ()", vec![Identifier(String::from("foo")), UnarySub, OpFuncEval(0)]); }
-    #[test] fn test_str_function_call_unary_op_precedence_with_parens_2() { run_expr("- (foo () )", vec![Identifier(String::from("foo")), OpFuncEval(0), UnarySub]); }
-    #[test] fn test_str_function_call_binary_op_precedence() { run_expr("foo ( 1 ) + ( 2 ( 3 ) )", vec![Identifier(String::from("foo")), Int(1), OpFuncEval(1), Int(2), Int(3), OpFuncEval(1), OpAdd]); }
-    #[test] fn test_str_function_call_parens_1() { run_expr("foo . bar (1 + 3) (5)", vec![Identifier(String::from("foo")), Identifier(String::from("bar")), Int(1), Int(3), OpAdd, OpFuncEval(1), Int(5), OpFuncEval(1), OpFuncCompose]); }
-    #[test] fn test_str_function_call_parens_2() { run_expr("( foo . bar (1 + 3) ) (5)", vec![Identifier(String::from("foo")), Identifier(String::from("bar")), Int(1), Int(3), OpAdd, OpFuncEval(1), OpFuncCompose, Int(5), OpFuncEval(1)]); }
-    #[test] fn test_str_function_composition_with_is() { run_expr("'123' . int is int . print", vec![Str(String::from("123")), Bound(StdBinding::Int), Bound(StdBinding::Int), OpIs, OpFuncCompose, Bound(StdBinding::Print), OpFuncCompose]); }
+    #[test] fn test_str_multiple_function_calls() { run_expr("foo (1) (2) (3)", vec![Identifier, Int(1), OpFuncEval(1), Int(2), OpFuncEval(1), Int(3), OpFuncEval(1)]); }
+    #[test] fn test_str_multiple_function_calls_some_args() { run_expr("foo () (1) (2, 3)", vec![Identifier, OpFuncEval(0), Int(1), OpFuncEval(1), Int(2), Int(3), OpFuncEval(2)]); }
+    #[test] fn test_str_multiple_function_calls_no_args() { run_expr("foo () () ()", vec![Identifier, OpFuncEval(0), OpFuncEval(0), OpFuncEval(0)]); }
+    #[test] fn test_str_function_call_unary_op_precedence() { run_expr("- foo ()", vec![Identifier, OpFuncEval(0), UnarySub]); }
+    #[test] fn test_str_function_call_unary_op_precedence_with_parens() { run_expr("(- foo) ()", vec![Identifier, UnarySub, OpFuncEval(0)]); }
+    #[test] fn test_str_function_call_unary_op_precedence_with_parens_2() { run_expr("- (foo () )", vec![Identifier, OpFuncEval(0), UnarySub]); }
+    #[test] fn test_str_function_call_binary_op_precedence() { run_expr("foo ( 1 ) + ( 2 ( 3 ) )", vec![Identifier, Int(1), OpFuncEval(1), Int(2), Int(3), OpFuncEval(1), OpAdd]); }
+    #[test] fn test_str_function_call_parens_1() { run_expr("foo . bar (1 + 3) (5)", vec![Identifier, Identifier, Int(1), Int(3), OpAdd, OpFuncEval(1), Int(5), OpFuncEval(1), OpFuncCompose]); }
+    #[test] fn test_str_function_call_parens_2() { run_expr("( foo . bar (1 + 3) ) (5)", vec![Identifier, Identifier, Int(1), Int(3), OpAdd, OpFuncEval(1), OpFuncCompose, Int(5), OpFuncEval(1)]); }
+    #[test] fn test_str_function_composition_with_is() { run_expr("'123' . int is int . print", vec![Str(0), Bound(StdBinding::Int), Bound(StdBinding::Int), OpIs, OpFuncCompose, Bound(StdBinding::Print), OpFuncCompose]); }
     #[test] fn test_and() { run_expr("1 < 2 and 3 < 4", vec![Int(1), Int(2), OpLessThan, JumpIfFalse(8), Pop, Int(3), Int(4), OpLessThan]); }
     #[test] fn test_or() { run_expr("1 < 2 or 3 < 4", vec![Int(1), Int(2), OpLessThan, JumpIfTrue(8), Pop, Int(3), Int(4), OpLessThan]); }
     #[test] fn test_precedence_1() { run_expr("1 . 2 & 3 > 4", vec![Int(1), Int(2), Int(3), OpBitwiseAnd, OpFuncCompose, Int(4), OpGreaterThan]); }
@@ -1036,10 +1048,20 @@ mod tests {
         assert!(result.errors.is_empty());
 
         let mut parser: Parser = Parser::new(stdlib::bindings(), result.tokens);
-
         parser.parse_expression();
 
-        assert_eq!(tokens, parser.output);
+        // Tokens will contain int values as exact values, as it's easier to read as a test DSL
+        // However, the parser will give us constant IDs
+        // So, index each one to produce what it looks like
+        let constants: Vec<i64> = parser.constants;
+        let output: Vec<Opcode> = parser.output.into_iter()
+            .map(|t| match t {
+                Int(i) => Int(constants[i as usize] as u16),
+                t => t
+            })
+            .collect::<Vec<Opcode>>();
+
+        assert_eq!(tokens, output);
     }
 
     fn run(path: &'static str) {
@@ -1050,11 +1072,14 @@ mod tests {
         assert!(scan_result.errors.is_empty());
 
         let parse_result: ParserResult = parser::parse(stdlib::bindings(), scan_result);
+        let strings: Vec<String> = parse_result.strings;
+        let constants: Vec<i64> = parse_result.constants;
 
         let mut lines: Vec<String> = Vec::new();
+
         if !parse_result.globals.is_empty() {
             lines.push(String::from("=== Globals ===\n"));
-            let mut globals = parse_result.globals.iter().collect::<Vec<(&String, &usize)>>();
+            let mut globals = parse_result.globals.iter().collect::<Vec<(&String, &u16)>>();
             globals.sort_by_key(|(_, u)| *u);
             for (global, gid) in globals {
                 lines.push(format!("{:?} : {:?}", global, gid));
@@ -1065,7 +1090,11 @@ mod tests {
         if !parse_result.code.is_empty() {
             lines.push(String::from("=== Parse Tokens ===\n"));
             for (ip, token) in parse_result.code.iter().enumerate() {
-                lines.push(format!("{:0>4} {:?}", ip, token));
+                lines.push(format!("{:0>4} {}", ip, match token {
+                    Int(cid) => format!("Int({} -> {})", cid, constants[*cid as usize]),
+                    Str(sid) => format!("Str({} -> {:?})", sid, strings[*sid as usize]),
+                    t => format!("{:?}", t),
+                }));
             }
         }
         if !parse_result.errors.is_empty() {
