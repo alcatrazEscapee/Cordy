@@ -14,6 +14,7 @@ pub enum RuntimeErrorType {
     BindingIsNotFunctionEvaluable(StdBinding),
 
     IncorrectNumberOfArguments(StdBinding, u8, u8),
+    IncorrectNumberOfArgumentsVariadicAtLeastOne(StdBinding),
     IndexOutOfBounds(i64, usize),
     SliceStepZero,
 
@@ -24,6 +25,8 @@ pub enum RuntimeErrorType {
     TypeErrorCannotCompare(Value, Value),
     TypeErrorCannotSlice(Value),
     TypeErrorSliceArgMustBeInt(&'static str, Value),
+    TypeErrorArgMustBeInt(Value),
+    TypeErrorArgMustBeIterable(Value),
     TypeErrorFunc1(&'static str, Value),
     TypeErrorFunc2(&'static str, Value, Value),
     TypeErrorFunc3(&'static str, Value, Value, Value),

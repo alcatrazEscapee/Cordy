@@ -7,7 +7,7 @@ use crate::vm::error::RuntimeErrorType;
 use Value::{*};
 
 /// The runtime sum type used by the virtual machine
-/// All `Value` type objects must be cloneable, and so mutable objects must be reference counted to ensure memory saftey
+/// All `Value` type objects must be cloneable, and so mutable objects must be reference counted to ensure memory safety
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub enum Value {
     // Primitive (Immutable) Types

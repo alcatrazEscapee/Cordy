@@ -130,9 +130,15 @@ And replace the values for the traces you want to enable with `on`:
 - Implement `->` binding resolution
 - ~~Global~~ and Local (block scoped) variables
 - ~~List types~~ (and list literals)
-- Tuple types (and tuple literals)
+- Tuple types (and tuple literals), if we need them
 - Set types
-- Map types
+- Map types and map literals
+- Function types
+- Polymorphic 'List' types that can be used as arbitrary iterators, etc. using rust traits rather than dispatch at every call site
+- Primitive operator partial evaluation `map (+ 3)` kinda deal
+- Functional wankery (map, filter, max, min, reduce) that operate on polymorphic lists
+- Deque / Queue type
+- Structs (fancy named tuples)
 - Format strings
 - Regex (some sort of impl)
 - Pattern matching / deconstruction
