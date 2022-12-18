@@ -58,6 +58,7 @@ pub enum ScanToken {
     KeywordElif,
     KeywordElse,
     KeywordLoop,
+    KeywordWhile,
     KeywordFor,
     KeywordIn,
     KeywordIs,
@@ -360,6 +361,7 @@ impl<'a> Scanner<'a> {
             "elif" => KeywordElif,
             "else" => KeywordElse,
             "loop" => KeywordLoop,
+            "while" => KeywordWhile,
             "for" => KeywordFor,
             "in" => KeywordIn,
             "is" => KeywordIs,
@@ -451,7 +453,7 @@ mod tests {
 
 
     #[test] fn test_str_empty() { run_str("", vec![]); }
-    #[test] fn test_str_keywords() { run_str("let fn if elif else loop for in is break continue true false nil struct exit", vec![KeywordLet, KeywordFn, KeywordIf, KeywordElif, KeywordElse, KeywordLoop, KeywordFor, KeywordIn, KeywordIs, KeywordBreak, KeywordContinue, KeywordTrue, KeywordFalse, KeywordNil, KeywordStruct, KeywordExit]); }
+    #[test] fn test_str_keywords() { run_str("let fn if elif else loop while for in is break continue true false nil struct exit", vec![KeywordLet, KeywordFn, KeywordIf, KeywordElif, KeywordElse, KeywordLoop, KeywordWhile, KeywordFor, KeywordIn, KeywordIs, KeywordBreak, KeywordContinue, KeywordTrue, KeywordFalse, KeywordNil, KeywordStruct, KeywordExit]); }
     #[test] fn test_str_identifiers() { run_str("foobar big_bad_wolf ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz", vec![Identifier(String::from("foobar")), Identifier(String::from("big_bad_wolf")), Identifier(String::from("ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz"))]); }
     #[test] fn test_str_literals() { run_str("'abc' 'a \n 3' '\\''", vec![StringLiteral(String::from("abc")), NewLine, StringLiteral(String::from("a \n 3")), StringLiteral(String::from("'"))]); }
     #[test] fn test_str_ints() { run_str("1234 654 10_00_00 0 1", vec![Int(1234), Int(654), Int(100000), Int(0), Int(1)]); }

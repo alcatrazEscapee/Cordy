@@ -20,7 +20,6 @@ pub struct VirtualMachine<R, W> {
     code: Vec<Opcode>,
     stack: Vec<Value>,
 
-    globals: Vec<Value>,
     strings: Vec<String>,
     constants: Vec<i64>,
 
@@ -40,7 +39,6 @@ impl<R, W> VirtualMachine<R, W> where
             ip: 0,
             code: parser_result.code,
             stack: Vec::new(),
-            globals: vec!(Value::Nil; parser_result.globals.len()),
             strings: parser_result.strings,
             constants: parser_result.constants,
             lineno: 0,
@@ -56,6 +54,7 @@ impl<R, W> VirtualMachine<R, W> where
             match op {
                 // Flow Control
                 // All jumps are absolute (because we don't have variable length instructions and it's easy to do so)
+                // todo: relative jumps? theoretically allows us more than u16.max instructions ~ 65k
                 JumpIfFalse(ip) => {
                     trace::trace_interpreter!("jump if false {} -> {}", self.stack.last().unwrap().as_debug_str(), ip);
                     let jump: usize = *ip as usize;
@@ -94,16 +93,22 @@ impl<R, W> VirtualMachine<R, W> where
                     trace::trace_interpreter!("stack pop {}", self.stack.last().unwrap().as_debug_str());
                     self.pop();
                 },
+                PopN(n) => {
+                    trace::trace_interpreter!("stack popn {}", n);
+                    for _ in 0..*n {
+                        self.pop();
+                    }
+                }
 
-                PushGlobal(gid) => {
-                    trace::trace_interpreter!("push global {:?}", gid);
-                    let gid = *gid as usize;
-                    self.push(self.globals[gid].clone());
-                },
-                StoreGlobal(gid) => {
-                    trace::trace_interpreter!("store global {:?}", gid);
-                    let gid: usize = *gid as usize;
-                    self.globals[gid] = self.pop();
+                PushLocal(local) => {
+                    trace::trace_interpreter!("push local {} : {}", local, self.stack[local].as_debug_str());
+                    let local = *local as usize;
+                    self.push(self.stack[local].clone());
+                }
+                StoreLocal(local) => {
+                    trace::trace_interpreter!("store local {} : {} -> {}", local, self.stack.last().unwrap().as_debug_str(), self.stack[local].as_debug_str());
+                    let local: usize = *local as usize;
+                    self.stack[local] = self.pop();
                 }
 
 
@@ -247,6 +252,11 @@ impl<R, W> VirtualMachine<R, W> where
                             list3.extend(list2.iter().cloned());
                             self.push(Value::list(list3))
                         },
+                        (l @ Value::List(l1), r) => {
+                            let mut list1 = (*l1).borrow();
+                            list1.push(r);
+                            self.push(l);
+                        }
                         (Value::Str(s1), r) => self.push(Value::Str(Box::new(format!("{}{}", s1, r.as_str())))),
                         (l, Value::Str(s2)) => self.push(Value::Str(Box::new(format!("{}{}", l.as_str(), s2)))),
                         (l, r) => return self.error(TypeErrorBinaryOp(OpAdd, l, r)),
@@ -478,7 +488,7 @@ impl<R, W> VirtualMachine<R, W> where
                 _ => panic!("Unimplemented {:?}", op)
             }
         }
-        trace::trace_interpreter_stack!(": [{}]", self.stack.iter().rev().map(|t| t.as_debug_str()).collect::<Vec<String>>().join(", "));
+        trace::trace_interpreter_stack!(": [{}]", self.debug_stack());
         Ok(())
     }
 
@@ -488,6 +498,13 @@ impl<R, W> VirtualMachine<R, W> where
             error,
             lineno: self.lineno,
         })
+    }
+}
+
+impl<R, W> VirtualMachine<R, W> {
+    #[cfg(trace_interpreter_stack = "on")]
+    fn debug_stack(self: &Self) -> String {
+        format!(": [{}]", self.stack.iter().rev().map(|t| t.as_debug_str()).collect::<Vec<String>>().join(", "))
     }
 }
 
@@ -517,21 +534,21 @@ impl<R, W> Stack for VirtualMachine<R, W> {
 
     /// Peeks at the top element of the stack, or an element `offset` down from the top
     fn peek(self: &Self, offset: usize) -> &Value {
-        trace::trace_interpreter_stack!(": [{}]", self.stack.iter().rev().map(|t| t.as_debug_str()).collect::<Vec<String>>().join(", "));
+        trace::trace_interpreter_stack!(": [{}]", self.debug_stack());
         trace::trace_interpreter_stack!("peek({}) -> {}", offset, self.stack[self.stack.len() - 1 - offset].as_debug_str());
         self.stack.get(self.stack.len() - 1 - offset).unwrap()
     }
 
     /// Pops the top of the stack
     fn pop(self: &mut Self) -> Value {
-        trace::trace_interpreter_stack!(": [{}]", self.stack.iter().rev().map(|t| t.as_debug_str()).collect::<Vec<String>>().join(", "));
+        trace::trace_interpreter_stack!(": [{}]", self.debug_stack());
         trace::trace_interpreter_stack!("pop() -> {}", self.stack.last().unwrap().as_debug_str());
         self.stack.pop().unwrap()
     }
 
     /// Pops the top N values off the stack, in order
     fn popn(self: &mut Self, n: usize) -> Vec<Value> {
-        trace::trace_interpreter_stack!(": [{}]", self.stack.iter().rev().map(|t| t.as_debug_str()).collect::<Vec<String>>().join(", "));
+        trace::trace_interpreter_stack!(": [{}]", self.debug_stack());
         trace::trace_interpreter_stack!("popn({}) -> {}, ...", n, self.stack.last().unwrap().as_debug_str());
         let length = self.stack.len();
         self.stack.splice(length - n..length, std::iter::empty()).collect()
@@ -539,7 +556,7 @@ impl<R, W> Stack for VirtualMachine<R, W> {
 
     /// Push a value onto the stack
     fn push(self: &mut Self, value: Value) {
-        trace::trace_interpreter_stack!(": [{}]", self.stack.iter().rev().map(|t| t.as_debug_str()).collect::<Vec<String>>().join(", "));
+        trace::trace_interpreter_stack!(": [{}]", self.debug_stack());
         trace::trace_interpreter_stack!("push({})", value.as_debug_str());
         self.stack.push(value);
     }
@@ -651,6 +668,19 @@ mod test {
     #[test] fn test_str_sum_values() { run_str("sum(1, 3, 5, 7) . print", "16\n"); }
     #[test] fn test_str_sum_no_arg() { run_str("sum()", "Function 'sum' requires at least 1 parameter but none were present.\n  at: line 1 (<test>)\n  at:\n\nsum()\n"); }
     #[test] fn test_str_sum_empty_list() { run_str("[] . sum . print", "0\n"); }
+    #[test] fn test_local_vars_01() { run_str("let x=0 { x.print }", "0\n"); }
+    #[test] fn test_local_vars_02() { run_str("let x=0 { let x=1; x.print }", "1\n"); }
+    #[test] fn test_local_vars_03() { run_str("let x=0 { x.print let x=1 }", "0\n"); }
+    #[test] fn test_local_vars_04() { run_str("let x=0 { let x=1 } x.print", "0\n"); }
+    #[test] fn test_local_vars_05() { run_str("let x=0 { x=1 } x.print", "1\n"); }
+    #[test] fn test_local_vars_06() { run_str("let x=0 { x=1 { x=2; x.print } }", "2\n"); }
+    #[test] fn test_local_vars_07() { run_str("let x=0 { x=1 { x=2 } x.print }", "2\n"); }
+    #[test] fn test_local_vars_08() { run_str("let x=0 { let x=1 { x=2 } x.print }", "2\n"); }
+    #[test] fn test_local_vars_09() { run_str("let x=0 { let x=1 { let x=2 } x.print }", "1\n"); }
+    #[test] fn test_local_vars_10() { run_str("let x=0 { x=1 { let x=2 } x.print }", "1\n"); }
+    #[test] fn test_local_vars_11() { run_str("let x=0 { x=1 { let x=2 } } x.print", "1\n"); }
+    #[test] fn test_local_vars_12() { run_str("let x=0 { let x=1 { let x=2 } } x.print", "0\n"); }
+    #[test] fn test_local_vars_14() { run_str("let x=3 { let x=x; x.print }", "3\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }

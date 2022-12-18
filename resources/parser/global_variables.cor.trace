@@ -1,44 +1,22 @@
-=== Globals ===
-
-"a" : 0
-"b" : 1
-"c" : 2
-"d" : 3
-"e" : 4
-"f" : 5
-"g" : 6
-"h" : 7
-"i" : 8
-"j" : 9
-
 === Parse Tokens ===
 
 0000 LineNumber(1)
 0001 Nil
-0002 StoreGlobal(0)
-0003 LineNumber(2)
+0002 LineNumber(2)
+0003 Nil
 0004 Nil
-0005 StoreGlobal(1)
+0005 LineNumber(3)
 0006 Nil
-0007 StoreGlobal(2)
-0008 LineNumber(3)
+0007 Int(0 -> 3)
+0008 LineNumber(4)
 0009 Nil
-0010 StoreGlobal(3)
-0011 Int(0 -> 3)
-0012 LineNumber(4)
-0013 StoreGlobal(4)
-0014 Nil
-0015 LineNumber(5)
-0016 StoreGlobal(5)
-0017 Int(1 -> 6)
-0018 Int(2 -> 5)
-0019 LineNumber(6)
-0020 OpAdd
-0021 StoreGlobal(6)
-0022 Nil
-0023 StoreGlobal(7)
-0024 True
-0025 StoreGlobal(8)
-0026 False
-0027 StoreGlobal(9)
-0028 Exit
+0010 LineNumber(5)
+0011 Int(1 -> 6)
+0012 Int(2 -> 5)
+0013 LineNumber(6)
+0014 OpAdd
+0015 Nil
+0016 True
+0017 False
+0018 PopN(10)
+0019 Exit

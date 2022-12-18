@@ -128,7 +128,6 @@ And replace the values for the traces you want to enable with `on`:
 ### To-Do
 
 - Implement `->` binding resolution
-- ~~Global~~ and Local (block scoped) variables
 - ~~List types~~ (and list literals)
 - Tuple types (and tuple literals), if we need them
 - Set types
