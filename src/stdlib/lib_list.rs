@@ -98,3 +98,35 @@ fn rev_range(start_high_inclusive: i64, stop_low_exclusive: i64) -> impl Iterato
         }
     })
 }
+
+
+// ===== Library Functions ===== //
+
+macro_rules! declare_varargs_iter {
+    ($iter:ident, $list:ident) => {
+        pub fn $iter(arg: Value) -> Result<Value, RuntimeErrorType> {
+            match arg {
+                List(ls) => $list((*ls).borrow().as_ref()),
+                e => Err(TypeErrorArgMustBeIterable(e)),
+            }
+        }
+    };
+}
+
+declare_varargs_iter!(sum_iter, sum_list);
+//declare_varargs_iter!(min_iter, min_list);
+//declare_varargs_iter!(max_iter, max_list);
+//declare_varargs_iter!(filter_iter, filter_list);
+//declare_varargs_iter!(map_iter, map_list);
+//declare_varargs_iter!(reduce_iter, reduce_list);
+
+pub fn sum_list(args: &Vec<Value>) -> Result<Value, RuntimeErrorType> {
+    let mut sum: i64 = 0;
+    for v in args {
+        match v {
+            Int(i) => sum += *i,
+            _ => return Err(TypeErrorArgMustBeInt(v.clone())),
+        }
+    }
+    Ok(Int(sum))
+}

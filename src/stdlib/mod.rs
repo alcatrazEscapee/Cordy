@@ -26,7 +26,7 @@ pub fn bindings() -> HashMap<&'static str, StdBinding> {
         ("repr", Repr),
         ("len", Len),
 
-        // lib_io
+        // lib_str
         ("to_lower", ToLower),
         ("to_upper", ToUpper),
         ("replace", Replace),
@@ -34,6 +34,9 @@ pub fn bindings() -> HashMap<&'static str, StdBinding> {
         ("index_of", IndexOf),
         ("count_of", CountOf),
         ("split", Split),
+
+        // lib_list
+        ("sum", Sum)
     ])
 }
 
@@ -60,6 +63,9 @@ pub fn lookup_binding(b: &StdBinding) -> &'static str {
         CountOf => "count_of",
         Split => "split",
 
+        // lib_list
+        Sum => "sum",
+
     }
 }
 
@@ -85,6 +91,9 @@ pub enum StdBinding {
     IndexOf,
     CountOf,
     Split,
+
+    // lib_list
+    Sum,
 }
 
 /*
@@ -147,6 +156,22 @@ pub fn invoke<S>(bound: StdBinding, nargs: u8, vm: &mut S) -> Result<Value, Runt
                     $ret
                 },
                 _ => Err(RuntimeErrorType::IncorrectNumberOfArguments(bound.clone(), nargs, 3))
+            }
+        };
+    }
+
+    macro_rules! dispatch_varargs {
+        ($iter:path, $list:path) => {
+            match nargs {
+                0 => Err(RuntimeErrorType::IncorrectNumberOfArgumentsVariadicAtLeastOne(Sum)),
+                1 => {
+                    let a1: Value = vm.pop();
+                    $iter(a1)
+                },
+                _ => {
+                    let args: Vec<Value> = vm.popn(nargs as usize);
+                    $list(&args)
+                }
             }
         };
     }
@@ -217,6 +242,9 @@ pub fn invoke<S>(bound: StdBinding, nargs: u8, vm: &mut S) -> Result<Value, Runt
         IndexOf => dispatch!(a1, a2, lib_str::index_of(a1, a2)),
         CountOf => dispatch!(a1, a2, lib_str::count_of(a1, a2)),
         Split => dispatch!(a1, a2, lib_str::split(a1, a2)),
+
+        // lib_list
+        Sum => dispatch_varargs!(lib_list::sum_iter, lib_list::sum_list),
 
         _ => Err(RuntimeErrorType::BindingIsNotFunctionEvaluable(bound.clone()))
     }

@@ -508,6 +508,7 @@ impl <R, W> IO for VirtualMachine<R, W> where
 pub trait Stack {
     fn peek(self: &Self, offset: usize) -> &Value;
     fn pop(self: &mut Self) -> Value;
+    fn popn(self: &mut Self, n: usize) -> Vec<Value>;
     fn push(self: &mut Self, value: Value);
 }
 
@@ -526,6 +527,14 @@ impl<R, W> Stack for VirtualMachine<R, W> {
         trace::trace_interpreter_stack!(": [{}]", self.stack.iter().rev().map(|t| t.as_debug_str()).collect::<Vec<String>>().join(", "));
         trace::trace_interpreter_stack!("pop() -> {}", self.stack.last().unwrap().as_debug_str());
         self.stack.pop().unwrap()
+    }
+
+    /// Pops the top N values off the stack, in order
+    fn popn(self: &mut Self, n: usize) -> Vec<Value> {
+        trace::trace_interpreter_stack!(": [{}]", self.stack.iter().rev().map(|t| t.as_debug_str()).collect::<Vec<String>>().join(", "));
+        trace::trace_interpreter_stack!("popn({}) -> {}, ...", n, self.stack.last().unwrap().as_debug_str());
+        let length = self.stack.len();
+        self.stack.splice(length - n..length, std::iter::empty()).collect()
     }
 
     /// Push a value onto the stack
@@ -638,6 +647,10 @@ mod test {
     #[test] fn test_str_list_slice_43() { run_str("[1, 2, 3, 4] [-10:1] . print", "[1]\n"); }
     #[test] fn test_str_list_slice_44() { run_str("[1, 2, 3, 4] [1:-10:-1] . print", "[2, 1]\n"); }
     #[test] fn test_str_list_slice_45() { run_str("[1, 2, 3, 4] [::0]", "Cannot slice a list with a step of 0\n  at: line 1 (<test>)\n  at:\n\n[1, 2, 3, 4] [::0]\n"); }
+    #[test] fn test_str_sum_list() { run_str("[1, 2, 3, 4] . sum . print", "10\n"); }
+    #[test] fn test_str_sum_values() { run_str("sum(1, 3, 5, 7) . print", "16\n"); }
+    #[test] fn test_str_sum_no_arg() { run_str("sum()", "Function 'sum' requires at least 1 parameter but none were present.\n  at: line 1 (<test>)\n  at:\n\nsum()\n"); }
+    #[test] fn test_str_sum_empty_list() { run_str("[] . sum . print", "0\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }
