@@ -4,17 +4,17 @@
 
 === Parse Tokens ===
 
-0000 Int(0)
+0000 Int(0 -> 0)
 0001 LineNumber(1)
 0002 StoreGlobal(0)
 0003 LineNumber(2)
 0004 PushGlobal(0)
-0005 Int(1)
+0005 Int(1 -> 1)
 0006 LineNumber(3)
 0007 OpAdd
 0008 StoreGlobal(0)
 0009 PushGlobal(0)
-0010 Int(10)
+0010 Int(2 -> 10)
 0011 OpGreaterThan
 0012 JumpIfFalsePop(15)
 0013 Jump(16)

@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use crate::stdlib;
 use crate::stdlib::StdBinding;
-use crate::vm::RuntimeErrorType;
+use crate::vm::error::RuntimeErrorType;
 
 use Value::{*};
 
@@ -14,7 +14,7 @@ pub enum Value {
     Nil,
     Bool(bool),
     Int(i64),
-    Str(String),
+    Str(Box<String>),
 
     // Reference (Mutable) Types
     // Really shitty memory management for now just using RefCell... in the future maybe we implement a garbage collected system
@@ -23,7 +23,7 @@ pub enum Value {
 
     // Functions
     Binding(StdBinding),
-    PartialBinding(StdBinding, Vec<Value>),
+    PartialBinding(StdBinding, Box<Vec<Box<Value>>>),
 }
 
 
@@ -37,7 +37,7 @@ impl Value {
     /// Converts the `Value` to a `String`. This is equivalent to the stdlib function `str()`
     pub fn as_str(self: &Self) -> String {
         match self {
-            Str(s) => s.clone(),
+            Str(s) => *s.clone(),
             List(v) => format!("[{}]", (*v).borrow().iter().map(|t| t.as_str()).collect::<Vec<String>>().join(", ")),
             Binding(b) => String::from(stdlib::lookup_binding(b)),
             _ => self.as_repr_str(),
@@ -143,4 +143,12 @@ impl Value {
             (l, r) => Err(RuntimeErrorType::TypeErrorCannotCompare(l.clone(), r.clone()))
         }
     }
+}
+
+
+#[cfg(test)]
+mod test {
+    use crate::vm::value::Value;
+
+    #[test] fn test_layout() { assert_eq!(16, std::mem::size_of::<Value>()); }
 }
