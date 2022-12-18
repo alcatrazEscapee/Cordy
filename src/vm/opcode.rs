@@ -15,9 +15,10 @@ pub enum Opcode {
     // Stack Operations
     Dupe, // ... x, y, z] -> ... x, y, z, z]
     Pop,
+    PopN(u16),
 
-    PushGlobal(u16),
-    StoreGlobal(u16),
+    PushLocal(u16),
+    StoreLocal(u16),
 
     // Push
     Nil,
@@ -27,8 +28,6 @@ pub enum Opcode {
     Str(u16),
     Bound(StdBinding),
     List(u16),
-
-    Identifier,
 
     // Unary Operators
     UnarySub,

@@ -1,33 +1,25 @@
-=== Globals ===
-
-"x" : 0
-"y" : 1
-"z" : 2
-
 === Parse Tokens ===
 
 0000 Nil
-0001 StoreGlobal(0)
-0002 Nil
-0003 StoreGlobal(1)
-0004 Int(0 -> 3)
-0005 LineNumber(1)
-0006 StoreGlobal(2)
-0007 Int(1 -> 1)
-0008 LineNumber(2)
-0009 StoreGlobal(0)
-0010 PushGlobal(0)
-0011 Int(2 -> 5)
-0012 LineNumber(3)
-0013 OpAdd
-0014 StoreGlobal(1)
-0015 PushGlobal(2)
-0016 PushGlobal(0)
-0017 LineNumber(4)
-0018 OpMul
-0019 StoreGlobal(2)
-0020 PushGlobal(0)
-0021 PushGlobal(2)
-0022 OpSub
-0023 StoreGlobal(0)
-0024 Exit
+0001 Nil
+0002 Int(0 -> 3)
+0003 LineNumber(1)
+0004 Int(1 -> 1)
+0005 LineNumber(2)
+0006 StoreLocal(0)
+0007 PushLocal(0)
+0008 Int(2 -> 5)
+0009 LineNumber(3)
+0010 OpAdd
+0011 StoreLocal(1)
+0012 PushLocal(2)
+0013 PushLocal(0)
+0014 LineNumber(4)
+0015 OpMul
+0016 StoreLocal(2)
+0017 PushLocal(0)
+0018 PushLocal(2)
+0019 OpSub
+0020 StoreLocal(0)
+0021 PopN(3)
+0022 Exit

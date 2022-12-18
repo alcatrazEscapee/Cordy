@@ -1,50 +1,52 @@
-=== Globals ===
-
-"x" : 0
-
 === Parse Tokens ===
 
-0000 LineNumber(1)
+0000 Nil
 0001 Nil
-0002 StoreGlobal(0)
-0003 Int(0 -> 1)
-0004 Int(1 -> 2)
-0005 Int(2 -> 3)
-0006 OpMul
-0007 OpAdd
-0008 Int(3 -> 4)
-0009 Int(4 -> 5)
-0010 OpDiv
-0011 OpSub
-0012 StoreGlobal(0)
-0013 LineNumber(2)
-0014 Identifier
-0015 Identifier
-0016 Int(5 -> 1)
-0017 Int(6 -> 2)
-0018 OpAdd
-0019 OpFuncEval(1)
-0020 OpFuncCompose
-0021 Identifier
-0022 PushGlobal(0)
-0023 OpFuncEval(1)
-0024 OpFuncCompose
-0025 Identifier
-0026 OpFuncCompose
-0027 StoreGlobal(0)
-0028 LineNumber(3)
-0029 Identifier
-0030 Identifier
+0002 Nil
+0003 Nil
+0004 Nil
+0005 Nil
+0006 LineNumber(1)
+0007 Nil
+0008 Int(0 -> 1)
+0009 Int(1 -> 2)
+0010 Int(2 -> 3)
+0011 OpMul
+0012 OpAdd
+0013 Int(3 -> 4)
+0014 Int(4 -> 5)
+0015 OpDiv
+0016 OpSub
+0017 StoreLocal(0)
+0018 LineNumber(2)
+0019 PushLocal(1)
+0020 PushLocal(2)
+0021 Int(5 -> 1)
+0022 Int(6 -> 2)
+0023 OpAdd
+0024 OpFuncEval(1)
+0025 OpFuncCompose
+0026 PushLocal(3)
+0027 PushLocal(0)
+0028 OpFuncEval(1)
+0029 OpFuncCompose
+0030 PushLocal(6)
 0031 OpFuncCompose
-0032 JumpIfFalse(37)
-0033 Pop
-0034 Int(7 -> 1)
-0035 Int(8 -> 2)
-0036 OpGreaterThan
-0037 JumpIfTrue(42)
+0032 StoreLocal(0)
+0033 LineNumber(3)
+0034 PushLocal(4)
+0035 PushLocal(5)
+0036 OpFuncCompose
+0037 JumpIfFalse(42)
 0038 Pop
-0039 Int(9 -> 6)
-0040 Int(10 -> 7)
-0041 OpGreaterThanEqual
-0042 StoreGlobal(0)
-0043 Exit
+0039 Int(7 -> 1)
+0040 Int(8 -> 2)
+0041 OpGreaterThan
+0042 JumpIfTrue(47)
+0043 Pop
+0044 Int(9 -> 6)
+0045 Int(10 -> 7)
+0046 OpGreaterThanEqual
+0047 StoreLocal(0)
+0048 PopN(7)
+0049 Exit

@@ -1,0 +1,8 @@
+let x
+loop {
+    let x
+    {
+        let x
+        break
+    }
+}

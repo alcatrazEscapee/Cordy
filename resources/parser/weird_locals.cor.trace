@@ -1,0 +1,24 @@
+=== Parse Tokens ===
+
+0000 Pop
+0001 LineNumber(1)
+0002 Int(0 -> 3)
+0003 LineNumber(2)
+0004 LineNumber(3)
+0005 PushLocal(0)
+0006 LineNumber(4)
+0007 Pop
+0008 Pop
+0009 Exit
+
+=== Parse Errors ===
+
+ParserError { error: UndeclaredIdentifier("x"), lineno: 0 }
+
+=== Formatted Parse Errors ===
+
+Undeclared identifier: 'x'
+  at: line 1 (weird_locals.cor)
+  at:
+
+{ let x = x }

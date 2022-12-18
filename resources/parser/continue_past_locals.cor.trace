@@ -1,0 +1,19 @@
+=== Parse Tokens ===
+
+0000 LineNumber(1)
+0001 Nil
+0002 LineNumber(2)
+0003 LineNumber(3)
+0004 Nil
+0005 LineNumber(4)
+0006 LineNumber(5)
+0007 Nil
+0008 PopN(2)
+0009 Jump(2)
+0010 LineNumber(6)
+0011 Pop
+0012 LineNumber(7)
+0013 Pop
+0014 Jump(2)
+0015 Pop
+0016 Exit

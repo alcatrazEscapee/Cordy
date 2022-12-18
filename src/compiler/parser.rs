@@ -18,7 +18,6 @@ pub fn parse(bindings: HashMap<&'static str, StdBinding>, scan_result: ScanResul
     ParserResult {
         code: parser.output,
         errors: parser.errors,
-        globals: parser.globals,
         strings: parser.strings,
         constants: parser.constants,
     }
@@ -28,7 +27,6 @@ pub struct ParserResult {
     pub code: Vec<Opcode>,
     pub errors: Vec<ParserError>,
 
-    pub globals: HashMap<String, u16>,
     pub strings: Vec<String>,
     pub constants: Vec<i64>,
 }
@@ -54,8 +52,8 @@ pub enum ParserErrorType {
     ExpectedStatement(ScanToken),
     ExpectedVariableNameAfterLet(ScanToken),
 
-    GlobalVariableConflictWithBinding(String),
-    GlobalVariableConflictWithGlobal(String),
+    LocalVariableConflict(String),
+    UndeclaredIdentifier(String),
 
     AssignmentToNotVariable(String),
     BreakOutsideOfLoop,
@@ -75,7 +73,9 @@ struct Parser {
     multiple_expression_statements_per_line: bool, // If a expression statement has already been parsed before a new line or ';', this flag is set
     lookahead: Option<ScanToken>, // A token we pretend 'push back onto' the input iterator
 
-    globals: HashMap<String, u16>,
+    locals: Vec<Local>, // Table of all locals, placed at the bottom of the stack
+    scope_depth: u16, // Scope depth
+
     strings: Vec<String>,
     constants: Vec<i64>,
 
@@ -83,14 +83,40 @@ struct Parser {
     // Each frame represents a single loop, which `break` and `continue` statements refer to
     // `continue` jumps back to the beginning of the loop, aka the first `usize` (loop start)
     // `break` statements jump back to the end of the loop, which needs to be patched later. The values to be patched record themselves in the stack at the current loop level
-    loops: Vec<(u16, Vec<u16>)>,
+    loops: Vec<Loop>,
+}
+
+#[derive(Eq, PartialEq, Debug, Clone)]
+struct Loop {
+    start_index: u16,
+    depth: u16,
+    break_statements: Vec<u16>
+}
+
+impl Loop {
+    fn new(start_index: u16, depth: u16) -> Loop {
+        Loop { start_index, depth, break_statements: Vec::new() }
+    }
+}
+
+#[derive(Eq, PartialEq, Debug, Clone)]
+struct Local {
+    name: String,
+    depth: u16,
+    index: u16,
+    initialized: bool,
+}
+
+impl Local {
+    fn new(name: String, depth: u16, index: u16) -> Local {
+        Local { name, depth, index, initialized: false }
+    }
 }
 
 #[derive(Eq, PartialEq, Debug, Clone)]
 enum VariableType {
     //StructOrDerivedBinding, // this one is complicated, since it is a type based dispatch against user defined types...
-    //LocalVariable(usize), // Not implemented
-    GlobalVariable(u16),
+    Local(u16),
     TopLevelBinding(StdBinding),
     None,
 }
@@ -111,7 +137,9 @@ impl Parser {
             multiple_expression_statements_per_line: false,
             lookahead: None,
 
-            globals: HashMap::new(),
+            locals: Vec::new(),
+            scope_depth: 0,
+
             strings: Vec::new(),
             constants: Vec::new(),
 
@@ -122,6 +150,7 @@ impl Parser {
     fn parse(self: &mut Self) {
         trace::trace_parser!("rule <root>");
         self.parse_statements();
+        self.pop_locals_in_current_scope_depth(); // Pop top level 'local' variables
         if let Some(t) = self.peek() {
             let token: ScanToken = t.clone();
             self.push_err(UnexpectedTokenAfterEoF(token));
@@ -136,7 +165,8 @@ impl Parser {
                 Some(KeywordFn) => self.parse_function(),
                 Some(KeywordLet) => self.parse_let(),
                 Some(KeywordIf) => self.parse_if_statement(),
-                Some(KeywordLoop) => self.parse_loop(),
+                Some(KeywordLoop) => self.parse_loop_statement(),
+                Some(KeywordWhile) => self.parse_while_statement(),
                 Some(KeywordFor) => self.parse_for(),
                 Some(KeywordBreak) => self.parse_break_statement(),
                 Some(KeywordContinue) => self.parse_continue_statement(),
@@ -160,8 +190,12 @@ impl Parser {
     fn parse_block_statement(self: &mut Self) {
         trace::trace_parser!("rule <block-statement>");
         self.expect(OpenBrace);
+        self.scope_depth += 1;
+        self.multiple_expression_statements_per_line = false;
         self.parse_statements();
         self.multiple_expression_statements_per_line = false;
+        self.pop_locals_in_current_scope_depth();
+        self.scope_depth -= 1;
         self.expect_resync(CloseBrace);
     }
 
@@ -169,50 +203,7 @@ impl Parser {
         panic!("Functions not implemented in parser");
     }
 
-    fn parse_let(self: &mut Self) {
-        trace::trace_parser!("rule <let-statement>");
-        self.advance();
-        loop {
-            // For now, assume that all variables are global
-            let store_op: Opcode = match self.peek() {
-                Some(ScanToken::Identifier(_)) => {
-                    let name: String = self.take_identifier();
-                    let gid: u16 = match self.declare_global(&name) {
-                        Some(g) => g,
-                        None => break
-                    };
-                    StoreGlobal(gid)
-                },
-                Some(t) => {
-                    let token: ScanToken = t.clone();
-                    self.push_err(ExpectedVariableNameAfterLet(token));
-                    break
-                },
-                None => break
-            };
-
-            match self.peek() {
-                Some(Equals) => { // x = <expr>, so parse the expression
-                    self.advance();
-                    self.multiple_expression_statements_per_line = true;
-                    self.parse_expression();
-                },
-                _ => {
-                    self.push(Nil); // Initialize to 'nil'
-                },
-            }
-
-            self.push(store_op);
-
-            match self.peek() {
-                Some(Comma) => { // Multiple declarations
-                    self.advance();
-                    self.multiple_expression_statements_per_line = false;
-                },
-                _ => break,
-            }
-        }
-    }
+    // ===== Control Flow ===== //
 
     fn parse_if_statement(self: &mut Self) {
         // Translation:
@@ -263,7 +254,39 @@ impl Parser {
         }
     }
 
-    fn parse_loop(self: &mut Self) {
+    fn parse_while_statement(self: &mut Self) {
+        trace::trace_parser!("<while-statement>");
+
+        // Translation
+        // while <expr> {    | L1: <expr> ; JumpIfFalsePop L2
+        //     <statements>  | <statements>
+        //     break         | Jump L2  -> Push onto loop stack, fix at end
+        //     continue      | Jump L1  -> Set immediately, using the loop start value
+        //     <statements>  | <statements>
+        // }                 | Jump L1 ; L2:
+
+        self.advance();
+
+        let loop_start: u16 = self.next_opcode(); // Top of the loop, push onto the loop stack
+        self.loops.push(Loop::new(loop_start, self.scope_depth));
+
+        self.parse_expression(); // While condition
+        self.push(Bound(StdBinding::Bool)); // Evaluate the condition with `<expr> . bool` automatically
+        self.push(OpFuncCompose);
+        let jump_if_false: u16 = self.reserve(); // Jump to the end
+        self.parse_block_statement(); // Inner loop statements, and jump back to front
+        self.push(Jump(loop_start));
+
+        let loop_end: u16 = self.next_opcode(); // After the jump, the next opcode is 'end of loop'. Repair all break statements
+        let break_opcodes: Vec<u16> = self.loops.pop().unwrap().break_statements;
+        for break_opcode in break_opcodes {
+            self.output[break_opcode as usize] = Jump(loop_end);
+        }
+
+        self.output[jump_if_false as usize] = JumpIfFalsePop(loop_end); // Fix the initial conditional jump
+    }
+
+    fn parse_loop_statement(self: &mut Self) {
         trace::trace_parser!("<loop-statement>");
 
         // Translation:
@@ -273,16 +296,17 @@ impl Parser {
         //     continue      | Jump L1  -> Set immediately, using the loop start value
         //     <statements>  | <statements>
         // }                 | Jump L1 ; L2:
+
         self.advance();
 
         let loop_start: u16 = self.next_opcode(); // Top of the loop, push onto the loop stack
-        self.loops.push((loop_start, Vec::new()));
+        self.loops.push(Loop::new(loop_start, self.scope_depth));
 
         self.parse_block_statement(); // Inner loop statements, and jump back to front
         self.push(Jump(loop_start));
 
         let loop_end: u16 = self.next_opcode(); // After the jump, the next opcode is 'end of loop'. Repair all break statements
-        let break_opcodes: Vec<u16> = self.loops.pop().unwrap().1;
+        let break_opcodes: Vec<u16> = self.loops.pop().unwrap().break_statements;
         for break_opcode in break_opcodes {
             self.output[break_opcode as usize] = Jump(loop_end);
         }
@@ -297,8 +321,9 @@ impl Parser {
         self.advance();
         match self.loops.last() {
             Some(_) => {
+                self.pop_locals_in_current_loop();
                 let jump: u16 = self.reserve();
-                self.loops.last_mut().unwrap().1.push(jump);
+                self.loops.last_mut().unwrap().break_statements.push(jump);
             },
             None => self.push_err(BreakOutsideOfLoop),
         }
@@ -308,11 +333,60 @@ impl Parser {
         trace::trace_parser!("rule <continue-statement>");
         self.advance();
         match self.loops.last() {
-            Some((loop_start, _)) => {
-                let jump_to: u16 = *loop_start;
+            Some(loop_stmt) => {
+                let jump_to: u16 = loop_stmt.start_index;
+                self.pop_locals_in_current_loop();
                 self.push(Jump(jump_to));
             },
             None => self.push_err(ContinueOutsideOfLoop),
+        }
+    }
+
+    // ===== Variables + Expressions ===== //
+
+    fn parse_let(self: &mut Self) {
+        trace::trace_parser!("rule <let-statement>");
+        self.advance();
+        loop {
+            let local: usize = match self.peek() {
+                Some(ScanToken::Identifier(_)) => {
+                    let name: String = self.take_identifier();
+                    match self.declare_local(name) {
+                        Some(l) => l,
+                        None => break
+                    }
+                },
+                Some(t) => {
+                    let token: ScanToken = t.clone();
+                    self.push_err(ExpectedVariableNameAfterLet(token));
+                    break
+                },
+                None => break
+            };
+
+            match self.peek() {
+                Some(Equals) => { // x = <expr>, so parse the expression
+                    self.advance();
+                    self.multiple_expression_statements_per_line = true;
+                    self.parse_expression();
+                },
+                _ => {
+                    self.push(Nil); // Initialize to 'nil'
+                },
+            }
+
+            // Local declarations don't have an explicit `store` opcode
+            // They just push their value onto the stack, and we know the location will equal that of the Local's index
+            // However, after we initialize a local we need to mark it initialized, so we can refer to it in expressions
+            self.locals[local].initialized = true;
+
+            match self.peek() {
+                Some(Comma) => { // Multiple declarations
+                    self.advance();
+                    self.multiple_expression_statements_per_line = false;
+                },
+                _ => break,
+            }
         }
     }
 
@@ -338,7 +412,7 @@ impl Parser {
 
             // Resolve the variable name
             let (store_op, push_op) = match self.resolve_identifier(&name) {
-                VariableType::GlobalVariable(gid) => (StoreGlobal(gid), PushGlobal(gid)),
+                VariableType::Local(local) => (StoreLocal(local), PushLocal(local)),
                 _ => {
                     let token: String = name.clone();
                     self.push_err(AssignmentToNotVariable(token));
@@ -359,7 +433,7 @@ impl Parser {
             // In this case, we matched (and consumed) <name> without a following '=' or other assignment operator.
             // This must be part of an expression, but we need to first push the lookahead identifier.
             // A bare expression that starts with an identifier token also must end with a `Pop` opcode.
-            self.push_lookahead(ScanToken::Identifier(name));
+            self.push_lookahead(Identifier(name));
             self.parse_expression_statement();
         }
     }
@@ -403,9 +477,9 @@ impl Parser {
             Some(ScanToken::Identifier(_)) => {
                 let string: String = self.take_identifier();
                 match self.resolve_identifier(&string) {
-                    VariableType::GlobalVariable(gid) => self.push(PushGlobal(gid)),
+                    VariableType::Local(local) => self.push(PushLocal(local)),
                     VariableType::TopLevelBinding(b) => self.push(Bound(b)),
-                    _ => self.push(Opcode::Identifier)
+                    _ => self.push_err(UndeclaredIdentifier(string))
                 };
             },
             Some(StringLiteral(_)) => {
@@ -762,22 +836,59 @@ impl Parser {
         self.output.len() as u16
     }
 
-    fn declare_global(self: &mut Self, name: &String) -> Option<u16> {
-        // Global variables must not conflict with known top-level bindings, or other global variables
-        // Otherwise they are allowed
-        if self.bindings.contains_key(name.as_str()) {
-            self.push_err(GlobalVariableConflictWithBinding(name.clone()));
-            return None;
-        }
-        if self.globals.contains_key(name) {
-            self.push_err(GlobalVariableConflictWithGlobal(name.clone()));
-            return None;
+    /// After a `let <name>` declaration, tries to declare this as a local variable in the current scope
+    /// Returns `true` if the declaration was valid
+    fn declare_local(self: &mut Self, name: String) -> Option<usize> {
+
+        // Walk backwards down the locals stack, and check if there are any locals with the same name in the same scope
+        for local in self.locals.iter().rev() {
+            if local.depth != self.scope_depth {
+                break
+            }
+            if local.name == name {
+                self.push_err(LocalVariableConflict(name.clone()));
+                return None;
+            }
         }
 
-        // Declaration successful! Enter it in the globals table
-        let gid: u16 = self.globals.len() as u16;
-        self.globals.insert(name.clone(), gid);
-        Some(gid)
+        // todo: do we handle binding conflicts at all?
+
+        // Local variable is free of conflicts
+        let local: Local = Local::new(name, self.scope_depth, self.locals.len() as u16);
+        let index: usize = local.index as usize;
+        self.locals.push(local);
+        Some(index)
+    }
+
+    /// Pops all locals declared in the current scope, *before* decrementing the scope depth
+    /// Also emits the relevant `OpPop` opcodes to the output token stream.
+    fn pop_locals_in_current_scope_depth(self: &mut Self) {
+        let mut local_depth: u16 = 0;
+        while let Some(local) = self.locals.last() {
+            if local.depth == self.scope_depth {
+                self.locals.pop().unwrap();
+                local_depth += 1;
+            } else {
+                break
+            }
+        }
+        self.push_pop(local_depth);
+    }
+
+    /// Pops all locals that are within the most recent loop, and outputs the relevant `Pop` / `PopN` opcodes
+    /// It **does not** modify the local variable stack, and only outputs these tokens for the purposes of a jump across scopes.
+    fn pop_locals_in_current_loop(self: &mut Self) {
+        let loop_stmt: &Loop = self.loops.last().unwrap();
+        let mut local_depth: u16 = 0;
+
+        for local in self.locals.iter().rev() {
+            if local.depth > loop_stmt.depth {
+                local_depth += 1;
+            } else {
+                break
+            }
+        }
+        self.push_pop(local_depth);
     }
 
     fn resolve_identifier(self: &mut Self, name: &String) -> VariableType {
@@ -786,9 +897,14 @@ impl Parser {
         // 2. Local Variables
         // 3. Global Variables
         // 4. Top Level Bindings
-        if let Some(gid) = self.globals.get(name) {
-            return VariableType::GlobalVariable(*gid);
+
+        // Search for local variables in reverse order
+        for local in self.locals.iter().rev() {
+            if &local.name == name && local.initialized {
+                return VariableType::Local(local.index);
+            }
         }
+
         if let Some(b) = self.bindings.get(name.as_str()) {
             return VariableType::TopLevelBinding(*b);
         }
@@ -924,6 +1040,15 @@ impl Parser {
         (self.output.len() - 1) as u16
     }
 
+    /// Specialization of `pop` which may push nothing, Pop, or PopN(n)
+    fn push_pop(self: &mut Self, n: u16) {
+        match n {
+            0 => {},
+            1 => self.push(Pop),
+            n => self.push(PopN(n))
+        }
+    }
+
     /// Pushes a new token into the output stream.
     /// Returns the index of the token pushed, which allows callers to later mutate that token if they need to.
     fn push(self: &mut Self, token: Opcode) {
@@ -976,6 +1101,7 @@ mod tests {
     use crate::compiler::parser::{Parser, ParserResult};
     use crate::{reporting, stdlib};
     use crate::stdlib::StdBinding;
+    use crate::stdlib::StdBinding::{Print, Read};
     use crate::vm::opcode::Opcode;
     use crate::trace;
 
@@ -994,23 +1120,23 @@ mod tests {
     #[test] fn test_str_binary_add_and_mod_rev() { run_expr("1 % 2 + 3", vec![Int(1), Int(2), OpMod, Int(3), OpAdd]); }
     #[test] fn test_str_binary_shifts() { run_expr("1 << 2 >> 3", vec![Int(1), Int(2), OpLeftShift, Int(3), OpRightShift]); }
     #[test] fn test_str_binary_shifts_and_operators() { run_expr("1 & 2 << 3 | 5", vec![Int(1), Int(2), Int(3), OpLeftShift, OpBitwiseAnd, Int(5), OpBitwiseOr]); }
-    #[test] fn test_str_function_composition() { run_expr("a . b", vec![Identifier, Identifier, OpFuncCompose]); }
+    #[test] fn test_str_function_composition() { run_expr("print . read", vec![Bound(Print), Bound(Read), OpFuncCompose]); }
     #[test] fn test_str_precedence_with_parens() { run_expr("(1 + 2) * 3", vec![Int(1), Int(2), OpAdd, Int(3), OpMul]); }
     #[test] fn test_str_precedence_with_parens_2() { run_expr("6 / (5 - 3)", vec![Int(6), Int(5), Int(3), OpSub, OpDiv]); }
     #[test] fn test_str_precedence_with_parens_3() { run_expr("-(1 - 3)", vec![Int(1), Int(3), OpSub, UnarySub]); }
-    #[test] fn test_str_function_no_args() { run_expr("foo", vec![Identifier]); }
-    #[test] fn test_str_function_one_arg() { run_expr("foo(1)", vec![Identifier, Int(1), OpFuncEval(1)]); }
-    #[test] fn test_str_function_many_args() { run_expr("foo(1,2,3)", vec![Identifier, Int(1), Int(2), Int(3), OpFuncEval(3)]); }
+    #[test] fn test_str_function_no_args() { run_expr("print", vec![Bound(Print)]); }
+    #[test] fn test_str_function_one_arg() { run_expr("print(1)", vec![Bound(Print), Int(1), OpFuncEval(1)]); }
+    #[test] fn test_str_function_many_args() { run_expr("print(1,2,3)", vec![Bound(Print), Int(1), Int(2), Int(3), OpFuncEval(3)]); }
     #[test] fn test_str_multiple_unary_ops() { run_expr("- ~ ! 1", vec![Int(1), UnaryLogicalNot, UnaryBitwiseNot, UnarySub]); }
-    #[test] fn test_str_multiple_function_calls() { run_expr("foo (1) (2) (3)", vec![Identifier, Int(1), OpFuncEval(1), Int(2), OpFuncEval(1), Int(3), OpFuncEval(1)]); }
-    #[test] fn test_str_multiple_function_calls_some_args() { run_expr("foo () (1) (2, 3)", vec![Identifier, OpFuncEval(0), Int(1), OpFuncEval(1), Int(2), Int(3), OpFuncEval(2)]); }
-    #[test] fn test_str_multiple_function_calls_no_args() { run_expr("foo () () ()", vec![Identifier, OpFuncEval(0), OpFuncEval(0), OpFuncEval(0)]); }
-    #[test] fn test_str_function_call_unary_op_precedence() { run_expr("- foo ()", vec![Identifier, OpFuncEval(0), UnarySub]); }
-    #[test] fn test_str_function_call_unary_op_precedence_with_parens() { run_expr("(- foo) ()", vec![Identifier, UnarySub, OpFuncEval(0)]); }
-    #[test] fn test_str_function_call_unary_op_precedence_with_parens_2() { run_expr("- (foo () )", vec![Identifier, OpFuncEval(0), UnarySub]); }
-    #[test] fn test_str_function_call_binary_op_precedence() { run_expr("foo ( 1 ) + ( 2 ( 3 ) )", vec![Identifier, Int(1), OpFuncEval(1), Int(2), Int(3), OpFuncEval(1), OpAdd]); }
-    #[test] fn test_str_function_call_parens_1() { run_expr("foo . bar (1 + 3) (5)", vec![Identifier, Identifier, Int(1), Int(3), OpAdd, OpFuncEval(1), Int(5), OpFuncEval(1), OpFuncCompose]); }
-    #[test] fn test_str_function_call_parens_2() { run_expr("( foo . bar (1 + 3) ) (5)", vec![Identifier, Identifier, Int(1), Int(3), OpAdd, OpFuncEval(1), OpFuncCompose, Int(5), OpFuncEval(1)]); }
+    #[test] fn test_str_multiple_function_calls() { run_expr("print (1) (2) (3)", vec![Bound(Print), Int(1), OpFuncEval(1), Int(2), OpFuncEval(1), Int(3), OpFuncEval(1)]); }
+    #[test] fn test_str_multiple_function_calls_some_args() { run_expr("print () (1) (2, 3)", vec![Bound(Print), OpFuncEval(0), Int(1), OpFuncEval(1), Int(2), Int(3), OpFuncEval(2)]); }
+    #[test] fn test_str_multiple_function_calls_no_args() { run_expr("print () () ()", vec![Bound(Print), OpFuncEval(0), OpFuncEval(0), OpFuncEval(0)]); }
+    #[test] fn test_str_function_call_unary_op_precedence() { run_expr("- print ()", vec![Bound(Print), OpFuncEval(0), UnarySub]); }
+    #[test] fn test_str_function_call_unary_op_precedence_with_parens() { run_expr("(- print) ()", vec![Bound(Print), UnarySub, OpFuncEval(0)]); }
+    #[test] fn test_str_function_call_unary_op_precedence_with_parens_2() { run_expr("- (print () )", vec![Bound(Print), OpFuncEval(0), UnarySub]); }
+    #[test] fn test_str_function_call_binary_op_precedence() { run_expr("print ( 1 ) + ( 2 ( 3 ) )", vec![Bound(Print), Int(1), OpFuncEval(1), Int(2), Int(3), OpFuncEval(1), OpAdd]); }
+    #[test] fn test_str_function_call_parens_1() { run_expr("print . read (1 + 3) (5)", vec![Bound(Print), Bound(Read), Int(1), Int(3), OpAdd, OpFuncEval(1), Int(5), OpFuncEval(1), OpFuncCompose]); }
+    #[test] fn test_str_function_call_parens_2() { run_expr("( print . read (1 + 3) ) (5)", vec![Bound(Print), Bound(Read), Int(1), Int(3), OpAdd, OpFuncEval(1), OpFuncCompose, Int(5), OpFuncEval(1)]); }
     #[test] fn test_str_function_composition_with_is() { run_expr("'123' . int is int . print", vec![Str(0), Bound(StdBinding::Int), Bound(StdBinding::Int), OpIs, OpFuncCompose, Bound(StdBinding::Print), OpFuncCompose]); }
     #[test] fn test_and() { run_expr("1 < 2 and 3 < 4", vec![Int(1), Int(2), OpLessThan, JumpIfFalse(8), Pop, Int(3), Int(4), OpLessThan]); }
     #[test] fn test_or() { run_expr("1 < 2 or 3 < 4", vec![Int(1), Int(2), OpLessThan, JumpIfTrue(8), Pop, Int(3), Int(4), OpLessThan]); }
@@ -1028,6 +1154,8 @@ mod tests {
     #[test] fn test_slice_11() { run_expr("1 [:3]", vec![Int(1), Nil, Int(3), OpSlice]); }
     #[test] fn test_slice_12() { run_expr("1 [2:3]", vec![Int(1), Int(2), Int(3), OpSlice]); }
 
+    #[test] fn test_break_past_locals() { run("break_past_locals"); }
+    #[test] fn test_continue_past_locals() { run("continue_past_locals"); }
     #[test] fn test_empty() { run("empty"); }
     #[test] fn test_expressions() { run("expressions"); }
     #[test] fn test_global_variables() { run("global_variables"); }
@@ -1038,10 +1166,17 @@ mod tests {
     #[test] fn test_if_statement_3() { run("if_statement_3"); }
     #[test] fn test_if_statement_4() { run("if_statement_4"); }
     #[test] fn test_invalid_expressions() { run("invalid_expressions"); }
+    #[test] fn test_local_assignments() { run("local_assignments"); }
+    #[test] fn test_local_variables() { run("local_variables"); }
     #[test] fn test_loop_1() { run("loop_1"); }
     #[test] fn test_loop_2() { run("loop_2"); }
     #[test] fn test_loop_3() { run("loop_3"); }
     #[test] fn test_loop_4() { run("loop_4"); }
+    #[test] fn test_weird_locals() { run("weird_locals"); }
+    #[test] fn test_while_1() { run("while_1"); }
+    #[test] fn test_while_2() { run("while_2"); }
+    #[test] fn test_while_3() { run("while_3"); }
+    #[test] fn test_while_4() { run("while_4"); }
 
     fn run_expr(text: &str, tokens: Vec<Opcode>) {
         let result: ScanResult = scanner::scan(&String::from(text));
@@ -1076,16 +1211,6 @@ mod tests {
         let constants: Vec<i64> = parse_result.constants;
 
         let mut lines: Vec<String> = Vec::new();
-
-        if !parse_result.globals.is_empty() {
-            lines.push(String::from("=== Globals ===\n"));
-            let mut globals = parse_result.globals.iter().collect::<Vec<(&String, &u16)>>();
-            globals.sort_by_key(|(_, u)| *u);
-            for (global, gid) in globals {
-                lines.push(format!("{:?} : {:?}", global, gid));
-            }
-            lines.push(String::new());
-        }
 
         if !parse_result.code.is_empty() {
             lines.push(String::from("=== Parse Tokens ===\n"));

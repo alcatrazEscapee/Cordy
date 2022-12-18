@@ -1,0 +1,5 @@
+{ let x = x }
+let y = 3
+{
+    let y = y
+}
