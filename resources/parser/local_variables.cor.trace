@@ -1,22 +1,10 @@
-=== Parse Tokens ===
-
-0000 LineNumber(1)
-0001 Nil
-0002 LineNumber(2)
-0003 LineNumber(3)
-0004 Nil
-0005 LineNumber(4)
-0006 LineNumber(5)
-0007 Nil
-0008 LineNumber(6)
-0009 Nil
-0010 LineNumber(7)
-0011 LineNumber(8)
-0012 Nil
-0013 Pop
-0014 LineNumber(9)
-0015 PopN(2)
-0016 LineNumber(10)
-0017 Pop
-0018 Pop
-0019 Exit
+L01: 0000 Nil
+L03: 0001 Nil
+L05: 0002 Nil
+L06: 0003 Nil
+L08: 0004 Nil
+     0005 Pop
+L09: 0006 PopN(2)
+L10: 0007 Pop
+L11: 0008 Pop
+     0009 Exit

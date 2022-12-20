@@ -1,7 +1,3 @@
-=== Parse Tokens ===
-
-0000 LineNumber(1)
-0001 Jump(4)
-0002 LineNumber(2)
-0003 Jump(0)
-0004 Exit
+L3: 0000 Jump(2)
+    0001 Jump(0)
+    0002 Exit

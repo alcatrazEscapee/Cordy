@@ -1,52 +1,47 @@
-=== Parse Tokens ===
-
-0000 Nil
-0001 Nil
-0002 Nil
-0003 Nil
-0004 Nil
-0005 Nil
-0006 LineNumber(1)
-0007 Nil
-0008 Int(0 -> 1)
-0009 Int(1 -> 2)
-0010 Int(2 -> 3)
-0011 OpMul
-0012 OpAdd
-0013 Int(3 -> 4)
-0014 Int(4 -> 5)
-0015 OpDiv
-0016 OpSub
-0017 StoreLocal(0)
-0018 LineNumber(2)
-0019 PushLocal(1)
-0020 PushLocal(2)
-0021 Int(5 -> 1)
-0022 Int(6 -> 2)
-0023 OpAdd
-0024 OpFuncEval(1)
-0025 OpFuncCompose
-0026 PushLocal(3)
-0027 PushLocal(0)
-0028 OpFuncEval(1)
-0029 OpFuncCompose
-0030 PushLocal(6)
-0031 OpFuncCompose
-0032 StoreLocal(0)
-0033 LineNumber(3)
-0034 PushLocal(4)
-0035 PushLocal(5)
-0036 OpFuncCompose
-0037 JumpIfFalse(42)
-0038 Pop
-0039 Int(7 -> 1)
-0040 Int(8 -> 2)
-0041 OpGreaterThan
-0042 JumpIfTrue(47)
-0043 Pop
-0044 Int(9 -> 6)
-0045 Int(10 -> 7)
-0046 OpGreaterThanEqual
-0047 StoreLocal(0)
-0048 PopN(7)
-0049 Exit
+L1: 0000 Nil
+    0001 Nil
+    0002 Nil
+    0003 Nil
+    0004 Nil
+    0005 Nil
+    0006 Nil
+L2: 0007 Int(0 -> 1)
+    0008 Int(1 -> 2)
+    0009 Int(2 -> 3)
+    0010 OpMul
+    0011 OpAdd
+    0012 Int(3 -> 4)
+    0013 Int(4 -> 5)
+    0014 OpDiv
+    0015 OpSub
+    0016 StoreGlobal(0)
+L3: 0017 PushGlobal(1)
+    0018 PushGlobal(2)
+    0019 Int(5 -> 1)
+    0020 Int(6 -> 2)
+    0021 OpAdd
+    0022 OpFuncEval(1)
+    0023 OpFuncCompose
+    0024 PushGlobal(3)
+    0025 PushGlobal(0)
+    0026 OpFuncEval(1)
+    0027 OpFuncCompose
+    0028 PushGlobal(6)
+    0029 OpFuncCompose
+    0030 StoreGlobal(0)
+L4: 0031 PushGlobal(4)
+    0032 PushGlobal(5)
+    0033 OpFuncCompose
+    0034 JumpIfFalse(39)
+    0035 Pop
+    0036 Int(7 -> 1)
+    0037 Int(8 -> 2)
+    0038 OpGreaterThan
+    0039 JumpIfTrue(44)
+    0040 Pop
+    0041 Int(9 -> 6)
+    0042 Int(10 -> 7)
+    0043 OpGreaterThanEqual
+    0044 StoreGlobal(0)
+    0045 PopN(7)
+    0046 Exit

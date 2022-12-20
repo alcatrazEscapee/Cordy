@@ -21,6 +21,7 @@ fn main() {
 
         let mut iter = args.into_iter();
         let mut file: Option<String> = None;
+        let mut disassembly: bool = false;
 
         if let None = iter.next() {
             eprintln!("Unexpected first argument");
@@ -32,6 +33,9 @@ fn main() {
                 "--help" => {
                     print_help();
                     return;
+                },
+                "-d" | "--disassembly" => {
+                    disassembly = true;
                 },
                 a => {
                     file = Some(String::from(a));
@@ -69,6 +73,13 @@ fn main() {
             }
         };
 
+        if disassembly {
+            for line in compiled.disassemble() {
+                println!("{}", line);
+            }
+            return;
+        }
+
         let result = {
             let stdin = io::stdin().lock();
             let stdout = io::stdout();
@@ -87,6 +98,11 @@ fn main() {
 fn print_help() {
     println!("cordy [options] <file>");
     println!("Command line interface, compiler and interpreter for the AoCL language.");
+    println!("When invoked with no arguments, this will open a REPL for the Cordy language (exit with 'exit')");
     println!("Options:");
-    println!("  --help : Show this message and then exit");
+    println!("  --help           : Show this message and then exit");
+    println!("  -c --compile     : Compile only. Outputs the compiled program to <file>.o by default, or what the -o option specifies");
+    println!("  -d --disassembly : Dump the disassembly view. Use -o to dump to a file.");
+    println!("  -e --execute     : Execute the provided file as a compiled binary (with -c), rather than compling a text file");
+    println!("  -o --output      : Output file to write to. Used by -d")
 }

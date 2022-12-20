@@ -1,19 +1,13 @@
-=== Parse Tokens ===
-
-0000 Int(0 -> 0)
-0001 LineNumber(1)
-0002 LineNumber(2)
-0003 PushLocal(0)
-0004 Int(1 -> 1)
-0005 LineNumber(3)
-0006 OpAdd
-0007 StoreLocal(0)
-0008 PushLocal(0)
-0009 Int(2 -> 10)
-0010 OpGreaterThan
-0011 JumpIfFalsePop(14)
-0012 Jump(15)
-0013 LineNumber(4)
-0014 Jump(2)
-0015 Pop
-0016 Exit
+L1: 0000 Int(0 -> 0)
+L3: 0001 PushGlobal(0)
+    0002 Int(1 -> 1)
+    0003 OpAdd
+    0004 StoreGlobal(0)
+L4: 0005 PushGlobal(0)
+    0006 Int(2 -> 10)
+    0007 OpGreaterThan
+L5: 0008 JumpIfFalsePop(10)
+    0009 Jump(11)
+    0010 Jump(1)
+    0011 Pop
+    0012 Exit

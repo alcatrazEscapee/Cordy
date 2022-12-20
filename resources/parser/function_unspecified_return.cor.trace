@@ -1,0 +1,20 @@
+L1: 0000 Function(0 -> FunctionImpl { head: 2, nargs: 1, name: "foo", args: ["x"] })
+L2: 0001 Jump(12)
+    0002 PushLocal(0)
+    0003 Int(0 -> 1)
+L3: 0004 OpGreaterThan
+    0005 JumpIfFalsePop(9)
+L5: 0006 True
+    0007 Pop
+L6: 0008 Jump(11)
+L9: 0009 False
+    0010 Noop
+    0011 Return
+    0012 PushGlobal(0)
+    0013 Int(1 -> 2)
+    0014 OpFuncEval(1)
+    0015 Bound(Print)
+    0016 OpFuncCompose
+    0017 Pop
+    0018 Pop
+    0019 Exit

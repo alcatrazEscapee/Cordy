@@ -142,7 +142,7 @@ And replace the values for the traces you want to enable with `on`:
 - Regex (some sort of impl)
 - Pattern matching / deconstruction
 - Even MORE standard library functions
-- User defined functions
+- ~~User defined functions~~
 - Lambdas
 - Closures
 - VS Code: https://code.visualstudio.com/api/language-extensions/overview

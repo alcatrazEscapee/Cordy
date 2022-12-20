@@ -11,14 +11,19 @@ pub enum Opcode {
     JumpIfFalsePop(u16),
     JumpIfTrue(u16),
     Jump(u16),
+    Return,
 
     // Stack Operations
-    Dupe, // ... x, y, z] -> ... x, y, z, z]
     Pop,
     PopN(u16),
 
+    // Note: Local + Global does not, for the VM, mean in terms of block scoped
+    // Rather, it means if this variable is accessed in the stack relative to the stack frame, or relative to the stack bottom
+    // In this regard it refers to variables outside of functions (top level, even within block scopes), and variables within functions
     PushLocal(u16),
     StoreLocal(u16),
+    PushGlobal(u16),
+    StoreGlobal(u16),
 
     // Push
     Nil,
@@ -26,6 +31,7 @@ pub enum Opcode {
     False,
     Int(u16),
     Str(u16),
+    Function(u16),
     Bound(StdBinding),
     List(u16),
 
@@ -37,7 +43,9 @@ pub enum Opcode {
     // Binary Operators
     // Ordered by precedence, highest to lowest
     OpFuncEval(u8),
-    OpArrayEval(u8),
+    OpIndex,
+    OpSlice,
+    OpSliceWithStep,
 
     OpMul,
     OpDiv,
@@ -51,6 +59,12 @@ pub enum Opcode {
     OpLeftShift,
     OpRightShift,
 
+    OpBitwiseAnd,
+    OpBitwiseOr,
+    OpBitwiseXor,
+
+    OpFuncCompose,
+
     OpLessThan,
     OpGreaterThan,
     OpLessThanEqual,
@@ -58,17 +72,7 @@ pub enum Opcode {
     OpEqual,
     OpNotEqual,
 
-    OpBitwiseAnd,
-    OpBitwiseOr,
-    OpBitwiseXor,
-
-    OpFuncCompose,
-    OpIndex,
-    OpSlice,
-    OpSliceWithStep,
-
     // Special
-    LineNumber(u16),
     Exit,
 }
 
