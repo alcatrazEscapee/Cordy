@@ -1,6 +1,4 @@
-use std::collections::HashMap;
-use std::iter::Peekable;
-use std::vec::IntoIter;
+use std::collections::{HashMap, VecDeque};
 
 use crate::compiler::scanner::{ScanResult, ScanToken};
 use crate::stdlib::StdBinding;
@@ -10,6 +8,7 @@ use crate::trace;
 use ScanToken::{*};
 use ParserErrorType::{*};
 use Opcode::{*};
+use crate::vm::value::FunctionImpl;
 
 
 pub fn parse(bindings: HashMap<&'static str, StdBinding>, scan_result: ScanResult) -> ParserResult {
@@ -18,8 +17,12 @@ pub fn parse(bindings: HashMap<&'static str, StdBinding>, scan_result: ScanResul
     ParserResult {
         code: parser.output,
         errors: parser.errors,
+
         strings: parser.strings,
         constants: parser.constants,
+        functions: parser.functions,
+
+        line_numbers: parser.line_numbers,
     }
 }
 
@@ -29,7 +32,45 @@ pub struct ParserResult {
 
     pub strings: Vec<String>,
     pub constants: Vec<i64>,
+    pub functions: Vec<FunctionImpl>,
+
+    pub line_numbers: Vec<u16>,
 }
+
+
+impl ParserResult {
+
+    pub fn disassemble(self: &Self) -> Vec<String> {
+        let mut lines: Vec<String> = Vec::new();
+        let mut width: usize = 0;
+        let mut longest: usize = (self.line_numbers.last().unwrap_or(&0) + 1) as usize;
+        while longest > 0 {
+            width += 1;
+            longest /= 10;
+        }
+
+        let mut last_line_no: u16 = 0;
+        for (ip, token) in self.code.iter().enumerate() {
+            let line_no = self.line_numbers.get(ip).unwrap_or_else(|| self.line_numbers.last().unwrap());
+            let label: String = if line_no + 1 != last_line_no {
+                last_line_no = line_no + 1;
+                format!("L{:0>width$}: ", line_no + 1, width = width)
+            } else {
+                " ".repeat(width + 3)
+            };
+            let asm: String = match token {
+                Opcode::Int(cid) => format!("Int({} -> {})", cid, self.constants[*cid as usize]),
+                Str(sid) => format!("Str({} -> {:?})", sid, self.strings[*sid as usize]),
+                Function(fid) => format!("Function({} -> {:?})", fid, self.functions[*fid as usize]),
+                t => format!("{:?}", t),
+            };
+            lines.push(format!("{}{:0>4} {}", label, ip % 10_000, asm));
+        }
+        lines
+    }
+}
+
+
 
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub struct ParserError {
@@ -40,6 +81,8 @@ pub struct ParserError {
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub enum ParserErrorType {
     UnexpectedEoF,
+    UnexpectedEofExpectingVariableNameAfterLet,
+    UnexpectedEofExpectingFunctionNameAfterFn,
     UnexpectedEoFExpecting(ScanToken),
     UnexpectedTokenAfterEoF(ScanToken),
 
@@ -51,6 +94,9 @@ pub enum ParserErrorType {
     ExpectedColonOrEndOfSlice(ScanToken),
     ExpectedStatement(ScanToken),
     ExpectedVariableNameAfterLet(ScanToken),
+    ExpectedFunctionNameAfterFn(ScanToken),
+    ExpectedParameterOrEndOfList(ScanToken),
+    ExpectedCommaOrEndOfParameters(ScanToken),
 
     LocalVariableConflict(String),
     UndeclaredIdentifier(String),
@@ -63,21 +109,23 @@ pub enum ParserErrorType {
 
 struct Parser {
     bindings: HashMap<&'static str, StdBinding>,
-    input: Peekable<IntoIter<ScanToken>>,
+    input: VecDeque<ScanToken>,
     output: Vec<Opcode>,
     errors: Vec<ParserError>,
 
-    lineno: usize,
+    lineno: u16,
+    line_numbers: Vec<u16>,
 
     error_recovery: bool, // If we are in error recover mode, this flag is set
     multiple_expression_statements_per_line: bool, // If a expression statement has already been parsed before a new line or ';', this flag is set
-    lookahead: Option<ScanToken>, // A token we pretend 'push back onto' the input iterator
 
     locals: Vec<Local>, // Table of all locals, placed at the bottom of the stack
     scope_depth: u16, // Scope depth
+    function_depth: u16,
 
     strings: Vec<String>,
     constants: Vec<i64>,
+    functions: Vec<FunctionImpl>,
 
     // Loop stack
     // Each frame represents a single loop, which `break` and `continue` statements refer to
@@ -102,14 +150,15 @@ impl Loop {
 #[derive(Eq, PartialEq, Debug, Clone)]
 struct Local {
     name: String,
-    depth: u16,
+    scope_depth: u16,
+    function_depth: u16,
     index: u16,
     initialized: bool,
 }
 
 impl Local {
-    fn new(name: String, depth: u16, index: u16) -> Local {
-        Local { name, depth, index, initialized: false }
+    fn new(name: String, scope_depth: u16, function_depth: u16, index: u16) -> Local {
+        Local { name, scope_depth, function_depth, index, initialized: false }
     }
 }
 
@@ -117,6 +166,7 @@ impl Local {
 enum VariableType {
     //StructOrDerivedBinding, // this one is complicated, since it is a type based dispatch against user defined types...
     Local(u16),
+    Global(u16),
     TopLevelBinding(StdBinding),
     None,
 }
@@ -127,21 +177,23 @@ impl Parser {
     fn new(bindings: HashMap<&'static str, StdBinding>, tokens: Vec<ScanToken>) -> Parser {
         Parser {
             bindings,
-            input: tokens.into_iter().peekable(),
+            input: tokens.into_iter().collect::<VecDeque<ScanToken>>(),
             output: Vec::new(),
             errors: Vec::new(),
 
             lineno: 0,
+            line_numbers: Vec::new(),
 
             error_recovery: false,
             multiple_expression_statements_per_line: false,
-            lookahead: None,
 
             locals: Vec::new(),
             scope_depth: 0,
+            function_depth: 0,
 
             strings: Vec::new(),
             constants: Vec::new(),
+            functions: Vec::new(),
 
             loops: Vec::new(),
         }
@@ -150,10 +202,10 @@ impl Parser {
     fn parse(self: &mut Self) {
         trace::trace_parser!("rule <root>");
         self.parse_statements();
-        self.pop_locals_in_current_scope_depth(); // Pop top level 'local' variables
+        self.pop_locals_in_current_scope_depth(true); // Pop top level 'local' variables
         if let Some(t) = self.peek() {
             let token: ScanToken = t.clone();
-            self.push_err(UnexpectedTokenAfterEoF(token));
+            self.error(UnexpectedTokenAfterEoF(token));
         }
         self.push(Exit);
     }
@@ -162,15 +214,16 @@ impl Parser {
         trace::trace_parser!("rule <statements>");
         loop {
             match self.peek() {
-                Some(KeywordFn) => self.parse_function(),
-                Some(KeywordLet) => self.parse_let(),
+                Some(KeywordFn) => self.parse_function_statement(),
+                Some(KeywordReturn) => self.parse_return_statement(),
+                Some(KeywordLet) => self.parse_let_statement(),
                 Some(KeywordIf) => self.parse_if_statement(),
                 Some(KeywordLoop) => self.parse_loop_statement(),
                 Some(KeywordWhile) => self.parse_while_statement(),
                 Some(KeywordFor) => self.parse_for(),
                 Some(KeywordBreak) => self.parse_break_statement(),
                 Some(KeywordContinue) => self.parse_continue_statement(),
-                Some(ScanToken::Identifier(_)) => self.parse_assignment(),
+                Some(Identifier(_)) => self.parse_assignment(),
                 Some(OpenBrace) => self.parse_block_statement(),
                 Some(CloseBrace) => break, // Don't consume, but break if we're in an error mode
                 Some(KeywordExit) => {
@@ -194,13 +247,146 @@ impl Parser {
         self.multiple_expression_statements_per_line = false;
         self.parse_statements();
         self.multiple_expression_statements_per_line = false;
-        self.pop_locals_in_current_scope_depth();
+        self.pop_locals_in_current_scope_depth(true);
         self.scope_depth -= 1;
         self.expect_resync(CloseBrace);
     }
 
-    fn parse_function(self: &mut Self) {
-        panic!("Functions not implemented in parser");
+    fn parse_function_statement(self: &mut Self) {
+        self.advance(); // Consume `fn`
+        let maybe_name: Option<String> = match self.peek() {
+            Some(Identifier(_)) => Some(self.take_identifier()),
+            Some(t) => {
+                let token: ScanToken = t.clone();
+                self.error(ExpectedFunctionNameAfterFn(token));
+                None // Continue parsing as we can resync on the ')' and '}'
+            },
+            None => {
+                self.error(UnexpectedEofExpectingFunctionNameAfterFn);
+                return
+            }
+        };
+
+        self.expect(OpenParen);
+
+        // Parameters
+        let mut args: Vec<String> = Vec::new();
+        loop {
+            match self.peek() {
+                Some(Identifier(_)) => args.push(self.take_identifier()),
+                Some(CloseParen) => break,
+                Some(t) => {
+                    let token = t.clone();
+                    self.error(ExpectedParameterOrEndOfList(token));
+                    break
+                },
+                None => break
+            }
+
+            match self.peek() {
+                Some(Comma) => self.skip(),
+                Some(CloseParen) => break,
+                Some(t) => {
+                    let token: ScanToken = t.clone();
+                    self.error(ExpectedCommaOrEndOfParameters(token));
+                    break
+                },
+                None => break
+            }
+        }
+
+        self.expect_resync(CloseParen);
+
+        if let Some(name) = maybe_name {
+            // The function itself is a complicated local variable, and needs to be declared as such
+            match self.declare_local(name.clone()) {
+                Some(index) => {
+                    self.locals[index].initialized = true;  // Functions are always initialized, as they can be recursive
+                    let func_start: usize = self.next_opcode() as usize + 2; // Declare the function literal. + 2 to the head because of the leading Jump and function local
+                    let func: u16 = self.declare_function(func_start, name, args.clone());
+                    self.push(Function(func));  // And push the function object itself
+                },
+                None => {
+                    // todo: error case
+                }
+            }
+        }
+
+        let jump: u16 = self.reserve(); // Jump over the function itself, the first time we encounter it
+
+        // Functions have their own depth tracking in addition to scope
+        // In addition, we let parameters have their own scope depth one outside locals to the function
+        // This lets us 1) declare parameters here, in the right scope,
+        // and 2) avoid popping parameters at the end of a function call (as they're handled by the `Return` opcode instead)
+        self.function_depth += 1;
+        self.scope_depth += 1;
+
+        for arg in args {
+            match self.declare_local(arg) {
+                Some(index) => {
+                    // They are automatically initialized, and we don't need to push `Nil` for them, since they're provided from the stack due to call semantics
+                    self.locals[index].initialized = true;
+                },
+                None => {
+                    // todo: error case, parameter conflict
+                }
+            }
+        }
+
+        // Slightly modified version of parse_block_statement() to handle return value injection
+        trace::trace_parser!("rule <block-statement>");
+        self.expect(OpenBrace);
+        self.scope_depth += 1;
+        self.multiple_expression_statements_per_line = false;
+        self.parse_statements();
+
+        // Handle implicit return values
+        // The last expression in a function is interpreted as the return value, without an explicit `return` keyword
+        // We just detect if an expression was just popped, and if so, return it
+        let last_index: usize = self.output.len() - 1;
+        let last: &Opcode = &self.output[last_index];
+        if last == &Pop {
+            // We identified a `Pop`, and as the next instruction will be `return`, we can replace it with `Noop`
+            // Note that we can't replace it with `Return` directly, as there may be jumps pointing to the *next* token after this pop.
+            self.output[last_index] = Noop;
+        } else {
+            // No final expression, so push and return `nil` instead
+            self.push(Nil);
+        }
+        self.push(Return);
+
+        self.multiple_expression_statements_per_line = false;
+        self.pop_locals_in_current_scope_depth(true);
+        self.scope_depth -= 1;
+
+        self.pop_locals_in_current_scope_depth(false); // Pop the parameters from the parser's knowledge of locals, but don't emit Pop / PopN
+        self.function_depth -= 1;
+        self.scope_depth -= 1;
+
+        self.expect_resync(CloseBrace);
+
+        let end: u16 = self.next_opcode(); // Repair the jump
+        self.output[jump as usize] = Jump(end);
+    }
+
+    fn parse_return_statement(self: &mut Self) {
+        self.advance(); // Consume `return`
+        match self.peek() {
+            Some(CloseBrace) => { // Allow a bare return, but only when followed by a `}` or `;`, which we can recognize and discard properly.
+                 self.push(Nil);
+            },
+            Some(Semicolon) => {
+                self.push(Nil);
+                self.advance();
+            },
+            _ => {
+                // Otherwise we require an expression
+                self.parse_expression();
+            }
+        }
+        // As the VM cleans up it's own call stack properly, by discarding everything above the function's frame when exiting,
+        // we don't need to clean up the call stack ourselves! And that's brilliant!
+        self.push(Return);
     }
 
     // ===== Control Flow ===== //
@@ -325,7 +511,7 @@ impl Parser {
                 let jump: u16 = self.reserve();
                 self.loops.last_mut().unwrap().break_statements.push(jump);
             },
-            None => self.push_err(BreakOutsideOfLoop),
+            None => self.error(BreakOutsideOfLoop),
         }
     }
 
@@ -338,18 +524,18 @@ impl Parser {
                 self.pop_locals_in_current_loop();
                 self.push(Jump(jump_to));
             },
-            None => self.push_err(ContinueOutsideOfLoop),
+            None => self.error(ContinueOutsideOfLoop),
         }
     }
 
     // ===== Variables + Expressions ===== //
 
-    fn parse_let(self: &mut Self) {
+    fn parse_let_statement(self: &mut Self) {
         trace::trace_parser!("rule <let-statement>");
         self.advance();
         loop {
             let local: usize = match self.peek() {
-                Some(ScanToken::Identifier(_)) => {
+                Some(Identifier(_)) => {
                     let name: String = self.take_identifier();
                     match self.declare_local(name) {
                         Some(l) => l,
@@ -358,10 +544,13 @@ impl Parser {
                 },
                 Some(t) => {
                     let token: ScanToken = t.clone();
-                    self.push_err(ExpectedVariableNameAfterLet(token));
+                    self.error(ExpectedVariableNameAfterLet(token));
                     break
                 },
-                None => break
+                None => {
+                    self.error(UnexpectedEofExpectingVariableNameAfterLet);
+                    break
+                }
             };
 
             match self.peek() {
@@ -392,8 +581,7 @@ impl Parser {
 
     fn parse_assignment(self: &mut Self) {
         trace::trace_parser!("rule <assignment-statement>");
-        let name: String = self.take_identifier();
-        let maybe_op: Option<Opcode> = match self.peek() {
+        let maybe_op: Option<Opcode> = match self.peek2() {
             Some(Equals) => Some(OpEqual), // Fake operator
             Some(PlusEquals) => Some(OpAdd),
             Some(MinusEquals) => Some(OpSub),
@@ -411,11 +599,13 @@ impl Parser {
         if let Some(op) = maybe_op {
 
             // Resolve the variable name
+            let name: String = self.take_identifier();
             let (store_op, push_op) = match self.resolve_identifier(&name) {
                 VariableType::Local(local) => (StoreLocal(local), PushLocal(local)),
+                VariableType::Global(local) => (StoreGlobal(local), PushGlobal(local)),
                 _ => {
                     let token: String = name.clone();
-                    self.push_err(AssignmentToNotVariable(token));
+                    self.error(AssignmentToNotVariable(token));
                     return
                 }
             };
@@ -430,10 +620,8 @@ impl Parser {
             }
             self.push(store_op);
         } else {
-            // In this case, we matched (and consumed) <name> without a following '=' or other assignment operator.
-            // This must be part of an expression, but we need to first push the lookahead identifier.
-            // A bare expression that starts with an identifier token also must end with a `Pop` opcode.
-            self.push_lookahead(Identifier(name));
+            // In this case, we matched <name> without a following '=' or other assignment operator.
+            // This must be part of an expression statement.
             self.parse_expression_statement();
         }
     }
@@ -448,7 +636,7 @@ impl Parser {
                     self.parse_expression();
                     self.push(Pop);
                 } else {
-                    self.push_err(ExpectedStatement(token))
+                    self.error(ExpectedStatement(token))
                 }
             },
             None => {},
@@ -474,12 +662,13 @@ impl Parser {
                 let cid: u16 = self.declare_constant(int);
                 self.push(Opcode::Int(cid));
             },
-            Some(ScanToken::Identifier(_)) => {
+            Some(Identifier(_)) => {
                 let string: String = self.take_identifier();
                 match self.resolve_identifier(&string) {
                     VariableType::Local(local) => self.push(PushLocal(local)),
+                    VariableType::Global(local) => self.push(PushGlobal(local)),
                     VariableType::TopLevelBinding(b) => self.push(Bound(b)),
-                    _ => self.push_err(UndeclaredIdentifier(string))
+                    _ => self.error(UndeclaredIdentifier(string))
                 };
             },
             Some(StringLiteral(_)) => {
@@ -506,7 +695,7 @@ impl Parser {
                                 Some(CloseSquareBracket) => {}, // Skip
                                 Some(t) => {
                                     let token: ScanToken = t.clone();
-                                    self.push_err(ExpectedCommaOrEndOfList(token))
+                                    self.error(ExpectedCommaOrEndOfList(token))
                                 }
                                 None => break
                             }
@@ -521,11 +710,11 @@ impl Parser {
             Some(e) => {
                 let token: ScanToken = e.clone();
                 self.push(Nil);
-                self.push_err(ExpectedExpressionTerminal(token));
+                self.error(ExpectedExpressionTerminal(token));
             },
             _ => {
                 self.push(Nil);
-                self.push_err(UnexpectedEoF)
+                self.error(UnexpectedEoF)
             },
         }
     }
@@ -574,12 +763,12 @@ impl Parser {
                                 Some(CloseParen) => self.skip(),
                                 Some(c) => {
                                     let token: ScanToken = c.clone();
-                                    self.push_err(ExpectedCommaOrEndOfArguments(token))
+                                    self.error(ExpectedCommaOrEndOfArguments(token))
                                 },
-                                _ => self.push_err(UnexpectedEoF),
+                                _ => self.error(UnexpectedEoF),
                             }
                         }
-                        None => self.push_err(UnexpectedEoF),
+                        None => self.error(UnexpectedEoF),
                     }
                     self.push(OpFuncEval(count));
                 },
@@ -606,7 +795,7 @@ impl Parser {
                         },
                         Some(t) => { // Anything else was a syntax error
                             let token: ScanToken = t.clone();
-                            self.push_err(ExpectedColonOrEndOfSlice(token));
+                            self.error(ExpectedColonOrEndOfSlice(token));
                             continue
                         },
                         _ => self.expect(CloseSquareBracket),
@@ -639,7 +828,7 @@ impl Parser {
                         },
                         Some(t) => { // Anything else was a syntax error
                             let token: ScanToken = t.clone();
-                            self.push_err(ExpectedColonOrEndOfSlice(token));
+                            self.error(ExpectedColonOrEndOfSlice(token));
                             continue;
                         },
                         _ => self.expect(CloseSquareBracket),
@@ -832,47 +1021,63 @@ impl Parser {
         (self.constants.len() - 1) as u16
     }
 
+    fn declare_function(self: &mut Self, head: usize, name: String, args: Vec<String>) -> u16 {
+        self.functions.push(FunctionImpl::new(head, name, args));
+        (self.functions.len() - 1) as u16
+    }
+
+
     fn next_opcode(self: &Self) -> u16 {
         self.output.len() as u16
     }
 
-    /// After a `let <name>` declaration, tries to declare this as a local variable in the current scope
-    /// Returns `true` if the declaration was valid
+    /// After a `let <name>` or `fn <name>` declaration, tries to declare this as a local variable in the current scope
+    /// Returns the index of the local variable in `locals` if the declaration was successful. Note that the index in `locals is **not** the same as the index used to reference the local (if it is a true local, it will be an offset due to the call stack)
     fn declare_local(self: &mut Self, name: String) -> Option<usize> {
 
         // Walk backwards down the locals stack, and check if there are any locals with the same name in the same scope
         for local in self.locals.iter().rev() {
-            if local.depth != self.scope_depth {
+            if local.scope_depth != self.scope_depth {
                 break
             }
             if local.name == name {
-                self.push_err(LocalVariableConflict(name.clone()));
+                self.error(LocalVariableConflict(name.clone()));
                 return None;
             }
         }
 
+        // Count the current number of locals at the current function depth
+        let mut local_index: u16 = 0;
+        for local in &self.locals {
+            if local.function_depth == self.function_depth {
+                local_index += 1;
+            }
+        }
+
+
         // todo: do we handle binding conflicts at all?
 
         // Local variable is free of conflicts
-        let local: Local = Local::new(name, self.scope_depth, self.locals.len() as u16);
-        let index: usize = local.index as usize;
+        let local: Local = Local::new(name, self.scope_depth, self.function_depth, local_index);
         self.locals.push(local);
-        Some(index)
+        Some(self.locals.len() - 1)
     }
 
     /// Pops all locals declared in the current scope, *before* decrementing the scope depth
     /// Also emits the relevant `OpPop` opcodes to the output token stream.
-    fn pop_locals_in_current_scope_depth(self: &mut Self) {
+    fn pop_locals_in_current_scope_depth(self: &mut Self, emit_pop_token: bool) {
         let mut local_depth: u16 = 0;
         while let Some(local) = self.locals.last() {
-            if local.depth == self.scope_depth {
+            if local.scope_depth == self.scope_depth {
                 self.locals.pop().unwrap();
                 local_depth += 1;
             } else {
                 break
             }
         }
-        self.push_pop(local_depth);
+        if emit_pop_token {
+            self.push_pop(local_depth);
+        }
     }
 
     /// Pops all locals that are within the most recent loop, and outputs the relevant `Pop` / `PopN` opcodes
@@ -882,7 +1087,7 @@ impl Parser {
         let mut local_depth: u16 = 0;
 
         for local in self.locals.iter().rev() {
-            if local.depth > loop_stmt.depth {
+            if local.scope_depth > loop_stmt.depth {
                 local_depth += 1;
             } else {
                 break
@@ -892,16 +1097,18 @@ impl Parser {
     }
 
     fn resolve_identifier(self: &mut Self, name: &String) -> VariableType {
-        // Resolution Strategy
-        // 1. Struct Fields and Derived Bindings
-        // 2. Local Variables
-        // 3. Global Variables
-        // 4. Top Level Bindings
-
         // Search for local variables in reverse order
+        // Locals can be accessed in multiple ways:
+        // 1. Locals (in the current call frame), with the same function depth
+        // 2. Globals (relative to the stack base), with function depth == 0
+        // 3. UpValues (todo)
         for local in self.locals.iter().rev() {
             if &local.name == name && local.initialized {
-                return VariableType::Local(local.index);
+                if local.function_depth == 0 {
+                    return VariableType::Global(local.index);
+                } else if local.function_depth == self.function_depth {
+                    return VariableType::Local(local.index);
+                }
             }
         }
 
@@ -917,17 +1124,16 @@ impl Parser {
 
     /// If the given token is present, accept it. Otherwise, flag an error and enter error recovery mode.
     fn expect(self: &mut Self, token: ScanToken) {
-        self.skip_new_line();
         match self.peek() {
             Some(t) if t == &token => {
                 trace::trace_parser!("expect {:?} -> pass", token);
-                self.raw_next();
+                self.advance();
             }
             Some(t) => {
                 let t0: ScanToken = t.clone();
-                self.push_err(Expecting(token, t0))
+                self.error(Expecting(token, t0))
             },
-            None => self.push_err(UnexpectedEoFExpecting(token)),
+            None => self.error(UnexpectedEoFExpecting(token)),
         }
     }
 
@@ -935,8 +1141,6 @@ impl Parser {
     /// Accepts tokens from the input (ignoring the current state of error recovery mode), until we reach the expected token or an empty input.
     /// If we reach the expected token, it is consumed and error mode is unset.
     fn expect_resync(self: &mut Self, token: ScanToken) {
-        self.skip_new_line();
-
         if let Some(t) = self.peek() { // First, check for expect() without raising an error
             if *t == token {
                 trace::trace_parser!("expect_resync {:?} -> pass", token);
@@ -944,20 +1148,24 @@ impl Parser {
                 return;
             }
         }
-        loop { // Then if we fail, start resync
-            self.skip_new_line();
-            match self.raw_peek() {
+        loop {
+            // Then if we fail, start resync. Initially set error recovery `false`, so we can peek ahead at the input.
+            self.error_recovery = false;
+            match self.peek() {
                 Some(t) if *t == token => {
                     trace::trace_parser!("expect_resync {:?} -> synced", token);
-                    self.error_recovery = false;
-                    self.raw_next();
+                    self.advance();
                     break;
                 },
                 Some(_t) => {
                     trace::trace_parser!("expect_resync {:?} -> discarding {:?}", token, _t);
-                    self.raw_next();
+                    self.advance();
                 },
-                None => break
+                None => {
+                    // Error recovery failed, so we need to reset it
+                    self.error_recovery = true;
+                    break
+                }
             }
         }
     }
@@ -973,7 +1181,7 @@ impl Parser {
     /// **Important**: Must only be called once `peek()` has identified an `Identifier` token is present, as this will panic otherwise.
     fn take_identifier(self: &mut Self) -> String {
         match self.advance() {
-            Some(ScanToken::Identifier(name)) => name,
+            Some(Identifier(name)) => name,
             t => panic!("Token mismatch in advance_identifier() -> expected an Some(Identifier(String)), got a {:?} instead", t)
         }
     }
@@ -999,12 +1207,35 @@ impl Parser {
     /// Peeks at the next incoming token.
     /// Note that this function only returns a read-only reference to the underlying token, suitable for matching
     /// If the token data needs to be unboxed, i.e. as with `Identifier` tokens, it must be extracted only via `advance()`
-    fn peek(self: &mut Self) -> Option<&ScanToken> {
+    /// This also does not consume newline tokens in the input, rather peeks _past_ them in order to find the next matching token.
+    fn peek(self: &Self) -> Option<&ScanToken> {
         if self.error_recovery {
             return None
         }
-        self.skip_new_line();
-        self.raw_peek()
+        for token in &self.input {
+            if token != &NewLine {
+                return Some(token)
+            }
+        }
+        None
+    }
+
+    // Like `peek()` but peeks one ahead (making this technically a lookahead 2 parser)
+    fn peek2(self: &mut Self) -> Option<&ScanToken> {
+        if self.error_recovery {
+            return None
+        }
+        let mut first: bool = false;
+        for token in &self.input {
+            if token != &NewLine {
+                if !first {
+                    first = true;
+                } else {
+                    return Some(token)
+                }
+            }
+        }
+        None
     }
 
     /// Like `advance()` but discards the result.
@@ -1013,29 +1244,24 @@ impl Parser {
     }
 
     /// Advances and returns the next incoming token.
+    /// Will also advance past any newline tokens, and so the advanced token will be the next token _after_ any newlines between the last token and the next.
     fn advance(self: &mut Self) -> Option<ScanToken> {
         if self.error_recovery {
             return None
         }
-        self.skip_new_line();
-        trace::trace_parser!("advance {:?}", self.input.peek());
-        self.raw_next()
-    }
-
-    fn skip_new_line(self: &mut Self) {
-        while let Some(NewLine) = self.raw_peek() {
-            trace::trace_parser!("advance NewLine L{}", self.lineno);
-            self.raw_next();
+        while let Some(NewLine) = self.input.front() {
+            trace::trace_parser!("newline {} at opcode {}, last = {:?}", self.lineno + 1, self.next_opcode(), self.line_numbers.last());
+            self.input.pop_front();
             self.lineno += 1;
-            self.output.push(LineNumber(self.lineno as u16));
-            self.multiple_expression_statements_per_line = false;
         }
+        trace::trace_parser!("advance {:?}", self.input.front());
+        self.input.pop_front()
     }
 
     /// Reserves a space in the output code by inserting a `Noop` token
     /// Returns an index to the token, which can later be used to set the correct value
     fn reserve(self: &mut Self) -> u16 {
-        trace::trace_parser!("reserve at {}", self.output.len() - 1);
+        trace::trace_parser!("reserve at {}", self.output.len());
         self.output.push(Noop);
         (self.output.len() - 1) as u16
     }
@@ -1054,42 +1280,19 @@ impl Parser {
     fn push(self: &mut Self, token: Opcode) {
         trace::trace_parser!("push {:?}", token);
         self.output.push(token);
+        self.line_numbers.push(self.lineno)
     }
 
     /// Pushes a new error token into the output error stream.
-    fn push_err(self: &mut Self, error: ParserErrorType) {
+    fn error(self: &mut Self, error: ParserErrorType) {
         trace::trace_parser!("push_err (error = {}) {:?}", self.error_recovery, error);
         if !self.error_recovery {
             self.errors.push(ParserError {
                 error,
-                lineno: self.lineno,
+                lineno: self.lineno as usize,
             });
         }
         self.error_recovery = true;
-    }
-
-    /// Inserts a scan token back into the input stream.
-    /// This is required as we technically have a lookahead 2 parser.
-    fn push_lookahead(self: &mut Self, token: ScanToken) {
-        assert!(self.lookahead.is_none());
-        self.lookahead = Some(token);
-    }
-
-    // ===== Interactions with `input` ===== //
-
-    fn raw_next(self: &mut Self) -> Option<ScanToken> {
-        if self.lookahead.is_some() {
-            trace::trace_parser!("take lookahead");
-            return self.lookahead.take();
-        }
-        self.input.next()
-    }
-
-    fn raw_peek(self: &mut Self) -> Option<&ScanToken> {
-        if self.lookahead.is_some() {
-            return self.lookahead.as_ref();
-        }
-        self.input.peek()
     }
 }
 
@@ -1107,37 +1310,38 @@ mod tests {
 
     use crate::vm::opcode::Opcode::{*};
 
-    #[test] fn test_str_empty() { run_expr("", vec![Nil]); }
-    #[test] fn test_str_int() { run_expr("123", vec![Int(123)]); }
-    #[test] fn test_str_str() { run_expr("'abc'", vec![Str(0)]); }
-    #[test] fn test_str_unary_minus() { run_expr("-3", vec![Int(3), UnarySub]); }
-    #[test] fn test_str_binary_mul() { run_expr("3 * 6", vec![Int(3), Int(6), OpMul]); }
-    #[test] fn test_str_binary_div() { run_expr("20 / 4 / 5", vec![Int(20), Int(4), OpDiv, Int(5), OpDiv]); }
-    #[test] fn test_str_binary_pow() { run_expr("2 ** 10", vec![Int(2), Int(10), OpPow]); }
-    #[test] fn test_str_binary_minus() { run_expr("6 - 7", vec![Int(6), Int(7), OpSub]); }
-    #[test] fn test_str_binary_and_unary_minus() { run_expr("15 -- 7", vec![Int(15), Int(7), UnarySub, OpSub]); }
-    #[test] fn test_str_binary_add_and_mod() { run_expr("1 + 2 % 3", vec![Int(1), Int(2), Int(3), OpMod, OpAdd]); }
-    #[test] fn test_str_binary_add_and_mod_rev() { run_expr("1 % 2 + 3", vec![Int(1), Int(2), OpMod, Int(3), OpAdd]); }
-    #[test] fn test_str_binary_shifts() { run_expr("1 << 2 >> 3", vec![Int(1), Int(2), OpLeftShift, Int(3), OpRightShift]); }
-    #[test] fn test_str_binary_shifts_and_operators() { run_expr("1 & 2 << 3 | 5", vec![Int(1), Int(2), Int(3), OpLeftShift, OpBitwiseAnd, Int(5), OpBitwiseOr]); }
-    #[test] fn test_str_function_composition() { run_expr("print . read", vec![Bound(Print), Bound(Read), OpFuncCompose]); }
-    #[test] fn test_str_precedence_with_parens() { run_expr("(1 + 2) * 3", vec![Int(1), Int(2), OpAdd, Int(3), OpMul]); }
-    #[test] fn test_str_precedence_with_parens_2() { run_expr("6 / (5 - 3)", vec![Int(6), Int(5), Int(3), OpSub, OpDiv]); }
-    #[test] fn test_str_precedence_with_parens_3() { run_expr("-(1 - 3)", vec![Int(1), Int(3), OpSub, UnarySub]); }
-    #[test] fn test_str_function_no_args() { run_expr("print", vec![Bound(Print)]); }
-    #[test] fn test_str_function_one_arg() { run_expr("print(1)", vec![Bound(Print), Int(1), OpFuncEval(1)]); }
-    #[test] fn test_str_function_many_args() { run_expr("print(1,2,3)", vec![Bound(Print), Int(1), Int(2), Int(3), OpFuncEval(3)]); }
-    #[test] fn test_str_multiple_unary_ops() { run_expr("- ~ ! 1", vec![Int(1), UnaryLogicalNot, UnaryBitwiseNot, UnarySub]); }
-    #[test] fn test_str_multiple_function_calls() { run_expr("print (1) (2) (3)", vec![Bound(Print), Int(1), OpFuncEval(1), Int(2), OpFuncEval(1), Int(3), OpFuncEval(1)]); }
-    #[test] fn test_str_multiple_function_calls_some_args() { run_expr("print () (1) (2, 3)", vec![Bound(Print), OpFuncEval(0), Int(1), OpFuncEval(1), Int(2), Int(3), OpFuncEval(2)]); }
-    #[test] fn test_str_multiple_function_calls_no_args() { run_expr("print () () ()", vec![Bound(Print), OpFuncEval(0), OpFuncEval(0), OpFuncEval(0)]); }
-    #[test] fn test_str_function_call_unary_op_precedence() { run_expr("- print ()", vec![Bound(Print), OpFuncEval(0), UnarySub]); }
-    #[test] fn test_str_function_call_unary_op_precedence_with_parens() { run_expr("(- print) ()", vec![Bound(Print), UnarySub, OpFuncEval(0)]); }
-    #[test] fn test_str_function_call_unary_op_precedence_with_parens_2() { run_expr("- (print () )", vec![Bound(Print), OpFuncEval(0), UnarySub]); }
-    #[test] fn test_str_function_call_binary_op_precedence() { run_expr("print ( 1 ) + ( 2 ( 3 ) )", vec![Bound(Print), Int(1), OpFuncEval(1), Int(2), Int(3), OpFuncEval(1), OpAdd]); }
-    #[test] fn test_str_function_call_parens_1() { run_expr("print . read (1 + 3) (5)", vec![Bound(Print), Bound(Read), Int(1), Int(3), OpAdd, OpFuncEval(1), Int(5), OpFuncEval(1), OpFuncCompose]); }
-    #[test] fn test_str_function_call_parens_2() { run_expr("( print . read (1 + 3) ) (5)", vec![Bound(Print), Bound(Read), Int(1), Int(3), OpAdd, OpFuncEval(1), OpFuncCompose, Int(5), OpFuncEval(1)]); }
-    #[test] fn test_str_function_composition_with_is() { run_expr("'123' . int is int . print", vec![Str(0), Bound(StdBinding::Int), Bound(StdBinding::Int), OpIs, OpFuncCompose, Bound(StdBinding::Print), OpFuncCompose]); }
+
+    #[test] fn test_empty_expr() { run_expr("", vec![Nil]); }
+    #[test] fn test_int() { run_expr("123", vec![Int(123)]); }
+    #[test] fn test_str() { run_expr("'abc'", vec![Str(0)]); }
+    #[test] fn test_unary_minus() { run_expr("-3", vec![Int(3), UnarySub]); }
+    #[test] fn test_binary_mul() { run_expr("3 * 6", vec![Int(3), Int(6), OpMul]); }
+    #[test] fn test_binary_div() { run_expr("20 / 4 / 5", vec![Int(20), Int(4), OpDiv, Int(5), OpDiv]); }
+    #[test] fn test_binary_pow() { run_expr("2 ** 10", vec![Int(2), Int(10), OpPow]); }
+    #[test] fn test_binary_minus() { run_expr("6 - 7", vec![Int(6), Int(7), OpSub]); }
+    #[test] fn test_binary_and_unary_minus() { run_expr("15 -- 7", vec![Int(15), Int(7), UnarySub, OpSub]); }
+    #[test] fn test_binary_add_and_mod() { run_expr("1 + 2 % 3", vec![Int(1), Int(2), Int(3), OpMod, OpAdd]); }
+    #[test] fn test_binary_add_and_mod_rev() { run_expr("1 % 2 + 3", vec![Int(1), Int(2), OpMod, Int(3), OpAdd]); }
+    #[test] fn test_binary_shifts() { run_expr("1 << 2 >> 3", vec![Int(1), Int(2), OpLeftShift, Int(3), OpRightShift]); }
+    #[test] fn test_binary_shifts_and_operators() { run_expr("1 & 2 << 3 | 5", vec![Int(1), Int(2), Int(3), OpLeftShift, OpBitwiseAnd, Int(5), OpBitwiseOr]); }
+    #[test] fn test_function_composition() { run_expr("print . read", vec![Bound(Print), Bound(Read), OpFuncCompose]); }
+    #[test] fn test_precedence_with_parens() { run_expr("(1 + 2) * 3", vec![Int(1), Int(2), OpAdd, Int(3), OpMul]); }
+    #[test] fn test_precedence_with_parens_2() { run_expr("6 / (5 - 3)", vec![Int(6), Int(5), Int(3), OpSub, OpDiv]); }
+    #[test] fn test_precedence_with_parens_3() { run_expr("-(1 - 3)", vec![Int(1), Int(3), OpSub, UnarySub]); }
+    #[test] fn test_function_no_args() { run_expr("print", vec![Bound(Print)]); }
+    #[test] fn test_function_one_arg() { run_expr("print(1)", vec![Bound(Print), Int(1), OpFuncEval(1)]); }
+    #[test] fn test_function_many_args() { run_expr("print(1,2,3)", vec![Bound(Print), Int(1), Int(2), Int(3), OpFuncEval(3)]); }
+    #[test] fn test_multiple_unary_ops() { run_expr("- ~ ! 1", vec![Int(1), UnaryLogicalNot, UnaryBitwiseNot, UnarySub]); }
+    #[test] fn test_multiple_function_calls() { run_expr("print (1) (2) (3)", vec![Bound(Print), Int(1), OpFuncEval(1), Int(2), OpFuncEval(1), Int(3), OpFuncEval(1)]); }
+    #[test] fn test_multiple_function_calls_some_args() { run_expr("print () (1) (2, 3)", vec![Bound(Print), OpFuncEval(0), Int(1), OpFuncEval(1), Int(2), Int(3), OpFuncEval(2)]); }
+    #[test] fn test_multiple_function_calls_no_args() { run_expr("print () () ()", vec![Bound(Print), OpFuncEval(0), OpFuncEval(0), OpFuncEval(0)]); }
+    #[test] fn test_function_call_unary_op_precedence() { run_expr("- print ()", vec![Bound(Print), OpFuncEval(0), UnarySub]); }
+    #[test] fn test_function_call_unary_op_precedence_with_parens() { run_expr("(- print) ()", vec![Bound(Print), UnarySub, OpFuncEval(0)]); }
+    #[test] fn test_function_call_unary_op_precedence_with_parens_2() { run_expr("- (print () )", vec![Bound(Print), OpFuncEval(0), UnarySub]); }
+    #[test] fn test_function_call_binary_op_precedence() { run_expr("print ( 1 ) + ( 2 ( 3 ) )", vec![Bound(Print), Int(1), OpFuncEval(1), Int(2), Int(3), OpFuncEval(1), OpAdd]); }
+    #[test] fn test_function_call_parens_1() { run_expr("print . read (1 + 3) (5)", vec![Bound(Print), Bound(Read), Int(1), Int(3), OpAdd, OpFuncEval(1), Int(5), OpFuncEval(1), OpFuncCompose]); }
+    #[test] fn test_function_call_parens_2() { run_expr("( print . read (1 + 3) ) (5)", vec![Bound(Print), Bound(Read), Int(1), Int(3), OpAdd, OpFuncEval(1), OpFuncCompose, Int(5), OpFuncEval(1)]); }
+    #[test] fn test_function_composition_with_is() { run_expr("'123' . int is int . print", vec![Str(0), Bound(StdBinding::Int), Bound(StdBinding::Int), OpIs, OpFuncCompose, Bound(StdBinding::Print), OpFuncCompose]); }
     #[test] fn test_and() { run_expr("1 < 2 and 3 < 4", vec![Int(1), Int(2), OpLessThan, JumpIfFalse(8), Pop, Int(3), Int(4), OpLessThan]); }
     #[test] fn test_or() { run_expr("1 < 2 or 3 < 4", vec![Int(1), Int(2), OpLessThan, JumpIfTrue(8), Pop, Int(3), Int(4), OpLessThan]); }
     #[test] fn test_precedence_1() { run_expr("1 . 2 & 3 > 4", vec![Int(1), Int(2), Int(3), OpBitwiseAnd, OpFuncCompose, Int(4), OpGreaterThan]); }
@@ -1154,10 +1358,20 @@ mod tests {
     #[test] fn test_slice_11() { run_expr("1 [:3]", vec![Int(1), Nil, Int(3), OpSlice]); }
     #[test] fn test_slice_12() { run_expr("1 [2:3]", vec![Int(1), Int(2), Int(3), OpSlice]); }
 
+    #[test] fn test_let_eof() { run_err("let", "Unexpected end of file, was expecting variable name after 'let' keyword\n  at: line 1 (<test>)\n  at:\n\nlet\n"); }
+    #[test] fn test_let_no_identifier() { run_err("let =", "Expecting a variable name after 'let' keyword, got '=' token instead\n  at: line 1 (<test>)\n  at:\n\nlet =\n"); }
+    #[test] fn test_let_expression_eof() { run_err("let x =", "Unexpected end of file.\n  at: line 1 (<test>)\n  at:\n\nlet x =\n"); }
+    #[test] fn test_let_no_expression() { run_err("let x = &", "Expected an expression terminal, got '&' token instead\n  at: line 1 (<test>)\n  at:\n\nlet x = &\n"); }
+
     #[test] fn test_break_past_locals() { run("break_past_locals"); }
     #[test] fn test_continue_past_locals() { run("continue_past_locals"); }
     #[test] fn test_empty() { run("empty"); }
     #[test] fn test_expressions() { run("expressions"); }
+    #[test] fn test_function() { run("function"); }
+    #[test] fn test_function_early_return() { run("function_early_return"); }
+    #[test] fn test_function_early_return_nested_scope() { run("function_early_return_nested_scope"); }
+    #[test] fn test_function_unspecified_return() { run("function_unspecified_return"); }
+    #[test] fn test_function_with_parameters() { run("function_with_parameters"); }
     #[test] fn test_global_variables() { run("global_variables"); }
     #[test] fn test_global_assignments() { run("global_assignments"); }
     #[test] fn test_hello_world() { run("hello_world"); }
@@ -1178,7 +1392,8 @@ mod tests {
     #[test] fn test_while_3() { run("while_3"); }
     #[test] fn test_while_4() { run("while_4"); }
 
-    fn run_expr(text: &str, tokens: Vec<Opcode>) {
+
+    fn run_expr(text: &'static str, tokens: Vec<Opcode>) {
         let result: ScanResult = scanner::scan(&String::from(text));
         assert!(result.errors.is_empty());
 
@@ -1199,6 +1414,24 @@ mod tests {
         assert_eq!(tokens, output);
     }
 
+    fn run_err(text: &'static str, output: &'static str) {
+        let text: &String = &String::from(text);
+        let text_lines: Vec<&str> = text.split("\n").collect();
+
+        let scan_result: ScanResult = scanner::scan(&text);
+        assert!(scan_result.errors.is_empty());
+
+        let parse_result: ParserResult = parser::parse(stdlib::bindings(), scan_result);
+        let mut lines: Vec<String> = Vec::new();
+        assert!(!parse_result.errors.is_empty());
+
+        for error in &parse_result.errors {
+            lines.push(reporting::format_parse_error(&text_lines, &String::from("<test>"), error));
+        }
+
+        assert_eq!(lines.join("\n"), output);
+    }
+
     fn run(path: &'static str) {
         let root: String = trace::test::get_test_resource_path("parser", path);
         let text: String = trace::test::get_test_resource_src(&root);
@@ -1207,27 +1440,9 @@ mod tests {
         assert!(scan_result.errors.is_empty());
 
         let parse_result: ParserResult = parser::parse(stdlib::bindings(), scan_result);
-        let strings: Vec<String> = parse_result.strings;
-        let constants: Vec<i64> = parse_result.constants;
+        let mut lines: Vec<String> = parse_result.disassemble();
 
-        let mut lines: Vec<String> = Vec::new();
-
-        if !parse_result.code.is_empty() {
-            lines.push(String::from("=== Parse Tokens ===\n"));
-            for (ip, token) in parse_result.code.iter().enumerate() {
-                lines.push(format!("{:0>4} {}", ip, match token {
-                    Int(cid) => format!("Int({} -> {})", cid, constants[*cid as usize]),
-                    Str(sid) => format!("Str({} -> {:?})", sid, strings[*sid as usize]),
-                    t => format!("{:?}", t),
-                }));
-            }
-        }
         if !parse_result.errors.is_empty() {
-            lines.push(String::from("\n=== Parse Errors ===\n"));
-            for error in &parse_result.errors {
-                lines.push(format!("{:?}", error));
-            }
-            lines.push(String::from("\n=== Formatted Parse Errors ===\n"));
             let mut source: String = String::from(path);
             source.push_str(".cor");
             let src_lines: Vec<&str> = text.lines().collect();

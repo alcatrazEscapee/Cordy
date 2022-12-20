@@ -23,6 +23,7 @@ pub fn bindings() -> HashMap<&'static str, StdBinding> {
         ("bool", Bool),
         ("int", Int),
         ("str", Str),
+        ("function", Function),
         ("repr", Repr),
         ("len", Len),
 
@@ -51,6 +52,7 @@ pub fn lookup_binding(b: &StdBinding) -> &'static str {
         Bool => "bool",
         Int => "int",
         Str => "str",
+        Function => "function",
         Repr => "repr",
         Len => "len",
 
@@ -80,6 +82,7 @@ pub enum StdBinding {
     Bool,
     Int,
     Str,
+    Function,
     Repr,
     Len,
 

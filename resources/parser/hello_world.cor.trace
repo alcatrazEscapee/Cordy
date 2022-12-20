@@ -1,7 +1,5 @@
-=== Parse Tokens ===
-
-0000 Bound(Print)
-0001 Str(0 -> "Hello World!")
-0002 OpFuncEval(1)
-0003 Pop
-0004 Exit
+L1: 0000 Bound(Print)
+    0001 Str(0 -> "Hello World!")
+    0002 OpFuncEval(1)
+    0003 Pop
+    0004 Exit

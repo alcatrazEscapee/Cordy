@@ -1,5 +1,7 @@
+use std::borrow::Borrow;
 use std::cell::RefCell;
 use std::rc::Rc;
+
 use crate::stdlib;
 use crate::stdlib::StdBinding;
 use crate::vm::error::RuntimeErrorType;
@@ -15,6 +17,7 @@ pub enum Value {
     Bool(bool),
     Int(i64),
     Str(Box<String>),
+    Function(Box<FunctionImpl>),
 
     // Reference (Mutable) Types
     // Really shitty memory management for now just using RefCell... in the future maybe we implement a garbage collected system
@@ -26,19 +29,25 @@ pub enum Value {
     PartialBinding(StdBinding, Box<Vec<Box<Value>>>),
 }
 
+#[derive(Eq, PartialEq, Debug, Clone)]
+pub struct FunctionImpl {
+    pub head: usize, // Pointer to the first opcode of the function's execution
+    pub nargs: u8, // The number of arguments the function takes
+    name: String, // The name of the function, useful to show in stack traces
+    args: Vec<String>, // Names of the arguments
+}
+
 
 impl Value {
 
     // Constructors
-    pub fn list(vec: Vec<Value>) -> Value {
-        List(Rc::new(RefCell::new(vec)))
-    }
+    pub fn list(vec: Vec<Value>) -> Value { List(Rc::new(RefCell::new(vec))) }
 
     /// Converts the `Value` to a `String`. This is equivalent to the stdlib function `str()`
     pub fn as_str(self: &Self) -> String {
         match self {
             Str(s) => *s.clone(),
-            List(v) => format!("[{}]", (*v).borrow().iter().map(|t| t.as_str()).collect::<Vec<String>>().join(", ")),
+            List(v) => format!("[{}]", (*v).as_ref().borrow().iter().map(|t| t.as_str()).collect::<Vec<String>>().join(", ")),
             Binding(b) => String::from(stdlib::lookup_binding(b)),
             _ => self.as_repr_str(),
         }
@@ -50,8 +59,15 @@ impl Value {
             Nil => String::from("nil"),
             Bool(b) => b.to_string(),
             Int(i) => i.to_string(),
-            Str(s) => format!("'{}'", s),
-            List(v) => format!("[{}]", (*v).borrow().iter().map(|t| t.as_repr_str()).collect::<Vec<String>>().join(", ")),
+            Str(s) => {
+                let escaped = format!("{:?}", s);
+                format!("'{}'", &escaped[1..escaped.len() - 1])
+            },
+            List(v) => format!("[{}]", (*v).as_ref().borrow().iter().map(|t| t.as_repr_str()).collect::<Vec<String>>().join(", ")),
+            Function(f) => {
+                let f = (*f).as_ref().borrow();
+                format!("fn {}({})", f.name, f.args.join(","))
+            },
             Binding(b) => String::from(stdlib::lookup_binding(b)),
             PartialBinding(b, v) => format!("{}({})", stdlib::lookup_binding(b), v.iter().rev().map(|a| a.as_repr_str()).collect::<Vec<String>>().join(", "))
         }
@@ -65,8 +81,9 @@ impl Value {
             Int(_) => "int",
             Str(_) => "str",
             List(_) => "list",
-            Binding(_) => "function",
-            PartialBinding(_, _) => "partial function",
+            Function(_) => "function",
+            Binding(_) => "native function",
+            PartialBinding(_, _) => "partial native function",
         })
     }
 
@@ -82,6 +99,7 @@ impl Value {
             Int(i) => *i != 0,
             Str(s) => !s.is_empty(),
             List(l) => !l.as_ref().borrow().is_empty(),
+            Function(_) => true,
             Binding(_) => true,
             PartialBinding(_, _) => true,
         }
@@ -115,6 +133,13 @@ impl Value {
         }
     }
 
+    pub fn is_function(self: &Self) -> bool {
+        match self {
+            Function(_) => true,
+            _ => false
+        }
+    }
+
     pub fn is_equal(self: &Self, other: &Value) -> bool {
         match (self, other) {
             (Nil, Nil) => true,
@@ -141,6 +166,18 @@ impl Value {
             (Int(l), Int(r)) => Ok(l <= r),
             (Str(l), Str(r)) => Ok(l <= r),
             (l, r) => Err(RuntimeErrorType::TypeErrorCannotCompare(l.clone(), r.clone()))
+        }
+    }
+}
+
+
+impl FunctionImpl {
+    pub fn new(head: usize, name: String, args: Vec<String>) -> FunctionImpl {
+        FunctionImpl {
+            head,
+            nargs: args.len() as u8,
+            name,
+            args
         }
     }
 }

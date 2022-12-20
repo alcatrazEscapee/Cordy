@@ -9,6 +9,7 @@ use value::Value;
 
 use Opcode::{*};
 use RuntimeErrorType::{*};
+use crate::vm::value::FunctionImpl;
 
 pub mod value;
 pub mod opcode;
@@ -19,14 +20,26 @@ pub struct VirtualMachine<R, W> {
     ip: usize,
     code: Vec<Opcode>,
     stack: Vec<Value>,
+    call_stack: Vec<CallFrame>,
 
     strings: Vec<String>,
     constants: Vec<i64>,
+    functions: Vec<FunctionImpl>,
 
     lineno: u16,
 
     read: R,
     write: W,
+}
+
+struct CallFrame {
+    /// The return address
+    /// When the function returns, execution transfers to this location
+    return_ip: usize,
+
+    /// A pointer into the current runtime stack, where this function's locals are stored
+    /// The local at index 0 will be the function itself, local 1, ...N will be the N parameters, locals after that will be local variables to the function
+    frame_pointer: usize,
 }
 
 
@@ -38,9 +51,11 @@ impl<R, W> VirtualMachine<R, W> where
         VirtualMachine {
             ip: 0,
             code: parser_result.code,
-            stack: Vec::new(),
+            stack: Vec::with_capacity(256), // Just guesses, not hard limits
+            call_stack: Vec::with_capacity(32),
             strings: parser_result.strings,
             constants: parser_result.constants,
+            functions: parser_result.functions,
             lineno: 0,
             read,
             write,
@@ -48,10 +63,15 @@ impl<R, W> VirtualMachine<R, W> where
     }
 
     pub fn run(self: &mut Self) -> Result<(), RuntimeError> {
+        self.call_stack.push(CallFrame {
+            return_ip: 0, frame_pointer: 0
+        });
         loop {
             let op: &Opcode = self.code.get(self.ip).unwrap();
             self.ip += 1;
             match op {
+                Noop => {},
+
                 // Flow Control
                 // All jumps are absolute (because we don't have variable length instructions and it's easy to do so)
                 // todo: relative jumps? theoretically allows us more than u16.max instructions ~ 65k
@@ -78,17 +98,29 @@ impl<R, W> VirtualMachine<R, W> where
                     if a1.as_bool() {
                         self.ip = jump;
                     }
-                }
+                },
                 Jump(ip) => {
                     trace::trace_interpreter!("jump -> {}", ip);
                     self.ip = *ip as usize;
-                }
+                },
+                Return => {
+                    trace::trace_interpreter!("return -> {}", self.return_ip());
+                    // Functions leave their return value as the top of the stack
+                    // Below that will be the functions locals, and the function itself
+                    // The frame pointer points to the first local of the function
+                    // [prev values ... function, local0, local1, ... localN, ret_val ]
+                    //                            ^frame pointer
+                    // So, we pop the return value, splice the difference between the frame pointer and the top, then push the return value
+                    let ret: Value = self.pop();
+                    self.stack.splice(self.frame_pointer() - 1..self.stack.len(), std::iter::empty());
+                    self.push(ret);
+
+                    self.ip = self.return_ip();
+                    self.call_stack.pop().unwrap();
+                    trace::trace_interpreter!("call stack = {}", self.debug_call_stack());
+                },
 
                 // Stack Manipulations
-                Dupe => {
-                    trace::trace_interpreter!("stack dupe {}", self.stack.last().unwrap().as_debug_str());
-                    self.push(self.peek(0).clone());
-                }
                 Pop => {
                     trace::trace_interpreter!("stack pop {}", self.stack.last().unwrap().as_debug_str());
                     self.pop();
@@ -101,15 +133,27 @@ impl<R, W> VirtualMachine<R, W> where
                 }
 
                 PushLocal(local) => {
+                    let local = self.frame_pointer() + *local as usize;
                     trace::trace_interpreter!("push local {} : {}", local, self.stack[local].as_debug_str());
-                    let local = *local as usize;
                     self.push(self.stack[local].clone());
                 }
                 StoreLocal(local) => {
+                    let local: usize = self.frame_pointer() + *local as usize;
                     trace::trace_interpreter!("store local {} : {} -> {}", local, self.stack.last().unwrap().as_debug_str(), self.stack[local].as_debug_str());
-                    let local: usize = *local as usize;
                     self.stack[local] = self.pop();
-                }
+                },
+                PushGlobal(local) => {
+                    // Globals are fancy locals that don't use the frame pointer to offset their local variable ID
+                    // 'global' just means a variable declared outside of an enclosing function
+                    let local: usize = *local as usize;
+                    trace::trace_interpreter!("push global {} : {}", local, self.stack[local].as_debug_str());
+                    self.push(self.stack[local].clone());
+                },
+                StoreGlobal(local) => {
+                    let local: usize = *local as usize;
+                    trace::trace_interpreter!("store global {} : {} -> {}", local, self.stack.last().unwrap().as_debug_str(), self.stack[local].as_debug_str());
+                    self.stack[local] = self.pop();
+                },
 
 
                 // Push Operations
@@ -126,23 +170,29 @@ impl<R, W> VirtualMachine<R, W> where
                     self.push(Value::Bool(false));
                 },
                 Int(cid) => {
-                    trace::trace_interpreter!("push {}", i);
                     let cid: usize = *cid as usize;
                     let value: i64 = self.constants[cid];
+                    trace::trace_interpreter!("push constant {} -> {}", cid, value);
                     self.push(Value::Int(value));
                 }
                 Str(sid) => {
-                    trace::trace_interpreter!("push '{}'", self.constants[sid]);
                     let sid: usize = *sid as usize;
                     let str: String = self.strings[sid].clone();
+                    trace::trace_interpreter!("push {} -> '{}'", sid, str);
                     self.push(Value::Str(Box::new(str)));
-                }
+                },
+                Function(fid) => {
+                    let fid: usize = *fid as usize;
+                    let func = Value::Function(Box::new(self.functions[fid].clone()));
+                    trace::trace_interpreter!("push function {} -> {}", fid, func.as_debug_str());
+                    self.push(func);
+                },
                 Bound(b) => {
-                    trace::trace_interpreter!("push {}", Value::Binding(*b).as_debug_str());
+                    trace::trace_interpreter!("push native function {}", Value::Binding(*b).as_debug_str());
                     self.push(Value::Binding(*b));
                 },
                 List(cid) => {
-                    trace::trace_interpreter!("push [n={}]", n);
+                    trace::trace_interpreter!("push [n={}]", cid);
                     // List values are present on the stack in-order
                     // So we need to splice the last n values of the stack into it's own list
                     let cid: usize = *cid as usize;
@@ -230,6 +280,7 @@ impl<R, W> VirtualMachine<R, W> where
                                 StdBinding::Bool => Value::Bool(a1.is_bool()),
                                 StdBinding::Int => Value::Bool(a1.is_int()),
                                 StdBinding::Str => Value::Bool(a1.is_str()),
+                                StdBinding::Function => Value::Bool(a1.is_function()),
                                 _ => return self.error(TypeErrorBinaryIs(a1, Value::Binding(b)))
                             };
                             self.push(ret);
@@ -252,11 +303,6 @@ impl<R, W> VirtualMachine<R, W> where
                             list3.extend(list2.iter().cloned());
                             self.push(Value::list(list3))
                         },
-                        (l @ Value::List(l1), r) => {
-                            let mut list1 = (*l1).borrow();
-                            list1.push(r);
-                            self.push(l);
-                        }
                         (Value::Str(s1), r) => self.push(Value::Str(Box::new(format!("{}{}", s1, r.as_str())))),
                         (l, Value::Str(s2)) => self.push(Value::Str(Box::new(format!("{}{}", l.as_str(), s2)))),
                         (l, r) => return self.error(TypeErrorBinaryOp(OpAdd, l, r)),
@@ -372,6 +418,7 @@ impl<R, W> VirtualMachine<R, W> where
                     trace::trace_interpreter!("op binary .");
                     let f: Value = self.pop();
                     match f {
+                        // todo: support functions
                         Value::Binding(b) => {
                             // invoke_func_binding() will pop `nargs` arguments off the stack and pass them to the provided function
                             // Unlike `OpFuncEval`, we have already popped the binding off the stack initially
@@ -404,11 +451,24 @@ impl<R, W> VirtualMachine<R, W> where
                 },
 
 
-                OpFuncEval(nargs_borrow) => {
-                    trace::trace_interpreter!("op function evaluate n = {}", nargs_borrow);
-                    let nargs: u8 = *nargs_borrow;
+                OpFuncEval(nargs) => {
+                    trace::trace_interpreter!("op function evaluate n = {}", nargs);
+                    let nargs: u8 = *nargs;
                     let f: &Value = self.peek(nargs as usize);
                     match f {
+                        Value::Function(func) => {
+                            if func.nargs == nargs {
+                                let frame = CallFrame {
+                                    return_ip: self.ip,
+                                    frame_pointer: self.stack.len() - (nargs as usize),
+                                };
+                                self.ip = func.head;
+                                self.call_stack.push(frame);
+                                trace::trace_interpreter!("call stack = {}", self.debug_call_stack());
+                            } else {
+                                return self.error(IncorrectNumberOfFunctionArguments(*func.clone(), nargs))
+                            }
+                        },
                         Value::Binding(b) => {
                             match stdlib::invoke(*b, nargs, self) {
                                 Ok(v) => {
@@ -446,7 +506,7 @@ impl<R, W> VirtualMachine<R, W> where
                         }
                         _ => return self.error(ValueIsNotFunctionEvaluable(f.clone())),
                     }
-                },
+                }
 
                 OpIndex => {
                     trace::trace_interpreter!("op []");
@@ -482,10 +542,7 @@ impl<R, W> VirtualMachine<R, W> where
                     }
                 },
 
-                LineNumber(lineno) => self.lineno = *lineno as u16,
                 Exit => break,
-
-                _ => panic!("Unimplemented {:?}", op)
             }
         }
         trace::trace_interpreter_stack!(": [{}]", self.debug_stack());
@@ -499,12 +556,25 @@ impl<R, W> VirtualMachine<R, W> where
             lineno: self.lineno,
         })
     }
+
+    fn frame_pointer(self: &Self) -> usize {
+        self.call_stack[self.call_stack.len() - 1].frame_pointer
+    }
+
+    fn return_ip(self: &Self) -> usize {
+        self.call_stack[self.call_stack.len() - 1].return_ip
+    }
 }
 
 impl<R, W> VirtualMachine<R, W> {
     #[cfg(trace_interpreter_stack = "on")]
     fn debug_stack(self: &Self) -> String {
         format!(": [{}]", self.stack.iter().rev().map(|t| t.as_debug_str()).collect::<Vec<String>>().join(", "))
+    }
+
+    #[cfg(trace_interpreter = "on")]
+    fn debug_call_stack(self: &Self) -> String {
+        format!(": [{}]", self.call_stack.iter().rev().map(|t| format!("{{fp: {}, ret: {}}}", t.frame_pointer, t.return_ip)).collect::<Vec<String>>().join(", "))
     }
 }
 
@@ -534,31 +604,34 @@ impl<R, W> Stack for VirtualMachine<R, W> {
 
     /// Peeks at the top element of the stack, or an element `offset` down from the top
     fn peek(self: &Self, offset: usize) -> &Value {
-        trace::trace_interpreter_stack!(": [{}]", self.debug_stack());
         trace::trace_interpreter_stack!("peek({}) -> {}", offset, self.stack[self.stack.len() - 1 - offset].as_debug_str());
-        self.stack.get(self.stack.len() - 1 - offset).unwrap()
+        let ret = self.stack.get(self.stack.len() - 1 - offset).unwrap();
+        trace::trace_interpreter_stack!("{}", self.debug_stack());
+        ret
     }
 
     /// Pops the top of the stack
     fn pop(self: &mut Self) -> Value {
-        trace::trace_interpreter_stack!(": [{}]", self.debug_stack());
         trace::trace_interpreter_stack!("pop() -> {}", self.stack.last().unwrap().as_debug_str());
-        self.stack.pop().unwrap()
+        let ret = self.stack.pop().unwrap();
+        trace::trace_interpreter_stack!("{}", self.debug_stack());
+        ret
     }
 
     /// Pops the top N values off the stack, in order
     fn popn(self: &mut Self, n: usize) -> Vec<Value> {
-        trace::trace_interpreter_stack!(": [{}]", self.debug_stack());
         trace::trace_interpreter_stack!("popn({}) -> {}, ...", n, self.stack.last().unwrap().as_debug_str());
-        let length = self.stack.len();
-        self.stack.splice(length - n..length, std::iter::empty()).collect()
+        let length: usize = self.stack.len();
+        let ret = self.stack.splice(length - n..length, std::iter::empty()).collect();
+        trace::trace_interpreter_stack!("{}", self.debug_stack());
+        ret
     }
 
     /// Push a value onto the stack
     fn push(self: &mut Self, value: Value) {
-        trace::trace_interpreter_stack!(": [{}]", self.debug_stack());
         trace::trace_interpreter_stack!("push({})", value.as_debug_str());
         self.stack.push(value);
+        trace::trace_interpreter_stack!("{}", self.debug_stack());
     }
 }
 
@@ -681,11 +754,41 @@ mod test {
     #[test] fn test_local_vars_11() { run_str("let x=0 { x=1 { let x=2 } } x.print", "1\n"); }
     #[test] fn test_local_vars_12() { run_str("let x=0 { let x=1 { let x=2 } } x.print", "0\n"); }
     #[test] fn test_local_vars_14() { run_str("let x=3 { let x=x; x.print }", "3\n"); }
+    #[test] fn test_functions_01() { run_str("fn foo() { 'hello' . print } ; foo();", "hello\n"); }
+    #[test] fn test_functions_02() { run_str("fn foo() { 'hello' . print } ; foo() ; foo()", "hello\nhello\n"); }
+    #[test] fn test_functions_03() { run_str("fn foo(a) { 'hello' . print } ; foo(1)", "hello\n"); }
+    #[test] fn test_functions_04() { run_str("fn foo(a) { 'hello ' + a . print } ; foo(1)", "hello 1\n"); }
+    #[test] fn test_functions_05() { run_str("fn foo(a, b, c) { a + b + c . print } ; foo(1, 2, 3)", "6\n"); }
+    #[test] fn test_functions_06() { run_str("fn foo() { 'hello' . print } ; fn bar() { foo() } bar()", "hello\n"); }
+    #[test] fn test_functions_07() { run_str("{ fn foo() { 'hello' . print } ; fn bar() { foo() } bar() }", "hello\n"); }
+    #[test] fn test_functions_08() { run_str("{ fn foo() { 'hello' . print } ; { fn bar() { foo() } bar() } }", "hello\n"); }
+    #[test] fn test_functions_09() { run_str("fn foo() { 'hello' . print } ; fn bar(a) { foo() } bar(1)", "hello\n"); }
+    #[test] fn test_functions_10() { run_str("{ fn foo() { 'hello' . print } ; fn bar(a) { foo() } bar(1) }", "hello\n"); }
+    #[test] fn test_functions_11() { run_str("{ fn foo() { 'hello' . print } ; { fn bar(a) { foo() } bar(1) } }", "hello\n"); }
+    #[test] fn test_functions_12() { run_str("fn foo(a) { a . print } ; fn bar(a, b, c) { foo(a + b + c) } bar(1, 2, 3)", "6\n"); }
+    #[test] fn test_functions_13() { run_str("fn foo(h, w) { h + ' ' + w . print } ; fn bar(w) { foo('hello', w) } bar('world')", "hello world\n"); }
+    #[test] fn test_functions_14() { run_str("let x = 'hello' ; fn foo(x) { x . print } foo(x)", "hello\n"); }
+    #[test] fn test_functions_15() { run_str("{ let x = 'hello' ; fn foo(x) { x . print } foo(x) }", "hello\n"); }
+    #[test] fn test_functions_16() { run_str("{ let x = 'hello' ; { fn foo(x) { x . print } foo(x) } }", "hello\n"); }
+    #[test] fn test_functions_17() { run_str("let x = 'hello' ; { fn foo() { x . print } foo()", "hello\n"); }
+    #[test] fn test_functions_18() { run_str("{ let x = 'hello' ; { fn foo() { x . print } foo() }", "hello\n"); }
+    #[test] fn test_functions_19() { run_str("{ let x = 'hello' ; { { fn foo() { x . print } foo() } }", "hello\n"); }
+    #[test] fn test_function_implicit_return_1() { run_str("fn foo() { } foo() . print", "nil\n"); }
+    #[test] fn test_function_implicit_return_2() { run_str("fn foo() { 'hello' } foo() . print", "hello\n"); }
+    #[test] fn test_function_unspecified_return_1() { run_str("fn foo(x) { if x > 1 {} else {} } foo(2) . print", "nil\n"); }
+    //#[test] fn test_function_unspecified_return_2() { run_str("fn foo(x) { if x > 1 { true ; } else { false ; } } foo(2) . print", "nil\n"); }
+    #[test] fn test_closures_01() { run_str("fn foo() { let x = 'hello' ; fn bar() { x . print } bar() } foo()", "hello\n"); } // todo: closures
+    #[test] fn test_function_return_1() { run_str("fn foo() { return 3 } foo() . print", "3\n"); }
+    #[test] fn test_function_return_2() { run_str("fn foo() { let x = 3; return x } foo() . print", "3\n"); }
+    #[test] fn test_function_return_3() { run_str("fn foo() { let x = 3; { return x } } foo() . print", "3\n"); }
+    #[test] fn test_function_return_4() { run_str("fn foo() { let x = 3; { let x; } return x } foo() . print", "3\n"); }
+    #[test] fn test_function_return_5() { run_str("fn foo() { let x; { let x = 3; return x } } foo() . print", "3\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }
     #[test] fn test_append_large_lists() { run("append_large_lists"); }
     #[test] fn test_fibonacci() { run("fibonacci"); }
+
 
     fn run_str(code: &'static str, expected: &'static str) {
         let text: &String = &String::from(code);

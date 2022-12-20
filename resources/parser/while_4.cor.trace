@@ -1,24 +1,15 @@
-=== Parse Tokens ===
-
-0000 True
-0001 Bound(Bool)
-0002 OpFuncCompose
-0003 JumpIfFalsePop(21)
-0004 LineNumber(1)
-0005 Jump(21)
-0006 LineNumber(2)
-0007 False
-0008 Bound(Bool)
-0009 OpFuncCompose
-0010 JumpIfFalsePop(17)
-0011 LineNumber(3)
-0012 Jump(7)
-0013 LineNumber(4)
-0014 Jump(17)
-0015 LineNumber(5)
-0016 Jump(7)
-0017 LineNumber(6)
-0018 Jump(0)
-0019 LineNumber(7)
-0020 Jump(0)
-0021 Exit
+L1: 0000 True
+    0001 Bound(Bool)
+    0002 OpFuncCompose
+L3: 0003 JumpIfFalsePop(14)
+    0004 Jump(14)
+    0005 False
+L4: 0006 Bound(Bool)
+L6: 0007 OpFuncCompose
+L7: 0008 JumpIfFalsePop(12)
+L8: 0009 Jump(5)
+    0010 Jump(12)
+    0011 Jump(5)
+    0012 Jump(0)
+    0013 Jump(0)
+    0014 Exit

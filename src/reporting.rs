@@ -4,7 +4,7 @@ use crate::stdlib;
 use crate::stdlib::StdBinding;
 use crate::vm::error::{RuntimeError, RuntimeErrorType};
 use crate::vm::opcode::Opcode;
-use crate::vm::value::Value;
+use crate::vm::value::{FunctionImpl, Value};
 
 const FORMAT_RESET: &'static str = ""; //\x1B[0m";
 const FORMAT_BOLD: &'static str = ""; //\x1B[1m";
@@ -72,6 +72,7 @@ impl AsError for RuntimeError {
         match &self.error {
             RuntimeErrorType::ValueIsNotFunctionEvaluable(v) => format!("Tried to evaluate {} but it is not a function.", v.format_error()),
             RuntimeErrorType::BindingIsNotFunctionEvaluable(b) => format!("Tried to evaluate '{}' but it is not an evaluable function.", b.format_error()),
+            RuntimeErrorType::IncorrectNumberOfFunctionArguments(f, a) => format!("Function '{}' requires {} parameters but {} were present.", f.format_error(), f.nargs, a),
             RuntimeErrorType::IncorrectNumberOfArguments(b, e, a) => format!("Function '{}' requires {} parameters but {} were present.", b.format_error(), e, a),
             RuntimeErrorType::IncorrectNumberOfArgumentsVariadicAtLeastOne(b) => format!("Function '{}' requires at least 1 parameter but none were present.", b.format_error()),
             RuntimeErrorType::IndexOutOfBounds(i, ln) => format!("Index '{}' is out of bounds for list of length [0, {})", i, ln),
@@ -95,6 +96,12 @@ impl AsError for RuntimeError {
 impl AsError for Value {
     fn format_error(self: &Self) -> String {
         format!("'{}' of type '{}'", self.as_str(), self.as_type_str())
+    }
+}
+
+impl AsError for FunctionImpl {
+    fn format_error(self: &Self) -> String {
+        Value::Function(Box::new(self.clone())).format_error()
     }
 }
 
@@ -127,6 +134,8 @@ impl AsError for ParserError {
     fn format_error(self: &Self) -> String {
         match &self.error {
             ParserErrorType::UnexpectedEoF => String::from("Unexpected end of file."),
+            ParserErrorType::UnexpectedEofExpectingVariableNameAfterLet => String::from("Unexpected end of file, was expecting variable name after 'let' keyword"),
+            ParserErrorType::UnexpectedEofExpectingFunctionNameAfterFn => String::from("Unexpected end of file, was expecting function name after 'fn' keyword"),
             ParserErrorType::UnexpectedEoFExpecting(e) => format!("Unexpected end of file, was expecting {}.", e.format_error()),
             ParserErrorType::UnexpectedTokenAfterEoF(e) => format!("Unexpected {} after parsing finished", e.format_error()),
             ParserErrorType::Expecting(e, a) => format!("Expected a {}, got {} instead", e.format_error(), a.format_error()),
@@ -136,6 +145,9 @@ impl AsError for ParserError {
             ParserErrorType::ExpectedColonOrEndOfSlice(e) => format!("Expected a ':' or ']' in slice, got {} instead", e.format_error()),
             ParserErrorType::ExpectedStatement(e) => format!("Expecting a statement, got {} instead", e.format_error()),
             ParserErrorType::ExpectedVariableNameAfterLet(e) => format!("Expecting a variable name after 'let' keyword, got {} instead", e.format_error()),
+            ParserErrorType::ExpectedFunctionNameAfterFn(e) => format!("Expecting a function name after 'fn' keyword, got {} instead", e.format_error()),
+            ParserErrorType::ExpectedParameterOrEndOfList(e) => format!("Expected a function parameter or ')' after function declaration, got {} instead", e.format_error()),
+            ParserErrorType::ExpectedCommaOrEndOfParameters(e) => format!("Expected a ',' or ')' after function parameter, got {} instead", e.format_error()),
             ParserErrorType::LocalVariableConflict(e) => format!("Multiple declarations for 'let {}' in the same scope", e),
             ParserErrorType::UndeclaredIdentifier(e) => format!("Undeclared identifier: '{}'", e),
             ParserErrorType::AssignmentToNotVariable(e) => format!("Cannot to assign to '{}' as it is not a global or local variable", e),
@@ -165,6 +177,7 @@ impl AsError for ScanToken {
 
             ScanToken::KeywordLet => String::from("'let' keyword"),
             ScanToken::KeywordFn => String::from("'fn' keyword"),
+            ScanToken::KeywordReturn => String::from("'return' keyword"),
             ScanToken::KeywordIf => String::from("'if' keyword"),
             ScanToken::KeywordElif => String::from("'elif' keyword"),
             ScanToken::KeywordElse => String::from("'else' keyword"),

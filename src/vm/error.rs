@@ -1,6 +1,6 @@
 use crate::stdlib::StdBinding;
 use crate::vm::opcode::Opcode;
-use crate::vm::value::Value;
+use crate::vm::value::{FunctionImpl, Value};
 
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub struct RuntimeError {
@@ -13,6 +13,7 @@ pub enum RuntimeErrorType {
     ValueIsNotFunctionEvaluable(Value),
     BindingIsNotFunctionEvaluable(StdBinding),
 
+    IncorrectNumberOfFunctionArguments(FunctionImpl, u8),
     IncorrectNumberOfArguments(StdBinding, u8, u8),
     IncorrectNumberOfArgumentsVariadicAtLeastOne(StdBinding),
     IndexOutOfBounds(i64, usize),
