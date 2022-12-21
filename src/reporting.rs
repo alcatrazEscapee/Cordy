@@ -1,8 +1,9 @@
+use std::rc::Rc;
 use crate::compiler::parser::{ParserError, ParserErrorType, ParserResult};
 use crate::compiler::scanner::{ScanError, ScanErrorType, ScanToken};
 use crate::stdlib;
 use crate::stdlib::StdBinding;
-use crate::vm::error::{RuntimeError, RuntimeErrorType};
+use crate::vm::error::{RuntimeErrorWithLineNumber, RuntimeError};
 use crate::vm::opcode::Opcode;
 use crate::vm::value::{FunctionImpl, Value};
 use crate::vm::VirtualMachine;
@@ -33,7 +34,7 @@ impl<'a> ErrorReporter<'a> {
         format_parse_error(&self.lines, self.src, error)
     }
 
-    pub fn format_runtime_error(self: &Self, error: &RuntimeError) -> String {
+    pub fn format_runtime_error(self: &Self, error: &RuntimeErrorWithLineNumber) -> String {
         format_runtime_error(&self.lines, self.src, error)
     }
 }
@@ -54,7 +55,7 @@ pub fn format_parse_error(source_lines: &Vec<&str>, source_file: &String, error:
     text
 }
 
-pub fn format_runtime_error(source_lines: &Vec<&str>, source_file: &String, error: &RuntimeError) -> String {
+pub fn format_runtime_error(source_lines: &Vec<&str>, source_file: &String, error: &RuntimeErrorWithLineNumber) -> String {
     let mut text: String = format!("{}{}{}{}", FORMAT_RED, FORMAT_BOLD, error.format_error(), FORMAT_RESET);
     text.push_str(format!("\n  at: line {} ({})\n  at:\n\n", error.lineno + 1, &source_file).as_str());
     text.push_str(source_lines.get(error.lineno as usize).map(|t| *t).unwrap_or(""));
@@ -90,31 +91,31 @@ trait AsError {
 }
 
 
-impl AsError for RuntimeError {
+impl AsError for RuntimeErrorWithLineNumber {
     fn format_error(self: &Self) -> String {
         match &self.error {
-            RuntimeErrorType::RuntimeExit => panic!("Not a real error"),
-            RuntimeErrorType::ValueIsNotFunctionEvaluable(v) => format!("Tried to evaluate {} but it is not a function.", v.format_error()),
-            RuntimeErrorType::BindingIsNotFunctionEvaluable(b) => format!("Tried to evaluate '{}' but it is not an evaluable function.", b.format_error()),
-            RuntimeErrorType::IncorrectNumberOfFunctionArguments(f, a) => format!("Function {} requires {} parameters but {} were present.", f.format_error(), f.nargs, a),
-            RuntimeErrorType::IncorrectNumberOfArguments(b, e, a) => format!("Function '{}' requires {} parameters but {} were present.", b.format_error(), e, a),
-            RuntimeErrorType::IncorrectNumberOfArgumentsVariadicAtLeastOne(b) => format!("Function '{}' requires at least 1 parameter but none were present.", b.format_error()),
-            RuntimeErrorType::IndexOutOfBounds(i, ln) => format!("Index '{}' is out of bounds for list of length [0, {})", i, ln),
-            RuntimeErrorType::SliceStepZero => String::from("Cannot slice a list with a step of 0"),
-            RuntimeErrorType::ValueErrorMaxArgMustBeNonEmptySequence => format!("ValueError: 'max' argument must be a non-empty sequence"),
-            RuntimeErrorType::ValueErrorMinArgMustBeNonEmptySequence => format!("ValueError: 'min' argument must be a non-empty sequence"),
-            RuntimeErrorType::TypeErrorUnaryOp(op, v) => format!("TypeError: Argument to unary '{}' must be an int, got {}", op.format_error(), v.format_error()),
-            RuntimeErrorType::TypeErrorBinaryOp(op, l, r) => format!("TypeError: Cannot {} {} and {}", op.format_error(), l.format_error(), r.format_error()),
-            RuntimeErrorType::TypeErrorBinaryIs(l, r) => format!("TypeError: {} is not a type and cannot be used with binary 'is' on {}", r.format_error(), l.format_error()),
-            RuntimeErrorType::TypeErrorCannotConvertToInt(v) => format!("TypeError: Cannot convert {} to an int", v.format_error()),
-            RuntimeErrorType::TypeErrorCannotCompare(l, r) => format!("TypeError: Cannot compare {} to {}", l.format_error(), r.format_error()),
-            RuntimeErrorType::TypeErrorCannotSlice(ls) => format!("TypeError: Cannot slice {}", ls.format_error()),
-            RuntimeErrorType::TypeErrorSliceArgMustBeInt(e, v) => format!("TypeError: Cannot slice list with {} argument {}", e, v.format_error()),
-            RuntimeErrorType::TypeErrorArgMustBeInt(v) => format!("TypeError: Expected {} to be a int", v.format_error()),
-            RuntimeErrorType::TypeErrorArgMustBeIterable(v) => format!("TypeError: Expected {} to be an iterable (list)", v.format_error()),
-            RuntimeErrorType::TypeErrorFunc1(e, v1) => format!("TypeError: incorrect arguments for {}, got {} instead", e, v1.format_error()),
-            RuntimeErrorType::TypeErrorFunc2(e, v1, v2) => format!("TypeError: incorrect arguments for {}, got '{}, {} instead", e, v1.format_error(), v2.format_error()),
-            RuntimeErrorType::TypeErrorFunc3(e, v1, v2, v3) => format!("TypeError: incorrect arguments for {}, got {}, {}, {} instead", e, v1.format_error(), v2.format_error(), v3.format_error()),
+            RuntimeError::RuntimeExit => panic!("Not a real error"),
+            RuntimeError::ValueIsNotFunctionEvaluable(v) => format!("Tried to evaluate {} but it is not a function.", v.format_error()),
+            RuntimeError::BindingIsNotFunctionEvaluable(b) => format!("Tried to evaluate '{}' but it is not an evaluable function.", b.format_error()),
+            RuntimeError::IncorrectNumberOfFunctionArguments(f, a) => format!("Function {} requires {} parameters but {} were present.", f.format_error(), f.nargs, a),
+            RuntimeError::IncorrectNumberOfArguments(b, e, a) => format!("Function '{}' requires {} parameters but {} were present.", b.format_error(), e, a),
+            RuntimeError::IncorrectNumberOfArgumentsVariadicAtLeastOne(b) => format!("Function '{}' requires at least 1 parameter but none were present.", b.format_error()),
+            RuntimeError::IndexOutOfBounds(i, ln) => format!("Index '{}' is out of bounds for list of length [0, {})", i, ln),
+            RuntimeError::SliceStepZero => String::from("Cannot slice a list with a step of 0"),
+            RuntimeError::ValueErrorMaxArgMustBeNonEmptySequence => format!("ValueError: 'max' argument must be a non-empty sequence"),
+            RuntimeError::ValueErrorMinArgMustBeNonEmptySequence => format!("ValueError: 'min' argument must be a non-empty sequence"),
+            RuntimeError::TypeErrorUnaryOp(op, v) => format!("TypeError: Argument to unary '{}' must be an int, got {}", op.format_error(), v.format_error()),
+            RuntimeError::TypeErrorBinaryOp(op, l, r) => format!("TypeError: Cannot {} {} and {}", op.format_error(), l.format_error(), r.format_error()),
+            RuntimeError::TypeErrorBinaryIs(l, r) => format!("TypeError: {} is not a type and cannot be used with binary 'is' on {}", r.format_error(), l.format_error()),
+            RuntimeError::TypeErrorCannotConvertToInt(v) => format!("TypeError: Cannot convert {} to an int", v.format_error()),
+            RuntimeError::TypeErrorCannotCompare(l, r) => format!("TypeError: Cannot compare {} to {}", l.format_error(), r.format_error()),
+            RuntimeError::TypeErrorCannotSlice(ls) => format!("TypeError: Cannot slice {}", ls.format_error()),
+            RuntimeError::TypeErrorSliceArgMustBeInt(e, v) => format!("TypeError: Cannot slice list with {} argument {}", e, v.format_error()),
+            RuntimeError::TypeErrorArgMustBeInt(v) => format!("TypeError: Expected {} to be a int", v.format_error()),
+            RuntimeError::TypeErrorArgMustBeIterable(v) => format!("TypeError: Expected {} to be an iterable (list)", v.format_error()),
+            RuntimeError::TypeErrorFunc1(e, v1) => format!("TypeError: incorrect arguments for {}, got {} instead", e, v1.format_error()),
+            RuntimeError::TypeErrorFunc2(e, v1, v2) => format!("TypeError: incorrect arguments for {}, got '{}, {} instead", e, v1.format_error(), v2.format_error()),
+            RuntimeError::TypeErrorFunc3(e, v1, v2, v3) => format!("TypeError: incorrect arguments for {}, got {}, {}, {} instead", e, v1.format_error(), v2.format_error(), v3.format_error()),
         }
     }
 }
@@ -127,7 +128,7 @@ impl AsError for Value {
 
 impl AsError for FunctionImpl {
     fn format_error(self: &Self) -> String {
-        Value::Function(Box::new(self.clone())).format_error()
+        Value::Function(Rc::new(self.clone())).format_error()
     }
 }
 

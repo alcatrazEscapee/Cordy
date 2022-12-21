@@ -3,13 +3,13 @@ use crate::vm::opcode::Opcode;
 use crate::vm::value::{FunctionImpl, Value};
 
 #[derive(Eq, PartialEq, Debug, Clone)]
-pub struct RuntimeError {
-    pub error: RuntimeErrorType,
+pub struct RuntimeErrorWithLineNumber {
+    pub error: RuntimeError,
     pub lineno: u16,
 }
 
 #[derive(Eq, PartialEq, Debug, Clone)]
-pub enum RuntimeErrorType {
+pub enum RuntimeError {
     RuntimeExit,
 
     ValueIsNotFunctionEvaluable(Value),
@@ -38,9 +38,14 @@ pub enum RuntimeErrorType {
     TypeErrorFunc3(&'static str, Value, Value, Value),
 }
 
-impl RuntimeErrorType {
-    pub fn with(self: Self, lineno: u16) -> RuntimeError {
-        RuntimeError {
+impl RuntimeError {
+
+    pub fn err<T>(self: Self) -> Result<T, Box<RuntimeError>> {
+        Err(Box::new(self))
+    }
+
+    pub fn with(self: Self, lineno: u16) -> RuntimeErrorWithLineNumber {
+        RuntimeErrorWithLineNumber {
             error: self,
             lineno
         }

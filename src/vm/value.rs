@@ -4,9 +4,14 @@ use std::rc::Rc;
 
 use crate::stdlib;
 use crate::stdlib::StdBinding;
-use crate::vm::error::RuntimeErrorType;
+use crate::vm::error::RuntimeError;
 
 use Value::{*};
+use RuntimeError::{*};
+
+
+type BoolResult = Result<bool, Box<RuntimeError>>;
+
 
 /// The runtime sum type used by the virtual machine
 /// All `Value` type objects must be cloneable, and so mutable objects must be reference counted to ensure memory safety
@@ -17,7 +22,7 @@ pub enum Value {
     Bool(bool),
     Int(i64),
     Str(Box<String>),
-    Function(Box<FunctionImpl>),
+    Function(Rc<FunctionImpl>),
     PartialFunction(Box<PartialFunctionImpl>),
 
     // Reference (Mutable) Types
@@ -40,7 +45,7 @@ pub struct FunctionImpl {
 
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub struct PartialFunctionImpl {
-    pub func: FunctionImpl,
+    pub func: Rc<FunctionImpl>,
     pub args: Vec<Box<Value>>,
 }
 
@@ -49,8 +54,8 @@ impl Value {
 
     // Constructors
     pub fn list(vec: Vec<Value>) -> Value { List(Rc::new(RefCell::new(vec))) }
-    pub fn partial1(func: FunctionImpl, arg: Value) -> Value { PartialFunction(Box::new(PartialFunctionImpl { func, args: vec![Box::new(arg)] }))}
-    pub fn partial(func: FunctionImpl, args: Vec<Value>) -> Value { PartialFunction(Box::new(PartialFunctionImpl { func, args: args.into_iter().map(|v| Box::new(v)).collect() }))}
+    pub fn partial1(func: Rc<FunctionImpl>, arg: Value) -> Value { PartialFunction(Box::new(PartialFunctionImpl { func, args: vec![Box::new(arg)] }))}
+    pub fn partial(func: Rc<FunctionImpl>, args: Vec<Value>) -> Value { PartialFunction(Box::new(PartialFunctionImpl { func, args: args.into_iter().map(|v| Box::new(v)).collect() }))}
 
     /// Converts the `Value` to a `String`. This is equivalent to the stdlib function `str()`
     pub fn as_str(self: &Self) -> String {
@@ -169,21 +174,21 @@ impl Value {
         }
     }
 
-    pub fn is_less_than(self: &Self, other: &Value) -> Result<bool, RuntimeErrorType> {
+    pub fn is_less_than(self: &Self, other: &Value) -> BoolResult {
         match (self, other) {
             (Bool(l), Bool(r)) => Ok(!*l && *r),
             (Int(l), Int(r)) => Ok(l < r),
             (Str(l), Str(r)) => Ok(l < r),
-            (l, r) => Err(RuntimeErrorType::TypeErrorCannotCompare(l.clone(), r.clone()))
+            (l, r) => TypeErrorCannotCompare(l.clone(), r.clone()).err()
         }
     }
 
-    pub fn is_less_than_or_equal(self: &Self, other: &Value) -> Result<bool, RuntimeErrorType> {
+    pub fn is_less_than_or_equal(self: &Self, other: &Value) -> BoolResult {
         match (self, other) {
             (Bool(l), Bool(r)) => Ok(!*l || *r),
             (Int(l), Int(r)) => Ok(l <= r),
             (Str(l), Str(r)) => Ok(l <= r),
-            (l, r) => Err(RuntimeErrorType::TypeErrorCannotCompare(l.clone(), r.clone()))
+            (l, r) => TypeErrorCannotCompare(l.clone(), r.clone()).err()
         }
     }
 }
@@ -203,7 +208,9 @@ impl FunctionImpl {
 
 #[cfg(test)]
 mod test {
+    use crate::vm::error::RuntimeError;
     use crate::vm::value::Value;
 
     #[test] fn test_layout() { assert_eq!(16, std::mem::size_of::<Value>()); }
+    #[test] fn test_result_box_layout() { assert_eq!(16, std::mem::size_of::<Result<Value, Box<RuntimeError>>>()); }
 }

@@ -1,16 +1,19 @@
 use std::io::{BufRead, Write};
-use error::{RuntimeError, RuntimeErrorType};
+use std::rc::Rc;
+use error::{RuntimeErrorWithLineNumber, RuntimeError};
 
 use crate::{stdlib, trace};
 use crate::compiler::parser::ParserResult;
 use crate::stdlib::StdBinding;
-use opcode::Opcode;
-use value::Value;
+use crate::vm::opcode::Opcode;
+use crate::vm::value::Value;
+use crate::vm::value::{FunctionImpl, PartialFunctionImpl};
+use crate::reporting::ProvidesLineNumber;
 
 use Opcode::{*};
-use RuntimeErrorType::{*};
-use crate::reporting::ProvidesLineNumber;
-use crate::vm::value::{FunctionImpl, PartialFunctionImpl};
+use RuntimeError::{*};
+
+type AnyResult = Result<(), Box<RuntimeError>>;
 
 pub mod value;
 pub mod opcode;
@@ -26,7 +29,7 @@ pub struct VirtualMachine<R, W> {
 
     strings: Vec<String>,
     constants: Vec<i64>,
-    functions: Vec<FunctionImpl>,
+    functions: Vec<Rc<FunctionImpl>>,
     pub line_numbers: Vec<u16>,
 
     read: R,
@@ -48,7 +51,7 @@ pub trait VirtualInterface {
     /// The one argument and function will be popped and the return value will be left on the top of the stack.
     ///
     /// Returns a `Result` which may contain an error which occurred during function evaluation.
-    fn invoke_func_compose(self: &mut Self) -> Result<FunctionType, RuntimeErrorType>;
+    fn invoke_func_compose(self: &mut Self) -> Result<FunctionType, Box<RuntimeError>>;
 
     /// Invokes the action of an `OpFuncEval(nargs)` opcode.
     ///
@@ -56,11 +59,11 @@ pub trait VirtualInterface {
     /// The arguments and function will be popped and the return value will be left on the top of the stack.
     ///
     /// Returns a `Result` which may contain an error which occurred during function evaluation.
-    fn invoke_func_eval(self: &mut Self, nargs: u8) -> Result<FunctionType, RuntimeErrorType>;
+    fn invoke_func_eval(self: &mut Self, nargs: u8) -> Result<FunctionType, Box<RuntimeError>>;
 
     /// Breaks back into the VM main loop and starts executing until the current call frame is dropped.
     /// Used after native code invokes either of the above two functions, to start a runtime loop for user functions.
-    fn run_after_invoke(self: &mut Self, function_type: FunctionType) -> Result<(), RuntimeErrorType>;
+    fn run_after_invoke(self: &mut Self, function_type: FunctionType) -> AnyResult;
 
     // Wrapped IO
     fn println0(self: &mut Self);
@@ -101,24 +104,25 @@ impl<R, W> VirtualMachine<R, W> where
             call_stack: Vec::with_capacity(32),
             strings: parser_result.strings,
             constants: parser_result.constants,
-            functions: parser_result.functions,
+            functions: parser_result.functions.into_iter().map(|f| Rc::new(f)).collect(),
             line_numbers: parser_result.line_numbers,
             read,
             write,
         }
     }
 
-    pub fn run_until_completion(self: &mut Self) -> Result<(), RuntimeError> {
-        match self.run() {
-            Err(RuntimeExit) => {},
-            Err(e) => return Err(e.with(self.line_number(self.ip))),
-            _ => {}
+    pub fn run_until_completion(self: &mut Self) -> Result<(), RuntimeErrorWithLineNumber> {
+        if let Err(e) = self.run() {
+            match *e {
+                RuntimeExit => {},
+                _ => return Err(e.with(self.line_number(self.ip)))
+            }
         }
         trace::trace_interpreter_stack!("final {}", self.debug_stack());
         Ok(())
     }
 
-    fn run_until_frame(self: &mut Self) -> Result<(), RuntimeErrorType> {
+    fn run_until_frame(self: &mut Self) -> AnyResult {
         let drop_frame: usize = self.call_stack.len() - 1;
         loop {
             let op: Opcode = self.next_op();
@@ -129,7 +133,7 @@ impl<R, W> VirtualMachine<R, W> where
         }
     }
 
-    fn run(self: &mut Self) -> Result<(), RuntimeErrorType> {
+    fn run(self: &mut Self) -> AnyResult {
         self.call_stack.push(CallFrame {
             return_ip: 0,
             frame_pointer: 0
@@ -141,14 +145,14 @@ impl<R, W> VirtualMachine<R, W> where
         }
     }
 
-    fn run_instruction(self: &mut Self, op: Opcode) -> Result<(), RuntimeErrorType> {
+    fn run_instruction(self: &mut Self, op: Opcode) -> AnyResult {
         macro_rules! operator {
             ($op:path, $a1:ident, $tr:expr) => {{
                 trace::trace_interpreter!("op unary {}", $tr);
                 let $a1: Value = self.pop();
                 match $op($a1) {
                     Ok(v) => self.push(v),
-                    Err(e) => return Err(e),
+                    Err(e) => return e.err(),
                 }
             }};
             ($op:path, $a1:ident, $a2:ident, $tr:expr) => {{
@@ -157,8 +161,22 @@ impl<R, W> VirtualMachine<R, W> where
                 let $a1: Value = self.pop();
                 match $op($a1, $a2) {
                     Ok(v) => self.push(v),
-                    Err(e) => return Err(e),
+                    Err(e) => return e.err(),
                 }
+            }};
+        }
+
+        macro_rules! operator_unchecked {
+            ($op:path, $a1:ident, $tr:expr) => {{
+                trace::trace_interpreter!("op unary {}", $tr);
+                let $a1: Value = self.pop();
+                self.push($op($a1));
+            }};
+            ($op:path, $a1:ident, $a2:ident, $tr:expr) => {{
+                trace::trace_interpreter!("op binary {}", $tr);
+                let $a2: Value = self.pop();
+                let $a1: Value = self.pop();
+                self.push($op($a1, $a2));
             }};
         }
 
@@ -205,7 +223,7 @@ impl<R, W> VirtualMachine<R, W> where
                 //                            ^frame pointer
                 // So, we pop the return value, splice the difference between the frame pointer and the top, then push the return value
                 let ret: Value = self.pop();
-                self.stack.splice(self.frame_pointer() - 1..self.stack.len(), std::iter::empty());
+                self.stack.truncate(self.frame_pointer() - 1);
                 trace::trace_interpreter_stack!("drop frame");
                 trace::trace_interpreter_stack!("{}", self.debug_stack());
                 self.push(ret);
@@ -277,7 +295,7 @@ impl<R, W> VirtualMachine<R, W> where
             },
             Function(fid) => {
                 let fid: usize = fid as usize;
-                let func = Value::Function(Box::new(self.functions[fid].clone()));
+                let func = Value::Function(Rc::clone(&self.functions[fid]));
                 trace::trace_interpreter!("push {} -> {}", fid, func.as_debug_str());
                 self.push(func);
             },
@@ -318,8 +336,8 @@ impl<R, W> VirtualMachine<R, W> where
             OpGreaterThan => operator!(operator::binary_greater_than, a1, a2, ">"),
             OpLessThanEqual => operator!(operator::binary_less_than_or_equal, a1, a2, "<="),
             OpGreaterThanEqual => operator!(operator::binary_greater_than_or_equal, a1, a2, ">="),
-            OpEqual => operator!(operator::binary_equals, a1, a2, "=="),
-            OpNotEqual => operator!(operator::binary_not_equals, a1, a2, "!="),
+            OpEqual => operator_unchecked!(operator::binary_equals, a1, a2, "=="),
+            OpNotEqual => operator_unchecked!(operator::binary_not_equals, a1, a2, "!="),
             OpBitwiseAnd => operator!(operator::binary_bitwise_and, a1, a2, "&"),
             OpBitwiseOr => operator!(operator::binary_bitwise_or, a1, a2, "|"),
             OpBitwiseXor => operator!(operator::binary_bitwise_xor, a1, a2, "^"),
@@ -327,14 +345,14 @@ impl<R, W> VirtualMachine<R, W> where
             OpFuncCompose => {
                 trace::trace_interpreter!("op binary .");
                 match self.invoke_func_compose() {
-                    Err(e) => return Err(e),
+                    Err(e) => return e.err(),
                     _ => {},
                 }
             },
             OpFuncEval(nargs) => {
                 trace::trace_interpreter!("op function evaluate n = {}", nargs);
                 match self.invoke_func_eval(nargs) {
-                    Err(e) => return Err(e),
+                    Err(e) => return e.err(),
                     _ => {},
                 }
             }
@@ -348,7 +366,7 @@ impl<R, W> VirtualMachine<R, W> where
                         Ok(v) => self.push(v),
                         Err(e) => return Err(e),
                     },
-                    (l, r) => return Err(TypeErrorBinaryOp(OpIndex, l, r))
+                    (l, r) => return TypeErrorBinaryOp(OpIndex, l, r).err()
                 }
             },
             OpSlice => {
@@ -373,7 +391,7 @@ impl<R, W> VirtualMachine<R, W> where
                 }
             },
 
-            Exit => return Err(RuntimeExit),
+            Exit => return RuntimeExit.err(),
         }
         Ok(())
     }
@@ -430,13 +448,13 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
 {
     // ===== Calling Functions External Interface ===== //
 
-    fn invoke_func_compose(self: &mut Self) -> Result<FunctionType, RuntimeErrorType> {
+    fn invoke_func_compose(self: &mut Self) -> Result<FunctionType, Box<RuntimeError>> {
         let f: Value = self.pop();
         match f {
             Value::Function(func) => {
                 trace::trace_interpreter!("invoke_func_compose -> {}", Value::Function(func.clone()).as_debug_str());
                 match func.nargs {
-                    0 => return Err(IncorrectNumberOfFunctionArguments(*func.clone(), 1)),
+                    0 => return IncorrectNumberOfFunctionArguments((*func).clone(), 1).err(),
                     1 => {
                         // Call function directly
                         // Before we call, we need to pop-push to reorder the arguments, so we have the correct calling convention
@@ -449,14 +467,14 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
                     _ => {
                         // Function has >1 argument, so evaluate as partial function
                         let arg: Value = self.pop();
-                        let partial: Value = Value::partial1(*func, arg);
+                        let partial: Value = Value::partial1(func, arg);
                         self.push(partial);
                     }
                 }
                 Ok(FunctionType::User)
             },
             Value::PartialFunction(partial) => {
-                trace::trace_interpreter!("invoke_func_compose -> {}", Value::Function(Box::new(partial.func.clone())).as_debug_str());
+                trace::trace_interpreter!("invoke_func_compose -> {}", Value::Function(Rc::new((*partial.func).clone())).as_debug_str());
                 let mut partial = *partial;
                 let nargs: u8 = partial.args.len() as u8 + 1;
                 if partial.func.nargs > nargs {
@@ -469,7 +487,7 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
                     // Before we call, we need to pop-push to reorder the arguments and setup partial arguments, so we have the correct calling convention
                     let arg: Value = self.pop();
                     let head: usize = partial.func.head;
-                    self.push(Value::Function(Box::new(partial.func)));
+                    self.push(Value::Function(partial.func.clone()));
                     for par in partial.args {
                         self.push(*par);
                     }
@@ -477,7 +495,7 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
                     self.call_function(head, nargs);
 
                 } else {
-                    return Err(IncorrectNumberOfFunctionArguments(partial.func.clone(), partial.func.nargs))
+                    return IncorrectNumberOfFunctionArguments((*partial.func).clone(), partial.func.nargs).err()
                 }
                 Ok(FunctionType::User)
             },
@@ -511,11 +529,11 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
                 }
                 Ok(FunctionType::Native)
             }
-            _ => return Err(ValueIsNotFunctionEvaluable(f.clone())),
+            _ => return ValueIsNotFunctionEvaluable(f.clone()).err(),
         }
     }
 
-    fn invoke_func_eval(self: &mut Self, nargs: u8) -> Result<FunctionType, RuntimeErrorType> {
+    fn invoke_func_eval(self: &mut Self, nargs: u8) -> Result<FunctionType, Box<RuntimeError>> {
         let f: &Value = self.peek(nargs as usize);
         match f {
             Value::Function(func) => {
@@ -526,19 +544,19 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
                 } else if func.nargs > nargs && nargs > 0 {
                     // Evaluate as a partial function
                     let arg: Vec<Value> = self.popn(nargs as usize);
-                    let func: FunctionImpl = match self.pop() {  // Pop the function, so we can interact with it directly
-                        Value::Function(f) => *f,
+                    let func: Rc<FunctionImpl> = match self.pop() {  // Pop the function, so we can interact with it directly
+                        Value::Function(f) => f,
                         _ => panic!("Stack corruption"),
                     };
                     let partial: Value = Value::partial(func, arg);
                     self.push(partial);
                 } else {
-                    return Err(IncorrectNumberOfFunctionArguments(*func.clone(), nargs));
+                    return IncorrectNumberOfFunctionArguments((**func).clone(), nargs).err();
                 }
                 Ok(FunctionType::User)
             },
             Value::PartialFunction(_partial) => {
-                trace::trace_interpreter!("invoke_func_eval -> {}, nargs = {}", Value::Function(Box::new(_partial.func.clone())).as_debug_str(), nargs);
+                trace::trace_interpreter!("invoke_func_eval -> {}, nargs = {}", Value::Function(Rc::new((*_partial.func).clone())).as_debug_str(), nargs);
                 // Surgically extract the partial binding from the stack
                 let i: usize = self.stack.len() - nargs as usize - 1;
                 let mut partial: PartialFunctionImpl = match std::mem::replace(&mut self.stack[i], Value::Nil) {
@@ -560,7 +578,7 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
                     let args: Vec<Value> = self.popn(nargs as usize);
                     let head: usize = partial.func.head;
                     self.pop(); // Should pop the `Nil` we swapped earlier
-                    self.push(Value::Function(Box::new(partial.func)));
+                    self.push(Value::Function(partial.func));
                     for par in partial.args {
                         self.push(*par);
                     }
@@ -570,7 +588,7 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
                     self.call_function(head, total_nargs);
 
                 } else {
-                    return Err(IncorrectNumberOfFunctionArguments(partial.func.clone(), total_nargs))
+                    return IncorrectNumberOfFunctionArguments((*partial.func).clone(), total_nargs).err()
                 }
                 Ok(FunctionType::User)
             },
@@ -613,11 +631,11 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
                 }
                 Ok(FunctionType::Native)
             }
-            _ => return Err(ValueIsNotFunctionEvaluable(f.clone())),
+            _ => return ValueIsNotFunctionEvaluable(f.clone()).err(),
         }
     }
 
-    fn run_after_invoke(self: &mut Self, function_type: FunctionType) -> Result<(), RuntimeErrorType> {
+    fn run_after_invoke(self: &mut Self, function_type: FunctionType) -> AnyResult {
         match function_type {
             FunctionType::Native => Ok(()),
             FunctionType::User => self.run_until_frame()
@@ -670,7 +688,7 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
 #[cfg(test)]
 mod test {
     use crate::{compiler, ErrorReporter, trace, VirtualMachine};
-    use crate::vm::error::RuntimeError;
+    use crate::vm::error::RuntimeErrorWithLineNumber;
 
     #[test] fn test_str_empty() { run_str("", ""); }
     #[test] fn test_str_hello_world() { run_str("print('hello world!')", "hello world!\n"); }
@@ -875,7 +893,7 @@ mod test {
         let mut buf: Vec<u8> = Vec::new();
         let mut vm = VirtualMachine::new(compile, &b""[..], &mut buf);
 
-        let result: Result<(), RuntimeError> = vm.run_until_completion();
+        let result: Result<(), RuntimeErrorWithLineNumber> = vm.run_until_completion();
         assert!(vm.stack.is_empty() || result.is_err());
 
         let mut output: String = String::from_utf8(buf).unwrap();
@@ -897,7 +915,7 @@ mod test {
         let mut buf: Vec<u8> = Vec::new();
         let mut vm = VirtualMachine::new(compile, &b""[..], &mut buf);
 
-        let result: Result<(), RuntimeError> = vm.run_until_completion();
+        let result: Result<(), RuntimeErrorWithLineNumber> = vm.run_until_completion();
         assert!(vm.stack.is_empty());
         assert!(result.is_ok());
 
