@@ -9,11 +9,13 @@ use value::Value;
 
 use Opcode::{*};
 use RuntimeErrorType::{*};
-use crate::vm::value::FunctionImpl;
+use crate::reporting::ProvidesLineNumber;
+use crate::vm::value::{FunctionImpl, PartialFunctionImpl};
 
 pub mod value;
 pub mod opcode;
 pub mod error;
+pub mod operator;
 
 
 pub struct VirtualMachine<R, W> {
@@ -25,12 +27,56 @@ pub struct VirtualMachine<R, W> {
     strings: Vec<String>,
     constants: Vec<i64>,
     functions: Vec<FunctionImpl>,
-
-    lineno: u16,
+    pub line_numbers: Vec<u16>,
 
     read: R,
     write: W,
 }
+
+#[derive(Eq, PartialEq, Debug, Copy, Clone)]
+pub enum FunctionType {
+    Native, User
+}
+
+
+pub trait VirtualInterface {
+    // Invoking Functions
+
+    /// Invokes the action of an `OpFuncCompose` opcode.
+    ///
+    /// The stack must be setup as `[..., arg, f ]`, where `arg` is a singular argument to the function `f`.
+    /// The one argument and function will be popped and the return value will be left on the top of the stack.
+    ///
+    /// Returns a `Result` which may contain an error which occurred during function evaluation.
+    fn invoke_func_compose(self: &mut Self) -> Result<FunctionType, RuntimeErrorType>;
+
+    /// Invokes the action of an `OpFuncEval(nargs)` opcode.
+    ///
+    /// The stack must be setup as `[..., f, arg1, arg2, ... argN ]`, where `f` is the function to be invoked with arguments `arg1, arg2, ... argN`.
+    /// The arguments and function will be popped and the return value will be left on the top of the stack.
+    ///
+    /// Returns a `Result` which may contain an error which occurred during function evaluation.
+    fn invoke_func_eval(self: &mut Self, nargs: u8) -> Result<FunctionType, RuntimeErrorType>;
+
+    /// Breaks back into the VM main loop and starts executing until the current call frame is dropped.
+    /// Used after native code invokes either of the above two functions, to start a runtime loop for user functions.
+    fn run_after_invoke(self: &mut Self, function_type: FunctionType) -> Result<(), RuntimeErrorType>;
+
+    // Wrapped IO
+    fn println0(self: &mut Self);
+    fn println(self: &mut Self, str: String);
+    fn print(self: &mut Self, str: String);
+
+    // Stack Manipulation
+    fn peek(self: &Self, offset: usize) -> &Value;
+    fn pop(self: &mut Self) -> Value;
+    fn popn(self: &mut Self, n: usize) -> Vec<Value>;
+    fn push(self: &mut Self, value: Value);
+}
+
+
+
+
 
 struct CallFrame {
     /// The return address
@@ -56,517 +102,316 @@ impl<R, W> VirtualMachine<R, W> where
             strings: parser_result.strings,
             constants: parser_result.constants,
             functions: parser_result.functions,
-            lineno: 0,
+            line_numbers: parser_result.line_numbers,
             read,
             write,
         }
     }
 
-    pub fn run(self: &mut Self) -> Result<(), RuntimeError> {
-        self.call_stack.push(CallFrame {
-            return_ip: 0, frame_pointer: 0
-        });
-        loop {
-            let op: &Opcode = self.code.get(self.ip).unwrap();
-            self.ip += 1;
-            match op {
-                Noop => {},
-
-                // Flow Control
-                // All jumps are absolute (because we don't have variable length instructions and it's easy to do so)
-                // todo: relative jumps? theoretically allows us more than u16.max instructions ~ 65k
-                JumpIfFalse(ip) => {
-                    trace::trace_interpreter!("jump if false {} -> {}", self.stack.last().unwrap().as_debug_str(), ip);
-                    let jump: usize = *ip as usize;
-                    let a1: &Value = self.peek(0);
-                    if !a1.as_bool() {
-                        self.ip = jump;
-                    }
-                },
-                JumpIfFalsePop(ip) => {
-                    trace::trace_interpreter!("jump if false {} -> {}", self.stack.last().unwrap().as_debug_str(), ip);
-                    let jump: usize = *ip as usize;
-                    let a1: Value = self.pop();
-                    if !a1.as_bool() {
-                        self.ip = jump;
-                    }
-                },
-                JumpIfTrue(ip) => {
-                    trace::trace_interpreter!("jump if true {} -> {}", self.stack.last().unwrap().as_debug_str(), ip);
-                    let jump: usize = *ip as usize;
-                    let a1: &Value = self.peek(0);
-                    if a1.as_bool() {
-                        self.ip = jump;
-                    }
-                },
-                Jump(ip) => {
-                    trace::trace_interpreter!("jump -> {}", ip);
-                    self.ip = *ip as usize;
-                },
-                Return => {
-                    trace::trace_interpreter!("return -> {}", self.return_ip());
-                    // Functions leave their return value as the top of the stack
-                    // Below that will be the functions locals, and the function itself
-                    // The frame pointer points to the first local of the function
-                    // [prev values ... function, local0, local1, ... localN, ret_val ]
-                    //                            ^frame pointer
-                    // So, we pop the return value, splice the difference between the frame pointer and the top, then push the return value
-                    let ret: Value = self.pop();
-                    self.stack.splice(self.frame_pointer() - 1..self.stack.len(), std::iter::empty());
-                    self.push(ret);
-
-                    self.ip = self.return_ip();
-                    self.call_stack.pop().unwrap();
-                    trace::trace_interpreter!("call stack = {}", self.debug_call_stack());
-                },
-
-                // Stack Manipulations
-                Pop => {
-                    trace::trace_interpreter!("stack pop {}", self.stack.last().unwrap().as_debug_str());
-                    self.pop();
-                },
-                PopN(n) => {
-                    trace::trace_interpreter!("stack popn {}", n);
-                    for _ in 0..*n {
-                        self.pop();
-                    }
-                }
-
-                PushLocal(local) => {
-                    let local = self.frame_pointer() + *local as usize;
-                    trace::trace_interpreter!("push local {} : {}", local, self.stack[local].as_debug_str());
-                    self.push(self.stack[local].clone());
-                }
-                StoreLocal(local) => {
-                    let local: usize = self.frame_pointer() + *local as usize;
-                    trace::trace_interpreter!("store local {} : {} -> {}", local, self.stack.last().unwrap().as_debug_str(), self.stack[local].as_debug_str());
-                    self.stack[local] = self.pop();
-                },
-                PushGlobal(local) => {
-                    // Globals are fancy locals that don't use the frame pointer to offset their local variable ID
-                    // 'global' just means a variable declared outside of an enclosing function
-                    let local: usize = *local as usize;
-                    trace::trace_interpreter!("push global {} : {}", local, self.stack[local].as_debug_str());
-                    self.push(self.stack[local].clone());
-                },
-                StoreGlobal(local) => {
-                    let local: usize = *local as usize;
-                    trace::trace_interpreter!("store global {} : {} -> {}", local, self.stack.last().unwrap().as_debug_str(), self.stack[local].as_debug_str());
-                    self.stack[local] = self.pop();
-                },
-
-
-                // Push Operations
-                Nil => {
-                    trace::trace_interpreter!("push nil");
-                    self.push(Value::Nil);
-                },
-                True => {
-                    trace::trace_interpreter!("push true");
-                    self.push(Value::Bool(true));
-                },
-                False => {
-                    trace::trace_interpreter!("push false");
-                    self.push(Value::Bool(false));
-                },
-                Int(cid) => {
-                    let cid: usize = *cid as usize;
-                    let value: i64 = self.constants[cid];
-                    trace::trace_interpreter!("push constant {} -> {}", cid, value);
-                    self.push(Value::Int(value));
-                }
-                Str(sid) => {
-                    let sid: usize = *sid as usize;
-                    let str: String = self.strings[sid].clone();
-                    trace::trace_interpreter!("push {} -> '{}'", sid, str);
-                    self.push(Value::Str(Box::new(str)));
-                },
-                Function(fid) => {
-                    let fid: usize = *fid as usize;
-                    let func = Value::Function(Box::new(self.functions[fid].clone()));
-                    trace::trace_interpreter!("push function {} -> {}", fid, func.as_debug_str());
-                    self.push(func);
-                },
-                Bound(b) => {
-                    trace::trace_interpreter!("push native function {}", Value::Binding(*b).as_debug_str());
-                    self.push(Value::Binding(*b));
-                },
-                List(cid) => {
-                    trace::trace_interpreter!("push [n={}]", cid);
-                    // List values are present on the stack in-order
-                    // So we need to splice the last n values of the stack into it's own list
-                    let cid: usize = *cid as usize;
-                    let length: usize = self.constants[cid] as usize;
-                    let start: usize = self.stack.len() - length;
-                    let end: usize = self.stack.len();
-                    let list: Vec<Value> = self.stack.splice(start..end, std::iter::empty())
-                        .collect::<Vec<Value>>();
-                    self.push(Value::list(list));
-                }
-
-                // Unary Operators
-                UnarySub => {
-                    trace::trace_interpreter!("op unary -");
-                    let a1: Value = self.pop();
-                    match a1 {
-                        Value::Int(i1) => self.push(Value::Int(-i1)),
-                        v => return self.error(TypeErrorUnaryOp(UnarySub, v)),
-                    }
-                },
-                UnaryLogicalNot => {
-                    trace::trace_interpreter!("op unary !");
-                    let a1: Value = self.pop();
-                    match a1 {
-                        Value::Bool(b1) => self.push(Value::Bool(!b1)),
-                        v => return self.error(TypeErrorUnaryOp(UnaryLogicalNot, v)),
-                    }
-                },
-                UnaryBitwiseNot => {
-                    trace::trace_interpreter!("op unary ~");
-                    let a1: Value = self.pop();
-                    match a1 {
-                        Value::Int(i1) => self.push(Value::Int(!i1)),
-                        v => return self.error(TypeErrorUnaryOp(UnaryBitwiseNot, v)),
-                    }
-                },
-
-                // Binary Operators
-                OpMul => {
-                    trace::trace_interpreter!("op binary *");
-                    let a2: Value = self.pop();
-                    let a1: Value = self.pop();
-                    match (a1, a2) {
-                        (Value::Int(i1), Value::Int(i2)) => self.push(Value::Int(i1 * i2)),
-                        (Value::Str(s1), Value::Int(i2)) if i2 > 0 => self.push(Value::Str(Box::new(s1.repeat(i2 as usize)))),
-                        (Value::Int(i1), Value::Str(s2)) if i1 > 0 => self.push(Value::Str(Box::new(s2.repeat(i1 as usize)))),
-                        (l, r) => return self.error(TypeErrorBinaryOp(OpMul, l, r))
-                    }
-                },
-                OpDiv => {
-                    trace::trace_interpreter!("op binary /");
-                    let a2: Value = self.pop();
-                    let a1: Value = self.pop();
-                    match (a1, a2) {
-                        (Value::Int(i1), Value::Int(i2)) if i2 != 0 => self.push(Value::Int(i1 / i2)),
-                        (l, r) => return self.error(TypeErrorBinaryOp(OpDiv, l, r))
-                    }
-                },
-                OpMod => {
-                    trace::trace_interpreter!("op binary %");
-                    let a2: Value = self.pop();
-                    let a1: Value = self.pop();
-                    match (a1, a2) {
-                        (Value::Int(i1), Value::Int(i2)) if i2 != 0 => self.push(Value::Int(i1 % i2)),
-                        (l, r) => return self.error(TypeErrorBinaryOp(OpMod, l, r))
-                    }
-                },
-                OpPow => {
-                    trace::trace_interpreter!("op binary **");
-                    let a2: Value = self.pop();
-                    let a1: Value = self.pop();
-                    match (a1, a2) {
-                        (Value::Int(i1), Value::Int(i2)) if i2 > 0 => self.push(Value::Int(i1.pow(i2 as u32))),
-                        (l, r) => return self.error(TypeErrorBinaryOp(OpMod, l, r))
-                    }
-                },
-                OpIs => {
-                    trace::trace_interpreter!("op binary 'is'");
-                    let a2: Value = self.pop();
-                    let a1: Value = self.pop();
-                    match a2 {
-                        Value::Binding(b) => {
-                            let ret: Value = match b {
-                                StdBinding::Nil => Value::Bool(a1.is_nil()),
-                                StdBinding::Bool => Value::Bool(a1.is_bool()),
-                                StdBinding::Int => Value::Bool(a1.is_int()),
-                                StdBinding::Str => Value::Bool(a1.is_str()),
-                                StdBinding::Function => Value::Bool(a1.is_function()),
-                                _ => return self.error(TypeErrorBinaryIs(a1, Value::Binding(b)))
-                            };
-                            self.push(ret);
-                        },
-                        _ => return self.error(TypeErrorBinaryIs(a1, a2))
-                    }
-                }
-
-                OpAdd => {
-                    trace::trace_interpreter!("op binary +");
-                    let a2: Value = self.pop();
-                    let a1: Value = self.pop();
-                    match (a1, a2) {
-                        (Value::Int(i1), Value::Int(i2)) => self.push(Value::Int(i1 + i2)),
-                        (Value::List(l1), Value::List(l2)) => {
-                            let list1 = (*l1).borrow();
-                            let list2 = (*l2).borrow();
-                            let mut list3: Vec<Value> = Vec::with_capacity(list1.len() + list2.len());
-                            list3.extend(list1.iter().cloned());
-                            list3.extend(list2.iter().cloned());
-                            self.push(Value::list(list3))
-                        },
-                        (Value::Str(s1), r) => self.push(Value::Str(Box::new(format!("{}{}", s1, r.as_str())))),
-                        (l, Value::Str(s2)) => self.push(Value::Str(Box::new(format!("{}{}", l.as_str(), s2)))),
-                        (l, r) => return self.error(TypeErrorBinaryOp(OpAdd, l, r)),
-                    }
-                },
-                OpSub => {
-                    trace::trace_interpreter!("op binary -");
-                    let a2: Value = self.pop();
-                    let a1: Value = self.pop();
-                    match (a1, a2) {
-                        (Value::Int(i1), Value::Int(i2)) if i2 > 0 => self.push(Value::Int(i1 - i2)),
-                        (l, r) => return self.error(TypeErrorBinaryOp(OpSub, l, r))
-                    }
-                },
-
-                OpLeftShift => {
-                    trace::trace_interpreter!("op binary <<");
-                    let a2: Value = self.pop();
-                    let a1: Value = self.pop();
-                    match (a1, a2) {
-                        (Value::Int(i1), Value::Int(i2)) => self.push(Value::Int(if i2 >= 0 { i1 << i2 } else {i1 >> (-i2)})),
-                        (l, r) => return self.error(TypeErrorBinaryOp(OpLeftShift, l, r))
-                    }
-                },
-                OpRightShift => {
-                    trace::trace_interpreter!("op binary >>");
-                    let a2: Value = self.pop();
-                    let a1: Value = self.pop();
-                    match (a1, a2) {
-                        (Value::Int(i1), Value::Int(i2)) => self.push(Value::Int(if i2 >= 0 { i1 >> i2 } else {i1 << (-i2)})),
-                        (l, r) => return self.error(TypeErrorBinaryOp(OpRightShift, l, r))
-                    }
-                },
-
-                OpLessThan => {
-                    trace::trace_interpreter!("op binary <");
-                    let a2: Value = self.pop();
-                    let a1: Value = self.pop();
-                    match a1.is_less_than(&a2) {
-                        Ok(v) => self.push(Value::Bool(v)),
-                        Err(e) => return self.error(e)
-                    }
-                },
-                OpGreaterThan => {
-                    trace::trace_interpreter!("op binary >");
-                    let a2: Value = self.pop();
-                    let a1: Value = self.pop();
-                    match a1.is_less_than_or_equal(&a2) {
-                        Ok(v) => self.push(Value::Bool(!v)),
-                        Err(e) => return self.error(e)
-                    }
-                },
-                OpLessThanEqual => {
-                    trace::trace_interpreter!("op binary <=");
-                    let a2: Value = self.pop();
-                    let a1: Value = self.pop();
-                    match a1.is_less_than_or_equal(&a2) {
-                        Ok(v) => self.push(Value::Bool(v)),
-                        Err(e) => return self.error(e)
-                    }
-                },
-                OpGreaterThanEqual => {
-                    trace::trace_interpreter!("op binary >=");
-                    let a2: Value = self.pop();
-                    let a1: Value = self.pop();
-                    match a1.is_less_than(&a2) {
-                        Ok(v) => self.push(Value::Bool(!v)),
-                        Err(e) => return self.error(e)
-                    }
-                },
-                OpEqual => {
-                    trace::trace_interpreter!("op binary ==");
-                    let a2: Value = self.pop();
-                    let a1: Value = self.pop();
-                    self.push(Value::Bool(a1.is_equal(&a2)));
-                },
-                OpNotEqual => {
-                    trace::trace_interpreter!("op binary !=");
-                    let a2: Value = self.pop();
-                    let a1: Value = self.pop();
-                    self.push(Value::Bool(!a1.is_equal(&a2)));
-                },
-
-                OpBitwiseAnd => {
-                    trace::trace_interpreter!("op binary &");
-                    let a2: Value = self.pop();
-                    let a1: Value = self.pop();
-                    match (a1, a2) {
-                        (Value::Int(i1), Value::Int(i2)) => self.push(Value::Int(i1 & i2)),
-                        (l, r) => return self.error(TypeErrorBinaryOp(OpBitwiseAnd, l, r))
-                    }
-                },
-                OpBitwiseOr => {
-                    trace::trace_interpreter!("op binary |");
-                    let a2: Value = self.pop();
-                    let a1: Value = self.pop();
-                    match (a1, a2) {
-                        (Value::Int(i1), Value::Int(i2)) => self.push(Value::Int(i1 | i2)),
-                        (l, r) => return self.error(TypeErrorBinaryOp(OpBitwiseAnd, l, r))
-                    }
-                },
-                OpBitwiseXor => {
-                    trace::trace_interpreter!("op binary ^");
-                    let a2: Value = self.pop();
-                    let a1: Value = self.pop();
-                    match (a1, a2) {
-                        (Value::Int(i1), Value::Int(i2)) => self.push(Value::Int(i1 ^ i2)),
-                        (l, r) => return self.error(TypeErrorBinaryOp(OpBitwiseAnd, l, r))
-                    }
-                },
-
-                OpFuncCompose => {
-                    trace::trace_interpreter!("op binary .");
-                    let f: Value = self.pop();
-                    match f {
-                        // todo: support functions
-                        Value::Binding(b) => {
-                            // invoke_func_binding() will pop `nargs` arguments off the stack and pass them to the provided function
-                            // Unlike `OpFuncEval`, we have already popped the binding off the stack initially
-                            match stdlib::invoke(b, 1, self) {
-                                Ok(ret) => self.push(ret),
-                                Err(e) => return self.error(e),
-                            }
-                        },
-                        Value::PartialBinding(b, nargs) => {
-                            // Need to consume the arguments and set up the stack for calling as if all partial arguments were just pushed
-                            // Top of the stack contains `argN+1`, and `nargs` contains `[argN, argN-1, ... arg1]`
-                            // After this, it should contain `[..., arg1, arg2, ... argN, argN+1]
-                            let held: Value = self.pop();
-                            let partial_args: u8 = nargs.len() as u8;
-                            for arg in nargs.into_iter().rev() {
-                                self.push(*arg);
-                            }
-                            self.push(held);
-
-                            // invoke_func_binding() will pop `nargs` arguments off the stack and pass them to the provided function
-                            // Unlike `OpFuncEval`, we have already popped the binding off the stack initially
-                            match stdlib::invoke(b, partial_args + 1, self) {
-                                Ok(ret) => self.push(ret),
-                                Err(e) => return self.error(e),
-                            }
-
-                        }
-                        _ => return self.error(ValueIsNotFunctionEvaluable(f.clone())),
-                    }
-                },
-
-
-                OpFuncEval(nargs) => {
-                    trace::trace_interpreter!("op function evaluate n = {}", nargs);
-                    let nargs: u8 = *nargs;
-                    let f: &Value = self.peek(nargs as usize);
-                    match f {
-                        Value::Function(func) => {
-                            if func.nargs == nargs {
-                                let frame = CallFrame {
-                                    return_ip: self.ip,
-                                    frame_pointer: self.stack.len() - (nargs as usize),
-                                };
-                                self.ip = func.head;
-                                self.call_stack.push(frame);
-                                trace::trace_interpreter!("call stack = {}", self.debug_call_stack());
-                            } else {
-                                return self.error(IncorrectNumberOfFunctionArguments(*func.clone(), nargs))
-                            }
-                        },
-                        Value::Binding(b) => {
-                            match stdlib::invoke(*b, nargs, self) {
-                                Ok(v) => {
-                                    self.pop();
-                                    self.push(v)
-                                },
-                                Err(e) => return self.error(e),
-                            }
-                        },
-                        Value::PartialBinding(b, _) => {
-                            // Need to consume the arguments and set up the stack for calling as if all partial arguments were just pushed
-                            // Surgically extract the binding via std::mem::replace
-                            let binding: StdBinding = *b;
-                            let i: usize = self.stack.len() - 1 - nargs as usize;
-                            let args: Vec<Box<Value>> = match std::mem::replace(&mut self.stack[i], Value::Nil) {
-                                Value::PartialBinding(_, x) => *x,
-                                _ => panic!("Stack corruption")
-                            };
-
-                            // Splice the args from the binding back into the stack, in the correct order
-                            // When evaluating a partial function the vm stack will contain [..., argN+1, ... argM]
-                            // The partial args will contain the vector [argN, argN-1, ... arg1]
-                            // After this, the vm stack should contain the args [..., arg1, arg2, ... argM]
-                            let j: usize = self.stack.len() - nargs as usize;
-                            let partial_args: u8 = args.len() as u8;
-                            self.stack.splice(j..j, args.into_iter().map(|t| *t).rev());
-
-                            match stdlib::invoke(binding, nargs + partial_args, self) {
-                                Ok(v) => {
-                                    self.pop();
-                                    self.push(v);
-                                },
-                                Err(e) => return self.error(e),
-                            }
-                        }
-                        _ => return self.error(ValueIsNotFunctionEvaluable(f.clone())),
-                    }
-                }
-
-                OpIndex => {
-                    trace::trace_interpreter!("op []");
-                    let a2: Value = self.pop();
-                    let a1: Value = self.pop();
-                    match (a1, a2) {
-                        (Value::List(l), Value::Int(r)) => match stdlib::lib_list::list_index(l, r) {
-                            Ok(v) => self.push(v),
-                            Err(e) => return self.error(e),
-                        },
-                        (l, r) => return self.error(TypeErrorBinaryOp(OpIndex, l, r))
-                    }
-                },
-                OpSlice => {
-                    trace::trace_interpreter!("op [:]");
-                    let a3: Value = self.pop();
-                    let a2: Value = self.pop();
-                    let a1: Value = self.pop();
-                    match stdlib::lib_list::list_slice(a1, a2, a3, Value::Int(1)) {
-                        Ok(v) => self.push(v),
-                        Err(e) => return self.error(e),
-                    }
-                },
-                OpSliceWithStep => {
-                    trace::trace_interpreter!("op [::]");
-                    let a4: Value = self.pop();
-                    let a3: Value = self.pop();
-                    let a2: Value = self.pop();
-                    let a1: Value = self.pop();
-                    match stdlib::lib_list::list_slice(a1, a2, a3, a4) {
-                        Ok(v) => self.push(v),
-                        Err(e) => return self.error(e),
-                    }
-                },
-
-                Exit => break,
-            }
+    pub fn run_until_completion(self: &mut Self) -> Result<(), RuntimeError> {
+        match self.run() {
+            Err(RuntimeExit) => {},
+            Err(e) => return Err(e.with(self.line_number(self.ip))),
+            _ => {}
         }
-        trace::trace_interpreter_stack!(": [{}]", self.debug_stack());
+        trace::trace_interpreter_stack!("final {}", self.debug_stack());
         Ok(())
     }
 
-    /// Constructs a `RuntimeError` to be returned from the main VM loop
-    fn error<T>(self: &Self, error: RuntimeErrorType) -> Result<T, RuntimeError> {
-        Err(RuntimeError {
-            error,
-            lineno: self.lineno,
-        })
+    fn run_until_frame(self: &mut Self) -> Result<(), RuntimeErrorType> {
+        let drop_frame: usize = self.call_stack.len() - 1;
+        loop {
+            let op: Opcode = self.next_op();
+            self.run_instruction(op)?;
+            if drop_frame == self.call_stack.len() {
+                return Ok(())
+            }
+        }
     }
 
+    fn run(self: &mut Self) -> Result<(), RuntimeErrorType> {
+        self.call_stack.push(CallFrame {
+            return_ip: 0,
+            frame_pointer: 0
+        });
+
+        loop {
+            let op = self.next_op();
+            self.run_instruction(op)?;
+        }
+    }
+
+    fn run_instruction(self: &mut Self, op: Opcode) -> Result<(), RuntimeErrorType> {
+        macro_rules! operator {
+            ($op:path, $a1:ident, $tr:expr) => {{
+                trace::trace_interpreter!("op unary {}", $tr);
+                let $a1: Value = self.pop();
+                match $op($a1) {
+                    Ok(v) => self.push(v),
+                    Err(e) => return Err(e),
+                }
+            }};
+            ($op:path, $a1:ident, $a2:ident, $tr:expr) => {{
+                trace::trace_interpreter!("op binary {}", $tr);
+                let $a2: Value = self.pop();
+                let $a1: Value = self.pop();
+                match $op($a1, $a2) {
+                    Ok(v) => self.push(v),
+                    Err(e) => return Err(e),
+                }
+            }};
+        }
+
+        match op {
+            Noop => {},
+
+            // Flow Control
+            // All jumps are absolute (because we don't have variable length instructions and it's easy to do so)
+            // todo: relative jumps? theoretically allows us more than u16.max instructions ~ 65k
+            JumpIfFalse(ip) => {
+                trace::trace_interpreter!("jump if false {} -> {}", self.stack.last().unwrap().as_debug_str(), ip);
+                let jump: usize = ip as usize;
+                let a1: &Value = self.peek(0);
+                if !a1.as_bool() {
+                    self.ip = jump;
+                }
+            },
+            JumpIfFalsePop(ip) => {
+                trace::trace_interpreter!("jump if false pop {} -> {}", self.stack.last().unwrap().as_debug_str(), ip);
+                let jump: usize = ip as usize;
+                let a1: Value = self.pop();
+                if !a1.as_bool() {
+                    self.ip = jump;
+                }
+            },
+            JumpIfTrue(ip) => {
+                trace::trace_interpreter!("jump if true {} -> {}", self.stack.last().unwrap().as_debug_str(), ip);
+                let jump: usize = ip as usize;
+                let a1: &Value = self.peek(0);
+                if a1.as_bool() {
+                    self.ip = jump;
+                }
+            },
+            Jump(ip) => {
+                trace::trace_interpreter!("jump -> {}", ip);
+                self.ip = ip as usize;
+            },
+            Return => {
+                trace::trace_interpreter!("return -> {}", self.return_ip());
+                // Functions leave their return value as the top of the stack
+                // Below that will be the functions locals, and the function itself
+                // The frame pointer points to the first local of the function
+                // [prev values ... function, local0, local1, ... localN, ret_val ]
+                //                            ^frame pointer
+                // So, we pop the return value, splice the difference between the frame pointer and the top, then push the return value
+                let ret: Value = self.pop();
+                self.stack.splice(self.frame_pointer() - 1..self.stack.len(), std::iter::empty());
+                trace::trace_interpreter_stack!("drop frame");
+                trace::trace_interpreter_stack!("{}", self.debug_stack());
+                self.push(ret);
+
+                self.ip = self.return_ip();
+                self.call_stack.pop().unwrap();
+                trace::trace_interpreter!("call stack = {}", self.debug_call_stack());
+            },
+
+            // Stack Manipulations
+            Pop => {
+                trace::trace_interpreter!("stack pop {}", self.stack.last().unwrap().as_debug_str());
+                self.pop();
+            },
+            PopN(n) => {
+                trace::trace_interpreter!("stack popn {}", n);
+                for _ in 0..n {
+                    self.pop();
+                }
+            }
+
+            PushLocal(local) => {
+                let local = self.frame_pointer() + local as usize;
+                trace::trace_interpreter!("push local {} : {}", local, self.stack[local].as_debug_str());
+                self.push(self.stack[local].clone());
+            }
+            StoreLocal(local) => {
+                let local: usize = self.frame_pointer() + local as usize;
+                trace::trace_interpreter!("store local {} : {} -> {}", local, self.stack.last().unwrap().as_debug_str(), self.stack[local].as_debug_str());
+                self.stack[local] = self.pop();
+            },
+            PushGlobal(local) => {
+                // Globals are fancy locals that don't use the frame pointer to offset their local variable ID
+                // 'global' just means a variable declared outside of an enclosing function
+                let local: usize = local as usize;
+                trace::trace_interpreter!("push global {} : {}", local, self.stack[local].as_debug_str());
+                self.push(self.stack[local].clone());
+            },
+            StoreGlobal(local) => {
+                let local: usize = local as usize;
+                trace::trace_interpreter!("store global {} : {} -> {}", local, self.stack.last().unwrap().as_debug_str(), self.stack[local].as_debug_str());
+                self.stack[local] = self.pop();
+            },
+
+            // Push Operations
+            Nil => {
+                trace::trace_interpreter!("push nil");
+                self.push(Value::Nil);
+            },
+            True => {
+                trace::trace_interpreter!("push true");
+                self.push(Value::Bool(true));
+            },
+            False => {
+                trace::trace_interpreter!("push false");
+                self.push(Value::Bool(false));
+            },
+            Int(cid) => {
+                let cid: usize = cid as usize;
+                let value: i64 = self.constants[cid];
+                trace::trace_interpreter!("push constant {} -> {}", cid, value);
+                self.push(Value::Int(value));
+            }
+            Str(sid) => {
+                let sid: usize = sid as usize;
+                let str: String = self.strings[sid].clone();
+                trace::trace_interpreter!("push {} -> '{}'", sid, str);
+                self.push(Value::Str(Box::new(str)));
+            },
+            Function(fid) => {
+                let fid: usize = fid as usize;
+                let func = Value::Function(Box::new(self.functions[fid].clone()));
+                trace::trace_interpreter!("push {} -> {}", fid, func.as_debug_str());
+                self.push(func);
+            },
+            Bound(b) => {
+                trace::trace_interpreter!("push {}", Value::Binding(b).as_debug_str());
+                self.push(Value::Binding(b));
+            },
+            List(cid) => {
+                trace::trace_interpreter!("push [n={}]", cid);
+                // List values are present on the stack in-order
+                // So we need to splice the last n values of the stack into it's own list
+                let cid: usize = cid as usize;
+                let length: usize = self.constants[cid] as usize;
+                let start: usize = self.stack.len() - length;
+                let end: usize = self.stack.len();
+                trace::trace_interpreter_stack!("stack splice {}..{} into [...]", start, end);
+                let list: Vec<Value> = self.stack.splice(start..end, std::iter::empty())
+                    .collect::<Vec<Value>>();
+                self.push(Value::list(list));
+            },
+
+            // Unary Operators
+            UnarySub => operator!(operator::unary_sub, a1, "-"),
+            UnaryLogicalNot => operator!(operator::unary_logical_not, a1, "!"),
+            UnaryBitwiseNot => operator!(operator::unary_bitwise_not, a1, "~"),
+
+            // Binary Operators
+            OpMul => operator!(operator::binary_mul, a1, a2, "*"),
+            OpDiv => operator!(operator::binary_div, a1, a2, "/"),
+            OpMod => operator!(operator::binary_mod, a1, a2, "%"),
+            OpPow => operator!(operator::binary_pow, a1, a2, "**"),
+            OpIs => operator!(operator::binary_is, a1, a2, "is"),
+            OpAdd => operator!(operator::binary_add, a1, a2, "+"),
+            OpSub => operator!(operator::binary_sub, a1, a2, "-"),
+            OpLeftShift => operator!(operator::binary_left_shift, a1, a2, "<<"),
+            OpRightShift => operator!(operator::binary_right_shift, a1, a2, ">>"),
+            OpLessThan => operator!(operator::binary_less_than, a1, a2, "<"),
+            OpGreaterThan => operator!(operator::binary_greater_than, a1, a2, ">"),
+            OpLessThanEqual => operator!(operator::binary_less_than_or_equal, a1, a2, "<="),
+            OpGreaterThanEqual => operator!(operator::binary_greater_than_or_equal, a1, a2, ">="),
+            OpEqual => operator!(operator::binary_equals, a1, a2, "=="),
+            OpNotEqual => operator!(operator::binary_not_equals, a1, a2, "!="),
+            OpBitwiseAnd => operator!(operator::binary_bitwise_and, a1, a2, "&"),
+            OpBitwiseOr => operator!(operator::binary_bitwise_or, a1, a2, "|"),
+            OpBitwiseXor => operator!(operator::binary_bitwise_xor, a1, a2, "^"),
+
+            OpFuncCompose => {
+                trace::trace_interpreter!("op binary .");
+                match self.invoke_func_compose() {
+                    Err(e) => return Err(e),
+                    _ => {},
+                }
+            },
+            OpFuncEval(nargs) => {
+                trace::trace_interpreter!("op function evaluate n = {}", nargs);
+                match self.invoke_func_eval(nargs) {
+                    Err(e) => return Err(e),
+                    _ => {},
+                }
+            }
+
+            OpIndex => {
+                trace::trace_interpreter!("op []");
+                let a2: Value = self.pop();
+                let a1: Value = self.pop();
+                match (a1, a2) {
+                    (Value::List(l), Value::Int(r)) => match stdlib::lib_list::list_index(l, r) {
+                        Ok(v) => self.push(v),
+                        Err(e) => return Err(e),
+                    },
+                    (l, r) => return Err(TypeErrorBinaryOp(OpIndex, l, r))
+                }
+            },
+            OpSlice => {
+                trace::trace_interpreter!("op [:]");
+                let a3: Value = self.pop();
+                let a2: Value = self.pop();
+                let a1: Value = self.pop();
+                match stdlib::lib_list::list_slice(a1, a2, a3, Value::Int(1)) {
+                    Ok(v) => self.push(v),
+                    Err(e) => return Err(e),
+                }
+            },
+            OpSliceWithStep => {
+                trace::trace_interpreter!("op [::]");
+                let a4: Value = self.pop();
+                let a3: Value = self.pop();
+                let a2: Value = self.pop();
+                let a1: Value = self.pop();
+                match stdlib::lib_list::list_slice(a1, a2, a3, a4) {
+                    Ok(v) => self.push(v),
+                    Err(e) => return Err(e),
+                }
+            },
+
+            Exit => return Err(RuntimeExit),
+        }
+        Ok(())
+    }
+
+
+    // ===== Basic Ops ===== //
+
+    /// Returns the current `frame_pointer`
     fn frame_pointer(self: &Self) -> usize {
         self.call_stack[self.call_stack.len() - 1].frame_pointer
     }
 
+    /// Returns the current `return_ip`
     fn return_ip(self: &Self) -> usize {
         self.call_stack[self.call_stack.len() - 1].return_ip
     }
-}
 
-impl<R, W> VirtualMachine<R, W> {
+    /// Returns the next opcode and increments `ip`
+    fn next_op(self: &mut Self) -> Opcode {
+        let op: Opcode = self.code[self.ip];
+        self.ip += 1;
+        op
+    }
+
+    /// Calls a user function by building a `CallFrame` and jumping to the function's `head` IP
+    fn call_function(self: &mut Self, head: usize, nargs: u8) {
+        let frame = CallFrame {
+            return_ip: self.ip,
+            frame_pointer: self.stack.len() - (nargs as usize),
+        };
+        self.ip = head;
+        self.call_stack.push(frame);
+        trace::trace_interpreter!("call stack = {}", self.debug_call_stack());
+    }
+
+
+    // ===== Debug Methods ===== //
+
     #[cfg(trace_interpreter_stack = "on")]
     fn debug_stack(self: &Self) -> String {
         format!(": [{}]", self.stack.iter().rev().map(|t| t.as_debug_str()).collect::<Vec<String>>().join(", "))
@@ -578,28 +423,214 @@ impl<R, W> VirtualMachine<R, W> {
     }
 }
 
-pub trait IO {
-    fn println0(self: &mut Self);
-    fn println(self: &mut Self, str: String);
-    fn print(self: &mut Self, str: String);
-}
 
-impl <R, W> IO for VirtualMachine<R, W> where
-    R: BufRead,
-    W: Write {
+impl <R, W> VirtualInterface for VirtualMachine<R, W> where
+    R : BufRead,
+    W : Write
+{
+    // ===== Calling Functions External Interface ===== //
+
+    fn invoke_func_compose(self: &mut Self) -> Result<FunctionType, RuntimeErrorType> {
+        let f: Value = self.pop();
+        match f {
+            Value::Function(func) => {
+                trace::trace_interpreter!("invoke_func_compose -> {}", Value::Function(func.clone()).as_debug_str());
+                match func.nargs {
+                    0 => return Err(IncorrectNumberOfFunctionArguments(*func.clone(), 1)),
+                    1 => {
+                        // Call function directly
+                        // Before we call, we need to pop-push to reorder the arguments, so we have the correct calling convention
+                        let arg: Value = self.pop();
+                        let head: usize = func.head;
+                        self.push(Value::Function(func));
+                        self.push(arg);
+                        self.call_function(head, 1);
+                    },
+                    _ => {
+                        // Function has >1 argument, so evaluate as partial function
+                        let arg: Value = self.pop();
+                        let partial: Value = Value::partial1(*func, arg);
+                        self.push(partial);
+                    }
+                }
+                Ok(FunctionType::User)
+            },
+            Value::PartialFunction(partial) => {
+                trace::trace_interpreter!("invoke_func_compose -> {}", Value::Function(Box::new(partial.func.clone())).as_debug_str());
+                let mut partial = *partial;
+                let nargs: u8 = partial.args.len() as u8 + 1;
+                if partial.func.nargs > nargs {
+                    // Not enough arguments, so pop the argument and push a new partial function
+                    let arg: Value = self.pop();
+                    partial.args.push(Box::new(arg));
+                    self.push(Value::PartialFunction(Box::new(partial)));
+                } else if partial.func.nargs == nargs {
+                    // Exactly enough arguments to invoke the function
+                    // Before we call, we need to pop-push to reorder the arguments and setup partial arguments, so we have the correct calling convention
+                    let arg: Value = self.pop();
+                    let head: usize = partial.func.head;
+                    self.push(Value::Function(Box::new(partial.func)));
+                    for par in partial.args {
+                        self.push(*par);
+                    }
+                    self.push(arg);
+                    self.call_function(head, nargs);
+
+                } else {
+                    return Err(IncorrectNumberOfFunctionArguments(partial.func.clone(), partial.func.nargs))
+                }
+                Ok(FunctionType::User)
+            },
+            Value::Binding(b) => {
+                trace::trace_interpreter!("invoke_func_compose -> {}", Value::Binding(b.clone()).as_debug_str());
+                // invoke_func_binding() will pop `nargs` arguments off the stack and pass them to the provided function
+                // Unlike `OpFuncEval`, we have already popped the binding off the stack initially
+                match stdlib::invoke(b, 1, self) {
+                    Ok(ret) => self.push(ret),
+                    Err(e) => return Err(e),
+                }
+                Ok(FunctionType::Native)
+            },
+            Value::PartialBinding(b, nargs) => {
+                trace::trace_interpreter!("invoke_func_compose -> {}", Value::Binding(b.clone()).as_debug_str());
+                // Need to consume the arguments and set up the stack for calling as if all partial arguments were just pushed
+                // Top of the stack contains `argN+1`, and `nargs` contains `[argN, argN-1, ... arg1]`
+                // After this, it should contain `[..., arg1, arg2, ... argN, argN+1]
+                let held: Value = self.pop();
+                let partial_args: u8 = nargs.len() as u8;
+                for arg in nargs.into_iter().rev() {
+                    self.push(*arg);
+                }
+                self.push(held);
+
+                // invoke_func_binding() will pop `nargs` arguments off the stack and pass them to the provided function
+                // Unlike `OpFuncEval`, we have already popped the binding off the stack initially
+                match stdlib::invoke(b, partial_args + 1, self) {
+                    Ok(ret) => self.push(ret),
+                    Err(e) => return Err(e),
+                }
+                Ok(FunctionType::Native)
+            }
+            _ => return Err(ValueIsNotFunctionEvaluable(f.clone())),
+        }
+    }
+
+    fn invoke_func_eval(self: &mut Self, nargs: u8) -> Result<FunctionType, RuntimeErrorType> {
+        let f: &Value = self.peek(nargs as usize);
+        match f {
+            Value::Function(func) => {
+                trace::trace_interpreter!("invoke_func_eval -> {}, nargs = {}", Value::Function(func.clone()).as_debug_str(), nargs);
+                if func.nargs == nargs {
+                    // Evaluate directly
+                    self.call_function(func.head, func.nargs);
+                } else if func.nargs > nargs && nargs > 0 {
+                    // Evaluate as a partial function
+                    let arg: Vec<Value> = self.popn(nargs as usize);
+                    let func: FunctionImpl = match self.pop() {  // Pop the function, so we can interact with it directly
+                        Value::Function(f) => *f,
+                        _ => panic!("Stack corruption"),
+                    };
+                    let partial: Value = Value::partial(func, arg);
+                    self.push(partial);
+                } else {
+                    return Err(IncorrectNumberOfFunctionArguments(*func.clone(), nargs));
+                }
+                Ok(FunctionType::User)
+            },
+            Value::PartialFunction(_partial) => {
+                trace::trace_interpreter!("invoke_func_eval -> {}, nargs = {}", Value::Function(Box::new(_partial.func.clone())).as_debug_str(), nargs);
+                // Surgically extract the partial binding from the stack
+                let i: usize = self.stack.len() - nargs as usize - 1;
+                let mut partial: PartialFunctionImpl = match std::mem::replace(&mut self.stack[i], Value::Nil) {
+                    Value::PartialFunction(x) => *x,
+                    _ => panic!("Stack corruption")
+                };
+                let total_nargs: u8 = partial.args.len() as u8 + nargs;
+                if partial.func.nargs > total_nargs {
+                    // Not enough arguments, so pop the argument and push a new partial function
+                    let top = self.stack.len();
+                    for arg in self.stack.splice(top - nargs as usize..top, std::iter::empty()) {
+                        partial.args.push(Box::new(arg));
+                    }
+                    self.pop(); // Should pop the `Nil` we swapped earlier
+                    self.push(Value::PartialFunction(Box::new(partial)));
+                } else if partial.func.nargs == total_nargs {
+                    // Exactly enough arguments to invoke the function
+                    // Before we call, we need to pop-push to reorder the arguments and setup partial arguments, so we have the correct calling convention
+                    let args: Vec<Value> = self.popn(nargs as usize);
+                    let head: usize = partial.func.head;
+                    self.pop(); // Should pop the `Nil` we swapped earlier
+                    self.push(Value::Function(Box::new(partial.func)));
+                    for par in partial.args {
+                        self.push(*par);
+                    }
+                    for arg in args {
+                        self.push(arg);
+                    }
+                    self.call_function(head, total_nargs);
+
+                } else {
+                    return Err(IncorrectNumberOfFunctionArguments(partial.func.clone(), total_nargs))
+                }
+                Ok(FunctionType::User)
+            },
+            Value::Binding(b) => {
+                trace::trace_interpreter!("invoke_func_eval -> {}, nargs = {}", Value::Binding(b.clone()).as_debug_str(), nargs);
+                match stdlib::invoke(*b, nargs, self) {
+                    Ok(v) => {
+                        self.pop();
+                        self.push(v)
+                    },
+                    Err(e) => return Err(e),
+                }
+                Ok(FunctionType::Native)
+            },
+            Value::PartialBinding(b, _) => {
+                trace::trace_interpreter!("invoke_func_eval -> {}, nargs = {}", Value::Binding(b.clone()).as_debug_str(), nargs);
+                // Need to consume the arguments and set up the stack for calling as if all partial arguments were just pushed
+                // Surgically extract the binding via std::mem::replace
+                let binding: StdBinding = *b;
+                let i: usize = self.stack.len() - 1 - nargs as usize;
+                let args: Vec<Box<Value>> = match std::mem::replace(&mut self.stack[i], Value::Nil) {
+                    Value::PartialBinding(_, x) => *x,
+                    _ => panic!("Stack corruption")
+                };
+
+                // Splice the args from the binding back into the stack, in the correct order
+                // When evaluating a partial function the vm stack will contain [..., argN+1, ... argM]
+                // The partial args will contain the vector [argN, argN-1, ... arg1]
+                // After this, the vm stack should contain the args [..., arg1, arg2, ... argM]
+                let j: usize = self.stack.len() - nargs as usize;
+                let partial_args: u8 = args.len() as u8;
+                self.stack.splice(j..j, args.into_iter().map(|t| *t).rev());
+
+                match stdlib::invoke(binding, nargs + partial_args, self) {
+                    Ok(v) => {
+                        self.pop();
+                        self.push(v);
+                    },
+                    Err(e) => return Err(e),
+                }
+                Ok(FunctionType::Native)
+            }
+            _ => return Err(ValueIsNotFunctionEvaluable(f.clone())),
+        }
+    }
+
+    fn run_after_invoke(self: &mut Self, function_type: FunctionType) -> Result<(), RuntimeErrorType> {
+        match function_type {
+            FunctionType::Native => Ok(()),
+            FunctionType::User => self.run_until_frame()
+        }
+    }
+
+    // ===== IO Methods ===== //
+
     fn println0(self: &mut Self) { writeln!(&mut self.write, "").unwrap(); }
     fn println(self: &mut Self, str: String) { writeln!(&mut self.write, "{}", str).unwrap(); }
     fn print(self: &mut Self, str: String) { write!(&mut self.write, "{}", str).unwrap(); }
-}
 
-pub trait Stack {
-    fn peek(self: &Self, offset: usize) -> &Value;
-    fn pop(self: &mut Self) -> Value;
-    fn popn(self: &mut Self, n: usize) -> Vec<Value>;
-    fn push(self: &mut Self, value: Value);
-}
 
-impl<R, W> Stack for VirtualMachine<R, W> {
     // ===== Stack Manipulations ===== //
 
     /// Peeks at the top element of the stack, or an element `offset` down from the top
@@ -650,7 +681,7 @@ mod test {
     #[test] fn test_str_add_str() { run_str("print(('a' + 'b') + (3 + 4) + (' hello' + 3) + (' and' + true + nil))", "ab7 hello3 andtruenil\n"); }
     #[test] fn test_str_mul_str() { run_str("print('abc' * 3)", "abcabcabc\n"); }
     #[test] fn test_str_add_sub_mul_div_int() { run_str("print(5 - 3, 12 + 5, 3 * 9, 16 / 3)", "2 17 27 5\n"); }
-    #[test] fn test_str_div_mod_int() { run_str("print(3 / 2, 3 / 3, -3 / 2, 10 % 3, 11 % 3, 12 % 3)", "1 1 -1 1 2 0\n"); }
+    #[test] fn test_str_div_mod_int() { run_str("print(3 / 2, 3 / 3, -3 / 2, 10 % 3, 11 % 3, 12 % 3)", "1 1 -2 1 2 0\n"); }
     #[test] fn test_str_div_by_zero() { run_str("print(15 / 0)", "TypeError: Cannot divide '15' of type 'int' and '0' of type 'int'\n  at: line 1 (<test>)\n  at:\n\nprint(15 / 0)\n"); }
     #[test] fn test_str_mod_by_zero() { run_str("print(15 % 0)", "TypeError: Cannot modulo '15' of type 'int' and '0' of type 'int'\n  at: line 1 (<test>)\n  at:\n\nprint(15 % 0)\n"); }
     #[test] fn test_str_left_right_shift() { run_str("print(1 << 10, 16 >> 1, 16 << -1, 1 >> -10)", "1024 8 8 1024\n"); }
@@ -773,17 +804,64 @@ mod test {
     #[test] fn test_functions_17() { run_str("let x = 'hello' ; { fn foo() { x . print } foo()", "hello\n"); }
     #[test] fn test_functions_18() { run_str("{ let x = 'hello' ; { fn foo() { x . print } foo() }", "hello\n"); }
     #[test] fn test_functions_19() { run_str("{ let x = 'hello' ; { { fn foo() { x . print } foo() } }", "hello\n"); }
-    #[test] fn test_function_implicit_return_1() { run_str("fn foo() { } foo() . print", "nil\n"); }
-    #[test] fn test_function_implicit_return_2() { run_str("fn foo() { 'hello' } foo() . print", "hello\n"); }
-    #[test] fn test_function_unspecified_return_1() { run_str("fn foo(x) { if x > 1 {} else {} } foo(2) . print", "nil\n"); }
-    //#[test] fn test_function_unspecified_return_2() { run_str("fn foo(x) { if x > 1 { true ; } else { false ; } } foo(2) . print", "nil\n"); }
+    #[test] fn test_functions_20() { run_str("fn foo(x) { 'hello ' + x . print } 'world' . foo", "hello world\n"); }
+    #[test] fn test_function_implicit_return_01() { run_str("fn foo() { } foo() . print", "nil\n"); }
+    #[test] fn test_function_implicit_return_02() { run_str("fn foo() { 'hello' } foo() . print", "hello\n"); }
+    #[test] fn test_function_implicit_return_03() { run_str("fn foo(x) { if x > 1 {} else {} } foo(2) . print", "nil\n"); }
+    #[test] fn test_function_implicit_return_04() { run_str("fn foo(x) { if x > 1 { true } else { false } } foo(2) . print", "true\n"); }
+    #[test] fn test_function_implicit_return_05() { run_str("fn foo(x) { if x > 1 { true } else { false } } foo(0) . print", "false\n"); }
+    #[test] fn test_function_implicit_return_06() { run_str("fn foo(x) { if x > 1 { } else { false } } foo(2) . print", "nil\n"); }
+    #[test] fn test_function_implicit_return_07() { run_str("fn foo(x) { if x > 1 { } else { false } } foo(0) . print", "false\n"); }
+    #[test] fn test_function_implicit_return_08() { run_str("fn foo(x) { if x > 1 { true } else { } } foo(2) . print", "true\n"); }
+    #[test] fn test_function_implicit_return_09() { run_str("fn foo(x) { if x > 1 { true } else { } } foo(0) . print", "nil\n"); }
+    #[test] fn test_function_implicit_return_10() { run_str("fn foo(x) { if x > 1 { 'hello' } } foo(2) . print", "hello\n"); }
+    #[test] fn test_function_implicit_return_11() { run_str("fn foo(x) { if x > 1 { 'hello' } } foo(0) . print", "nil\n"); }
+    #[test] fn test_function_implicit_return_12() { run_str("fn foo(x) { if x > 1 { if true { 'hello' } } } foo(2) . print", "hello\n"); }
+    #[test] fn test_function_implicit_return_13() { run_str("fn foo(x) { if x > 1 { if true { 'hello' } } } foo(0) . print", "nil\n"); }
+    #[test] fn test_function_implicit_return_14() { run_str("fn foo(x) { loop { if x > 1 { break } } } foo(2) . print", "nil\n"); }
+    #[test] fn test_function_implicit_return_15() { run_str("fn foo(x) { loop { if x > 1 { continue } else { break } } } foo(0) . print", "nil\n"); }
     #[test] fn test_closures_01() { run_str("fn foo() { let x = 'hello' ; fn bar() { x . print } bar() } foo()", "hello\n"); } // todo: closures
     #[test] fn test_function_return_1() { run_str("fn foo() { return 3 } foo() . print", "3\n"); }
     #[test] fn test_function_return_2() { run_str("fn foo() { let x = 3; return x } foo() . print", "3\n"); }
     #[test] fn test_function_return_3() { run_str("fn foo() { let x = 3; { return x } } foo() . print", "3\n"); }
     #[test] fn test_function_return_4() { run_str("fn foo() { let x = 3; { let x; } return x } foo() . print", "3\n"); }
     #[test] fn test_function_return_5() { run_str("fn foo() { let x; { let x = 3; return x } } foo() . print", "3\n"); }
-
+    #[test] fn test_partial_function_composition_1() { run_str("fn foo(a, b, c) { c . print } (3 . (2 . (1 . foo)))", "3\n"); }
+    #[test] fn test_partial_function_composition_2() { run_str("fn foo(a, b, c) { c . print } (2 . (1 . foo)) (3)", "3\n"); }
+    #[test] fn test_partial_function_composition_3() { run_str("fn foo(a, b, c) { c . print } (1 . foo) (2) (3)", "3\n"); }
+    #[test] fn test_partial_function_composition_4() { run_str("fn foo(a, b, c) { c . print } foo (1) (2) (3)", "3\n"); }
+    #[test] fn test_partial_function_composition_5() { run_str("fn foo(a, b, c) { c . print } foo (1, 2) (3)", "3\n"); }
+    #[test] fn test_partial_function_composition_6() { run_str("fn foo(a, b, c) { c . print } foo (1) (2, 3)", "3\n"); }
+    #[test] fn test_operator_functions_01() { run_str("(+3) . print", "(+)\n"); }
+    #[test] fn test_operator_functions_02() { run_str("4 . (+3) . print", "7\n"); }
+    #[test] fn test_operator_functions_03() { run_str("4 . (-) . print", "-4\n"); }
+    #[test] fn test_operator_functions_04() { run_str("true . (!) . print", "false\n"); }
+    #[test] fn test_operator_functions_05() { run_str("let f = (/5) ; 15 . f . print", "3\n"); }
+    #[test] fn test_operator_functions_06() { run_str("let f = (*5) ; f(3) . print", "15\n"); }
+    #[test] fn test_operator_functions_07() { run_str("let f = (<5) ; 3 . f . print", "true\n"); }
+    #[test] fn test_operator_functions_08() { run_str("let f = (>5) ; 3 . f . print", "false\n"); }
+    #[test] fn test_operator_functions_09() { run_str("2 . (**5) . print", "32\n"); }
+    #[test] fn test_operator_functions_10() { run_str("7 . (%3) . print", "1\n"); }
+    #[test] fn test_arrow_functions_01() { run_str("fn foo() -> 3 ; foo() . print", "3\n"); }
+    #[test] fn test_arrow_functions_02() { run_str("fn foo() -> 3 ; foo() . print", "3\n"); }
+    #[test] fn test_arrow_functions_03() { run_str("fn foo(a) -> 3 * a ; 5 . foo . print", "15\n"); }
+    #[test] fn test_arrow_functions_04() { run_str("fn foo(x, y, z) -> x + y + z ; foo(1, 2, 4) . print", "7\n"); }
+    #[test] fn test_arrow_functions_05() { run_str("fn foo() -> (fn() -> 123) ; foo() . print", "_\n"); }
+    #[test] fn test_arrow_functions_06() { run_str("fn foo() -> (fn() -> 123) ; foo() . repr . print", "fn _()\n"); }
+    #[test] fn test_arrow_functions_07() { run_str("fn foo() -> (fn(a, b, c) -> 123) ; foo() . print", "_\n"); }
+    #[test] fn test_arrow_functions_08() { run_str("fn foo() -> (fn(a, b, c) -> 123) ; foo() . repr . print", "fn _(a, b, c)\n"); }
+    #[test] fn test_arrow_functions_09() { run_str("fn foo() -> (fn() -> 123) ; foo()() . print", "123\n"); }
+    #[test] fn test_arrow_functions_10() { run_str("let x = fn() -> 3 ; x() . print", "3\n"); }
+    #[test] fn test_arrow_functions_11() { run_str("let x = fn() -> fn() -> 4 ; x() . print", "_\n"); }
+    #[test] fn test_arrow_functions_12() { run_str("let x = fn() -> fn() -> 4 ; x() . repr .print", "fn _()\n"); }
+    #[test] fn test_arrow_functions_13() { run_str("let x = fn() -> fn() -> 4 ; x()() . print", "4\n"); }
+    #[test] fn test_arrow_functions_14() { run_str("fn foo() { if true { return 123 } else { return 321 } } ; foo() . print", "123\n"); }
+    #[test] fn test_arrow_functions_15() { run_str("fn foo() { if false { return 123 } else { return 321 } } ; foo() . print", "321\n"); }
+    #[test] fn test_arrow_functions_16() { run_str("fn foo() { let x = 1234; x } ; foo() . print", "1234\n"); }
+    #[test] fn test_arrow_functions_17() { run_str("fn foo() { let x, y; x + ' and ' + y } ; foo() . print", "nil and nil\n"); }
+    #[test] fn test_arrow_functions_18() { run_str("fn foo() { fn bar() -> 3 ; bar } ; foo() . print", "bar\n"); }
+    #[test] fn test_arrow_functions_19() { run_str("fn foo() { fn bar() -> 3 ; bar } ; foo() . repr . print", "fn bar()\n"); }
+    #[test] fn test_arrow_functions_20() { run_str("fn foo() { fn bar() -> 3 ; bar } ; foo()() . print", "3\n"); }
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }
     #[test] fn test_append_large_lists() { run("append_large_lists"); }
@@ -797,7 +875,7 @@ mod test {
         let mut buf: Vec<u8> = Vec::new();
         let mut vm = VirtualMachine::new(compile, &b""[..], &mut buf);
 
-        let result: Result<(), RuntimeError> = vm.run();
+        let result: Result<(), RuntimeError> = vm.run_until_completion();
         assert!(vm.stack.is_empty() || result.is_err());
 
         let mut output: String = String::from_utf8(buf).unwrap();
@@ -807,7 +885,7 @@ mod test {
             Err(err) => output.push_str(ErrorReporter::new(text, source).format_runtime_error(&err).as_str()),
         }
 
-        assert_eq!(expected, output.as_str());
+        assert_eq!(output.as_str(), expected);
     }
 
     fn run(path: &'static str) {
@@ -819,7 +897,7 @@ mod test {
         let mut buf: Vec<u8> = Vec::new();
         let mut vm = VirtualMachine::new(compile, &b""[..], &mut buf);
 
-        let result: Result<(), RuntimeError> = vm.run();
+        let result: Result<(), RuntimeError> = vm.run_until_completion();
         assert!(vm.stack.is_empty());
         assert!(result.is_ok());
 

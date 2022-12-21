@@ -3,12 +3,14 @@ use std::collections::{HashMap, VecDeque};
 use crate::compiler::scanner::{ScanResult, ScanToken};
 use crate::stdlib::StdBinding;
 use crate::vm::opcode::Opcode;
+use crate::vm::value::FunctionImpl;
+use crate::reporting::ProvidesLineNumber;
 use crate::trace;
 
 use ScanToken::{*};
 use ParserErrorType::{*};
 use Opcode::{*};
-use crate::vm::value::FunctionImpl;
+use StdBinding::{*};
 
 
 pub fn parse(bindings: HashMap<&'static str, StdBinding>, scan_result: ScanResult) -> ParserResult {
@@ -51,7 +53,7 @@ impl ParserResult {
 
         let mut last_line_no: u16 = 0;
         for (ip, token) in self.code.iter().enumerate() {
-            let line_no = self.line_numbers.get(ip).unwrap_or_else(|| self.line_numbers.last().unwrap());
+            let line_no = self.line_number(ip);
             let label: String = if line_no + 1 != last_line_no {
                 last_line_no = line_no + 1;
                 format!("L{:0>width$}: ", line_no + 1, width = width)
@@ -60,8 +62,8 @@ impl ParserResult {
             };
             let asm: String = match token {
                 Opcode::Int(cid) => format!("Int({} -> {})", cid, self.constants[*cid as usize]),
-                Str(sid) => format!("Str({} -> {:?})", sid, self.strings[*sid as usize]),
-                Function(fid) => format!("Function({} -> {:?})", fid, self.functions[*fid as usize]),
+                Opcode::Str(sid) => format!("Str({} -> {:?})", sid, self.strings[*sid as usize]),
+                Opcode::Function(fid) => format!("Function({} -> {:?})", fid, self.functions[*fid as usize]),
                 t => format!("{:?}", t),
             };
             lines.push(format!("{}{:0>4} {}", label, ip % 10_000, asm));
@@ -83,6 +85,7 @@ pub enum ParserErrorType {
     UnexpectedEoF,
     UnexpectedEofExpectingVariableNameAfterLet,
     UnexpectedEofExpectingFunctionNameAfterFn,
+    UnexpectedEofExpectingFunctionBlockOrArrowAfterFn,
     UnexpectedEoFExpecting(ScanToken),
     UnexpectedTokenAfterEoF(ScanToken),
 
@@ -95,6 +98,7 @@ pub enum ParserErrorType {
     ExpectedStatement(ScanToken),
     ExpectedVariableNameAfterLet(ScanToken),
     ExpectedFunctionNameAfterFn(ScanToken),
+    ExpectedFunctionBlockOrArrowAfterFn(ScanToken),
     ExpectedParameterOrEndOfList(ScanToken),
     ExpectedCommaOrEndOfParameters(ScanToken),
 
@@ -116,8 +120,15 @@ struct Parser {
     lineno: u16,
     line_numbers: Vec<u16>,
 
-    error_recovery: bool, // If we are in error recover mode, this flag is set
-    multiple_expression_statements_per_line: bool, // If a expression statement has already been parsed before a new line or ';', this flag is set
+    // If we are in error recover mode, this flag is set
+    error_recovery: bool,
+    // If a expression statement has already been parsed before a new line or ';', this flag is set
+    // This denies two unrelated expression statements on the same line, unless seperated by a token such as `;`, `{` or `}`
+    prevent_expression_statement: bool,
+    // We delay the last `Pop` emitted from an expression statement wherever possible
+    // This allows more statement-like constructs to act like expression statements automatically
+    // If this flag is `true`, then we need to emit a `Pop` or risk mangling the stack.
+    delay_pop_from_expression_statement: bool,
 
     locals: Vec<Local>, // Table of all locals, placed at the bottom of the stack
     scope_depth: u16, // Scope depth
@@ -185,7 +196,8 @@ impl Parser {
             line_numbers: Vec::new(),
 
             error_recovery: false,
-            multiple_expression_statements_per_line: false,
+            prevent_expression_statement: false,
+            delay_pop_from_expression_statement: false,
 
             locals: Vec::new(),
             scope_depth: 0,
@@ -202,6 +214,7 @@ impl Parser {
     fn parse(self: &mut Self) {
         trace::trace_parser!("rule <root>");
         self.parse_statements();
+        self.push_delayed_pop();
         self.pop_locals_in_current_scope_depth(true); // Pop top level 'local' variables
         if let Some(t) = self.peek() {
             let token: ScanToken = t.clone();
@@ -213,8 +226,9 @@ impl Parser {
     fn parse_statements(self: &mut Self) {
         trace::trace_parser!("rule <statements>");
         loop {
+            trace::trace_parser!("rule <statement>");
             match self.peek() {
-                Some(KeywordFn) => self.parse_function_statement(),
+                Some(KeywordFn) => self.parse_named_function(),
                 Some(KeywordReturn) => self.parse_return_statement(),
                 Some(KeywordLet) => self.parse_let_statement(),
                 Some(KeywordIf) => self.parse_if_statement(),
@@ -227,11 +241,13 @@ impl Parser {
                 Some(OpenBrace) => self.parse_block_statement(),
                 Some(CloseBrace) => break, // Don't consume, but break if we're in an error mode
                 Some(KeywordExit) => {
+                    self.push_delayed_pop();
                     self.advance();
                     self.push(Exit);
                 },
                 Some(Semicolon) => {
-                    self.multiple_expression_statements_per_line = false;
+                    self.prevent_expression_statement = false;
+                    self.push_delayed_pop();
                     self.advance();
                 },
                 Some(_) => self.parse_expression_statement(),
@@ -242,19 +258,67 @@ impl Parser {
 
     fn parse_block_statement(self: &mut Self) {
         trace::trace_parser!("rule <block-statement>");
+        self.push_delayed_pop();
         self.expect(OpenBrace);
         self.scope_depth += 1;
-        self.multiple_expression_statements_per_line = false;
+        self.prevent_expression_statement = false;
         self.parse_statements();
-        self.multiple_expression_statements_per_line = false;
+        self.prevent_expression_statement = false;
         self.pop_locals_in_current_scope_depth(true);
         self.scope_depth -= 1;
         self.expect_resync(CloseBrace);
     }
 
-    fn parse_function_statement(self: &mut Self) {
-        self.advance(); // Consume `fn`
-        let maybe_name: Option<String> = match self.peek() {
+    fn parse_named_function(self: &mut Self) {
+        trace::trace_parser!("rule <named-function>");
+
+        // Function header - `fn <name> (<arg>, ...)
+        self.push_delayed_pop();
+        self.advance();
+        let maybe_name: Option<String> = self.parse_function_name();
+        self.expect(OpenParen);
+        let args: Vec<String> = self.parse_function_parameters();
+        self.expect_resync(CloseParen);
+
+        // Named functions are a complicated local variable, and needs to be declared as such
+        if let Some(name) = maybe_name {
+            match self.declare_local(name.clone()) {
+                Some(index) => {
+                    self.locals[index].initialized = true;  // Functions are always initialized, as they can be recursive
+                    let func_start: usize = self.next_opcode() as usize + 2; // Declare the function literal. + 2 to the head because of the leading Jump and function local
+                    let func: u16 = self.declare_function(func_start, name, args.clone());
+                    self.push(Opcode::Function(func));  // And push the function object itself
+                },
+                None => {
+                    // todo: error case
+                }
+            }
+        }
+
+        self.parse_function_body(args);
+    }
+
+    fn parse_expression_function(self: &mut Self) {
+        trace::trace_parser!("rule <expression-function>");
+
+        // Function header - `fn` (<arg>, ...)
+        self.advance();
+        self.expect(OpenParen);
+        let args: Vec<String> = self.parse_function_parameters();
+        self.expect_resync(CloseParen);
+
+        // Expression functions don't declare themselves as a local variable that can be referenced.
+        // Instead, as they're part of an expression, they just push a single function instance onto the stack
+        let func_start: usize = self.next_opcode() as usize + 2; // Declare the function literal. + 2 to the head because of the leading Jump and function local
+        let func: u16 = self.declare_function(func_start, String::from("_"), args.clone());
+        self.push(Opcode::Function(func));  // And push the function object itself
+
+        self.parse_function_body(args);
+    }
+
+    fn parse_function_name(self: &mut Self) -> Option<String> {
+        trace::trace_parser!("rule <function-name>");
+        match self.peek() {
             Some(Identifier(_)) => Some(self.take_identifier()),
             Some(t) => {
                 let token: ScanToken = t.clone();
@@ -263,12 +327,13 @@ impl Parser {
             },
             None => {
                 self.error(UnexpectedEofExpectingFunctionNameAfterFn);
-                return
+                None
             }
-        };
+        }
+    }
 
-        self.expect(OpenParen);
-
+    fn parse_function_parameters(self: &mut Self) -> Vec<String> {
+        trace::trace_parser!("rule <function-parameters>");
         // Parameters
         let mut args: Vec<String> = Vec::new();
         loop {
@@ -294,25 +359,13 @@ impl Parser {
                 None => break
             }
         }
+        args
+    }
 
-        self.expect_resync(CloseParen);
-
-        if let Some(name) = maybe_name {
-            // The function itself is a complicated local variable, and needs to be declared as such
-            match self.declare_local(name.clone()) {
-                Some(index) => {
-                    self.locals[index].initialized = true;  // Functions are always initialized, as they can be recursive
-                    let func_start: usize = self.next_opcode() as usize + 2; // Declare the function literal. + 2 to the head because of the leading Jump and function local
-                    let func: u16 = self.declare_function(func_start, name, args.clone());
-                    self.push(Function(func));  // And push the function object itself
-                },
-                None => {
-                    // todo: error case
-                }
-            }
-        }
-
+    fn parse_function_body(self: &mut Self, args: Vec<String>) {
+        trace::trace_parser!("rule <function-body>");
         let jump: u16 = self.reserve(); // Jump over the function itself, the first time we encounter it
+        let prev_pop_status: bool = self.delay_pop_from_expression_statement; // Stack semantics for the delayed pop
 
         // Functions have their own depth tracking in addition to scope
         // In addition, we let parameters have their own scope depth one outside locals to the function
@@ -333,29 +386,39 @@ impl Parser {
             }
         }
 
-        // Slightly modified version of parse_block_statement() to handle return value injection
-        trace::trace_parser!("rule <block-statement>");
-        self.expect(OpenBrace);
+        // Scope of the function itself
         self.scope_depth += 1;
-        self.multiple_expression_statements_per_line = false;
-        self.parse_statements();
+        self.prevent_expression_statement = false;
 
-        // Handle implicit return values
-        // The last expression in a function is interpreted as the return value, without an explicit `return` keyword
-        // We just detect if an expression was just popped, and if so, return it
-        let last_index: usize = self.output.len() - 1;
-        let last: &Opcode = &self.output[last_index];
-        if last == &Pop {
-            // We identified a `Pop`, and as the next instruction will be `return`, we can replace it with `Noop`
-            // Note that we can't replace it with `Return` directly, as there may be jumps pointing to the *next* token after this pop.
-            self.output[last_index] = Noop;
-        } else {
-            // No final expression, so push and return `nil` instead
-            self.push(Nil);
-        }
-        self.push(Return);
+        let is_block_function = match self.peek() {
+            Some(OpenBrace) => {
+                self.advance(); // Block-based function
+                self.parse_statements(); // So parse statements
+                if !self.delay_pop_from_expression_statement {
+                    // If we haven't delayed a `Pop` (and there is a return value already on the stack), we need to push one
+                    self.push(Opcode::Nil);
+                }
+                true
+            },
+            Some(Arrow) => {
+                self.advance(); // Expression-based function
+                self.parse_expression(); // So parse an expression
+                false
+            },
+            Some(t) => {
+                let token: ScanToken = t.clone();
+                self.error(ExpectedFunctionBlockOrArrowAfterFn(token));
+                true
+            },
+            None => {
+                self.error(UnexpectedEofExpectingFunctionBlockOrArrowAfterFn);
+                return
+            }
+        };
 
-        self.multiple_expression_statements_per_line = false;
+        self.push(Return); // Returns the last expression in the function
+
+        self.prevent_expression_statement = false;
         self.pop_locals_in_current_scope_depth(true);
         self.scope_depth -= 1;
 
@@ -363,20 +426,25 @@ impl Parser {
         self.function_depth -= 1;
         self.scope_depth -= 1;
 
-        self.expect_resync(CloseBrace);
+        if is_block_function {
+            self.expect_resync(CloseBrace);
+        }
 
         let end: u16 = self.next_opcode(); // Repair the jump
         self.output[jump as usize] = Jump(end);
+        self.delay_pop_from_expression_statement = prev_pop_status; // Exit the stack
     }
 
     fn parse_return_statement(self: &mut Self) {
+        trace::trace_parser!("rule <return-statement>");
+        self.push_delayed_pop();
         self.advance(); // Consume `return`
         match self.peek() {
             Some(CloseBrace) => { // Allow a bare return, but only when followed by a `}` or `;`, which we can recognize and discard properly.
-                 self.push(Nil);
+                 self.push(Opcode::Nil);
             },
             Some(Semicolon) => {
-                self.push(Nil);
+                self.push(Opcode::Nil);
                 self.advance();
             },
             _ => {
@@ -405,9 +473,17 @@ impl Parser {
 
         trace::trace_parser!("rule <if-statement>");
         self.advance();
+        self.push_delayed_pop();
         self.parse_expression();
         let jump_if_false: u16 = self.reserve(); // placeholder for jump to the beginning of an if branch, if it exists
         self.parse_block_statement();
+
+        // We treat `if` statements as expressions - each branch will create an value on the stack, and we set this flag at the end of parsing the `if`
+        // But, if we didn't delay a `Pop`, we need to push a fake `Nil` onto the stack to maintain the stack size
+        if !self.delay_pop_from_expression_statement {
+            self.delay_pop_from_expression_statement = true;
+            self.push(Opcode::Nil);
+        }
 
         // `elif` can be de-sugared to else { if <expr> { ... } else { ... } }
         // The additional scope around the else {} can be dropped as it doesn't contain anything already in a scope
@@ -418,6 +494,7 @@ impl Parser {
                 let jump: u16 = self.reserve();
                 let after_if: u16 = self.next_opcode();
                 self.output[jump_if_false as usize] = JumpIfFalsePop(after_if);
+                self.delay_pop_from_expression_statement = false;
                 self.parse_if_statement();
                 let after_else: u16 = self.next_opcode();
                 self.output[jump as usize] = Jump(after_else);
@@ -428,14 +505,23 @@ impl Parser {
                 let jump: u16 = self.reserve();
                 let after_if: u16 = self.next_opcode();
                 self.output[jump_if_false as usize] = JumpIfFalsePop(after_if);
+                self.delay_pop_from_expression_statement = false;
                 self.parse_block_statement();
+                if !self.delay_pop_from_expression_statement {
+                    self.delay_pop_from_expression_statement = true;
+                    self.push(Opcode::Nil);
+                }
                 let after_else: u16 = self.next_opcode();
                 self.output[jump as usize] = Jump(after_else);
             },
             _ => {
-                // No `else`, so we patch the original jump to jump to here
-                let after: u16 = self.next_opcode();
-                self.output[jump_if_false as usize] = JumpIfFalsePop(after);
+                // No `else`, but we need to wire in a fake `else` statement which just pushes `Nil` so each branch still pushes a value
+                let jump: u16 = self.reserve();
+                let after_if: u16 = self.next_opcode();
+                self.output[jump_if_false as usize] = JumpIfFalsePop(after_if);
+                self.push(Opcode::Nil);
+                let after_else: u16 = self.next_opcode();
+                self.output[jump as usize] = Jump(after_else);
             },
         }
     }
@@ -451,13 +537,14 @@ impl Parser {
         //     <statements>  | <statements>
         // }                 | Jump L1 ; L2:
 
+        self.push_delayed_pop();
         self.advance();
 
         let loop_start: u16 = self.next_opcode(); // Top of the loop, push onto the loop stack
         self.loops.push(Loop::new(loop_start, self.scope_depth));
 
         self.parse_expression(); // While condition
-        self.push(Bound(StdBinding::Bool)); // Evaluate the condition with `<expr> . bool` automatically
+        self.push(Bound(Bool)); // Evaluate the condition with `<expr> . bool` automatically
         self.push(OpFuncCompose);
         let jump_if_false: u16 = self.reserve(); // Jump to the end
         self.parse_block_statement(); // Inner loop statements, and jump back to front
@@ -483,12 +570,14 @@ impl Parser {
         //     <statements>  | <statements>
         // }                 | Jump L1 ; L2:
 
+        self.push_delayed_pop();
         self.advance();
 
         let loop_start: u16 = self.next_opcode(); // Top of the loop, push onto the loop stack
         self.loops.push(Loop::new(loop_start, self.scope_depth));
 
         self.parse_block_statement(); // Inner loop statements, and jump back to front
+        self.push_delayed_pop(); // Loops can't return a value
         self.push(Jump(loop_start));
 
         let loop_end: u16 = self.next_opcode(); // After the jump, the next opcode is 'end of loop'. Repair all break statements
@@ -504,6 +593,7 @@ impl Parser {
 
     fn parse_break_statement(self: &mut Self) {
         trace::trace_parser!("rule <break-statement>");
+        self.push_delayed_pop();
         self.advance();
         match self.loops.last() {
             Some(_) => {
@@ -517,6 +607,7 @@ impl Parser {
 
     fn parse_continue_statement(self: &mut Self) {
         trace::trace_parser!("rule <continue-statement>");
+        self.push_delayed_pop();
         self.advance();
         match self.loops.last() {
             Some(loop_stmt) => {
@@ -532,6 +623,7 @@ impl Parser {
 
     fn parse_let_statement(self: &mut Self) {
         trace::trace_parser!("rule <let-statement>");
+        self.push_delayed_pop();
         self.advance();
         loop {
             let local: usize = match self.peek() {
@@ -556,11 +648,11 @@ impl Parser {
             match self.peek() {
                 Some(Equals) => { // x = <expr>, so parse the expression
                     self.advance();
-                    self.multiple_expression_statements_per_line = true;
+                    self.prevent_expression_statement = true;
                     self.parse_expression();
                 },
                 _ => {
-                    self.push(Nil); // Initialize to 'nil'
+                    self.push(Opcode::Nil); // Initialize to 'nil'
                 },
             }
 
@@ -572,7 +664,7 @@ impl Parser {
             match self.peek() {
                 Some(Comma) => { // Multiple declarations
                     self.advance();
-                    self.multiple_expression_statements_per_line = false;
+                    self.prevent_expression_statement = false;
                 },
                 _ => break,
             }
@@ -597,6 +689,7 @@ impl Parser {
             _ => None
         };
         if let Some(op) = maybe_op {
+            self.push_delayed_pop();
 
             // Resolve the variable name
             let name: String = self.take_identifier();
@@ -613,7 +706,7 @@ impl Parser {
                 self.push(push_op);
             }
             self.advance();
-            self.multiple_expression_statements_per_line = true;
+            self.prevent_expression_statement = true;
             self.parse_expression();
             if op != OpEqual { // Only push the operator in assignment expressions
                 self.push(op);
@@ -631,10 +724,11 @@ impl Parser {
         match self.peek() {
             Some(t) => {
                 let token: ScanToken = t.clone();
-                if !self.multiple_expression_statements_per_line {
-                    self.multiple_expression_statements_per_line = true;
+                if !self.prevent_expression_statement {
+                    self.prevent_expression_statement = true;
+                    self.push_delayed_pop();
                     self.parse_expression();
-                    self.push(Pop);
+                    self.delay_pop_from_expression_statement = true;
                 } else {
                     self.error(ExpectedStatement(token))
                 }
@@ -654,7 +748,7 @@ impl Parser {
     fn parse_expr_1_terminal(self: &mut Self) {
         trace::trace_parser!("rule <expr-1>");
         match self.peek() {
-            Some(KeywordNil) => self.advance_push(Nil),
+            Some(KeywordNil) => self.advance_push(Opcode::Nil),
             Some(KeywordTrue) => self.advance_push(True),
             Some(KeywordFalse) => self.advance_push(False),
             Some(ScanToken::Int(_)) => {
@@ -674,12 +768,14 @@ impl Parser {
             Some(StringLiteral(_)) => {
                 let string: String = self.take_str();
                 let sid: u16 = self.declare_string(string);
-                self.push(Str(sid));
+                self.push(Opcode::Str(sid));
             },
             Some(OpenParen) => {
-                self.advance();
-                self.parse_expression();
-                self.expect(CloseParen);
+                self.advance(); // Consume the `(`
+                if !self.parse_expr_1_partial_operator() {
+                    self.parse_expression();
+                    self.expect(CloseParen);
+                }
             },
             Some(OpenSquareBracket) => {
                 self.advance();
@@ -707,15 +803,79 @@ impl Parser {
                 self.push(List(length));
                 self.expect(CloseSquareBracket);
             },
+            Some(KeywordFn) => {
+                self.parse_expression_function();
+            }
             Some(e) => {
                 let token: ScanToken = e.clone();
-                self.push(Nil);
+                self.push(Opcode::Nil);
                 self.error(ExpectedExpressionTerminal(token));
             },
             _ => {
-                self.push(Nil);
+                self.push(Opcode::Nil);
                 self.error(UnexpectedEoF)
             },
+        }
+    }
+
+    fn parse_expr_1_partial_operator(self: &mut Self) -> bool {
+        trace::trace_parser!("rule <expr-1-partial-operator>");
+        // Open `(` usually resolves precedence, so it begins parsing an expression from the top again
+        // However it *also* can be used to wrap around a partial evaluation of a literal operator, for example
+        // (-) => operator->unary_sub
+        // (+ 3) => partial evaluate operator->add at 3
+        // So, if we peek ahead and see an operator, we know this is a expression of that sort and we need to handle accordingly
+        // We *also* know that we will never see a binary operator begin an expression
+        let mut unary: Option<StdBinding> = None;
+        let mut binary: Option<StdBinding> = None;
+        match self.peek() {
+            // Unary operators *can* be present at the start of an expression, but we would see something after
+            // So, we peek ahead again and see if the next token is a `)` - that's the only way you evaluate unary operators as functions
+            Some(Minus) => unary = Some(OperatorUnarySub),
+            Some(LogicalNot) => unary = Some(OperatorUnaryLogicalNot),
+            Some(BitwiseNot) => unary = Some(OperatorUnaryBitwiseNot),
+
+            Some(Mul) => binary = Some(OperatorMul),
+            Some(Div) => binary = Some(OperatorDiv),
+            Some(Pow) => binary = Some(OperatorPow),
+            Some(Mod) => binary = Some(OperatorMod),
+            Some(KeywordIs) => binary = Some(OperatorIs),
+            Some(Plus) => binary = Some(OperatorAdd),
+            // `-` cannot be a binary operator as it's ambiguous from a unary expression
+            Some(LeftShift) => binary = Some(OperatorLeftShift),
+            Some(RightShift) => binary = Some(OperatorRightShift),
+            Some(BitwiseAnd) => binary = Some(OperatorBitwiseAnd),
+            Some(BitwiseOr) => binary = Some(OperatorBitwiseOr),
+            Some(BitwiseXor) => binary = Some(OperatorBitwiseXor),
+            Some(LessThan) => binary = Some(OperatorLessThan),
+            Some(LessThanEquals) => binary = Some(OperatorLessThanEqual),
+            Some(GreaterThan) => binary = Some(OperatorGreaterThan),
+            Some(GreaterThanEquals) => binary = Some(OperatorGreaterThanEqual),
+            Some(DoubleEquals) => binary = Some(OperatorEqual),
+            Some(NotEquals) => binary = Some(OperatorNotEqual),
+
+            _ => {},
+        }
+
+        if let Some(op) = unary {
+            match self.peek2() {
+                Some(CloseParen) => {
+                    self.advance(); // The unary operator
+                    self.push(Bound(op)); // Push the binding - there is no partial evaluation so that's all we need
+                    self.advance(); // The close paren
+                    true
+                },
+                _ => false
+            }
+        } else if let Some(op) = binary {
+            self.advance(); // The unary operator
+            self.parse_expression(); // Parse the expression following a binary prefix operator
+            self.push(Bound(op)); // Push the binding
+            self.push(OpFuncCompose); // And partially evaluate it
+            self.expect(CloseParen);
+            true
+        } else {
+            false
         }
     }
 
@@ -745,32 +905,45 @@ impl Parser {
         loop {
             match self.peek() {
                 Some(OpenParen) => {
-                    let mut count: u8 = 0;
                     self.advance();
                     match self.peek() {
-                        Some(CloseParen) => { self.advance(); },
+                        Some(CloseParen) => {
+                            self.advance();
+                            self.push(OpFuncEval(0));
+                        },
                         Some(_) => {
-                            // First argument
-                            self.parse_expression();
-                            count += 1;
-                            // Other arguments
-                            while let Some(Comma) = self.peek() {
-                                self.advance();
+                            // Special case: if we can parse a partially-evaluated operator expression, we do so
+                            // This means we can write `map (+3)` instead of `map ((+3))`
+                            // If we parse something here, this will have consumed everything, otherwise we parse an expression as per usual
+                            if self.parse_expr_1_partial_operator() {
+                                // We still need to treat this as a function evaluation, however, because we pretended we didn't need to see the outer parenthesis
+                                self.push(OpFuncEval(1));
+                            } else {
+                                // First argument
                                 self.parse_expression();
-                                count += 1;
-                            }
-                            match self.peek() {
-                                Some(CloseParen) => self.skip(),
-                                Some(c) => {
-                                    let token: ScanToken = c.clone();
-                                    self.error(ExpectedCommaOrEndOfArguments(token))
-                                },
-                                _ => self.error(UnexpectedEoF),
+                                let mut count: u8 = 1;
+
+                                // Other arguments
+                                while let Some(Comma) = self.peek() {
+                                    self.advance();
+                                    self.parse_expression();
+                                    count += 1;
+                                }
+                                match self.peek() {
+                                    Some(CloseParen) => self.skip(),
+                                    Some(c) => {
+                                        let token: ScanToken = c.clone();
+                                        self.error(ExpectedCommaOrEndOfArguments(token))
+                                    },
+                                    _ => self.error(UnexpectedEoF),
+                                }
+
+                                // Evaluate the number of arguments we parsed
+                                self.push(OpFuncEval(count));
                             }
                         }
                         None => self.error(UnexpectedEoF),
                     }
-                    self.push(OpFuncEval(count));
                 },
                 Some(OpenSquareBracket) => {
                     self.advance(); // Consume the square bracket
@@ -778,7 +951,7 @@ impl Parser {
                     // Consumed `[` so far
                     match self.peek() {
                         Some(Colon) => { // No first argument, so push zero. Don't consume the colon as it's the seperator
-                            self.push(Nil);
+                            self.push(Opcode::Nil);
                         },
                         _ => self.parse_expression(), // Otherwise we require a first expression
                     }
@@ -804,10 +977,10 @@ impl Parser {
                     // Consumed `[` <expression> `:` so far
                     match self.peek() {
                         Some(Colon) => { // No second argument, but we have a third argument, so push -1. Don't consume the colon as it's the seperator
-                            self.push(Nil);
+                            self.push(Opcode::Nil);
                         },
                         Some(CloseSquareBracket) => { // No second argument, so push -1 and then exit
-                            self.push(Nil);
+                            self.push(Opcode::Nil);
                             self.advance();
                             self.push(OpSlice);
                             continue
@@ -837,7 +1010,7 @@ impl Parser {
                     // Consumed `[` <expression> `:` <expression> `:` so far
                     match self.peek() {
                         Some(CloseSquareBracket) => { // Three arguments + default value for slice
-                            self.push(Nil);
+                            self.push(Opcode::Nil);
                         },
                         _ => self.parse_expression(),
                     }
@@ -1208,13 +1381,15 @@ impl Parser {
     /// Note that this function only returns a read-only reference to the underlying token, suitable for matching
     /// If the token data needs to be unboxed, i.e. as with `Identifier` tokens, it must be extracted only via `advance()`
     /// This also does not consume newline tokens in the input, rather peeks _past_ them in order to find the next matching token.
-    fn peek(self: &Self) -> Option<&ScanToken> {
+    fn peek(self: &mut Self) -> Option<&ScanToken> {
         if self.error_recovery {
             return None
         }
         for token in &self.input {
             if token != &NewLine {
                 return Some(token)
+            } else {
+                self.prevent_expression_statement = false;
             }
         }
         None
@@ -1233,6 +1408,8 @@ impl Parser {
                 } else {
                     return Some(token)
                 }
+            } else {
+                self.prevent_expression_statement = false;
             }
         }
         None
@@ -1253,6 +1430,7 @@ impl Parser {
             trace::trace_parser!("newline {} at opcode {}, last = {:?}", self.lineno + 1, self.next_opcode(), self.line_numbers.last());
             self.input.pop_front();
             self.lineno += 1;
+            self.prevent_expression_statement = false;
         }
         trace::trace_parser!("advance {:?}", self.input.front());
         self.input.pop_front()
@@ -1266,8 +1444,18 @@ impl Parser {
         (self.output.len() - 1) as u16
     }
 
+    /// If we previously delayed a `Pop` opcode from being omitted, push it now and reset the flag
+    fn push_delayed_pop(self: &mut Self) {
+        if self.delay_pop_from_expression_statement {
+            trace::trace_parser!("push Pop (delayed)");
+            self.push(Pop);
+            self.delay_pop_from_expression_statement = false;
+        }
+    }
+
     /// Specialization of `pop` which may push nothing, Pop, or PopN(n)
     fn push_pop(self: &mut Self, n: u16) {
+        trace::trace_parser!("push Pop/PopN {}", n);
         match n {
             0 => {},
             1 => self.push(Pop),
@@ -1304,11 +1492,11 @@ mod tests {
     use crate::compiler::parser::{Parser, ParserResult};
     use crate::{reporting, stdlib};
     use crate::stdlib::StdBinding;
-    use crate::stdlib::StdBinding::{Print, Read};
     use crate::vm::opcode::Opcode;
     use crate::trace;
 
-    use crate::vm::opcode::Opcode::{*};
+    use StdBinding::{Print, Read};
+    use Opcode::{*};
 
 
     #[test] fn test_empty_expr() { run_expr("", vec![Nil]); }
@@ -1341,7 +1529,7 @@ mod tests {
     #[test] fn test_function_call_binary_op_precedence() { run_expr("print ( 1 ) + ( 2 ( 3 ) )", vec![Bound(Print), Int(1), OpFuncEval(1), Int(2), Int(3), OpFuncEval(1), OpAdd]); }
     #[test] fn test_function_call_parens_1() { run_expr("print . read (1 + 3) (5)", vec![Bound(Print), Bound(Read), Int(1), Int(3), OpAdd, OpFuncEval(1), Int(5), OpFuncEval(1), OpFuncCompose]); }
     #[test] fn test_function_call_parens_2() { run_expr("( print . read (1 + 3) ) (5)", vec![Bound(Print), Bound(Read), Int(1), Int(3), OpAdd, OpFuncEval(1), OpFuncCompose, Int(5), OpFuncEval(1)]); }
-    #[test] fn test_function_composition_with_is() { run_expr("'123' . int is int . print", vec![Str(0), Bound(StdBinding::Int), Bound(StdBinding::Int), OpIs, OpFuncCompose, Bound(StdBinding::Print), OpFuncCompose]); }
+    #[test] fn test_function_composition_with_is() { run_expr("'123' . int is int . print", vec![Str(0), Bound(StdBinding::Int), Bound(StdBinding::Int), OpIs, OpFuncCompose, Bound(Print), OpFuncCompose]); }
     #[test] fn test_and() { run_expr("1 < 2 and 3 < 4", vec![Int(1), Int(2), OpLessThan, JumpIfFalse(8), Pop, Int(3), Int(4), OpLessThan]); }
     #[test] fn test_or() { run_expr("1 < 2 or 3 < 4", vec![Int(1), Int(2), OpLessThan, JumpIfTrue(8), Pop, Int(3), Int(4), OpLessThan]); }
     #[test] fn test_precedence_1() { run_expr("1 . 2 & 3 > 4", vec![Int(1), Int(2), Int(3), OpBitwiseAnd, OpFuncCompose, Int(4), OpGreaterThan]); }
@@ -1370,7 +1558,7 @@ mod tests {
     #[test] fn test_function() { run("function"); }
     #[test] fn test_function_early_return() { run("function_early_return"); }
     #[test] fn test_function_early_return_nested_scope() { run("function_early_return_nested_scope"); }
-    #[test] fn test_function_unspecified_return() { run("function_unspecified_return"); }
+    #[test] fn test_function_implicit_return() { run("function_implicit_return"); }
     #[test] fn test_function_with_parameters() { run("function_with_parameters"); }
     #[test] fn test_global_variables() { run("global_variables"); }
     #[test] fn test_global_assignments() { run("global_assignments"); }
@@ -1386,6 +1574,7 @@ mod tests {
     #[test] fn test_loop_2() { run("loop_2"); }
     #[test] fn test_loop_3() { run("loop_3"); }
     #[test] fn test_loop_4() { run("loop_4"); }
+    #[test] fn test_weird_expression_statements() { run("weird_expression_statements"); }
     #[test] fn test_weird_locals() { run("weird_locals"); }
     #[test] fn test_while_1() { run("while_1"); }
     #[test] fn test_while_2() { run("while_2"); }
@@ -1399,6 +1588,7 @@ mod tests {
 
         let mut parser: Parser = Parser::new(stdlib::bindings(), result.tokens);
         parser.parse_expression();
+        assert_eq!(None, parser.peek());
 
         // Tokens will contain int values as exact values, as it's easier to read as a test DSL
         // However, the parser will give us constant IDs
@@ -1411,7 +1601,7 @@ mod tests {
             })
             .collect::<Vec<Opcode>>();
 
-        assert_eq!(tokens, output);
+        assert_eq!(output, tokens);
     }
 
     fn run_err(text: &'static str, output: &'static str) {

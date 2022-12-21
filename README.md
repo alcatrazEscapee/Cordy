@@ -127,22 +127,19 @@ And replace the values for the traces you want to enable with `on`:
 
 ### To-Do
 
-- Implement `->` binding resolution
-- ~~List types~~ (and list literals)
-- Tuple types (and tuple literals), if we need them
-- Set types
-- Map types and map literals
-- Function types
+- Implement `->` operator, basic named tuple types (structs), or binding resolution on macros
+- Sets (HashSet)
+- Maps (HashMap) and dictionary literals (or just use list syntax?)
 - Polymorphic 'List' types that can be used as arbitrary iterators, etc. using rust traits rather than dispatch at every call site
-- Primitive operator partial evaluation `map (+ 3)` kinda deal
 - Functional wankery (map, filter, max, min, reduce) that operate on polymorphic lists
-- Deque / Queue type
-- Structs (fancy named tuples)
-- Format strings
+- Deque / Queue type (VecDeque)
+- Format strings (just normal strings with the python `%` operator, but with rust formatting? does that even work?)
 - Regex (some sort of impl)
 - Pattern matching / deconstruction
 - Even MORE standard library functions
-- ~~User defined functions~~
 - Lambdas
-- Closures
+- Expression functions: `fn <name> (...) -> <expr>`
+- Statement lambdas: `fn(...) { <statements> }`
+- Improved return value collection (make it work properly with if/else statements, loops, etc.)
+- Closures - capture value not variable (like in Java)?
 - VS Code: https://code.visualstudio.com/api/language-extensions/overview

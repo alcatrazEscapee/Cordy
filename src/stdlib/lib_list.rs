@@ -6,6 +6,7 @@ use crate::vm::value::Value;
 
 use RuntimeErrorType::{*};
 use Value::{*};
+use crate::vm::VirtualInterface;
 
 
 macro_rules! slice_arg {
@@ -114,8 +115,9 @@ macro_rules! declare_varargs_iter {
 }
 
 declare_varargs_iter!(sum_iter, sum_list);
-//declare_varargs_iter!(min_iter, min_list);
-//declare_varargs_iter!(max_iter, max_list);
+declare_varargs_iter!(min_iter, min_list);
+declare_varargs_iter!(max_iter, max_list);
+
 //declare_varargs_iter!(filter_iter, filter_list);
 //declare_varargs_iter!(map_iter, map_list);
 //declare_varargs_iter!(reduce_iter, reduce_list);
@@ -129,4 +131,53 @@ pub fn sum_list(args: &Vec<Value>) -> Result<Value, RuntimeErrorType> {
         }
     }
     Ok(Int(sum))
+}
+
+pub fn max_list(args: &Vec<Value>) -> Result<Value, RuntimeErrorType> {
+    let mut iter = args.iter();
+    let mut max = match iter.next() {
+        Some(t) => t,
+        None => return Err(ValueErrorMaxArgMustBeNonEmptySequence)
+    };
+    for v in iter {
+        if max.is_less_than(v)? {
+            max = v;
+        }
+    }
+    Ok(max.clone())
+}
+
+pub fn min_list(args: &Vec<Value>) -> Result<Value, RuntimeErrorType> {
+    let mut iter = args.iter();
+    let mut min = match iter.next() {
+        Some(t) => t,
+        None => return Err(ValueErrorMinArgMustBeNonEmptySequence)
+    };
+    for v in iter {
+        if v.is_less_than(min)? {
+            min = v;
+        }
+    }
+    Ok(min.clone())
+}
+
+pub fn map<VM>(vm: &mut VM, a1: Value, a2: Value) -> Result<Value, RuntimeErrorType> where VM : VirtualInterface {
+    match (a1, a2) {
+        (l, List(rs)) => {
+            let rs = (*rs).borrow();
+            let mut acc: Vec<Value> = Vec::with_capacity(rs.len());
+            for r in rs.iter() {
+                vm.push(r.clone());
+                vm.push(l.clone());
+                let f = match vm.invoke_func_compose() {
+                    Err(e) => return Err(e),
+                    Ok(f) => f
+                };
+                vm.run_after_invoke(f)?;
+                acc.push(vm.pop());
+            }
+            Ok(Value::list(acc))
+        },
+        (_, r) => return Err(TypeErrorArgMustBeIterable(r)),
+    }
 }

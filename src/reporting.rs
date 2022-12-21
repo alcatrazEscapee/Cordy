@@ -1,10 +1,11 @@
-use crate::compiler::parser::{ParserError, ParserErrorType};
+use crate::compiler::parser::{ParserError, ParserErrorType, ParserResult};
 use crate::compiler::scanner::{ScanError, ScanErrorType, ScanToken};
 use crate::stdlib;
 use crate::stdlib::StdBinding;
 use crate::vm::error::{RuntimeError, RuntimeErrorType};
 use crate::vm::opcode::Opcode;
 use crate::vm::value::{FunctionImpl, Value};
+use crate::vm::VirtualMachine;
 
 const FORMAT_RESET: &'static str = ""; //\x1B[0m";
 const FORMAT_BOLD: &'static str = ""; //\x1B[1m";
@@ -61,6 +62,28 @@ pub fn format_runtime_error(source_lines: &Vec<&str>, source_file: &String, erro
     text
 }
 
+pub trait ProvidesLineNumber {
+    fn line_number(self: &Self, ip: usize) -> u16;
+}
+
+impl ProvidesLineNumber for Vec<u16> {
+    fn line_number(self: &Self, ip: usize) -> u16 {
+        *self.get(ip).unwrap_or_else(|| self.last().unwrap())
+    }
+}
+
+impl ProvidesLineNumber for ParserResult {
+    fn line_number(self: &Self, ip: usize) -> u16 {
+        self.line_numbers.line_number(ip)
+    }
+}
+
+impl<R, W> ProvidesLineNumber for VirtualMachine<R, W> {
+    fn line_number(self: &Self, ip: usize) -> u16 {
+        self.line_numbers.line_number(ip)
+    }
+}
+
 
 trait AsError {
     fn format_error(self: &Self) -> String;
@@ -70,13 +93,16 @@ trait AsError {
 impl AsError for RuntimeError {
     fn format_error(self: &Self) -> String {
         match &self.error {
+            RuntimeErrorType::RuntimeExit => panic!("Not a real error"),
             RuntimeErrorType::ValueIsNotFunctionEvaluable(v) => format!("Tried to evaluate {} but it is not a function.", v.format_error()),
             RuntimeErrorType::BindingIsNotFunctionEvaluable(b) => format!("Tried to evaluate '{}' but it is not an evaluable function.", b.format_error()),
-            RuntimeErrorType::IncorrectNumberOfFunctionArguments(f, a) => format!("Function '{}' requires {} parameters but {} were present.", f.format_error(), f.nargs, a),
+            RuntimeErrorType::IncorrectNumberOfFunctionArguments(f, a) => format!("Function {} requires {} parameters but {} were present.", f.format_error(), f.nargs, a),
             RuntimeErrorType::IncorrectNumberOfArguments(b, e, a) => format!("Function '{}' requires {} parameters but {} were present.", b.format_error(), e, a),
             RuntimeErrorType::IncorrectNumberOfArgumentsVariadicAtLeastOne(b) => format!("Function '{}' requires at least 1 parameter but none were present.", b.format_error()),
             RuntimeErrorType::IndexOutOfBounds(i, ln) => format!("Index '{}' is out of bounds for list of length [0, {})", i, ln),
             RuntimeErrorType::SliceStepZero => String::from("Cannot slice a list with a step of 0"),
+            RuntimeErrorType::ValueErrorMaxArgMustBeNonEmptySequence => format!("ValueError: 'max' argument must be a non-empty sequence"),
+            RuntimeErrorType::ValueErrorMinArgMustBeNonEmptySequence => format!("ValueError: 'min' argument must be a non-empty sequence"),
             RuntimeErrorType::TypeErrorUnaryOp(op, v) => format!("TypeError: Argument to unary '{}' must be an int, got {}", op.format_error(), v.format_error()),
             RuntimeErrorType::TypeErrorBinaryOp(op, l, r) => format!("TypeError: Cannot {} {} and {}", op.format_error(), l.format_error(), r.format_error()),
             RuntimeErrorType::TypeErrorBinaryIs(l, r) => format!("TypeError: {} is not a type and cannot be used with binary 'is' on {}", r.format_error(), l.format_error()),
@@ -136,6 +162,7 @@ impl AsError for ParserError {
             ParserErrorType::UnexpectedEoF => String::from("Unexpected end of file."),
             ParserErrorType::UnexpectedEofExpectingVariableNameAfterLet => String::from("Unexpected end of file, was expecting variable name after 'let' keyword"),
             ParserErrorType::UnexpectedEofExpectingFunctionNameAfterFn => String::from("Unexpected end of file, was expecting function name after 'fn' keyword"),
+            ParserErrorType::UnexpectedEofExpectingFunctionBlockOrArrowAfterFn => String::from("Unexpected end of file, was expecting function body starting with '{' or '->' after 'fn' keyword"),
             ParserErrorType::UnexpectedEoFExpecting(e) => format!("Unexpected end of file, was expecting {}.", e.format_error()),
             ParserErrorType::UnexpectedTokenAfterEoF(e) => format!("Unexpected {} after parsing finished", e.format_error()),
             ParserErrorType::Expecting(e, a) => format!("Expected a {}, got {} instead", e.format_error(), a.format_error()),
@@ -146,6 +173,7 @@ impl AsError for ParserError {
             ParserErrorType::ExpectedStatement(e) => format!("Expecting a statement, got {} instead", e.format_error()),
             ParserErrorType::ExpectedVariableNameAfterLet(e) => format!("Expecting a variable name after 'let' keyword, got {} instead", e.format_error()),
             ParserErrorType::ExpectedFunctionNameAfterFn(e) => format!("Expecting a function name after 'fn' keyword, got {} instead", e.format_error()),
+            ParserErrorType::ExpectedFunctionBlockOrArrowAfterFn(e) => format!("Expecting a function body starting with '{{' or `->` after 'fn', got {} instead", e.format_error()),
             ParserErrorType::ExpectedParameterOrEndOfList(e) => format!("Expected a function parameter or ')' after function declaration, got {} instead", e.format_error()),
             ParserErrorType::ExpectedCommaOrEndOfParameters(e) => format!("Expected a ',' or ')' after function parameter, got {} instead", e.format_error()),
             ParserErrorType::LocalVariableConflict(e) => format!("Multiple declarations for 'let {}' in the same scope", e),

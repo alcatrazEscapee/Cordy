@@ -1,9 +1,8 @@
 L1: 0000 Function(0 -> FunctionImpl { head: 2, nargs: 0, name: "foo", args: [] })
-L2: 0001 Jump(7)
+L2: 0001 Jump(6)
     0002 Str(0 -> "hello")
     0003 Bound(Print)
     0004 OpFuncCompose
-    0005 Noop
-L3: 0006 Return
-    0007 Pop
-    0008 Exit
+L3: 0005 Return
+    0006 Pop
+    0007 Exit

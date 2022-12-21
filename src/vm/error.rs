@@ -10,6 +10,8 @@ pub struct RuntimeError {
 
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub enum RuntimeErrorType {
+    RuntimeExit,
+
     ValueIsNotFunctionEvaluable(Value),
     BindingIsNotFunctionEvaluable(StdBinding),
 
@@ -18,6 +20,9 @@ pub enum RuntimeErrorType {
     IncorrectNumberOfArgumentsVariadicAtLeastOne(StdBinding),
     IndexOutOfBounds(i64, usize),
     SliceStepZero,
+
+    ValueErrorMaxArgMustBeNonEmptySequence,
+    ValueErrorMinArgMustBeNonEmptySequence,
 
     TypeErrorUnaryOp(Opcode, Value),
     TypeErrorBinaryOp(Opcode, Value, Value),
@@ -31,4 +36,13 @@ pub enum RuntimeErrorType {
     TypeErrorFunc1(&'static str, Value),
     TypeErrorFunc2(&'static str, Value, Value),
     TypeErrorFunc3(&'static str, Value, Value, Value),
+}
+
+impl RuntimeErrorType {
+    pub fn with(self: Self, lineno: u16) -> RuntimeError {
+        RuntimeError {
+            error: self,
+            lineno
+        }
+    }
 }

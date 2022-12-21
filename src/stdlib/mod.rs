@@ -1,14 +1,16 @@
 use std::collections::HashMap;
 use std::{fs, io};
 
-use crate::vm::{IO, Stack};
+use crate::vm::{operator, VirtualInterface};
 use crate::vm::value::Value;
 use crate::vm::error::RuntimeErrorType;
 
 use StdBinding::{*};
+use crate::trace;
 
-pub mod lib_str;
-pub mod lib_list;
+mod lib_str;
+pub mod lib_list; // VM to directly call slice, index
+mod lib_math;
 
 
 /// Build a `Node` containing all native bindings for the interpreter runtime.
@@ -37,7 +39,14 @@ pub fn bindings() -> HashMap<&'static str, StdBinding> {
         ("split", Split),
 
         // lib_list
-        ("sum", Sum)
+        ("sum", Sum),
+        ("max", Max),
+        ("min", Min),
+
+        ("map", Map),
+
+        // lib_math
+        ("abs", Abs),
     ])
 }
 
@@ -56,6 +65,29 @@ pub fn lookup_binding(b: &StdBinding) -> &'static str {
         Repr => "repr",
         Len => "len",
 
+        OperatorUnarySub => "(-)",
+        OperatorUnaryLogicalNot => "(!)",
+        OperatorUnaryBitwiseNot => "(~)",
+
+        OperatorMul => "(*)",
+        OperatorDiv => "(/)",
+        OperatorPow => "(**)",
+        OperatorMod => "(%)",
+        OperatorIs => "(is)",
+        OperatorAdd => "(+)",
+        OperatorSub => "(-)",
+        OperatorLeftShift => "(<<)",
+        OperatorRightShift => "(>>)",
+        OperatorBitwiseAnd => "(&)",
+        OperatorBitwiseOr => "(|)",
+        OperatorBitwiseXor => "(^)",
+        OperatorLessThan => "(<)",
+        OperatorLessThanEqual => "(<=)",
+        OperatorGreaterThan => "(>)",
+        OperatorGreaterThanEqual => "(>=)",
+        OperatorEqual => "(==)",
+        OperatorNotEqual => "(!=)",
+
         // lib_str
         ToLower => "to_lower",
         ToUpper => "to_upper",
@@ -67,7 +99,12 @@ pub fn lookup_binding(b: &StdBinding) -> &'static str {
 
         // lib_list
         Sum => "sum",
+        Min => "min",
+        Max => "max",
+        Map => "map",
 
+        // lib_math
+        Abs => "abs",
     }
 }
 
@@ -86,6 +123,30 @@ pub enum StdBinding {
     Repr,
     Len,
 
+    // Native Operators
+    OperatorUnarySub,
+    OperatorUnaryLogicalNot,
+    OperatorUnaryBitwiseNot,
+
+    OperatorMul,
+    OperatorDiv,
+    OperatorPow,
+    OperatorMod,
+    OperatorIs,
+    OperatorAdd,
+    OperatorSub, // Cannot be referenced as (- <expr>)
+    OperatorLeftShift,
+    OperatorRightShift,
+    OperatorBitwiseAnd,
+    OperatorBitwiseOr,
+    OperatorBitwiseXor,
+    OperatorLessThan,
+    OperatorLessThanEqual,
+    OperatorGreaterThan,
+    OperatorGreaterThanEqual,
+    OperatorEqual,
+    OperatorNotEqual,
+
     // lib_str
     ToLower,
     ToUpper,
@@ -97,29 +158,20 @@ pub enum StdBinding {
 
     // lib_list
     Sum,
+    Min,
+    Max,
+    Map,
+    // Filter,
+    // Reduce,
+
+    // lib_math
+    Abs,
 }
 
-/*
-pub struct StdBindingTree {
-    pub binding: Option<StdBinding>,
-    pub children: Option<HashMap<&'static str, StdBindingTree>>
-}
 
-fn root<const N: usize>(children: [(&'static str, StdBindingTree); N]) -> StdBindingTree { StdBindingTree::new(None, Some(HashMap::from(children))) }
-fn node<const N: usize>(node: StdBinding, children: [(&'static str, StdBindingTree); N]) -> StdBindingTree { StdBindingTree::new(Some(node), Some(HashMap::from(children))) }
-fn leaf(node: StdBinding) -> StdBindingTree { StdBindingTree::new(Some(node), None) }
-
-impl StdBindingTree {
-    fn new(binding: Option<StdBinding>, children: Option<HashMap<&'static str, StdBindingTree>>) -> StdBindingTree {
-        StdBindingTree { binding, children }
-    }
-}*/
-
-
-pub fn invoke<S>(bound: StdBinding, nargs: u8, vm: &mut S) -> Result<Value, RuntimeErrorType> where
-    S : Stack,
-    S : IO,
+pub fn invoke<VM>(bound: StdBinding, nargs: u8, vm: &mut VM) -> Result<Value, RuntimeErrorType> where VM : VirtualInterface
 {
+    trace::trace_interpreter!("stdlib::invoke() func={}, nargs={}", lookup_binding(&bound), nargs);
     // Dispatch macros for 0, 1, 2 and 3 argument functions
     // All dispatch!() cases support partial evaluation (where 0 < nargs < required args)
     macro_rules! dispatch {
@@ -237,6 +289,29 @@ pub fn invoke<S>(bound: StdBinding, nargs: u8, vm: &mut S) -> Result<Value, Runt
             _ => Err(RuntimeErrorType::TypeErrorFunc1("len([T] | str): int", a1))
         }),
 
+        // operator
+        OperatorUnarySub => dispatch!(a1, operator::unary_sub(a1)),
+        OperatorUnaryLogicalNot => dispatch!(a1, operator::unary_logical_not(a1)),
+        OperatorUnaryBitwiseNot => dispatch!(a1, operator::unary_bitwise_not(a1)),
+        OperatorMul => dispatch!(a1, a2, operator::binary_mul(a2, a1)),
+        OperatorDiv => dispatch!(a1, a2, operator::binary_div(a2, a1)),
+        OperatorPow => dispatch!(a1, a2, operator::binary_pow(a2, a1)),
+        OperatorMod => dispatch!(a1, a2, operator::binary_mod(a2, a1)),
+        OperatorIs => dispatch!(a1, a2, operator::binary_is(a2, a1)),
+        OperatorAdd => dispatch!(a1, a2, operator::binary_add(a2, a1)),
+        OperatorSub => dispatch!(a1, a2, operator::binary_sub(a2, a1)),
+        OperatorLeftShift => dispatch!(a1, a2, operator::binary_left_shift(a2, a1)),
+        OperatorRightShift => dispatch!(a1, a2, operator::binary_right_shift(a2, a1)),
+        OperatorBitwiseAnd => dispatch!(a1, a2, operator::binary_bitwise_and(a2, a1)),
+        OperatorBitwiseOr => dispatch!(a1, a2, operator::binary_bitwise_or(a2, a1)),
+        OperatorBitwiseXor => dispatch!(a1, a2, operator::binary_bitwise_xor(a2, a1)),
+        OperatorLessThan => dispatch!(a1, a2, operator::binary_less_than(a2, a1)),
+        OperatorLessThanEqual => dispatch!(a1, a2, operator::binary_less_than_or_equal(a2, a1)),
+        OperatorGreaterThan => dispatch!(a1, a2, operator::binary_greater_than(a2, a1)),
+        OperatorGreaterThanEqual => dispatch!(a1, a2, operator::binary_greater_than_or_equal(a2, a1)),
+        OperatorEqual => dispatch!(a1, a2, operator::binary_equals(a2, a1)),
+        OperatorNotEqual => dispatch!(a1, a2, operator::binary_not_equals(a2, a1)),
+
         // lib_str
         ToLower => dispatch!(a1, lib_str::to_lower(a1)),
         ToUpper => dispatch!(a1, lib_str::to_upper(a1)),
@@ -248,15 +323,19 @@ pub fn invoke<S>(bound: StdBinding, nargs: u8, vm: &mut S) -> Result<Value, Runt
 
         // lib_list
         Sum => dispatch_varargs!(lib_list::sum_iter, lib_list::sum_list),
+        Max => dispatch_varargs!(lib_list::max_iter, lib_list::max_list),
+        Min => dispatch_varargs!(lib_list::min_iter, lib_list::min_list),
+        Map => dispatch!(a1, a2, lib_list::map(vm, a1, a2)),
 
-        _ => Err(RuntimeErrorType::BindingIsNotFunctionEvaluable(bound.clone()))
+        // lib_math
+        Abs => dispatch!(a1, lib_math::abs(a1)),
+
+        _ => Err(RuntimeErrorType::BindingIsNotFunctionEvaluable(bound.clone())),
     }
 }
 
 
-fn wrap_as_partial<S>(bound: StdBinding, nargs: u8, vm: &mut S) -> Result<Value, RuntimeErrorType> where
-    S : Stack,
-{
+fn wrap_as_partial<VM>(bound: StdBinding, nargs: u8, vm: &mut VM) -> Result<Value, RuntimeErrorType> where VM : VirtualInterface {
     // vm stack will contain [..., arg1, arg2, ... argN]
     // popping in order will populate the vector with [argN, argN-1, ... arg1]
     let mut args: Vec<Box<Value>> = Vec::with_capacity(nargs as usize);

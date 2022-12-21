@@ -1,6 +1,6 @@
 use crate::stdlib::StdBinding;
 
-#[derive(Eq, PartialEq, Debug, Clone)]
+#[derive(Eq, PartialEq, Debug, Clone, Copy)]
 pub enum Opcode {
 
     Noop,

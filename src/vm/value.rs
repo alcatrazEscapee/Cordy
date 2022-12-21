@@ -18,6 +18,7 @@ pub enum Value {
     Int(i64),
     Str(Box<String>),
     Function(Box<FunctionImpl>),
+    PartialFunction(Box<PartialFunctionImpl>),
 
     // Reference (Mutable) Types
     // Really shitty memory management for now just using RefCell... in the future maybe we implement a garbage collected system
@@ -37,18 +38,29 @@ pub struct FunctionImpl {
     args: Vec<String>, // Names of the arguments
 }
 
+#[derive(Eq, PartialEq, Debug, Clone)]
+pub struct PartialFunctionImpl {
+    pub func: FunctionImpl,
+    pub args: Vec<Box<Value>>,
+}
+
 
 impl Value {
 
     // Constructors
     pub fn list(vec: Vec<Value>) -> Value { List(Rc::new(RefCell::new(vec))) }
+    pub fn partial1(func: FunctionImpl, arg: Value) -> Value { PartialFunction(Box::new(PartialFunctionImpl { func, args: vec![Box::new(arg)] }))}
+    pub fn partial(func: FunctionImpl, args: Vec<Value>) -> Value { PartialFunction(Box::new(PartialFunctionImpl { func, args: args.into_iter().map(|v| Box::new(v)).collect() }))}
 
     /// Converts the `Value` to a `String`. This is equivalent to the stdlib function `str()`
     pub fn as_str(self: &Self) -> String {
         match self {
             Str(s) => *s.clone(),
             List(v) => format!("[{}]", (*v).as_ref().borrow().iter().map(|t| t.as_str()).collect::<Vec<String>>().join(", ")),
+            Function(f) => f.name.clone(),
+            PartialFunction(f) => f.func.name.clone(),
             Binding(b) => String::from(stdlib::lookup_binding(b)),
+            PartialBinding(b, _) => String::from(stdlib::lookup_binding(b)),
             _ => self.as_repr_str(),
         }
     }
@@ -66,10 +78,14 @@ impl Value {
             List(v) => format!("[{}]", (*v).as_ref().borrow().iter().map(|t| t.as_repr_str()).collect::<Vec<String>>().join(", ")),
             Function(f) => {
                 let f = (*f).as_ref().borrow();
-                format!("fn {}({})", f.name, f.args.join(","))
+                format!("fn {}({})", f.name, f.args.join(", "))
             },
-            Binding(b) => String::from(stdlib::lookup_binding(b)),
-            PartialBinding(b, v) => format!("{}({})", stdlib::lookup_binding(b), v.iter().rev().map(|a| a.as_repr_str()).collect::<Vec<String>>().join(", "))
+            PartialFunction(f) => {
+                let f = (*f).as_ref().borrow();
+                format!("fn {}({})", f.func.name, f.func.args.join(", "))
+            },
+            Binding(b) => format!("fn {}()", stdlib::lookup_binding(b)),
+            PartialBinding(b, _) => format!("fn {}()", stdlib::lookup_binding(b)),
         }
     }
 
@@ -82,6 +98,7 @@ impl Value {
             Str(_) => "str",
             List(_) => "list",
             Function(_) => "function",
+            PartialFunction(_) => "partial function",
             Binding(_) => "native function",
             PartialBinding(_, _) => "partial native function",
         })
@@ -100,6 +117,7 @@ impl Value {
             Str(s) => !s.is_empty(),
             List(l) => !l.as_ref().borrow().is_empty(),
             Function(_) => true,
+            PartialFunction(_) => true,
             Binding(_) => true,
             PartialBinding(_, _) => true,
         }
