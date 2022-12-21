@@ -1,13 +1,15 @@
-use crate::vm::error::RuntimeErrorType;
+use crate::vm::error::RuntimeError;
 use crate::vm::value::Value;
 
-use RuntimeErrorType::{*};
+use RuntimeError::{*};
 use Value::{*};
 
+type ValueResult = Result<Value, Box<RuntimeError>>;
 
-pub fn abs(a1: Value) -> Result<Value, RuntimeErrorType> {
+
+pub fn abs(a1: Value) -> ValueResult {
     match a1 {
         Int(i) => Ok(Int(i.abs())),
-        v => Err(TypeErrorArgMustBeInt(v.clone())),
+        v => TypeErrorArgMustBeInt(v.clone()).err(),
     }
 }

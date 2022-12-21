@@ -1,12 +1,14 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::vm::error::RuntimeErrorType;
+use crate::vm::error::RuntimeError;
 use crate::vm::value::Value;
-
-use RuntimeErrorType::{*};
-use Value::{*};
 use crate::vm::VirtualInterface;
+
+use RuntimeError::{*};
+use Value::{*};
+
+type ValueResult = Result<Value, Box<RuntimeError>>;
 
 
 macro_rules! slice_arg {
@@ -14,34 +16,34 @@ macro_rules! slice_arg {
         match $a {
             Value::Int(x) => x,
             Value::Nil => $def,
-            t => return Err(TypeErrorSliceArgMustBeInt($n, t)),
+            t => return TypeErrorSliceArgMustBeInt($n, t).err(),
         }
     };
 }
 
 
-pub fn list_index(list_ref: Rc<RefCell<Vec<Value>>>, r: i64) -> Result<Value, RuntimeErrorType> {
+pub fn list_index(list_ref: Rc<RefCell<Vec<Value>>>, r: i64) -> ValueResult {
     let list = (*list_ref).borrow();
     let index: usize = if r < 0 { (list.len() as i64 + r) as usize } else { r as usize };
     if index < list.len() {
         Ok(list[index].clone())
     } else {
-        Err(IndexOutOfBounds(r, list.len()))
+        IndexOutOfBounds(r, list.len()).err()
     }
 }
 
-pub fn list_slice(a1: Value, a2: Value, a3: Value, a4: Value) -> Result<Value, RuntimeErrorType> {
+pub fn list_slice(a1: Value, a2: Value, a3: Value, a4: Value) -> ValueResult {
 
     let list_ref= match a1 {
         List(ls) => ls,
-        t => return Err(TypeErrorCannotSlice(t)),
+        t => return TypeErrorCannotSlice(t).err(),
     };
     let list = (*list_ref).borrow();
     let length: i64 = list.len() as i64;
 
     let step: i64 = slice_arg!(a4, "step", 1);
     if step == 0 {
-        return Err(SliceStepZero)
+        return SliceStepZero.err()
     }
 
     let low: i64 = slice_arg!(a2, "low", if step > 0 { 0 } else { -1 });
@@ -105,10 +107,10 @@ fn rev_range(start_high_inclusive: i64, stop_low_exclusive: i64) -> impl Iterato
 
 macro_rules! declare_varargs_iter {
     ($iter:ident, $list:ident) => {
-        pub fn $iter(arg: Value) -> Result<Value, RuntimeErrorType> {
+        pub fn $iter(arg: Value) -> ValueResult {
             match arg {
                 List(ls) => $list((*ls).borrow().as_ref()),
-                e => Err(TypeErrorArgMustBeIterable(e)),
+                e => TypeErrorArgMustBeIterable(e).err(),
             }
         }
     };
@@ -122,22 +124,22 @@ declare_varargs_iter!(max_iter, max_list);
 //declare_varargs_iter!(map_iter, map_list);
 //declare_varargs_iter!(reduce_iter, reduce_list);
 
-pub fn sum_list(args: &Vec<Value>) -> Result<Value, RuntimeErrorType> {
+pub fn sum_list(args: &Vec<Value>) -> ValueResult {
     let mut sum: i64 = 0;
     for v in args {
         match v {
             Int(i) => sum += *i,
-            _ => return Err(TypeErrorArgMustBeInt(v.clone())),
+            _ => return TypeErrorArgMustBeInt(v.clone()).err(),
         }
     }
     Ok(Int(sum))
 }
 
-pub fn max_list(args: &Vec<Value>) -> Result<Value, RuntimeErrorType> {
+pub fn max_list(args: &Vec<Value>) -> ValueResult {
     let mut iter = args.iter();
     let mut max = match iter.next() {
         Some(t) => t,
-        None => return Err(ValueErrorMaxArgMustBeNonEmptySequence)
+        None => return ValueErrorMaxArgMustBeNonEmptySequence.err()
     };
     for v in iter {
         if max.is_less_than(v)? {
@@ -147,11 +149,11 @@ pub fn max_list(args: &Vec<Value>) -> Result<Value, RuntimeErrorType> {
     Ok(max.clone())
 }
 
-pub fn min_list(args: &Vec<Value>) -> Result<Value, RuntimeErrorType> {
+pub fn min_list(args: &Vec<Value>) -> ValueResult {
     let mut iter = args.iter();
     let mut min = match iter.next() {
         Some(t) => t,
-        None => return Err(ValueErrorMinArgMustBeNonEmptySequence)
+        None => return ValueErrorMinArgMustBeNonEmptySequence.err()
     };
     for v in iter {
         if v.is_less_than(min)? {
@@ -161,7 +163,7 @@ pub fn min_list(args: &Vec<Value>) -> Result<Value, RuntimeErrorType> {
     Ok(min.clone())
 }
 
-pub fn map<VM>(vm: &mut VM, a1: Value, a2: Value) -> Result<Value, RuntimeErrorType> where VM : VirtualInterface {
+pub fn map<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : VirtualInterface {
     match (a1, a2) {
         (l, List(rs)) => {
             let rs = (*rs).borrow();
@@ -170,7 +172,7 @@ pub fn map<VM>(vm: &mut VM, a1: Value, a2: Value) -> Result<Value, RuntimeErrorT
                 vm.push(r.clone());
                 vm.push(l.clone());
                 let f = match vm.invoke_func_compose() {
-                    Err(e) => return Err(e),
+                    Err(e) => return e.err(),
                     Ok(f) => f
                 };
                 vm.run_after_invoke(f)?;
@@ -178,6 +180,6 @@ pub fn map<VM>(vm: &mut VM, a1: Value, a2: Value) -> Result<Value, RuntimeErrorT
             }
             Ok(Value::list(acc))
         },
-        (_, r) => return Err(TypeErrorArgMustBeIterable(r)),
+        (_, r) => return TypeErrorArgMustBeIterable(r).err(),
     }
 }
