@@ -84,7 +84,7 @@ fn main() {
             let stdin = io::stdin().lock();
             let stdout = io::stdout();
             let mut vm = VirtualMachine::new(compiled, stdin, stdout);
-            vm.run()
+            vm.run_until_completion()
         };
         match result {
             Err(e) => {
