@@ -97,7 +97,6 @@ fn main() {
 
 fn print_help() {
     println!("cordy [options] <file>");
-    println!("Command line interface, compiler and interpreter for the AoCL language.");
     println!("When invoked with no arguments, this will open a REPL for the Cordy language (exit with 'exit')");
     println!("Options:");
     println!("  --help           : Show this message and then exit");

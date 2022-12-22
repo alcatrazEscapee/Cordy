@@ -1,8 +1,7 @@
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::collections::HashSet;
 
 use crate::vm::error::RuntimeError;
-use crate::vm::value::Value;
+use crate::vm::value::{Mut, Value};
 use crate::vm::VirtualInterface;
 
 use RuntimeError::{*};
@@ -22,8 +21,8 @@ macro_rules! slice_arg {
 }
 
 
-pub fn list_index(list_ref: Rc<RefCell<Vec<Value>>>, r: i64) -> ValueResult {
-    let list = (*list_ref).borrow();
+pub fn list_index(list_ref: Mut<Vec<Value>>, r: i64) -> ValueResult {
+    let list = list_ref.borrow();
     let index: usize = if r < 0 { (list.len() as i64 + r) as usize } else { r as usize };
     if index < list.len() {
         Ok(list[index].clone())
@@ -38,7 +37,7 @@ pub fn list_slice(a1: Value, a2: Value, a3: Value, a4: Value) -> ValueResult {
         List(ls) => ls,
         t => return TypeErrorCannotSlice(t).err(),
     };
-    let list = (*list_ref).borrow();
+    let list = list_ref.borrow();
     let length: i64 = list.len() as i64;
 
     let step: i64 = slice_arg!(a4, "step", 1);
@@ -109,7 +108,7 @@ macro_rules! declare_varargs_iter {
     ($iter:ident, $list:ident) => {
         pub fn $iter(arg: Value) -> ValueResult {
             match arg {
-                List(ls) => $list((*ls).borrow().as_ref()),
+                List(ls) => $list(ls.borrow().as_ref()),
                 e => TypeErrorArgMustBeIterable(e).err(),
             }
         }
@@ -119,10 +118,10 @@ macro_rules! declare_varargs_iter {
 declare_varargs_iter!(sum_iter, sum_list);
 declare_varargs_iter!(min_iter, min_list);
 declare_varargs_iter!(max_iter, max_list);
+declare_varargs_iter!(unique_iter, unique_list);
+declare_varargs_iter!(sorted_iter, sorted_list);
+declare_varargs_iter!(reversed_iter, reversed_list);
 
-//declare_varargs_iter!(filter_iter, filter_list);
-//declare_varargs_iter!(map_iter, map_list);
-//declare_varargs_iter!(reduce_iter, reduce_list);
 
 pub fn sum_list(args: &Vec<Value>) -> ValueResult {
     let mut sum: i64 = 0;
@@ -136,37 +135,46 @@ pub fn sum_list(args: &Vec<Value>) -> ValueResult {
 }
 
 pub fn max_list(args: &Vec<Value>) -> ValueResult {
-    let mut iter = args.iter();
-    let mut max = match iter.next() {
-        Some(t) => t,
-        None => return ValueErrorMaxArgMustBeNonEmptySequence.err()
-    };
-    for v in iter {
-        if max.is_less_than(v)? {
-            max = v;
-        }
+    match args.iter().max() {
+        Some(v) => Ok(v.clone()),
+        None => ValueErrorMaxArgMustBeNonEmptySequence.err()
     }
-    Ok(max.clone())
 }
 
 pub fn min_list(args: &Vec<Value>) -> ValueResult {
-    let mut iter = args.iter();
-    let mut min = match iter.next() {
-        Some(t) => t,
-        None => return ValueErrorMinArgMustBeNonEmptySequence.err()
-    };
-    for v in iter {
-        if v.is_less_than(min)? {
-            min = v;
-        }
+    match args.iter().min() {
+        Some(v) => Ok(v.clone()),
+        None => ValueErrorMaxArgMustBeNonEmptySequence.err()
     }
-    Ok(min.clone())
 }
+
+pub fn unique_list(args: &Vec<Value>) -> ValueResult {
+    Ok(Value::list(args.iter()
+        .cloned()
+        .collect::<HashSet<Value>>()
+        .into_iter()
+        .collect::<Vec<Value>>()))
+}
+
+pub fn sorted_list(args: &Vec<Value>) -> ValueResult {
+    let mut sorted: Vec<Value> = args.iter().cloned().collect::<Vec<Value>>();
+    sorted.sort_unstable();
+    Ok(Value::list(sorted))
+}
+
+pub fn reversed_list(args: &Vec<Value>) -> ValueResult {
+    Ok(Value::list(args.iter()
+        .cloned()
+        .rev()
+        .collect::<Vec<Value>>()))
+}
+
+
 
 pub fn map<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : VirtualInterface {
     match (a1, a2) {
         (l, List(rs)) => {
-            let rs = (*rs).borrow();
+            let rs = rs.borrow();
             let mut acc: Vec<Value> = Vec::with_capacity(rs.len());
             for r in rs.iter() {
                 vm.push(r.clone());
@@ -179,6 +187,56 @@ pub fn map<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : Virt
                 acc.push(vm.pop());
             }
             Ok(Value::list(acc))
+        },
+        (_, r) => return TypeErrorArgMustBeIterable(r).err(),
+    }
+}
+
+pub fn filter<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : VirtualInterface {
+    match (a1, a2) {
+        (l, List(rs)) => {
+            let rs = rs.borrow();
+            let mut acc: Vec<Value> = Vec::with_capacity(rs.len());
+            for r in rs.iter() {
+                vm.push(r.clone());
+                vm.push(l.clone());
+                let f = match vm.invoke_func_compose() {
+                    Err(e) => return e.err(),
+                    Ok(f) => f
+                };
+                vm.run_after_invoke(f)?;
+                if vm.pop().as_bool() {
+                    acc.push(r.clone());
+                }
+            }
+            Ok(Value::list(acc))
+        },
+        (_, r) => return TypeErrorArgMustBeIterable(r).err(),
+    }
+}
+
+pub fn reduce<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : VirtualInterface {
+    match (a1, a2) {
+        (l, List(rs)) => {
+            let rs = rs.borrow();
+            let mut iter = rs.iter().cloned();
+            let mut acc: Value = match iter.next() {
+                Some(v) => v,
+                None => return ValueErrorReduceArgMustBeNonEmptySequence.err()
+            };
+
+            for r in iter {
+                vm.push(l.clone()); // Function
+                vm.push(acc); // Accumulator (arg1)
+                vm.push(r); // Value (arg2)
+                let f = match vm.invoke_func_eval(2) {
+                    Err(e) => return e.err(),
+                    Ok(f) => f
+                };
+                vm.run_after_invoke(f)?;
+                acc = vm.pop();
+            }
+            Ok(acc)
         },
         (_, r) => return TypeErrorArgMustBeIterable(r).err(),
     }

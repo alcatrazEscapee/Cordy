@@ -3,7 +3,7 @@ use std::rc::Rc;
 use error::{RuntimeErrorWithLineNumber, RuntimeError};
 
 use crate::{stdlib, trace};
-use crate::compiler::parser::ParserResult;
+use crate::compiler::CompileResult;
 use crate::stdlib::StdBinding;
 use crate::vm::opcode::Opcode;
 use crate::vm::value::Value;
@@ -96,7 +96,7 @@ impl<R, W> VirtualMachine<R, W> where
     R: BufRead,
     W: Write {
 
-    pub fn new(parser_result: ParserResult, read: R, write: W) -> VirtualMachine<R, W> {
+    pub fn new(parser_result: CompileResult, read: R, write: W) -> VirtualMachine<R, W> {
         VirtualMachine {
             ip: 0,
             code: parser_result.code,
@@ -147,10 +147,10 @@ impl<R, W> VirtualMachine<R, W> where
 
     fn run_instruction(self: &mut Self, op: Opcode) -> AnyResult {
         macro_rules! operator {
-            ($op:path, $a1:ident, $tr:expr) => {{
+            ($op:expr, $a1:ident, $tr:expr) => {{
                 trace::trace_interpreter!("op unary {}", $tr);
                 let $a1: Value = self.pop();
-                match $op($a1) {
+                match $op {
                     Ok(v) => self.push(v),
                     Err(e) => return e.err(),
                 }
@@ -318,9 +318,9 @@ impl<R, W> VirtualMachine<R, W> where
             },
 
             // Unary Operators
-            UnarySub => operator!(operator::unary_sub, a1, "-"),
-            UnaryLogicalNot => operator!(operator::unary_logical_not, a1, "!"),
-            UnaryBitwiseNot => operator!(operator::unary_bitwise_not, a1, "~"),
+            UnarySub => operator!(operator::unary_sub(a1), a1, "-"),
+            UnaryLogicalNot => operator!(operator::unary_logical_not(a1), a1, "!"),
+            UnaryBitwiseNot => operator!(operator::unary_bitwise_not(a1), a1, "~"),
 
             // Binary Operators
             OpMul => operator!(operator::binary_mul, a1, a2, "*"),
@@ -332,10 +332,10 @@ impl<R, W> VirtualMachine<R, W> where
             OpSub => operator!(operator::binary_sub, a1, a2, "-"),
             OpLeftShift => operator!(operator::binary_left_shift, a1, a2, "<<"),
             OpRightShift => operator!(operator::binary_right_shift, a1, a2, ">>"),
-            OpLessThan => operator!(operator::binary_less_than, a1, a2, "<"),
-            OpGreaterThan => operator!(operator::binary_greater_than, a1, a2, ">"),
-            OpLessThanEqual => operator!(operator::binary_less_than_or_equal, a1, a2, "<="),
-            OpGreaterThanEqual => operator!(operator::binary_greater_than_or_equal, a1, a2, ">="),
+            OpLessThan => operator_unchecked!(operator::binary_less_than, a1, a2, "<"),
+            OpGreaterThan => operator_unchecked!(operator::binary_greater_than, a1, a2, ">"),
+            OpLessThanEqual => operator_unchecked!(operator::binary_less_than_or_equal, a1, a2, "<="),
+            OpGreaterThanEqual => operator_unchecked!(operator::binary_greater_than_or_equal, a1, a2, ">="),
             OpEqual => operator_unchecked!(operator::binary_equals, a1, a2, "=="),
             OpNotEqual => operator_unchecked!(operator::binary_not_equals, a1, a2, "!="),
             OpBitwiseAnd => operator!(operator::binary_bitwise_and, a1, a2, "&"),
@@ -362,7 +362,7 @@ impl<R, W> VirtualMachine<R, W> where
                 let a2: Value = self.pop();
                 let a1: Value = self.pop();
                 match (a1, a2) {
-                    (Value::List(l), Value::Int(r)) => match stdlib::lib_list::list_index(l, r) {
+                    (Value::List(l), Value::Int(r)) => match stdlib::list_index(l, r) {
                         Ok(v) => self.push(v),
                         Err(e) => return Err(e),
                     },
@@ -374,7 +374,7 @@ impl<R, W> VirtualMachine<R, W> where
                 let a3: Value = self.pop();
                 let a2: Value = self.pop();
                 let a1: Value = self.pop();
-                match stdlib::lib_list::list_slice(a1, a2, a3, Value::Int(1)) {
+                match stdlib::list_slice(a1, a2, a3, Value::Int(1)) {
                     Ok(v) => self.push(v),
                     Err(e) => return Err(e),
                 }
@@ -385,7 +385,7 @@ impl<R, W> VirtualMachine<R, W> where
                 let a3: Value = self.pop();
                 let a2: Value = self.pop();
                 let a1: Value = self.pop();
-                match stdlib::lib_list::list_slice(a1, a2, a3, a4) {
+                match stdlib::list_slice(a1, a2, a3, a4) {
                     Ok(v) => self.push(v),
                     Err(e) => return Err(e),
                 }
@@ -880,6 +880,20 @@ mod test {
     #[test] fn test_arrow_functions_18() { run_str("fn foo() { fn bar() -> 3 ; bar } ; foo() . print", "bar\n"); }
     #[test] fn test_arrow_functions_19() { run_str("fn foo() { fn bar() -> 3 ; bar } ; foo() . repr . print", "fn bar()\n"); }
     #[test] fn test_arrow_functions_20() { run_str("fn foo() { fn bar() -> 3 ; bar } ; foo()() . print", "3\n"); }
+    #[test] fn test_builtin_map() { run_str("[1, 2, 3] . map(str) . repr . print", "['1', '2', '3']\n") }
+    #[test] fn test_builtin_map_lambda() { run_str("[-1, 2, -3] . map(fn(x) -> x . abs) . print", "[1, 2, 3]\n") }
+    #[test] fn test_builtin_filter() { run_str("[2, 3, 4, 5, 6] . filter (>3) . print", "[4, 5, 6]\n") }
+    #[test] fn test_builtin_filter_lambda() { run_str("[2, 3, 4, 5, 6] . filter (fn(x) -> x % 2 == 0) . print", "[2, 4, 6]\n") }
+    #[test] fn test_builtin_reduce() { run_str("[1, 2, 3, 4, 5, 6] . reduce (*) . print", "720\n"); }
+    #[test] fn test_builtin_reduce_lambda() { run_str("[1, 2, 3, 4, 5, 6] . reduce (fn(a, b) -> a * b) . print", "720\n"); }
+    #[test] fn test_builtin_reduce_with_builtin() { run_str("[1, 2, 3, 4, 5, 6] . reduce (sum) . print", "21\n"); }
+    #[test] fn test_builtin_sorted() { run_str("[6, 2, 3, 7, 2, 1] . sorted . print", "[1, 2, 2, 3, 6, 7]\n"); }
+    #[test] fn test_builtin_unique() { run_str("[1, 7, 3, 2, 3, 2, 1, 6] . unique . sorted . print", "[1, 2, 3, 6, 7]\n"); }
+    #[test] fn test_builtin_reversed() { run_str("[8, 1, 2, 6, 3, 2, 3] . reversed . print", "[3, 2, 3, 6, 2, 1, 8]\n"); }
+    #[test] fn test_bare_operator_eval() { run_str("(+)(1, 2) . print", "3\n"); }
+    #[test] fn test_bare_operator_partial_eval() { run_str("(+)(1)(2) . print", "3\n"); }
+    #[test] fn test_bare_operator_compose_and_eval() { run_str("2 . (+)(1) . print", "3\n"); }
+    #[test] fn test_bare_operator_compose() { run_str("1 . (2 . (+)) . print", "3\n"); }
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }
     #[test] fn test_append_large_lists() { run("append_large_lists"); }

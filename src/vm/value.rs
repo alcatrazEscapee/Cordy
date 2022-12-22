@@ -1,21 +1,19 @@
 use std::borrow::Borrow;
-use std::cell::RefCell;
+use std::cell::{Ref, RefCell, RefMut};
+use std::cmp::Ordering;
+use std::fmt::Debug;
+use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
 use crate::stdlib;
 use crate::stdlib::StdBinding;
-use crate::vm::error::RuntimeError;
 
 use Value::{*};
-use RuntimeError::{*};
-
-
-type BoolResult = Result<bool, Box<RuntimeError>>;
 
 
 /// The runtime sum type used by the virtual machine
 /// All `Value` type objects must be cloneable, and so mutable objects must be reference counted to ensure memory safety
-#[derive(Eq, PartialEq, Debug, Clone)]
+#[derive(Eq, PartialEq, Debug, Clone, Hash)]
 pub enum Value {
     // Primitive (Immutable) Types
     Nil,
@@ -28,32 +26,18 @@ pub enum Value {
     // Reference (Mutable) Types
     // Really shitty memory management for now just using RefCell... in the future maybe we implement a garbage collected system
     // mark and sweep or something... but for now, RefCell will do!
-    List(Rc<RefCell<Vec<Value>>>),
+    List(Mut<Vec<Value>>),
 
     // Functions
     Binding(StdBinding),
     PartialBinding(StdBinding, Box<Vec<Box<Value>>>),
 }
 
-#[derive(Eq, PartialEq, Debug, Clone)]
-pub struct FunctionImpl {
-    pub head: usize, // Pointer to the first opcode of the function's execution
-    pub nargs: u8, // The number of arguments the function takes
-    name: String, // The name of the function, useful to show in stack traces
-    args: Vec<String>, // Names of the arguments
-}
-
-#[derive(Eq, PartialEq, Debug, Clone)]
-pub struct PartialFunctionImpl {
-    pub func: Rc<FunctionImpl>,
-    pub args: Vec<Box<Value>>,
-}
-
 
 impl Value {
 
     // Constructors
-    pub fn list(vec: Vec<Value>) -> Value { List(Rc::new(RefCell::new(vec))) }
+    pub fn list(vec: Vec<Value>) -> Value { List(Mut::new(vec)) }
     pub fn partial1(func: Rc<FunctionImpl>, arg: Value) -> Value { PartialFunction(Box::new(PartialFunctionImpl { func, args: vec![Box::new(arg)] }))}
     pub fn partial(func: Rc<FunctionImpl>, args: Vec<Value>) -> Value { PartialFunction(Box::new(PartialFunctionImpl { func, args: args.into_iter().map(|v| Box::new(v)).collect() }))}
 
@@ -61,7 +45,7 @@ impl Value {
     pub fn as_str(self: &Self) -> String {
         match self {
             Str(s) => *s.clone(),
-            List(v) => format!("[{}]", (*v).as_ref().borrow().iter().map(|t| t.as_str()).collect::<Vec<String>>().join(", ")),
+            List(v) => format!("[{}]", v.borrow().iter().map(|t| t.as_str()).collect::<Vec<String>>().join(", ")),
             Function(f) => f.name.clone(),
             PartialFunction(f) => f.func.name.clone(),
             Binding(b) => String::from(stdlib::lookup_binding(b)),
@@ -80,7 +64,7 @@ impl Value {
                 let escaped = format!("{:?}", s);
                 format!("'{}'", &escaped[1..escaped.len() - 1])
             },
-            List(v) => format!("[{}]", (*v).as_ref().borrow().iter().map(|t| t.as_repr_str()).collect::<Vec<String>>().join(", ")),
+            List(v) => format!("[{}]", v.borrow().iter().map(|t| t.as_repr_str()).collect::<Vec<String>>().join(", ")),
             Function(f) => {
                 let f = (*f).as_ref().borrow();
                 format!("fn {}({})", f.name, f.args.join(", "))
@@ -120,7 +104,7 @@ impl Value {
             Bool(b) => *b,
             Int(i) => *i != 0,
             Str(s) => !s.is_empty(),
-            List(l) => !l.as_ref().borrow().is_empty(),
+            List(l) => !l.borrow().is_empty(),
             Function(_) => true,
             PartialFunction(_) => true,
             Binding(_) => true,
@@ -173,24 +157,76 @@ impl Value {
             _ => false,
         }
     }
+}
 
-    pub fn is_less_than(self: &Self, other: &Value) -> BoolResult {
+/// Implement Ord and PartialOrd explicitly, to derive implementations for each individual type.
+/// All types are explicitly ordered because we need it in order to call `sort()` and I don't see why not otherwise.
+impl PartialOrd<Self> for Value {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Value {
+    fn cmp(&self, other: &Self) -> Ordering {
         match (self, other) {
-            (Bool(l), Bool(r)) => Ok(!*l && *r),
-            (Int(l), Int(r)) => Ok(l < r),
-            (Str(l), Str(r)) => Ok(l < r),
-            (l, r) => TypeErrorCannotCompare(l.clone(), r.clone()).err()
+            (Bool(l), Bool(r)) => (*l as i32).cmp(&(*r as i32)),
+            (Int(l), Int(r)) => l.cmp(r),
+            (Str(l), Str(r)) => l.cmp(r),
+            (List(l), List(r)) => {
+                let ls = (*l).borrow();
+                let rs = (*r).borrow();
+                ls.cmp(&rs)
+            },
+            // Un-order-able things are defined as equal ordering
+            (_, _) => Ordering::Equal,
         }
     }
+}
 
-    pub fn is_less_than_or_equal(self: &Self, other: &Value) -> BoolResult {
-        match (self, other) {
-            (Bool(l), Bool(r)) => Ok(!*l || *r),
-            (Int(l), Int(r)) => Ok(l <= r),
-            (Str(l), Str(r)) => Ok(l <= r),
-            (l, r) => TypeErrorCannotCompare(l.clone(), r.clone()).err()
-        }
+
+/// Wrapper type to allow mutable types to hash
+/// Yes, mutable types in hash maps is dangerous but this is a language about shooting yourself in the foot
+/// So why would we not allow this?
+#[derive(Eq, PartialEq, Debug, Clone)]
+pub struct Mut<T : Eq + PartialEq + Debug + Clone + Hash> {
+    value: Rc<RefCell<T>>
+}
+
+impl<T : Eq + PartialEq + Debug + Clone + Hash> Mut<T> {
+
+    pub fn new(value: T) -> Mut<T> {
+        Mut { value: Rc::new(RefCell::new(value)) }
     }
+
+    pub fn borrow(self: &Self) -> Ref<T> {
+        (*self.value).borrow()
+    }
+
+    pub fn borrow_mut(self: &Self) -> RefMut<T> {
+        (*self.value).borrow_mut()
+    }
+}
+
+impl<T : Eq + PartialEq + Debug + Clone + Hash> Hash for Mut<T> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        (*self).borrow().hash(state)
+    }
+}
+
+
+#[derive(Eq, PartialEq, Debug, Clone)]
+pub struct FunctionImpl {
+    pub head: usize, // Pointer to the first opcode of the function's execution
+    pub nargs: u8, // The number of arguments the function takes
+    name: String, // The name of the function, useful to show in stack traces
+    args: Vec<String>, // Names of the arguments
+}
+
+#[derive(Eq, PartialEq, Debug, Clone)]
+pub struct PartialFunctionImpl {
+    pub func: Rc<FunctionImpl>,
+    pub args: Vec<Box<Value>>,
 }
 
 
@@ -202,6 +238,18 @@ impl FunctionImpl {
             name,
             args
         }
+    }
+}
+
+impl Hash for FunctionImpl {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.name.hash(state)
+    }
+}
+
+impl Hash for PartialFunctionImpl {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.func.hash(state)
     }
 }
 

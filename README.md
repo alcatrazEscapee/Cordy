@@ -1,120 +1,21 @@
-### Cordy
+## Cordy
 
-Cordy is a dynamically typed, interpreted, stack-based, semi-functional / semi-procedural language I made up. It is meant to be a quick scripting language for solving puzzles and other fun things as an alternative to Python.
+**Note** This is still very unfinished and rough around the edges.
 
-### Grammar
+Cordy is a dynamically typed, interpreted, semi-functional / semi-procedural language I made up. It is meant to be a quick scripting language for solving puzzles and other fun things as an alternative to Python, and as a personal challenge to myself to use. It is implemented here in Rust, with a custom recursive descent parser, and a stack based interpreter.
 
-```
+### Usage
 
-<program> := <statement> *
-
-<statement>
-    | <block-statement>
-    | <function-statement>
-    | <let-statement>
-    | <if-statement>
-    | <loop-statement>
-    | <for-statement>
-    | <assignment-statement>
-    | <expression-statement>
-    | `break`
-    | `continue`
-
-<block-statement> := `{` <statement> * `}`
-
-<function-statement> := `fn` <name> <function-parameters> ? <function-type> ? <block-statement>
-
-<function-parameters> := `(` <function-parameter> [ `,` <function-parameter> ] * `)`
-<function-parameter> := <name> [ `:` <type> ] ?
-<function-type> := `:` <type>
-
-<let-statement> := `let` <pattern> <let-type> ? <let-assignment> ?
-
-<let-type> := `:` <type>
-<let-assignment> := `=` <expression>
-
-<if-statement> := `if` <expression> <block-statement> <if-elif-statement> * <if-else-statement> ?
-
-<if-elif-statement> := `elif` <block-statement>
-<if-else-statement> := `else` <block-statement>
-
-<loop-statement> := `loop` <block-statement>
-
-<for-statement> := `for` <pattern> `in` <expression> <block-statement>
-
-<assignment-statement> := `<pattern> <assignment-operator> <expression>
-
-<expression-statement> := <expression>
-
-
-The complicated expression-like recursive guts
-
-<type>
-    | `[` <type> `]`
-    | `(` <type> [ `,` <type> ] * `)`
-    | `int`
-    | `str`
-
-<pattern>
-    | <name>
-    | `(` <pattern> [ `,` <pattern> ] * `)`
-    | `_`
-
-<expression>
-    | <expression> <expression-suffix>
-    | <expression> <binary-operator> <expression>
-    | <unary-operator> <expression>
-
-<expression-suffix>
-    | `(` <expression> [ `,` <expression> ] * `)`
-    | `[` <expression> [ `:` <expression> [ `:` <expression> ] ? ] ? `]`
-
-
-Detailed View of <expression>
-
-Precedence Table:
-
-1  | `()` `[]`                   | Function application or array access
-2  | `!` `~` `-`                 | Logical and Bitwise NOT, Negation
-3  | `*` `/` `%`                 | Multiplication, Division, Modulo
-4  | `+` `-`                     | Addition, Subtraction
-5  | `>>` `<<`                   | Bitwise Shifts
-7  | `&` `|` `^`                 | Bitwise AND, OR, XOR
-8  | `.`                         | Function composition
-6  | `<` `>` `<=` `>=` `==` `!=` | Comparison operators
-9  | `and` `or`                  | Logical (Short Circuiting) AND, OR
-
-<expression> := <expr-9>
-
-<expr-1>
-    | <number>
-    | <name>
-    | <string>
-    | `true`
-    | `false`
-    | `nil`
-    | `(` <expression> `)`
-
-<expr-2> := [ `!` | `~` | `-` ] <expr-2> <expr-suffix>
-<expr-3> := <expr-2> ( [ `*` | `/` | `%` ] <expr-2> ) *
-<expr-4> := <expr-3> ( [ `+` | `-` ] <expr-3> ) *
-<expr-5> := <expr-4> ( [ `>>` | `<<` ] <expr-4> ) *
-<expr-6> := <expr-5> ( [ `<` | `>` | `<=` | `>=` | `==` | `!=` ] <expr-5> ) *
-<expr-7> := <expr-6> ( [ `&` | `|` | `^` ] <expr-6> ) *
-<expr-8> := <expr-7> ( `.` <expr-7> ) *
-<expr-9> := <expr-8> ( [ `&&` | `||` ] <expr-8> )
-
-<expr-suffix>
-    | `(` <expression> [ `,` <expression> ] * `)`
-    | `[` <expression> [ `:` <expression> [ `:` <expression> ] ? ] ?
+It is a standard Rust project, and thus built with `cargo build --release`. The `cordy` executable serves both as the compiler and runtime.
 
 ```
+cordy [options] <file>
+    -d : Show the disassembly output, then exit.
 
+Compiles and executes the file <file>
+```
 
-
-### Enabling Debug Traces
-
-Compile with the environment variable `RUSTFLAGS` set to
+For additional debugging information, compile with the environment variable `RUSTFLAGS` set to
 
 ```
 --cfg trace_parser="off" --cfg trace_interpreter="off" --cfg trace_interpreter_stack="off"
@@ -124,22 +25,59 @@ And replace the values for the traces you want to enable with `on`:
 
 - `trace_parser` traces the parser execution, logging tokens accepted, pushed, and rules entered.
 - `trace_interpreter` traces the virtual machine execution, logging every instruction executed.
+- `trace_interpreter_stack` traces the virtual machine's stack, including a view of the full stack after every `pop`, and `push`
+
+
+### Quick Introduction
+
+This language is inspired by parts from Python, Rust, Haskell, Java, and JavaScript. It is also heavily inspired by the [Crafting Interpreters](https://craftinginterpreters.com/) book. A basic rundown of the syntax:
+
+- The basic structure of the language is C-style, with `{` and `}` to separate code blocks, and imperative constructs such as `if`, `else`, `while`, etc.
+- `let x` is used to declare a variable. `fn(x, y, z)` declares a function. Functions can either be followed be expressions (like `fn(x) -> x + 1`) or blocks (like `fn (x) { print(x) }`).
+- The basic types are `nil` (the absence of a value, and the default value for all declared uninitialized variables), `bool` (a boolean), `int` (a 64-bit unsigned integer), `str` (a UTF-8 string), `function` (the type of all functions), and `list` (A basic array backed list).
+- Expressions should be familiar from most imperative programming languages, as should be operator precedence.
+    - Operators on their own are functions, so `(+)` is a two argument function which adds values.
+    - `%` is mathematical modulo, and `/` rounds to negative infinity, and `-(a / b) == -a / b == a / -b` (similar to Python)
+    - The `.` operator is actually a low precedence function composition operator: `a . b . c` is equivalent to `c(b(a))`, and it can be chained in a functional style.
+- Most functions (that aren't variadic) can be partially evaluated (like Haskell): `(+ 3)` is a function which takes one argument and adds three.
+- The language is almost completely newline independent, and whitespace only used to delimit tokens. There are a few edge cases where whitespace (or semicolons) is required between expressions to reduce ambiguity.
+
+
+### Examples
+
+Below is a solution to [Advent of Code Day 1 Part 1](https://adventofcode.com/2022/day/1), written in a functional style:
+
+```java
+'input.txt' . read_text . split ('\n\n')
+    . map(fn(g) -> g . split('\n') . map(int) . sum )
+    . max
+    . print
+```
+
+Or the same solution, written in a different style, with the same language:
+
+```java
+let inp = read_text('input.txt')
+let lines = inp.split('\n\n')
+let elves = lines.map(fn(g) {
+    let elf = g.split('\n')
+    elf.map(int).sum
+})
+print(max(elves))
+```
+
 
 ### To-Do
 
+- REPL, functional CLI and arguments.
 - Implement `->` operator, basic named tuple types (structs), or binding resolution on macros
 - Sets (HashSet)
 - Maps (HashMap) and dictionary literals (or just use list syntax?)
 - Polymorphic 'List' types that can be used as arbitrary iterators, etc. using rust traits rather than dispatch at every call site
-- Functional wankery (map, filter, max, min, reduce) that operate on polymorphic lists
 - Deque / Queue type (VecDeque)
 - Format strings (just normal strings with the python `%` operator, but with rust formatting? does that even work?)
 - Regex (some sort of impl)
 - Pattern matching / deconstruction
 - Even MORE standard library functions
-- Lambdas
-- Expression functions: `fn <name> (...) -> <expr>`
-- Statement lambdas: `fn(...) { <statements> }`
-- Improved return value collection (make it work properly with if/else statements, loops, etc.)
 - Closures - capture value not variable (like in Java)?
-- VS Code: https://code.visualstudio.com/api/language-extensions/overview
+- [VS Code](https://code.visualstudio.com/api/language-extensions/overview)?

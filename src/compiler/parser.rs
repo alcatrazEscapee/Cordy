@@ -4,19 +4,19 @@ use crate::compiler::scanner::{ScanResult, ScanToken};
 use crate::stdlib::StdBinding;
 use crate::vm::opcode::Opcode;
 use crate::vm::value::FunctionImpl;
-use crate::reporting::ProvidesLineNumber;
 use crate::trace;
 
 use ScanToken::{*};
 use ParserErrorType::{*};
 use Opcode::{*};
 use StdBinding::{*};
+use crate::compiler::CompileResult;
 
 
-pub fn parse(bindings: HashMap<&'static str, StdBinding>, scan_result: ScanResult) -> ParserResult {
+pub fn parse(bindings: HashMap<&'static str, StdBinding>, scan_result: ScanResult) -> CompileResult {
     let mut parser: Parser = Parser::new(bindings, scan_result.tokens);
     parser.parse();
-    ParserResult {
+    CompileResult {
         code: parser.output,
         errors: parser.errors,
 
@@ -27,51 +27,6 @@ pub fn parse(bindings: HashMap<&'static str, StdBinding>, scan_result: ScanResul
         line_numbers: parser.line_numbers,
     }
 }
-
-pub struct ParserResult {
-    pub code: Vec<Opcode>,
-    pub errors: Vec<ParserError>,
-
-    pub strings: Vec<String>,
-    pub constants: Vec<i64>,
-    pub functions: Vec<FunctionImpl>,
-
-    pub line_numbers: Vec<u16>,
-}
-
-
-impl ParserResult {
-
-    pub fn disassemble(self: &Self) -> Vec<String> {
-        let mut lines: Vec<String> = Vec::new();
-        let mut width: usize = 0;
-        let mut longest: usize = (self.line_numbers.last().unwrap_or(&0) + 1) as usize;
-        while longest > 0 {
-            width += 1;
-            longest /= 10;
-        }
-
-        let mut last_line_no: u16 = 0;
-        for (ip, token) in self.code.iter().enumerate() {
-            let line_no = self.line_number(ip);
-            let label: String = if line_no + 1 != last_line_no {
-                last_line_no = line_no + 1;
-                format!("L{:0>width$}: ", line_no + 1, width = width)
-            } else {
-                " ".repeat(width + 3)
-            };
-            let asm: String = match token {
-                Opcode::Int(cid) => format!("Int({} -> {})", cid, self.constants[*cid as usize]),
-                Opcode::Str(sid) => format!("Str({} -> {:?})", sid, self.strings[*sid as usize]),
-                Opcode::Function(fid) => format!("Function({} -> {:?})", fid, self.functions[*fid as usize]),
-                t => format!("{:?}", t),
-            };
-            lines.push(format!("{}{:0>4} {}", label, ip % 10_000, asm));
-        }
-        lines
-    }
-}
-
 
 
 #[derive(Eq, PartialEq, Debug, Clone)]
@@ -822,8 +777,9 @@ impl Parser {
         trace::trace_parser!("rule <expr-1-partial-operator>");
         // Open `(` usually resolves precedence, so it begins parsing an expression from the top again
         // However it *also* can be used to wrap around a partial evaluation of a literal operator, for example
-        // (-) => operator->unary_sub
-        // (+ 3) => partial evaluate operator->add at 3
+        // (-) => OperatorUnarySub
+        // (+ 3) => Int(3) OperatorAdd OpFuncCompose
+        // (*) => OperatorMul
         // So, if we peek ahead and see an operator, we know this is a expression of that sort and we need to handle accordingly
         // We *also* know that we will never see a binary operator begin an expression
         let mut unary: Option<StdBinding> = None;
@@ -869,10 +825,20 @@ impl Parser {
             }
         } else if let Some(op) = binary {
             self.advance(); // The unary operator
-            self.parse_expression(); // Parse the expression following a binary prefix operator
-            self.push(Bound(op)); // Push the binding
-            self.push(OpFuncCompose); // And partially evaluate it
-            self.expect(CloseParen);
+            match self.peek() {
+                Some(CloseParen) => {
+                    // No expression follows this operator, so we have `(` <op> `)`, which just returns the operator itself
+                    self.push(Bound(op));
+                    self.advance();
+                },
+                _ => {
+                    // Anything else, and we try and parse an expression and partially evaluate
+                    self.parse_expression(); // Parse the expression following a binary prefix operator
+                    self.push(Bound(op)); // Push the binding
+                    self.push(OpFuncCompose); // And partially evaluate it
+                    self.expect(CloseParen);
+                }
+            }
             true
         } else {
             false
@@ -1487,15 +1453,15 @@ impl Parser {
 
 #[cfg(test)]
 mod tests {
-    use crate::compiler::{parser, scanner};
+    use crate::compiler::{parser, CompileResult, scanner};
     use crate::compiler::scanner::ScanResult;
-    use crate::compiler::parser::{Parser, ParserResult};
+    use crate::compiler::parser::Parser;
     use crate::{reporting, stdlib};
     use crate::stdlib::StdBinding;
     use crate::vm::opcode::Opcode;
     use crate::trace;
 
-    use StdBinding::{Print, Read};
+    use StdBinding::{Print, Read, OperatorAdd, OperatorDiv, OperatorMul};
     use Opcode::{*};
 
 
@@ -1545,6 +1511,7 @@ mod tests {
     #[test] fn test_slice_10() { run_expr("1 [2:]", vec![Int(1), Int(2), Nil, OpSlice]); }
     #[test] fn test_slice_11() { run_expr("1 [:3]", vec![Int(1), Nil, Int(3), OpSlice]); }
     #[test] fn test_slice_12() { run_expr("1 [2:3]", vec![Int(1), Int(2), Int(3), OpSlice]); }
+    #[test] fn test_binary_ops() { run_expr("(*) * (+) + (/)", vec![Bound(OperatorMul), Bound(OperatorAdd), OpMul, Bound(OperatorDiv), OpAdd]); }
 
     #[test] fn test_let_eof() { run_err("let", "Unexpected end of file, was expecting variable name after 'let' keyword\n  at: line 1 (<test>)\n  at:\n\nlet\n"); }
     #[test] fn test_let_no_identifier() { run_err("let =", "Expecting a variable name after 'let' keyword, got '=' token instead\n  at: line 1 (<test>)\n  at:\n\nlet =\n"); }
@@ -1611,7 +1578,7 @@ mod tests {
         let scan_result: ScanResult = scanner::scan(&text);
         assert!(scan_result.errors.is_empty());
 
-        let parse_result: ParserResult = parser::parse(stdlib::bindings(), scan_result);
+        let parse_result: CompileResult = parser::parse(stdlib::bindings(), scan_result);
         let mut lines: Vec<String> = Vec::new();
         assert!(!parse_result.errors.is_empty());
 
@@ -1629,7 +1596,7 @@ mod tests {
         let scan_result: ScanResult = scanner::scan(&text);
         assert!(scan_result.errors.is_empty());
 
-        let parse_result: ParserResult = parser::parse(stdlib::bindings(), scan_result);
+        let parse_result: CompileResult = parser::parse(stdlib::bindings(), scan_result);
         let mut lines: Vec<String> = parse_result.disassemble();
 
         if !parse_result.errors.is_empty() {
