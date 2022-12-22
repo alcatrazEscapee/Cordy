@@ -23,12 +23,12 @@ pub enum RuntimeError {
 
     ValueErrorMaxArgMustBeNonEmptySequence,
     ValueErrorMinArgMustBeNonEmptySequence,
+    ValueErrorReduceArgMustBeNonEmptySequence,
 
     TypeErrorUnaryOp(Opcode, Value),
     TypeErrorBinaryOp(Opcode, Value, Value),
     TypeErrorBinaryIs(Value, Value),
     TypeErrorCannotConvertToInt(Value),
-    TypeErrorCannotCompare(Value, Value),
     TypeErrorCannotSlice(Value),
     TypeErrorSliceArgMustBeInt(&'static str, Value),
     TypeErrorArgMustBeInt(Value),

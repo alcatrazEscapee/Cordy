@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::{fs, io};
 
 use crate::vm::{operator, VirtualInterface};
-use crate::vm::value::Value;
+use crate::vm::value::{Mut, Value};
 use crate::vm::error::RuntimeError;
 use crate::trace;
 
@@ -12,7 +12,7 @@ use RuntimeError::{*};
 type ValueResult = Result<Value, Box<RuntimeError>>;
 
 mod lib_str;
-pub mod lib_list; // VM to directly call slice, index
+mod lib_list;
 mod lib_math;
 
 
@@ -47,6 +47,11 @@ pub fn bindings() -> HashMap<&'static str, StdBinding> {
         ("min", Min),
 
         ("map", Map),
+        ("filter", Filter),
+        ("reduce", Reduce),
+        ("unique", Unique),
+        ("sorted", Sorted),
+        ("reversed", Reversed),
 
         // lib_math
         ("abs", Abs),
@@ -105,6 +110,11 @@ pub fn lookup_binding(b: &StdBinding) -> &'static str {
         Min => "min",
         Max => "max",
         Map => "map",
+        Filter => "filter",
+        Reduce => "reduce",
+        Unique => "unique",
+        Sorted => "sorted",
+        Reversed => "reversed",
 
         // lib_math
         Abs => "abs",
@@ -112,7 +122,7 @@ pub fn lookup_binding(b: &StdBinding) -> &'static str {
 }
 
 /// The enum containing all bindings as they are represented at runtime.
-#[derive(Eq, PartialEq, Debug, Clone, Copy)]
+#[derive(Eq, PartialEq, Debug, Clone, Copy, Hash)]
 pub enum StdBinding {
     Print,
     Read,
@@ -164,8 +174,11 @@ pub enum StdBinding {
     Min,
     Max,
     Map,
-    // Filter,
-    // Reduce,
+    Filter,
+    Reduce,
+    Unique,
+    Sorted,
+    Reversed,
 
     // lib_math
     Abs,
@@ -308,10 +321,10 @@ pub fn invoke<VM>(bound: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult wher
         OperatorBitwiseAnd => dispatch!(a1, a2, operator::binary_bitwise_and(a2, a1)),
         OperatorBitwiseOr => dispatch!(a1, a2, operator::binary_bitwise_or(a2, a1)),
         OperatorBitwiseXor => dispatch!(a1, a2, operator::binary_bitwise_xor(a2, a1)),
-        OperatorLessThan => dispatch!(a1, a2, operator::binary_less_than(a2, a1)),
-        OperatorLessThanEqual => dispatch!(a1, a2, operator::binary_less_than_or_equal(a2, a1)),
-        OperatorGreaterThan => dispatch!(a1, a2, operator::binary_greater_than(a2, a1)),
-        OperatorGreaterThanEqual => dispatch!(a1, a2, operator::binary_greater_than_or_equal(a2, a1)),
+        OperatorLessThan => dispatch!(a1, a2, Ok(operator::binary_less_than(a2, a1))),
+        OperatorLessThanEqual => dispatch!(a1, a2, Ok(operator::binary_less_than_or_equal(a2, a1))),
+        OperatorGreaterThan => dispatch!(a1, a2, Ok(operator::binary_greater_than(a2, a1))),
+        OperatorGreaterThanEqual => dispatch!(a1, a2, Ok(operator::binary_greater_than_or_equal(a2, a1))),
         OperatorEqual => dispatch!(a1, a2, Ok(operator::binary_equals(a2, a1))),
         OperatorNotEqual => dispatch!(a1, a2, Ok(operator::binary_not_equals(a2, a1))),
 
@@ -329,6 +342,11 @@ pub fn invoke<VM>(bound: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult wher
         Max => dispatch_varargs!(lib_list::max_iter, lib_list::max_list, Max),
         Min => dispatch_varargs!(lib_list::min_iter, lib_list::min_list, Min),
         Map => dispatch!(a1, a2, lib_list::map(vm, a1, a2)),
+        Filter => dispatch!(a1, a2, lib_list::filter(vm, a1, a2)),
+        Reduce => dispatch!(a1, a2, lib_list::reduce(vm, a1, a2)),
+        Unique => dispatch_varargs!(lib_list::unique_iter, lib_list::unique_list, Unique),
+        Sorted => dispatch_varargs!(lib_list::sorted_iter, lib_list::sorted_list, Sorted),
+        Reversed => dispatch_varargs!(lib_list::reversed_iter, lib_list::reversed_list, Reversed),
 
         // lib_math
         Abs => dispatch!(a1, lib_math::abs(a1)),
@@ -337,7 +355,16 @@ pub fn invoke<VM>(bound: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult wher
     }
 }
 
+pub fn list_index(list_ref: Mut<Vec<Value>>, r: i64) -> ValueResult {
+    lib_list::list_index(list_ref, r)
+}
 
+pub fn list_slice(a1: Value, a2: Value, a3: Value, a4: Value) -> ValueResult {
+    lib_list::list_slice(a1, a2, a3, a4)
+}
+
+
+/// Not unused - invoked via the dispatch!() macro above
 fn wrap_as_partial<VM>(bound: StdBinding, nargs: u8, vm: &mut VM) -> Value where VM : VirtualInterface {
     // vm stack will contain [..., arg1, arg2, ... argN]
     // popping in order will populate the vector with [argN, argN-1, ... arg1]

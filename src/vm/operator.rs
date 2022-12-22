@@ -86,8 +86,8 @@ pub fn binary_add(a1: Value, a2: Value) -> ValueResult {
     match (a1, a2) {
         (Value::Int(i1), Value::Int(i2)) => Ok(Value::Int(i1 + i2)),
         (Value::List(l1), Value::List(l2)) => {
-            let list1 = (*l1).borrow();
-            let list2 = (*l2).borrow();
+            let list1 = l1.borrow();
+            let list2 = l2.borrow();
             let mut list3: Vec<Value> = Vec::with_capacity(list1.len() + list2.len());
             list3.extend(list1.iter().cloned());
             list3.extend(list2.iter().cloned());
@@ -111,7 +111,7 @@ pub fn binary_left_shift(a1: Value, a2: Value) -> ValueResult {
     match (a1, a2) {
         (Value::Int(i1), Value::Int(i2)) => Ok(Value::Int(if i2 >= 0 { i1 << i2 } else {i1 >> (-i2)})),
         (Value::List(ls), r) => {
-            (*ls).borrow_mut().push(r);
+            ls.borrow_mut().push(r);
             Ok(Value::List(ls))
         },
         (l, r) => return TypeErrorBinaryOp(OpLeftShift, l, r).err(),
@@ -123,7 +123,7 @@ pub fn binary_right_shift(a1: Value, a2: Value) -> ValueResult {
     match (a1, a2) {
         (Value::Int(i1), Value::Int(i2)) => Ok(Value::Int(if i2 >= 0 { i1 >> i2 } else {i1 << (-i2)})),
         (l, Value::List(rs)) => {
-            (*rs).borrow_mut().insert(0, l);
+            rs.borrow_mut().insert(0, l);
             Ok(Value::List(rs))
         },
         (l, r) => TypeErrorBinaryOp(OpRightShift, l, r).err(),
@@ -131,41 +131,16 @@ pub fn binary_right_shift(a1: Value, a2: Value) -> ValueResult {
 }
 
 
-pub fn binary_less_than(a1: Value, a2: Value) -> ValueResult {
-    match a1.is_less_than(&a2) {
-        Ok(v) => Ok(Value::Bool(v)),
-        Err(e) => e.err()
-    }
-}
-
-pub fn binary_less_than_or_equal(a1: Value, a2: Value) -> ValueResult {
-    match a1.is_less_than_or_equal(&a2) {
-        Ok(v) => Ok(Value::Bool(v)),
-        Err(e) => Err(e)
-    }
-}
-
-pub fn binary_greater_than(a1: Value, a2: Value) -> ValueResult {
-    match a1.is_less_than_or_equal(&a2) {
-        Ok(v) => Ok(Value::Bool(!v)),
-        Err(e) => Err(e)
-    }
-}
-
-pub fn binary_greater_than_or_equal(a1: Value, a2: Value) -> ValueResult {
-    match a1.is_less_than(&a2) {
-        Ok(v) => Ok(Value::Bool(!v)),
-        Err(e) => Err(e)
-    }
-}
+pub fn binary_less_than(a1: Value, a2: Value) -> Value { Value::Bool(a1 < a2) }
+pub fn binary_less_than_or_equal(a1: Value, a2: Value) -> Value { Value::Bool(a1 <= a2) }
+pub fn binary_greater_than(a1: Value, a2: Value) -> Value { Value::Bool(a1 > a2) }
+pub fn binary_greater_than_or_equal(a1: Value, a2: Value) -> Value { Value::Bool(a1 >= a2) }
 
 pub fn binary_equals(a1: Value, a2: Value) -> Value {
-    Value::Bool(a1.is_equal(&a2))
+    Value::Bool(a1 == a2)
 }
+pub fn binary_not_equals(a1: Value, a2: Value) -> Value { Value::Bool(a1 != a2) }
 
-pub fn binary_not_equals(a1: Value, a2: Value) -> Value {
-    Value::Bool(!a1.is_equal(&a2))
-}
 
 pub fn binary_bitwise_and(a1: Value, a2: Value) -> ValueResult {
     match (a1, a2) {

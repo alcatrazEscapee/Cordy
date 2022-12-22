@@ -1,9 +1,10 @@
 use std::rc::Rc;
-use crate::compiler::parser::{ParserError, ParserErrorType, ParserResult};
+use crate::compiler::parser::{ParserError, ParserErrorType};
+use crate::compiler::CompileResult;
 use crate::compiler::scanner::{ScanError, ScanErrorType, ScanToken};
 use crate::stdlib;
 use crate::stdlib::StdBinding;
-use crate::vm::error::{RuntimeErrorWithLineNumber, RuntimeError};
+use crate::vm::error::{RuntimeError, RuntimeErrorWithLineNumber};
 use crate::vm::opcode::Opcode;
 use crate::vm::value::{FunctionImpl, Value};
 use crate::vm::VirtualMachine;
@@ -73,7 +74,7 @@ impl ProvidesLineNumber for Vec<u16> {
     }
 }
 
-impl ProvidesLineNumber for ParserResult {
+impl ProvidesLineNumber for CompileResult {
     fn line_number(self: &Self, ip: usize) -> u16 {
         self.line_numbers.line_number(ip)
     }
@@ -104,11 +105,11 @@ impl AsError for RuntimeErrorWithLineNumber {
             RuntimeError::SliceStepZero => String::from("Cannot slice a list with a step of 0"),
             RuntimeError::ValueErrorMaxArgMustBeNonEmptySequence => format!("ValueError: 'max' argument must be a non-empty sequence"),
             RuntimeError::ValueErrorMinArgMustBeNonEmptySequence => format!("ValueError: 'min' argument must be a non-empty sequence"),
+            RuntimeError::ValueErrorReduceArgMustBeNonEmptySequence => format!("ValueError: 'reduce' argument must be a non-empty sequence"),
             RuntimeError::TypeErrorUnaryOp(op, v) => format!("TypeError: Argument to unary '{}' must be an int, got {}", op.format_error(), v.format_error()),
             RuntimeError::TypeErrorBinaryOp(op, l, r) => format!("TypeError: Cannot {} {} and {}", op.format_error(), l.format_error(), r.format_error()),
             RuntimeError::TypeErrorBinaryIs(l, r) => format!("TypeError: {} is not a type and cannot be used with binary 'is' on {}", r.format_error(), l.format_error()),
             RuntimeError::TypeErrorCannotConvertToInt(v) => format!("TypeError: Cannot convert {} to an int", v.format_error()),
-            RuntimeError::TypeErrorCannotCompare(l, r) => format!("TypeError: Cannot compare {} to {}", l.format_error(), r.format_error()),
             RuntimeError::TypeErrorCannotSlice(ls) => format!("TypeError: Cannot slice {}", ls.format_error()),
             RuntimeError::TypeErrorSliceArgMustBeInt(e, v) => format!("TypeError: Cannot slice list with {} argument {}", e, v.format_error()),
             RuntimeError::TypeErrorArgMustBeInt(v) => format!("TypeError: Expected {} to be a int", v.format_error()),
