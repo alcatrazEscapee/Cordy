@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::VecDeque;
 
 use crate::vm::error::RuntimeError;
 use crate::vm::value::{Mut, Value};
@@ -21,7 +21,7 @@ macro_rules! slice_arg {
 }
 
 
-pub fn list_index(list_ref: Mut<Vec<Value>>, r: i64) -> ValueResult {
+pub fn list_index(list_ref: Mut<VecDeque<Value>>, r: i64) -> ValueResult {
     let list = list_ref.borrow();
     let index: usize = if r < 0 { (list.len() as i64 + r) as usize } else { r as usize };
     if index < list.len() {
@@ -51,21 +51,19 @@ pub fn list_slice(a1: Value, a2: Value, a3: Value, a4: Value) -> ValueResult {
     let abs_start: i64 = to_index(length, low);
     let abs_step: usize = step.unsigned_abs() as usize;
 
-    return Ok(Value::list(if step > 0 {
+    return Ok(if step > 0 {
         let abs_stop: i64 = to_index(length, high - 1);
 
-        (abs_start..=abs_stop).step_by(abs_step)
+        Value::iter((abs_start..=abs_stop).step_by(abs_step)
             .filter_map(|i| safe_get(&list, i))
-            .cloned()
-            .collect::<Vec<Value>>()
+            .cloned())
     } else {
         let abs_stop: i64 = to_index(length, high);
 
-        rev_range(abs_start, abs_stop).step_by(abs_step)
+        Value::iter(rev_range(abs_start, abs_stop).step_by(abs_step)
             .filter_map(|i| safe_get(&list, i))
-            .cloned()
-            .collect::<Vec<Value>>()
-    }))
+            .cloned())
+    })
 }
 
 
@@ -79,7 +77,7 @@ fn to_index(len: i64, pos_or_neg: i64) -> i64 {
 }
 
 #[inline(always)]
-fn safe_get(list: &Vec<Value>, index: i64) -> Option<&Value> {
+fn safe_get(list: &VecDeque<Value>, index: i64) -> Option<&Value> {
     if index < 0 {
         None
     } else {
@@ -105,25 +103,26 @@ fn rev_range(start_high_inclusive: i64, stop_low_exclusive: i64) -> impl Iterato
 // ===== Library Functions ===== //
 
 macro_rules! declare_varargs_iter {
-    ($iter:ident, $list:ident) => {
-        pub fn $iter(arg: Value) -> ValueResult {
+    ($varargs:ident, $iter:ident) => {
+        pub fn $varargs(arg: Value) -> ValueResult {
             match arg {
-                List(ls) => $list(ls.borrow().as_ref()),
+                List(v) => $iter(v.borrow().iter()),
+                Set(v) => $iter(v.borrow().iter()),
+                Dict(v) => $iter(v.borrow().keys()),
                 e => TypeErrorArgMustBeIterable(e).err(),
             }
         }
     };
 }
 
-declare_varargs_iter!(sum_iter, sum_list);
-declare_varargs_iter!(min_iter, min_list);
-declare_varargs_iter!(max_iter, max_list);
-declare_varargs_iter!(unique_iter, unique_list);
-declare_varargs_iter!(sorted_iter, sorted_list);
-declare_varargs_iter!(reversed_iter, reversed_list);
+declare_varargs_iter!(sum_varargs, sum_iter);
+declare_varargs_iter!(min_varargs, min_iter);
+declare_varargs_iter!(max_varargs, max_iter);
+declare_varargs_iter!(sorted_varargs, sorted_iter);
+declare_varargs_iter!(reversed_varargs, reversed_iter);
 
 
-pub fn sum_list(args: &Vec<Value>) -> ValueResult {
+pub fn sum_iter<'a>(args: impl Iterator<Item=&'a Value>) -> ValueResult {
     let mut sum: i64 = 0;
     for v in args {
         match v {
@@ -134,36 +133,28 @@ pub fn sum_list(args: &Vec<Value>) -> ValueResult {
     Ok(Int(sum))
 }
 
-pub fn max_list(args: &Vec<Value>) -> ValueResult {
-    match args.iter().max() {
+pub fn max_iter<'a>(args: impl Iterator<Item=&'a Value>) -> ValueResult {
+    match args.max() {
         Some(v) => Ok(v.clone()),
         None => ValueErrorMaxArgMustBeNonEmptySequence.err()
     }
 }
 
-pub fn min_list(args: &Vec<Value>) -> ValueResult {
-    match args.iter().min() {
+pub fn min_iter<'a>(args: impl Iterator<Item=&'a Value>) -> ValueResult {
+    match args.min() {
         Some(v) => Ok(v.clone()),
         None => ValueErrorMaxArgMustBeNonEmptySequence.err()
     }
 }
 
-pub fn unique_list(args: &Vec<Value>) -> ValueResult {
-    Ok(Value::list(args.iter()
-        .cloned()
-        .collect::<HashSet<Value>>()
-        .into_iter()
-        .collect::<Vec<Value>>()))
-}
-
-pub fn sorted_list(args: &Vec<Value>) -> ValueResult {
-    let mut sorted: Vec<Value> = args.iter().cloned().collect::<Vec<Value>>();
+pub fn sorted_iter<'a>(args: impl Iterator<Item=&'a Value>) -> ValueResult {
+    let mut sorted: Vec<Value> = args.cloned().collect::<Vec<Value>>();
     sorted.sort_unstable();
     Ok(Value::list(sorted))
 }
 
-pub fn reversed_list(args: &Vec<Value>) -> ValueResult {
-    Ok(Value::list(args.iter()
+pub fn reversed_iter<'a>(args: impl DoubleEndedIterator<Item=&'a Value>) -> ValueResult {
+    Ok(Value::list(args
         .cloned()
         .rev()
         .collect::<Vec<Value>>()))
@@ -239,5 +230,64 @@ pub fn reduce<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : V
             Ok(acc)
         },
         (_, r) => return TypeErrorArgMustBeIterable(r).err(),
+    }
+}
+
+pub fn pop(a1: Value) -> ValueResult {
+    match &a1 {
+        List(v) => { v.borrow_mut().pop_back(); Ok(a1) },
+        Set(v) => { v.borrow_mut().pop_back(); Ok(a1) },
+        Dict(v) => { v.borrow_mut().pop_back(); Ok(a1) },
+        _ => TypeErrorArgMustBeIterable(a1).err()
+    }
+}
+
+pub fn push(a1: Value, a2: Value) -> ValueResult {
+    match &a2 {
+        List(v) => { v.borrow_mut().push_back(a1); Ok(a2) }
+        Set(v) => { v.borrow_mut().insert(a1); Ok(a2) }
+        _ => TypeErrorArgMustBeIterable(a2).err()
+    }
+}
+
+pub fn last(a1: Value) -> ValueResult {
+    match &a1 {
+        List(v) => Ok(v.borrow_mut().back().cloned().unwrap_or(Nil)),
+        Set(v) => Ok(v.borrow_mut().back().cloned().unwrap_or(Nil)),
+        _ => TypeErrorArgMustBeIterable(a1).err()
+    }
+}
+
+pub fn head(a1: Value) -> ValueResult {
+    match &a1 {
+        List(v) => Ok(v.borrow_mut().front().cloned().unwrap_or(Nil)),
+        Set(v) => Ok(v.borrow_mut().front().cloned().unwrap_or(Nil)),
+        _ => TypeErrorArgMustBeIterable(a1).err()
+    }
+}
+
+pub fn init(a1: Value) -> ValueResult {
+    match &a1 {
+        List(v) => {
+            let v = v.borrow();
+            let mut iter = v.iter();
+            iter.next_back();
+            Ok(Value::iter(iter.cloned()))
+        },
+        Set(v) => {
+            let v = v.borrow();
+            let mut iter = v.iter();
+            iter.next_back();
+            Ok(Value::iter(iter.cloned()))
+        },
+        _ => TypeErrorArgMustBeIterable(a1).err()
+    }
+}
+
+pub fn tail(a1: Value) -> ValueResult {
+    match &a1 {
+        List(v) => Ok(Value::iter(v.borrow().iter().skip(1).cloned())),
+        Set(v) => Ok(Value::iter(v.borrow().iter().skip(1).cloned())),
+        _ => TypeErrorArgMustBeIterable(a1).err()
     }
 }

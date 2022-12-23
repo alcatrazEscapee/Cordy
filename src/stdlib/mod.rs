@@ -1,5 +1,6 @@
-use std::collections::HashMap;
-use std::{fs, io};
+use std::collections::VecDeque;
+use std::fs;
+use lazy_static::lazy_static;
 
 use crate::vm::{operator, VirtualInterface};
 use crate::vm::value::{Mut, Value};
@@ -16,114 +17,44 @@ mod lib_list;
 mod lib_math;
 
 
-/// Build a `Node` containing all native bindings for the interpreter runtime.
-/// This is used in the parser in order to replace raw identifiers with their bound enum value.
-pub fn bindings() -> HashMap<&'static str, StdBinding> {
-    HashMap::from([
-        ("print", Print),
-        ("read", Read),
-        ("read_text", ReadText),
-        ("write_text", WriteText),
-        ("nil", Nil),
-        ("bool", Bool),
-        ("int", Int),
-        ("str", Str),
-        ("function", Function),
-        ("repr", Repr),
-        ("len", Len),
-
-        // lib_str
-        ("to_lower", ToLower),
-        ("to_upper", ToUpper),
-        ("replace", Replace),
-        ("trim", Trim),
-        ("index_of", IndexOf),
-        ("count_of", CountOf),
-        ("split", Split),
-
-        // lib_list
-        ("sum", Sum),
-        ("max", Max),
-        ("min", Min),
-
-        ("map", Map),
-        ("filter", Filter),
-        ("reduce", Reduce),
-        ("unique", Unique),
-        ("sorted", Sorted),
-        ("reversed", Reversed),
-
-        // lib_math
-        ("abs", Abs),
-    ])
+/// Looks up a `StdBinding`'s string name
+pub fn lookup_name(b: StdBinding) -> &'static str {
+    NATIVE_BINDINGS.iter()
+        .find(|info| info.binding == b)
+        .unwrap()
+        .name
 }
 
-/// Looks up the semantic name of a binding. This is the result of calling `print->out . str` for example
-pub fn lookup_binding(b: &StdBinding) -> &'static str {
-    match b {
-        Print => "print",
-        Read => "read",
-        ReadText => "read_text",
-        WriteText => "write_text",
-        Nil => "nil",
-        Bool => "bool",
-        Int => "int",
-        Str => "str",
-        Function => "function",
-        Repr => "repr",
-        Len => "len",
-
-        OperatorUnarySub => "(-)",
-        OperatorUnaryLogicalNot => "(!)",
-        OperatorUnaryBitwiseNot => "(~)",
-
-        OperatorMul => "(*)",
-        OperatorDiv => "(/)",
-        OperatorPow => "(**)",
-        OperatorMod => "(%)",
-        OperatorIs => "(is)",
-        OperatorAdd => "(+)",
-        OperatorSub => "(-)",
-        OperatorLeftShift => "(<<)",
-        OperatorRightShift => "(>>)",
-        OperatorBitwiseAnd => "(&)",
-        OperatorBitwiseOr => "(|)",
-        OperatorBitwiseXor => "(^)",
-        OperatorLessThan => "(<)",
-        OperatorLessThanEqual => "(<=)",
-        OperatorGreaterThan => "(>)",
-        OperatorGreaterThanEqual => "(>=)",
-        OperatorEqual => "(==)",
-        OperatorNotEqual => "(!=)",
-
-        // lib_str
-        ToLower => "to_lower",
-        ToUpper => "to_upper",
-        Replace => "replace",
-        Trim => "trim",
-        IndexOf => "index_of",
-        CountOf => "count_of",
-        Split => "split",
-
-        // lib_list
-        Sum => "sum",
-        Min => "min",
-        Max => "max",
-        Map => "map",
-        Filter => "filter",
-        Reduce => "reduce",
-        Unique => "unique",
-        Sorted => "sorted",
-        Reversed => "reversed",
-
-        // lib_math
-        Abs => "abs",
-    }
+/// Looks up a `StdBinding` by a name.
+/// This is used in the parser to resolve a top-level name.
+pub fn lookup_named_binding(name: &String) -> Option<StdBinding> {
+    NATIVE_BINDINGS.iter()
+        .find(|info| info.parent == None && info.name == name)
+        .map(|info| info.binding)
 }
+
+/// Looks up a named child `StdBinding` via the parent and child name.
+/// This is used in the parser to resolve `->` references.
+pub fn lookup_named_sub_binding(parent: StdBinding, child: String) -> Option<StdBinding> {
+    NATIVE_BINDINGS.iter()
+        .find(|info| info.parent == Some(parent) && info.name == child)
+        .map(|info| info.binding)
+}
+
+
+
+struct StdBindingInfo {
+    name: &'static str,
+    binding: StdBinding,
+    parent: Option<StdBinding>,
+}
+
 
 /// The enum containing all bindings as they are represented at runtime.
 #[derive(Eq, PartialEq, Debug, Clone, Copy, Hash)]
 pub enum StdBinding {
+    Void, // A dummy binding that parents itself. Any children of this binding cannot be referenced in the parser
+
     Print,
     Read,
     ReadText,
@@ -132,6 +63,9 @@ pub enum StdBinding {
     Bool,
     Int,
     Str,
+    List,
+    Set,
+    Dict,
     Function,
     Repr,
     Len,
@@ -176,18 +110,119 @@ pub enum StdBinding {
     Map,
     Filter,
     Reduce,
-    Unique,
     Sorted,
     Reversed,
 
+    Pop, // Remove last, or at index
+    Push, // Inverse of `pop` (alias)
+    Last, // Just last element
+    Head, // Just first element
+    Tail, // Compliment of `head`
+    Init, // Compliment of `last`
+    Insert, // Insert by key (or index)
+    Remove, // Remove by key (or index)
+    Merge, // Merges two collections (append right onto left)
+
     // lib_math
     Abs,
+    Gcd,
+    Lcm,
 }
+
+impl StdBindingInfo {
+    fn new(name: &'static str, binding: StdBinding, parent: Option<StdBinding>) -> StdBindingInfo {
+        StdBindingInfo { name, binding, parent }
+    }
+}
+
+lazy_static! {
+    static ref NATIVE_BINDINGS: Vec<StdBindingInfo> = load_bindings();
+}
+
+fn load_bindings() -> Vec<StdBindingInfo> {
+    macro_rules! of {
+        ($b:expr, $name:expr) => { StdBindingInfo::new($name, $b, None) };
+        ($p: expr, $b:expr, $name:expr) => { StdBindingInfo::new($name, $b, Some($p)) };
+    }
+    vec![
+        of!(Void, ""),
+
+        of!(Print, "print"),
+        of!(Read, "read"),
+        of!(ReadText, "read_text"),
+        of!(WriteText, "write_text"),
+
+        of!(Nil, "nil"),
+        of!(Bool, "bool"),
+        of!(Int, "int"),
+        of!(Str, "str"),
+        of!(List, "list"),
+        of!(Set, "set"),
+        of!(Dict, "dict"),
+        of!(Function, "function"),
+
+        of!(Void, OperatorUnarySub, "(-)"),
+        of!(Void, OperatorUnaryLogicalNot, "(!)"),
+        of!(Void, OperatorUnaryBitwiseNot, "(~)"),
+
+        of!(Void, OperatorMul, "(*)"),
+        of!(Void, OperatorDiv, "(/)"),
+        of!(Void, OperatorPow, "(**)"),
+        of!(Void, OperatorMod, "(%)"),
+        of!(Void, OperatorIs, "(is)"),
+        of!(Void, OperatorAdd, "(+)"),
+        of!(Void, OperatorSub, "(-)"), // Cannot be referenced as (- <expr>)
+        of!(Void, OperatorLeftShift, "(<<)"),
+        of!(Void, OperatorRightShift, "(>>)"),
+        of!(Void, OperatorBitwiseAnd, "(&)"),
+        of!(Void, OperatorBitwiseOr, "(|)"),
+        of!(Void, OperatorBitwiseXor, "(^)"),
+        of!(Void, OperatorLessThan, "(<)"),
+        of!(Void, OperatorLessThanEqual, "(<=)"),
+        of!(Void, OperatorGreaterThan, "(>)"),
+        of!(Void, OperatorGreaterThanEqual, "(>=)"),
+        of!(Void, OperatorEqual, "(==)"),
+        of!(Void, OperatorNotEqual, "(!=)"),
+
+        of!(Repr, "repr"),
+
+        of!(ToLower, "to_lower"),
+        of!(ToUpper, "to_upper"),
+        of!(Replace, "replace"),
+        of!(Trim, "trim"),
+        of!(IndexOf, "index_of"),
+        of!(CountOf, "count_of"),
+        of!(Split, "split"),
+
+        of!(Sum, "sum"),
+        of!(Max, "max"),
+        of!(Min, "min"),
+
+        of!(Len, "len"),
+        of!(Map, "map"),
+        of!(Filter, "filter"),
+        of!(Reduce, "reduce"),
+        of!(Sorted, "sorted"),
+        of!(Reversed, "reversed"),
+
+        of!(Pop, "pop"),
+        of!(Push, "push"),
+        of!(Last, "last"),
+        of!(Head, "head"),
+        of!(Tail, "tail"),
+        of!(Init, "init"),
+
+        of!(Abs, "abs"),
+        of!(Gcd, "gcd"),
+        of!(Lcm, "lcm"),
+    ]
+}
+
 
 
 pub fn invoke<VM>(bound: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult where VM : VirtualInterface
 {
-    trace::trace_interpreter!("stdlib::invoke() func={}, nargs={}", lookup_binding(&bound), nargs);
+    trace::trace_interpreter!("stdlib::invoke() func={}, nargs={}", lookup_name(&bound), nargs);
     // Dispatch macros for 0, 1, 2 and 3 argument functions
     // All dispatch!() cases support partial evaluation (where 0 < nargs < required args)
     macro_rules! dispatch {
@@ -241,7 +276,7 @@ pub fn invoke<VM>(bound: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult wher
                 },
                 _ => {
                     let args: Vec<Value> = vm.popn(nargs as usize);
-                    $list(&args)
+                    $list(args.iter())
                 }
             }
         };
@@ -270,10 +305,7 @@ pub fn invoke<VM>(bound: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult wher
             Ok(Value::Nil)
         },
         Read => dispatch!({
-            // todo: this doesn't work
-            let stdin = io::stdin();
-            let it = stdin.lines();
-            Ok(Value::Str(Box::new(it.map(|t| String::from(t.unwrap())).collect::<Vec<String>>().join("\n"))))
+            panic!("Not Implemented");
         }),
         ReadText => dispatch!(a1, match a1 {
             Value::Str(s1) => Ok(Value::Str(Box::new(fs::read_to_string(s1.as_ref()).unwrap().replace("\r", "")))), // todo: error handling?
@@ -298,10 +330,24 @@ pub fn invoke<VM>(bound: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult wher
             _ => TypeErrorCannotConvertToInt(a1).err(),
         }),
         Str => dispatch!(a1, Ok(Value::Str(Box::new(a1.as_str())))),
+        List => dispatch!(a1, match &a1 {
+            Value::Str(v) => Ok(Value::iter(v.chars().map(|c| Value::Str(Box::new(String::from(c)))))),
+            Value::List(v) => Ok(Value::iter(v.borrow().iter().cloned())),
+            Value::Set(v) => Ok(Value::iter(v.borrow().iter().cloned())),
+            _ => TypeErrorArgMustBeIterable(a1).err()
+        }),
+        Set => dispatch!(a1, match &a1 {
+            Value::Str(v) => Ok(Value::set(v.chars().map(|c| Value::Str(Box::new(String::from(c)))).collect())),
+            Value::List(v) => Ok(Value::set(v.borrow().iter().cloned().collect())),
+            Value::Set(v) => Ok(Value::set(v.borrow().iter().cloned().collect())),
+            _ => TypeErrorArgMustBeIterable(a1).err()
+        }),
         Repr => dispatch!(a1, Ok(Value::Str(Box::new(a1.as_repr_str())))),
         Len => dispatch!(a1, match &a1 {
             Value::Str(s) => Ok(Value::Int(s.len() as i64)),
             Value::List(l) => Ok(Value::Int((*l).borrow().len() as i64)),
+            Value::Set(s) => Ok(Value::Int((*s).borrow().len() as i64)),
+            Value::Dict(d) => Ok(Value::Int((*d).borrow().len() as i64)),
             _ => TypeErrorFunc1("len([T] | str): int", a1).err()
         }),
 
@@ -338,15 +384,21 @@ pub fn invoke<VM>(bound: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult wher
         Split => dispatch!(a1, a2, lib_str::split(a1, a2)),
 
         // lib_list
-        Sum => dispatch_varargs!(lib_list::sum_iter, lib_list::sum_list, Sum),
-        Max => dispatch_varargs!(lib_list::max_iter, lib_list::max_list, Max),
-        Min => dispatch_varargs!(lib_list::min_iter, lib_list::min_list, Min),
+        Sum => dispatch_varargs!(lib_list::sum_varargs, lib_list::sum_iter, Sum),
+        Max => dispatch_varargs!(lib_list::max_varargs, lib_list::max_iter, Max),
+        Min => dispatch_varargs!(lib_list::min_varargs, lib_list::min_iter, Min),
         Map => dispatch!(a1, a2, lib_list::map(vm, a1, a2)),
         Filter => dispatch!(a1, a2, lib_list::filter(vm, a1, a2)),
         Reduce => dispatch!(a1, a2, lib_list::reduce(vm, a1, a2)),
-        Unique => dispatch_varargs!(lib_list::unique_iter, lib_list::unique_list, Unique),
-        Sorted => dispatch_varargs!(lib_list::sorted_iter, lib_list::sorted_list, Sorted),
-        Reversed => dispatch_varargs!(lib_list::reversed_iter, lib_list::reversed_list, Reversed),
+        Sorted => dispatch_varargs!(lib_list::sorted_varargs, lib_list::sorted_iter, Sorted),
+        Reversed => dispatch_varargs!(lib_list::reversed_varargs, lib_list::reversed_iter, Reversed),
+
+        Pop => dispatch!(a1, lib_list::pop(a1)),
+        Push => dispatch!(a1, a2, lib_list::push(a1, a2)),
+        Last => dispatch!(a1, lib_list::last(a1)),
+        Head => dispatch!(a1, lib_list::head(a1)),
+        Init => dispatch!(a1, lib_list::init(a1)),
+        Tail => dispatch!(a1, lib_list::tail(a1)),
 
         // lib_math
         Abs => dispatch!(a1, lib_math::abs(a1)),
@@ -355,7 +407,7 @@ pub fn invoke<VM>(bound: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult wher
     }
 }
 
-pub fn list_index(list_ref: Mut<Vec<Value>>, r: i64) -> ValueResult {
+pub fn list_index(list_ref: Mut<VecDeque<Value>>, r: i64) -> ValueResult {
     lib_list::list_index(list_ref, r)
 }
 

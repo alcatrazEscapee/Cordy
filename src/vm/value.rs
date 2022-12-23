@@ -1,9 +1,11 @@
 use std::borrow::Borrow;
 use std::cell::{Ref, RefCell, RefMut};
 use std::cmp::Ordering;
+use std::collections::VecDeque;
 use std::fmt::Debug;
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
+use hashlink::{LinkedHashMap, LinkedHashSet};
 
 use crate::stdlib;
 use crate::stdlib::StdBinding;
@@ -24,9 +26,12 @@ pub enum Value {
     PartialFunction(Box<PartialFunctionImpl>),
 
     // Reference (Mutable) Types
-    // Really shitty memory management for now just using RefCell... in the future maybe we implement a garbage collected system
-    // mark and sweep or something... but for now, RefCell will do!
-    List(Mut<Vec<Value>>),
+    // Memory is not really managed at all and cycles are entirely possible.
+    // In future, a GC'd system could be implemented with `Mut` only owning weak references, and the GC owning the only strong reference.
+    // But that comes at even more performance overhead because we'd need to still obey rust reference counting semantics.
+    List(Mut<VecDeque<Value>>),
+    Set(Mut<LinkedHashSet<Value>>),
+    Dict(Mut<LinkedHashMap<Value, Value>>),
 
     // Functions
     Binding(StdBinding),
@@ -37,7 +42,11 @@ pub enum Value {
 impl Value {
 
     // Constructors
-    pub fn list(vec: Vec<Value>) -> Value { List(Mut::new(vec)) }
+    pub fn iter(vec: impl Iterator<Item=Value>) -> Value { List(Mut::new(vec.collect::<VecDeque<Value>>())) }
+    pub fn list(vec: Vec<Value>) -> Value { List(Mut::new(vec.into_iter().collect::<VecDeque<Value>>())) }
+    pub fn set(set: LinkedHashSet<Value>) -> Value { Set(Mut::new(set)) }
+    pub fn dict(dict: LinkedHashMap<Value, Value>) -> Value { Dict(Mut::new(dict)) }
+    pub fn dequeue(vec: VecDeque<Value>) -> Value { List(Mut::new(vec)) }
     pub fn partial1(func: Rc<FunctionImpl>, arg: Value) -> Value { PartialFunction(Box::new(PartialFunctionImpl { func, args: vec![Box::new(arg)] }))}
     pub fn partial(func: Rc<FunctionImpl>, args: Vec<Value>) -> Value { PartialFunction(Box::new(PartialFunctionImpl { func, args: args.into_iter().map(|v| Box::new(v)).collect() }))}
 
@@ -45,11 +54,10 @@ impl Value {
     pub fn as_str(self: &Self) -> String {
         match self {
             Str(s) => *s.clone(),
-            List(v) => format!("[{}]", v.borrow().iter().map(|t| t.as_str()).collect::<Vec<String>>().join(", ")),
             Function(f) => f.name.clone(),
             PartialFunction(f) => f.func.name.clone(),
-            Binding(b) => String::from(stdlib::lookup_binding(b)),
-            PartialBinding(b, _) => String::from(stdlib::lookup_binding(b)),
+            Binding(b) => String::from(stdlib::lookup_name(*b)),
+            PartialBinding(b, _) => String::from(stdlib::lookup_name(*b)),
             _ => self.as_repr_str(),
         }
     }
@@ -65,6 +73,8 @@ impl Value {
                 format!("'{}'", &escaped[1..escaped.len() - 1])
             },
             List(v) => format!("[{}]", v.borrow().iter().map(|t| t.as_repr_str()).collect::<Vec<String>>().join(", ")),
+            Set(v) => format!("{{{}}}", v.borrow().iter().map(|t| t.as_repr_str()).collect::<Vec<String>>().join(", ")),
+            Dict(v) => format!("{{{}}}", v.borrow().iter().map(|(k, v)| format!("{}: {}", k.as_repr_str(), v.as_repr_str())).collect::<Vec<String>>().join(", ")),
             Function(f) => {
                 let f = (*f).as_ref().borrow();
                 format!("fn {}({})", f.name, f.args.join(", "))
@@ -73,8 +83,8 @@ impl Value {
                 let f = (*f).as_ref().borrow();
                 format!("fn {}({})", f.func.name, f.func.args.join(", "))
             },
-            Binding(b) => format!("fn {}()", stdlib::lookup_binding(b)),
-            PartialBinding(b, _) => format!("fn {}()", stdlib::lookup_binding(b)),
+            Binding(b) => format!("fn {}()", stdlib::lookup_name(*b)),
+            PartialBinding(b, _) => format!("fn {}()", stdlib::lookup_name(*b)),
         }
     }
 
@@ -86,6 +96,8 @@ impl Value {
             Int(_) => "int",
             Str(_) => "str",
             List(_) => "list",
+            Set(_) => "set",
+            Dict(_) => "dict",
             Function(_) => "function",
             PartialFunction(_) => "partial function",
             Binding(_) => "native function",
@@ -105,6 +117,8 @@ impl Value {
             Int(i) => *i != 0,
             Str(s) => !s.is_empty(),
             List(l) => !l.borrow().is_empty(),
+            Set(v) => !v.borrow().is_empty(),
+            Dict(v) => !v.borrow().is_empty(),
             Function(_) => true,
             PartialFunction(_) => true,
             Binding(_) => true,
@@ -142,19 +156,8 @@ impl Value {
 
     pub fn is_function(self: &Self) -> bool {
         match self {
-            Function(_) => true,
+            Function(_) | PartialFunction(_) | Binding(_) | PartialBinding(_, _) => true,
             _ => false
-        }
-    }
-
-    pub fn is_equal(self: &Self, other: &Value) -> bool {
-        match (self, other) {
-            (Nil, Nil) => true,
-            (Bool(l), Bool(r)) => l == r,
-            (Int(l), Int(r)) => l == r,
-            (Str(l), Str(r)) => l == r,
-            (Binding(l), Binding(r)) => l == r,
-            _ => false,
         }
     }
 }

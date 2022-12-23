@@ -110,10 +110,6 @@ pub fn binary_sub(a1: Value, a2: Value) -> ValueResult {
 pub fn binary_left_shift(a1: Value, a2: Value) -> ValueResult {
     match (a1, a2) {
         (Value::Int(i1), Value::Int(i2)) => Ok(Value::Int(if i2 >= 0 { i1 << i2 } else {i1 >> (-i2)})),
-        (Value::List(ls), r) => {
-            ls.borrow_mut().push(r);
-            Ok(Value::List(ls))
-        },
         (l, r) => return TypeErrorBinaryOp(OpLeftShift, l, r).err(),
     }
 }
@@ -122,10 +118,6 @@ pub fn binary_left_shift(a1: Value, a2: Value) -> ValueResult {
 pub fn binary_right_shift(a1: Value, a2: Value) -> ValueResult {
     match (a1, a2) {
         (Value::Int(i1), Value::Int(i2)) => Ok(Value::Int(if i2 >= 0 { i1 >> i2 } else {i1 << (-i2)})),
-        (l, Value::List(rs)) => {
-            rs.borrow_mut().insert(0, l);
-            Ok(Value::List(rs))
-        },
         (l, r) => TypeErrorBinaryOp(OpRightShift, l, r).err(),
     }
 }

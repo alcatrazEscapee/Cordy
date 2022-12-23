@@ -1,7 +1,6 @@
 use crate::compiler::parser::ParserError;
 use crate::compiler::scanner::ScanResult;
 use crate::reporting::{ErrorReporter, ProvidesLineNumber};
-use crate::stdlib;
 use crate::vm::opcode::Opcode;
 use crate::vm::value::FunctionImpl;
 
@@ -22,21 +21,18 @@ pub fn compile(source: &String, text: &String) -> Result<CompileResult, Vec<Stri
         return Err(errors);
     }
 
-    // Load Native Bindings
-    let bindings = stdlib::bindings();
-
     // Parse
-    let parse_result: CompileResult = parser::parse(bindings, scan_result);
-    if !parse_result.errors.is_empty() {
+    let compile_result: CompileResult = parser::parse(scan_result);
+    if !compile_result.errors.is_empty() {
         let rpt: ErrorReporter = ErrorReporter::new(text, source);
-        for error in &parse_result.errors {
+        for error in &compile_result.errors {
             errors.push(rpt.format_parse_error(&error));
         }
         return Err(errors);
     }
 
     // Compilation Successful
-    Ok(parse_result)
+    Ok(compile_result)
 }
 
 
