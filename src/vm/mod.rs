@@ -337,9 +337,8 @@ impl<R, W> VirtualMachine<R, W> where
                 let start: usize = self.stack.len() - length;
                 let end: usize = self.stack.len();
                 trace::trace_interpreter_stack!("stack splice {}..{} into [...]", start, end);
-                let list: Vec<Value> = self.stack.splice(start..end, std::iter::empty())
-                    .collect::<Vec<Value>>();
-                self.push(Value::list(list));
+                let list: Value = Value::iter_list(self.stack.splice(start..end, std::iter::empty()));
+                self.push(list);
             },
 
             // Unary Operators

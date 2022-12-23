@@ -9,8 +9,12 @@ use hashlink::{LinkedHashMap, LinkedHashSet};
 
 use crate::stdlib;
 use crate::stdlib::StdBinding;
+use crate::vm::error::RuntimeError;
 
 use Value::{*};
+use crate::vm::error::RuntimeError::TypeErrorArgMustBeIterable;
+
+type ValueResult = Result<Value, Box<RuntimeError>>;
 
 
 /// The runtime sum type used by the virtual machine
@@ -42,11 +46,13 @@ pub enum Value {
 impl Value {
 
     // Constructors
-    pub fn iter(vec: impl Iterator<Item=Value>) -> Value { List(Mut::new(vec.collect::<VecDeque<Value>>())) }
+    pub fn iter_list(vec: impl Iterator<Item=Value>) -> Value { List(Mut::new(vec.collect::<VecDeque<Value>>())) }
+    pub fn iter_set(vec: impl Iterator<Item=Value>) -> Value { Set(Mut::new(vec.collect::<LinkedHashSet<Value>>()))}
+
     pub fn list(vec: Vec<Value>) -> Value { List(Mut::new(vec.into_iter().collect::<VecDeque<Value>>())) }
     pub fn set(set: LinkedHashSet<Value>) -> Value { Set(Mut::new(set)) }
     pub fn dict(dict: LinkedHashMap<Value, Value>) -> Value { Dict(Mut::new(dict)) }
-    pub fn dequeue(vec: VecDeque<Value>) -> Value { List(Mut::new(vec)) }
+
     pub fn partial1(func: Rc<FunctionImpl>, arg: Value) -> Value { PartialFunction(Box::new(PartialFunctionImpl { func, args: vec![Box::new(arg)] }))}
     pub fn partial(func: Rc<FunctionImpl>, args: Vec<Value>) -> Value { PartialFunction(Box::new(PartialFunctionImpl { func, args: args.into_iter().map(|v| Box::new(v)).collect() }))}
 
@@ -72,9 +78,9 @@ impl Value {
                 let escaped = format!("{:?}", s);
                 format!("'{}'", &escaped[1..escaped.len() - 1])
             },
-            List(v) => format!("[{}]", v.borrow().iter().map(|t| t.as_repr_str()).collect::<Vec<String>>().join(", ")),
-            Set(v) => format!("{{{}}}", v.borrow().iter().map(|t| t.as_repr_str()).collect::<Vec<String>>().join(", ")),
-            Dict(v) => format!("{{{}}}", v.borrow().iter().map(|(k, v)| format!("{}: {}", k.as_repr_str(), v.as_repr_str())).collect::<Vec<String>>().join(", ")),
+            List(v) => format!("[{}]", v.unbox().iter().map(|t| t.as_repr_str()).collect::<Vec<String>>().join(", ")),
+            Set(v) => format!("{{{}}}", v.unbox().iter().map(|t| t.as_repr_str()).collect::<Vec<String>>().join(", ")),
+            Dict(v) => format!("{{{}}}", v.unbox().iter().map(|(k, v)| format!("{}: {}", k.as_repr_str(), v.as_repr_str())).collect::<Vec<String>>().join(", ")),
             Function(f) => {
                 let f = (*f).as_ref().borrow();
                 format!("fn {}({})", f.name, f.args.join(", "))
@@ -116,13 +122,38 @@ impl Value {
             Bool(b) => *b,
             Int(i) => *i != 0,
             Str(s) => !s.is_empty(),
-            List(l) => !l.borrow().is_empty(),
-            Set(v) => !v.borrow().is_empty(),
-            Dict(v) => !v.borrow().is_empty(),
+            List(l) => !l.unbox().is_empty(),
+            Set(v) => !v.unbox().is_empty(),
+            Dict(v) => !v.unbox().is_empty(),
             Function(_) => true,
             PartialFunction(_) => true,
             Binding(_) => true,
             PartialBinding(_, _) => true,
+        }
+    }
+
+    pub fn as_iter(self: &Self) -> Result<ValueIntoIter, Box<RuntimeError>> {
+        match self {
+            Str(s) => {
+                let chars: Vec<Value> = s.chars()
+                    .map(|c| Value::Str(Box::new(String::from(c))))
+                    .collect::<Vec<Value>>();
+                Ok(ValueIntoIter::Str(chars))
+            },
+            List(l) => Ok(ValueIntoIter::List(l.unbox())),
+            Set(s) => Ok(ValueIntoIter::Set(s.unbox())),
+            Dict(d) => Ok(ValueIntoIter::Dict(d.unbox())),
+            _ => TypeErrorArgMustBeIterable(self.clone()).err(),
+        }
+    }
+
+    pub fn len(self: &Self) -> ValueResult {
+        match &self {
+            Str(it) => Ok(Value::Int(it.len() as i64)),
+            List(it) => Ok(Value::Int(it.unbox().len() as i64)),
+            Set(it) => Ok(Value::Int(it.unbox().len() as i64)),
+            Dict(it) => Ok(Value::Int(it.unbox().len() as i64)),
+            _ => TypeErrorArgMustBeIterable(self.clone()).err()
         }
     }
 
@@ -177,8 +208,8 @@ impl Ord for Value {
             (Int(l), Int(r)) => l.cmp(r),
             (Str(l), Str(r)) => l.cmp(r),
             (List(l), List(r)) => {
-                let ls = (*l).borrow();
-                let rs = (*r).borrow();
+                let ls = (*l).unbox();
+                let rs = (*r).unbox();
                 ls.cmp(&rs)
             },
             // Un-order-able things are defined as equal ordering
@@ -202,18 +233,18 @@ impl<T : Eq + PartialEq + Debug + Clone + Hash> Mut<T> {
         Mut { value: Rc::new(RefCell::new(value)) }
     }
 
-    pub fn borrow(self: &Self) -> Ref<T> {
+    pub fn unbox(self: &Self) -> Ref<T> {
         (*self.value).borrow()
     }
 
-    pub fn borrow_mut(self: &Self) -> RefMut<T> {
+    pub fn unbox_mut(self: &Self) -> RefMut<T> {
         (*self.value).borrow_mut()
     }
 }
 
 impl<T : Eq + PartialEq + Debug + Clone + Hash> Hash for Mut<T> {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        (*self).borrow().hash(state)
+        (*self).unbox().hash(state)
     }
 }
 
@@ -253,6 +284,60 @@ impl Hash for FunctionImpl {
 impl Hash for PartialFunctionImpl {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.func.hash(state)
+    }
+}
+
+// Escapes iterators all having different concrete types
+pub enum ValueIter<'a> {
+    Str(std::slice::Iter<'a, Value>),
+    List(std::collections::vec_deque::Iter<'a, Value>),
+    Set(hashlink::linked_hash_set::Iter<'a, Value>),
+    Dict(hashlink::linked_hash_map::Keys<'a, Value, Value>),
+}
+
+impl<'a> Iterator for ValueIter<'a> {
+    type Item = &'a Value;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            ValueIter::Str(it) => it.next(),
+            ValueIter::List(it) => it.next(),
+            ValueIter::Set(it) => it.next(),
+            ValueIter::Dict(it) => it.next(),
+        }
+    }
+}
+
+impl<'a> DoubleEndedIterator for ValueIter<'a> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        match self {
+            ValueIter::Str(it) => it.next_back(),
+            ValueIter::List(it) => it.next_back(),
+            ValueIter::Set(it) => it.next_back(),
+            ValueIter::Dict(it) => it.next_back(),
+        }
+    }
+}
+
+// Escapes the interior mutability pattern
+pub enum ValueIntoIter<'a> {
+    Str(Vec<Value>),
+    List(Ref<'a, VecDeque<Value>>),
+    Set(Ref<'a, LinkedHashSet<Value>>),
+    Dict(Ref<'a, LinkedHashMap<Value, Value>>),
+}
+
+impl<'b: 'a, 'a> IntoIterator for &'b ValueIntoIter<'a> {
+    type Item = &'a Value;
+    type IntoIter = ValueIter<'a>;
+
+    fn into_iter(self) -> ValueIter<'a> {
+        match self {
+            ValueIntoIter::Str(it) => ValueIter::Str(it.into_iter()),
+            ValueIntoIter::List(it) => ValueIter::List(it.iter()),
+            ValueIntoIter::Set(it) => ValueIter::Set(it.iter()),
+            ValueIntoIter::Dict(it) => ValueIter::Dict(it.keys()),
+        }
     }
 }
 
