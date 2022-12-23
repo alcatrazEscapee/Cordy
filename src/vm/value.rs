@@ -147,12 +147,12 @@ impl Value {
         }
     }
 
-    pub fn len(self: &Self) -> ValueResult {
+    pub fn len(self: &Self) -> Result<usize, Box<RuntimeError>> {
         match &self {
-            Str(it) => Ok(Value::Int(it.len() as i64)),
-            List(it) => Ok(Value::Int(it.unbox().len() as i64)),
-            Set(it) => Ok(Value::Int(it.unbox().len() as i64)),
-            Dict(it) => Ok(Value::Int(it.unbox().len() as i64)),
+            Str(it) => Ok(it.len()),
+            List(it) => Ok(it.unbox().len()),
+            Set(it) => Ok(it.unbox().len()),
+            Dict(it) => Ok(it.unbox().len()),
             _ => TypeErrorArgMustBeIterable(self.clone()).err()
         }
     }
@@ -318,8 +318,6 @@ impl<'a> DoubleEndedIterator for ValueIter<'a> {
         }
     }
 }
-
-impl<'a> ExactSizeIterator for ValueIter<'a> {}
 
 // Escapes the interior mutability pattern
 pub enum ValueIntoIter<'a> {

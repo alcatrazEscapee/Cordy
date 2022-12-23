@@ -391,7 +391,7 @@ pub fn invoke<VM>(bound: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult wher
             Err(e) => Err(e),
         }),
         Repr => dispatch!(a1, Ok(Value::Str(Box::new(a1.as_repr_str())))),
-        Len => dispatch!(a1, a1.len()),
+        Len => dispatch!(a1, a1.len().map(|u| Value::Int(u as i64))),
 
         // operator
         OperatorUnarySub => dispatch!(a1, operator::unary_sub(a1)),

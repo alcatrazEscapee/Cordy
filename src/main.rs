@@ -1,5 +1,7 @@
 use std::{fs, io};
-use std::io::{BufRead, Write};
+use std::io::Write;
+use rustyline::Editor;
+use rustyline::error::ReadlineError;
 
 use crate::reporting::ErrorReporter;
 use crate::vm::VirtualMachine;
@@ -20,17 +22,31 @@ fn main() {
         println!("Welcome to Cordy! (exit with 'exit' or Ctrl-C)");
 
         let source = &String::from("<stdin>");
+        let mut editor = Editor::<()>::new().unwrap();
         let mut buffer: String = String::new();
         let mut continuation: bool = false;
 
         loop {
             {
-                if continuation { print!(". ") } else { print!("> ") }
-                continuation = false;
-
                 io::stdout().flush().unwrap();
-                io::stdin().lock().read_line(&mut buffer).unwrap();
+                let line: String = match editor.readline(if continuation { ". " } else { "> " }) {
+                    Ok(line) => {
+                        editor.add_history_entry(line.as_str());
+                        line
+                    },
+                    Err(ReadlineError::Interrupted) | Err(ReadlineError::Eof) => break,
+                    Err(e) => {
+                        println!("Error: {}", e);
+                        break
+                    }
+                };
 
+                if line == "" {
+                    continue
+                }
+
+                continuation = false;
+                buffer.push_str(line.as_str());
                 if buffer.ends_with('\n') {
                     buffer.pop();
                     if buffer.ends_with('\r') {
