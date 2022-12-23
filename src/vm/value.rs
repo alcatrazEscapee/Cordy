@@ -319,6 +319,8 @@ impl<'a> DoubleEndedIterator for ValueIter<'a> {
     }
 }
 
+impl<'a> ExactSizeIterator for ValueIter<'a> {}
+
 // Escapes the interior mutability pattern
 pub enum ValueIntoIter<'a> {
     Str(Vec<Value>),
