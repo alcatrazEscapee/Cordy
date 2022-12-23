@@ -46,7 +46,7 @@ pub fn count_of(v0: Value, v1: Value) -> ValueResult {
 
 pub fn split(v0: Value, v1: Value) -> ValueResult {
     match (&v0, &v1) {
-        (Str(a0), Str(a1)) => Ok(Value::list(a1.split(a0.as_ref()).map(|v| Str(Box::new(String::from(v)))).collect::<Vec<Value>>())),
+        (Str(a0), Str(a1)) => Ok(Value::iter_list(a1.split(a0.as_ref()).map(|v| Str(Box::new(String::from(v)))))),
         _ => TypeErrorFunc2("split(str, str): [str]", v0, v1).err()
     }
 }

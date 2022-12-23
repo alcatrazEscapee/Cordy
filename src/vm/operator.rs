@@ -86,8 +86,8 @@ pub fn binary_add(a1: Value, a2: Value) -> ValueResult {
     match (a1, a2) {
         (Value::Int(i1), Value::Int(i2)) => Ok(Value::Int(i1 + i2)),
         (Value::List(l1), Value::List(l2)) => {
-            let list1 = l1.borrow();
-            let list2 = l2.borrow();
+            let list1 = l1.unbox();
+            let list2 = l2.unbox();
             let mut list3: Vec<Value> = Vec::with_capacity(list1.len() + list2.len());
             list3.extend(list1.iter().cloned());
             list3.extend(list2.iter().cloned());

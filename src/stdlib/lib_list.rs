@@ -22,7 +22,7 @@ macro_rules! slice_arg {
 
 
 pub fn list_index(list_ref: Mut<VecDeque<Value>>, r: i64) -> ValueResult {
-    let list = list_ref.borrow();
+    let list = list_ref.unbox();
     let index: usize = if r < 0 { (list.len() as i64 + r) as usize } else { r as usize };
     if index < list.len() {
         Ok(list[index].clone())
@@ -37,7 +37,7 @@ pub fn list_slice(a1: Value, a2: Value, a3: Value, a4: Value) -> ValueResult {
         List(ls) => ls,
         t => return TypeErrorCannotSlice(t).err(),
     };
-    let list = list_ref.borrow();
+    let list = list_ref.unbox();
     let length: i64 = list.len() as i64;
 
     let step: i64 = slice_arg!(a4, "step", 1);
@@ -54,13 +54,13 @@ pub fn list_slice(a1: Value, a2: Value, a3: Value, a4: Value) -> ValueResult {
     return Ok(if step > 0 {
         let abs_stop: i64 = to_index(length, high - 1);
 
-        Value::iter((abs_start..=abs_stop).step_by(abs_step)
+        Value::iter_list((abs_start..=abs_stop).step_by(abs_step)
             .filter_map(|i| safe_get(&list, i))
             .cloned())
     } else {
         let abs_stop: i64 = to_index(length, high);
 
-        Value::iter(rev_range(abs_start, abs_stop).step_by(abs_step)
+        Value::iter_list(rev_range(abs_start, abs_stop).step_by(abs_step)
             .filter_map(|i| safe_get(&list, i))
             .cloned())
     })
@@ -102,70 +102,46 @@ fn rev_range(start_high_inclusive: i64, stop_low_exclusive: i64) -> impl Iterato
 
 // ===== Library Functions ===== //
 
-macro_rules! declare_varargs_iter {
-    ($varargs:ident, $iter:ident) => {
-        pub fn $varargs(arg: Value) -> ValueResult {
-            match arg {
-                List(v) => $iter(v.borrow().iter()),
-                Set(v) => $iter(v.borrow().iter()),
-                Dict(v) => $iter(v.borrow().keys()),
-                e => TypeErrorArgMustBeIterable(e).err(),
-            }
-        }
-    };
-}
-
-declare_varargs_iter!(sum_varargs, sum_iter);
-declare_varargs_iter!(min_varargs, min_iter);
-declare_varargs_iter!(max_varargs, max_iter);
-declare_varargs_iter!(sorted_varargs, sorted_iter);
-declare_varargs_iter!(reversed_varargs, reversed_iter);
-
-
-pub fn sum_iter<'a>(args: impl Iterator<Item=&'a Value>) -> ValueResult {
+pub fn sum<'a>(args: impl Iterator<Item=&'a Value>) -> ValueResult {
     let mut sum: i64 = 0;
     for v in args {
         match v {
-            Int(i) => sum += *i,
+            Int(i) => sum += i,
             _ => return TypeErrorArgMustBeInt(v.clone()).err(),
         }
     }
     Ok(Int(sum))
 }
 
-pub fn max_iter<'a>(args: impl Iterator<Item=&'a Value>) -> ValueResult {
+pub fn max<'a>(args: impl Iterator<Item=&'a Value>) -> ValueResult {
     match args.max() {
         Some(v) => Ok(v.clone()),
-        None => ValueErrorMaxArgMustBeNonEmptySequence.err()
+        None => TypeErrorArgMustNotBeEmpty.err()
     }
 }
 
-pub fn min_iter<'a>(args: impl Iterator<Item=&'a Value>) -> ValueResult {
+pub fn min<'a>(args: impl Iterator<Item=&'a Value>) -> ValueResult {
     match args.min() {
         Some(v) => Ok(v.clone()),
-        None => ValueErrorMaxArgMustBeNonEmptySequence.err()
+        None => TypeErrorArgMustNotBeEmpty.err()
     }
 }
 
-pub fn sorted_iter<'a>(args: impl Iterator<Item=&'a Value>) -> ValueResult {
+pub fn sorted<'a>(args: impl Iterator<Item=&'a Value>) -> ValueResult {
     let mut sorted: Vec<Value> = args.cloned().collect::<Vec<Value>>();
     sorted.sort_unstable();
     Ok(Value::list(sorted))
 }
 
-pub fn reversed_iter<'a>(args: impl DoubleEndedIterator<Item=&'a Value>) -> ValueResult {
-    Ok(Value::list(args
-        .cloned()
-        .rev()
-        .collect::<Vec<Value>>()))
+pub fn reversed<'a>(args: impl DoubleEndedIterator<Item=&'a Value>) -> ValueResult {
+    Ok(Value::iter_list(args.rev().cloned()))
 }
-
 
 
 pub fn map<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : VirtualInterface {
     match (a1, a2) {
         (l, List(rs)) => {
-            let rs = rs.borrow();
+            let rs = rs.unbox();
             let mut acc: Vec<Value> = Vec::with_capacity(rs.len());
             for r in rs.iter() {
                 vm.push(r.clone());
@@ -186,7 +162,7 @@ pub fn map<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : Virt
 pub fn filter<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : VirtualInterface {
     match (a1, a2) {
         (l, List(rs)) => {
-            let rs = rs.borrow();
+            let rs = rs.unbox();
             let mut acc: Vec<Value> = Vec::with_capacity(rs.len());
             for r in rs.iter() {
                 vm.push(r.clone());
@@ -209,11 +185,11 @@ pub fn filter<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : V
 pub fn reduce<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : VirtualInterface {
     match (a1, a2) {
         (l, List(rs)) => {
-            let rs = rs.borrow();
+            let rs = rs.unbox();
             let mut iter = rs.iter().cloned();
             let mut acc: Value = match iter.next() {
                 Some(v) => v,
-                None => return ValueErrorReduceArgMustBeNonEmptySequence.err()
+                None => return TypeErrorArgMustNotBeEmpty.err()
             };
 
             for r in iter {
@@ -234,34 +210,37 @@ pub fn reduce<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : V
 }
 
 pub fn pop(a1: Value) -> ValueResult {
-    match &a1 {
-        List(v) => { v.borrow_mut().pop_back(); Ok(a1) },
-        Set(v) => { v.borrow_mut().pop_back(); Ok(a1) },
-        Dict(v) => { v.borrow_mut().pop_back(); Ok(a1) },
-        _ => TypeErrorArgMustBeIterable(a1).err()
+    match match &a1 {
+        List(v) => v.unbox_mut().pop_back(),
+        Set(v) => v.unbox_mut().pop_back(),
+        Dict(v) => v.unbox_mut().pop_back().map(|(k, _)| k),
+        _ => return TypeErrorArgMustBeIterable(a1).err()
+    } {
+        Some(v) => Ok(v),
+        None => TypeErrorArgMustNotBeEmpty.err()
     }
 }
 
 pub fn push(a1: Value, a2: Value) -> ValueResult {
     match &a2 {
-        List(v) => { v.borrow_mut().push_back(a1); Ok(a2) }
-        Set(v) => { v.borrow_mut().insert(a1); Ok(a2) }
+        List(v) => { v.unbox_mut().push_back(a1); Ok(a2) }
+        Set(v) => { v.unbox_mut().insert(a1); Ok(a2) }
         _ => TypeErrorArgMustBeIterable(a2).err()
     }
 }
 
 pub fn last(a1: Value) -> ValueResult {
     match &a1 {
-        List(v) => Ok(v.borrow_mut().back().cloned().unwrap_or(Nil)),
-        Set(v) => Ok(v.borrow_mut().back().cloned().unwrap_or(Nil)),
+        List(v) => Ok(v.unbox_mut().back().cloned().unwrap_or(Nil)),
+        Set(v) => Ok(v.unbox_mut().back().cloned().unwrap_or(Nil)),
         _ => TypeErrorArgMustBeIterable(a1).err()
     }
 }
 
 pub fn head(a1: Value) -> ValueResult {
     match &a1 {
-        List(v) => Ok(v.borrow_mut().front().cloned().unwrap_or(Nil)),
-        Set(v) => Ok(v.borrow_mut().front().cloned().unwrap_or(Nil)),
+        List(v) => Ok(v.unbox_mut().front().cloned().unwrap_or(Nil)),
+        Set(v) => Ok(v.unbox_mut().front().cloned().unwrap_or(Nil)),
         _ => TypeErrorArgMustBeIterable(a1).err()
     }
 }
@@ -269,16 +248,16 @@ pub fn head(a1: Value) -> ValueResult {
 pub fn init(a1: Value) -> ValueResult {
     match &a1 {
         List(v) => {
-            let v = v.borrow();
+            let v = v.unbox();
             let mut iter = v.iter();
             iter.next_back();
-            Ok(Value::iter(iter.cloned()))
+            Ok(Value::iter_list(iter.cloned()))
         },
         Set(v) => {
-            let v = v.borrow();
+            let v = v.unbox();
             let mut iter = v.iter();
             iter.next_back();
-            Ok(Value::iter(iter.cloned()))
+            Ok(Value::iter_list(iter.cloned()))
         },
         _ => TypeErrorArgMustBeIterable(a1).err()
     }
@@ -286,8 +265,8 @@ pub fn init(a1: Value) -> ValueResult {
 
 pub fn tail(a1: Value) -> ValueResult {
     match &a1 {
-        List(v) => Ok(Value::iter(v.borrow().iter().skip(1).cloned())),
-        Set(v) => Ok(Value::iter(v.borrow().iter().skip(1).cloned())),
+        List(v) => Ok(Value::iter_list(v.unbox().iter().skip(1).cloned())),
+        Set(v) => Ok(Value::iter_list(v.unbox().iter().skip(1).cloned())),
         _ => TypeErrorArgMustBeIterable(a1).err()
     }
 }

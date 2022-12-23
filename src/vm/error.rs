@@ -21,18 +21,19 @@ pub enum RuntimeError {
     IndexOutOfBounds(i64, usize),
     SliceStepZero,
 
-    ValueErrorMaxArgMustBeNonEmptySequence,
-    ValueErrorMinArgMustBeNonEmptySequence,
-    ValueErrorReduceArgMustBeNonEmptySequence,
-
     TypeErrorUnaryOp(Opcode, Value),
     TypeErrorBinaryOp(Opcode, Value, Value),
     TypeErrorBinaryIs(Value, Value),
     TypeErrorCannotConvertToInt(Value),
     TypeErrorCannotSlice(Value),
     TypeErrorSliceArgMustBeInt(&'static str, Value),
+
     TypeErrorArgMustBeInt(Value),
+    TypeErrorArgMustBeStr(Value),
     TypeErrorArgMustBeIterable(Value),
+    TypeErrorArgMustNotBeEmpty,
+
+    // Deprecated - find a better generic way to do this
     TypeErrorFunc1(&'static str, Value),
     TypeErrorFunc2(&'static str, Value, Value),
     TypeErrorFunc3(&'static str, Value, Value, Value),
