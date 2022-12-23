@@ -139,11 +139,11 @@ pub fn reversed<'a>(args: impl DoubleEndedIterator<Item=&'a Value>) -> ValueResu
 
 
 pub fn map<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : VirtualInterface {
-    match (a1, a2) {
-        (l, List(rs)) => {
-            let rs = rs.unbox();
+    match (a1, a2.as_iter()) {
+        (l, Ok(rs)) => {
+            let rs = (&rs).into_iter();
             let mut acc: Vec<Value> = Vec::with_capacity(rs.len());
-            for r in rs.iter() {
+            for r in rs {
                 vm.push(r.clone());
                 vm.push(l.clone());
                 let f = match vm.invoke_func_compose() {
@@ -155,16 +155,16 @@ pub fn map<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : Virt
             }
             Ok(Value::list(acc))
         },
-        (_, r) => return TypeErrorArgMustBeIterable(r).err(),
+        (_, Err(e)) => return Err(e),
     }
 }
 
 pub fn filter<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : VirtualInterface {
-    match (a1, a2) {
-        (l, List(rs)) => {
-            let rs = rs.unbox();
+    match (a1, a2.as_iter()) {
+        (l, Ok(rs)) => {
+            let rs = (&rs).into_iter();
             let mut acc: Vec<Value> = Vec::with_capacity(rs.len());
-            for r in rs.iter() {
+            for r in rs {
                 vm.push(r.clone());
                 vm.push(l.clone());
                 let f = match vm.invoke_func_compose() {
@@ -178,15 +178,14 @@ pub fn filter<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : V
             }
             Ok(Value::list(acc))
         },
-        (_, r) => return TypeErrorArgMustBeIterable(r).err(),
+        (_, Err(e)) => Err(e),
     }
 }
 
 pub fn reduce<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : VirtualInterface {
-    match (a1, a2) {
-        (l, List(rs)) => {
-            let rs = rs.unbox();
-            let mut iter = rs.iter().cloned();
+    match (a1, a2.as_iter()) {
+        (l, Ok(rs)) => {
+            let mut iter = (&rs).into_iter().cloned();
             let mut acc: Value = match iter.next() {
                 Some(v) => v,
                 None => return TypeErrorArgMustNotBeEmpty.err()
@@ -205,7 +204,7 @@ pub fn reduce<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : V
             }
             Ok(acc)
         },
-        (_, r) => return TypeErrorArgMustBeIterable(r).err(),
+        (_, Err(e)) => Err(e),
     }
 }
 
@@ -257,7 +256,7 @@ pub fn init(a1: Value) -> ValueResult {
             let v = v.unbox();
             let mut iter = v.iter();
             iter.next_back();
-            Ok(Value::iter_list(iter.cloned()))
+            Ok(Value::iter_set(iter.cloned()))
         },
         _ => TypeErrorArgMustBeIterable(a1).err()
     }
@@ -266,7 +265,7 @@ pub fn init(a1: Value) -> ValueResult {
 pub fn tail(a1: Value) -> ValueResult {
     match &a1 {
         List(v) => Ok(Value::iter_list(v.unbox().iter().skip(1).cloned())),
-        Set(v) => Ok(Value::iter_list(v.unbox().iter().skip(1).cloned())),
+        Set(v) => Ok(Value::iter_set(v.unbox().iter().skip(1).cloned())),
         _ => TypeErrorArgMustBeIterable(a1).err()
     }
 }

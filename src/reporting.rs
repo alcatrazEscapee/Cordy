@@ -145,7 +145,22 @@ impl AsError for Opcode {
             Opcode::OpSub => "subtract",
             Opcode::OpLeftShift => "left shift",
             Opcode::OpRightShift => "right shift",
+            Opcode::OpPow => "**",
+            Opcode::OpIs => "is",
+            Opcode::OpBitwiseAnd => "&",
+            Opcode::OpBitwiseOr => "|",
+            Opcode::OpBitwiseXor => "^",
+            Opcode::OpFuncCompose => ".",
+            Opcode::OpLessThan => "<",
+            Opcode::OpGreaterThan => ">",
+            Opcode::OpLessThanEqual => "<=",
+            Opcode::OpGreaterThanEqual => ">=",
+            Opcode::OpEqual => "==",
+            Opcode::OpNotEqual => "!=",
             Opcode::OpIndex => "array index",
+            Opcode::OpFuncEval(_) => "()",
+            Opcode::OpSlice => "list slice",
+            Opcode::OpSliceWithStep => "list slice",
             op => panic!("AsError not implemented for opcode {:?}", op)
         })
     }
