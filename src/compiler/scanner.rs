@@ -344,6 +344,7 @@ impl<'a> Scanner<'a> {
                        ':' => self.push(Colon),
                        '_' => self.push(Underscore),
                        ';' => self.push(Semicolon),
+                       '\\' => {}, // Discard backslashes... like a ninja
 
                        e => self.push_err(InvalidCharacter(e))
                    }

@@ -154,7 +154,7 @@ impl AsError for Opcode {
 
 impl AsError for StdBinding {
     fn format_error(self: &Self) -> String {
-        String::from(stdlib::lookup_binding(self))
+        String::from(stdlib::lookup_name(*self))
     }
 }
 

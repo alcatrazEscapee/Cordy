@@ -96,16 +96,41 @@ impl<R, W> VirtualMachine<R, W> where
     R: BufRead,
     W: Write {
 
-    pub fn new(parser_result: CompileResult, read: R, write: W) -> VirtualMachine<R, W> {
+    pub fn incremental(read: R, write: W) -> VirtualMachine<R, W> {
         VirtualMachine {
             ip: 0,
-            code: parser_result.code,
+            code: Vec::new(),
             stack: Vec::with_capacity(256), // Just guesses, not hard limits
             call_stack: Vec::with_capacity(32),
-            strings: parser_result.strings,
-            constants: parser_result.constants,
-            functions: parser_result.functions.into_iter().map(|f| Rc::new(f)).collect(),
-            line_numbers: parser_result.line_numbers,
+            strings: Vec::new(),
+            constants: Vec::new(),
+            functions: Vec::new(),
+            line_numbers: Vec::new(),
+            read,
+            write,
+        }
+    }
+
+    pub fn incremental_run(self: &mut Self, result: &CompileResult) -> Result<(), RuntimeErrorWithLineNumber> {
+        self.ip += 1;
+        self.code = result.code.clone();
+        self.strings = result.strings.clone();
+        self.constants = result.constants.clone();
+        self.functions = result.functions.iter().cloned().map(|f| Rc::new(f)).collect();
+        self.line_numbers = result.line_numbers.clone();
+        self.run_until_completion()
+    }
+
+    pub fn new(result: CompileResult, read: R, write: W) -> VirtualMachine<R, W> {
+        VirtualMachine {
+            ip: 0,
+            code: result.code,
+            stack: Vec::with_capacity(256), // Just guesses, not hard limits
+            call_stack: Vec::with_capacity(32),
+            strings: result.strings,
+            constants: result.constants,
+            functions: result.functions.into_iter().map(|f| Rc::new(f)).collect(),
+            line_numbers: result.line_numbers,
             read,
             write,
         }
@@ -734,7 +759,7 @@ mod test {
     #[test] fn test_str_partial_func_6() { run_str("('o' . replace('a')) ('apples and bananas') . print", "opples ond bononos\n"); }
     #[test] fn test_str_list_len() { run_str("[1, 2, 3] . len . print", "3\n"); }
     #[test] fn test_str_str_len() { run_str("'12345' . len . print", "5\n"); }
-    #[test] fn test_str_list_print() { run_str("[1, 2, '3'] . print", "[1, 2, 3]\n"); }
+    #[test] fn test_str_list_print() { run_str("[1, 2, '3'] . print", "[1, 2, '3']\n"); }
     #[test] fn test_str_list_repr_print() { run_str("['1', 2, '3'] . repr . print", "['1', 2, '3']\n"); }
     #[test] fn test_str_list_add() { run_str("[1, 2, 3] + [4, 5, 6] . print", "[1, 2, 3, 4, 5, 6]\n"); }
     #[test] fn test_str_empty_list() { run_str("[] . print", "[]\n"); }
@@ -888,12 +913,16 @@ mod test {
     #[test] fn test_builtin_reduce_lambda() { run_str("[1, 2, 3, 4, 5, 6] . reduce (fn(a, b) -> a * b) . print", "720\n"); }
     #[test] fn test_builtin_reduce_with_builtin() { run_str("[1, 2, 3, 4, 5, 6] . reduce (sum) . print", "21\n"); }
     #[test] fn test_builtin_sorted() { run_str("[6, 2, 3, 7, 2, 1] . sorted . print", "[1, 2, 2, 3, 6, 7]\n"); }
-    #[test] fn test_builtin_unique() { run_str("[1, 7, 3, 2, 3, 2, 1, 6] . unique . sorted . print", "[1, 2, 3, 6, 7]\n"); }
     #[test] fn test_builtin_reversed() { run_str("[8, 1, 2, 6, 3, 2, 3] . reversed . print", "[3, 2, 3, 6, 2, 1, 8]\n"); }
     #[test] fn test_bare_operator_eval() { run_str("(+)(1, 2) . print", "3\n"); }
     #[test] fn test_bare_operator_partial_eval() { run_str("(+)(1)(2) . print", "3\n"); }
     #[test] fn test_bare_operator_compose_and_eval() { run_str("2 . (+)(1) . print", "3\n"); }
     #[test] fn test_bare_operator_compose() { run_str("1 . (2 . (+)) . print", "3\n"); }
+    #[test] fn test_reduce_list_1() { run_str("[1, 2, 3] . reduce (+) . print", "6\n"); }
+    #[test] fn test_reduce_list_2() { run_str("[1, 2, 3] . reduce (-) . print", "Function '(-)' requires 2 parameters but 1 were present.\n  at: line 1 (<test>)\n  at:\n\n[1, 2, 3] . reduce (-) . print\n"); }
+    #[test] fn test_str_to_list() { run_str("'funny beans' . list . print", "['f', 'u', 'n', 'n', 'y', ' ', 'b', 'e', 'a', 'n', 's']\n"); }
+    #[test] fn test_str_to_set() { run_str("'funny beans' . set . print", "{'f', 'u', 'y', ' ', 'b', 'e', 'a', 'n', 's'}\n"); }
+    #[test] fn test_str_to_set_to_sorted() { run_str("'funny' . set . sorted . print", "['f', 'n', 'u', 'y']\n");}
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }
     #[test] fn test_append_large_lists() { run("append_large_lists"); }

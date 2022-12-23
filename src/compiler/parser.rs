@@ -1,20 +1,20 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 
 use crate::compiler::scanner::{ScanResult, ScanToken};
+use crate::compiler::CompileResult;
 use crate::stdlib::StdBinding;
 use crate::vm::opcode::Opcode;
 use crate::vm::value::FunctionImpl;
-use crate::trace;
+use crate::{stdlib, trace};
 
 use ScanToken::{*};
 use ParserErrorType::{*};
 use Opcode::{*};
 use StdBinding::{*};
-use crate::compiler::CompileResult;
 
 
-pub fn parse(bindings: HashMap<&'static str, StdBinding>, scan_result: ScanResult) -> CompileResult {
-    let mut parser: Parser = Parser::new(bindings, scan_result.tokens);
+pub fn parse(scan_result: ScanResult) -> CompileResult {
+    let mut parser: Parser = Parser::new(scan_result.tokens);
     parser.parse();
     CompileResult {
         code: parser.output,
@@ -27,7 +27,6 @@ pub fn parse(bindings: HashMap<&'static str, StdBinding>, scan_result: ScanResul
         line_numbers: parser.line_numbers,
     }
 }
-
 
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub struct ParserError {
@@ -67,7 +66,6 @@ pub enum ParserErrorType {
 
 
 struct Parser {
-    bindings: HashMap<&'static str, StdBinding>,
     input: VecDeque<ScanToken>,
     output: Vec<Opcode>,
     errors: Vec<ParserError>,
@@ -140,9 +138,8 @@ enum VariableType {
 
 impl Parser {
 
-    fn new(bindings: HashMap<&'static str, StdBinding>, tokens: Vec<ScanToken>) -> Parser {
+    fn new(tokens: Vec<ScanToken>) -> Parser {
         Parser {
-            bindings,
             input: tokens.into_iter().collect::<VecDeque<ScanToken>>(),
             output: Vec::new(),
             errors: Vec::new(),
@@ -755,7 +752,7 @@ impl Parser {
                     }
                 }
                 let length: u16 = self.declare_constant(length);
-                self.push(List(length));
+                self.push(Opcode::List(length));
                 self.expect(CloseSquareBracket);
             },
             Some(KeywordFn) => {
@@ -1129,7 +1126,7 @@ impl Parser {
                 Some(LogicalAnd) => {
                     self.advance();
                     let jump_if_false: u16 = self.reserve();
-                    self.push(Pop);
+                    self.push(Opcode::Pop);
                     self.parse_expr_8();
                     let jump_to: u16 = self.next_opcode();
                     self.output[jump_if_false as usize] = JumpIfFalse(jump_to);
@@ -1137,7 +1134,7 @@ impl Parser {
                 Some(LogicalOr) => {
                     self.advance();
                     let jump_if_true: u16 = self.reserve();
-                    self.push(Pop);
+                    self.push(Opcode::Pop);
                     self.parse_expr_8();
                     let jump_to: u16 = self.next_opcode();
                     self.output[jump_if_true as usize] = JumpIfTrue(jump_to);
@@ -1251,8 +1248,8 @@ impl Parser {
             }
         }
 
-        if let Some(b) = self.bindings.get(name.as_str()) {
-            return VariableType::TopLevelBinding(*b);
+        if let Some(b) = stdlib::lookup_named_binding(name) {
+            return VariableType::TopLevelBinding(b);
         }
         VariableType::None
     }
@@ -1414,7 +1411,7 @@ impl Parser {
     fn push_delayed_pop(self: &mut Self) {
         if self.delay_pop_from_expression_statement {
             trace::trace_parser!("push Pop (delayed)");
-            self.push(Pop);
+            self.push(Opcode::Pop);
             self.delay_pop_from_expression_statement = false;
         }
     }
@@ -1424,7 +1421,7 @@ impl Parser {
         trace::trace_parser!("push Pop/PopN {}", n);
         match n {
             0 => {},
-            1 => self.push(Pop),
+            1 => self.push(Opcode::Pop),
             n => self.push(PopN(n))
         }
     }
@@ -1456,7 +1453,7 @@ mod tests {
     use crate::compiler::{parser, CompileResult, scanner};
     use crate::compiler::scanner::ScanResult;
     use crate::compiler::parser::Parser;
-    use crate::{reporting, stdlib};
+    use crate::reporting;
     use crate::stdlib::StdBinding;
     use crate::vm::opcode::Opcode;
     use crate::trace;
@@ -1553,7 +1550,7 @@ mod tests {
         let result: ScanResult = scanner::scan(&String::from(text));
         assert!(result.errors.is_empty());
 
-        let mut parser: Parser = Parser::new(stdlib::bindings(), result.tokens);
+        let mut parser: Parser = Parser::new(result.tokens);
         parser.parse_expression();
         assert_eq!(None, parser.peek());
 
@@ -1578,7 +1575,7 @@ mod tests {
         let scan_result: ScanResult = scanner::scan(&text);
         assert!(scan_result.errors.is_empty());
 
-        let parse_result: CompileResult = parser::parse(stdlib::bindings(), scan_result);
+        let parse_result: CompileResult = parser::parse(scan_result);
         let mut lines: Vec<String> = Vec::new();
         assert!(!parse_result.errors.is_empty());
 
@@ -1596,7 +1593,7 @@ mod tests {
         let scan_result: ScanResult = scanner::scan(&text);
         assert!(scan_result.errors.is_empty());
 
-        let parse_result: CompileResult = parser::parse(stdlib::bindings(), scan_result);
+        let parse_result: CompileResult = parser::parse(scan_result);
         let mut lines: Vec<String> = parse_result.disassemble();
 
         if !parse_result.errors.is_empty() {
