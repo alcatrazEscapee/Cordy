@@ -139,10 +139,11 @@ pub fn reversed<'a>(args: impl DoubleEndedIterator<Item=&'a Value>) -> ValueResu
 
 
 pub fn map<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : VirtualInterface {
+    let len: usize = a2.len().unwrap_or(0);
     match (a1, a2.as_iter()) {
         (l, Ok(rs)) => {
             let rs = (&rs).into_iter();
-            let mut acc: Vec<Value> = Vec::with_capacity(rs.len());
+            let mut acc: Vec<Value> = Vec::with_capacity(len);
             for r in rs {
                 vm.push(r.clone());
                 vm.push(l.clone());
@@ -160,10 +161,11 @@ pub fn map<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : Virt
 }
 
 pub fn filter<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : VirtualInterface {
+    let len: usize = a2.len().unwrap_or(0);
     match (a1, a2.as_iter()) {
         (l, Ok(rs)) => {
             let rs = (&rs).into_iter();
-            let mut acc: Vec<Value> = Vec::with_capacity(rs.len());
+            let mut acc: Vec<Value> = Vec::with_capacity(len);
             for r in rs {
                 vm.push(r.clone());
                 vm.push(l.clone());
