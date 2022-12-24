@@ -278,7 +278,7 @@ impl<R, W> VirtualMachine<R, W> where
             StoreLocal(local) => {
                 let local: usize = self.frame_pointer() + local as usize;
                 trace::trace_interpreter!("store local {} : {} -> {}", local, self.stack.last().unwrap().as_debug_str(), self.stack[local].as_debug_str());
-                self.stack[local] = self.pop();
+                self.stack[local] = self.peek(0).clone();
             },
             PushGlobal(local) => {
                 // Globals are fancy locals that don't use the frame pointer to offset their local variable ID
@@ -290,7 +290,21 @@ impl<R, W> VirtualMachine<R, W> where
             StoreGlobal(local) => {
                 let local: usize = local as usize;
                 trace::trace_interpreter!("store global {} : {} -> {}", local, self.stack.last().unwrap().as_debug_str(), self.stack[local].as_debug_str());
-                self.stack[local] = self.pop();
+                self.stack[local] = self.peek(0).clone();
+            },
+
+            StoreArray => {
+                trace::trace_interpreter!("store array array = {}, index = {}, value = {}", self.stack[self.stack.len() - 3].as_debug_str(), self.stack[self.stack.len() - 2].as_debug_str(), self.stack.last().unwrap().as_debug_str());
+                let a3: Value = self.pop();
+                let a2: Value = self.pop();
+                let a1: Value = self.peek(0).clone(); // Leave this on the stack when done
+                match (a1, a2) {
+                    (Value::List(l), Value::Int(r)) => match stdlib::list_set_index(l, r, a3) {
+                        Ok(_) => {}, // No push, as we left the previous value on top of the stack
+                        Err(e) => return Err(e),
+                    },
+                    (l, r) => return TypeErrorBinaryOp(OpIndex, l, r).err()
+                }
             },
 
             // Push Operations
@@ -386,7 +400,19 @@ impl<R, W> VirtualMachine<R, W> where
                 let a2: Value = self.pop();
                 let a1: Value = self.pop();
                 match (a1, a2) {
-                    (Value::List(l), Value::Int(r)) => match stdlib::list_index(l, r) {
+                    (Value::List(l), Value::Int(r)) => match stdlib::list_get_index(l, r) {
+                        Ok(v) => self.push(v),
+                        Err(e) => return Err(e),
+                    },
+                    (l, r) => return TypeErrorBinaryOp(OpIndex, l, r).err()
+                }
+            },
+            OpIndexPeek => {
+                trace::trace_interpreter!("op [] peek");
+                let a2: Value = self.peek(0).clone();
+                let a1: Value = self.peek(1).clone();
+                match (a1, a2) {
+                    (Value::List(l), Value::Int(r)) => match stdlib::list_get_index(l, r) {
                         Ok(v) => self.push(v),
                         Err(e) => return Err(e),
                     },
@@ -926,7 +952,23 @@ mod test {
     #[test] fn test_reduce_list_2() { run_str("[1, 2, 3] . reduce (-) . print", "Function '(-)' requires 2 parameters but 1 were present.\n  at: line 1 (<test>)\n  at:\n\n[1, 2, 3] . reduce (-) . print\n"); }
     #[test] fn test_str_to_list() { run_str("'funny beans' . list . print", "['f', 'u', 'n', 'n', 'y', ' ', 'b', 'e', 'a', 'n', 's']\n"); }
     #[test] fn test_str_to_set() { run_str("'funny beans' . set . print", "{'f', 'u', 'y', ' ', 'b', 'e', 'a', 'n', 's'}\n"); }
-    #[test] fn test_str_to_set_to_sorted() { run_str("'funny' . set . sorted . print", "['f', 'n', 'u', 'y']\n");}
+    #[test] fn test_str_to_set_to_sorted() { run_str("'funny' . set . sorted . print", "['f', 'n', 'u', 'y']\n"); }
+    #[test] fn test_chained_assignments() { run_str("let a, b, c; a = b = c = 3; [a, b, c] . print", "[3, 3, 3]\n"); }
+    #[test] fn test_array_assignment_1() { run_str("let a = [1, 2, 3]; a[0] = 3; a . print", "[3, 2, 3]\n"); }
+    #[test] fn test_array_assignment_2() { run_str("let a = [1, 2, 3]; a[2] = 1; a . print", "[1, 2, 1]\n"); }
+    #[test] fn test_array_assignment_negative_index_1() { run_str("let a = [1, 2, 3]; a[-1] = 6; a . print", "[1, 2, 6]\n"); }
+    #[test] fn test_array_assignment_negative_index_2() { run_str("let a = [1, 2, 3]; a[-3] = 6; a . print", "[6, 2, 3]\n"); }
+    #[test] fn test_nested_array_assignment_1() { run_str("let a = [[1, 2], [3, 4]]; a[0][1] = 6; a . print", "[[1, 6], [3, 4]]\n"); }
+    #[test] fn test_nested_array_assignment_2() { run_str("let a = [[1, 2], [3, 4]]; a[1][0] = 6; a . print", "[[1, 2], [6, 4]]\n"); }
+    #[test] fn test_nested_array_assignment_negative_index_1() { run_str("let a = [[1, 2], [3, 4]]; a[0][-1] = 6; a . print", "[[1, 6], [3, 4]]\n"); }
+    #[test] fn test_nested_array_assignment_negative_index_2() { run_str("let a = [[1, 2], [3, 4]]; a[-1][-2] = 6; a . print", "[[1, 2], [6, 4]]\n"); }
+    #[test] fn test_chained_operator_assignment() { run_str("let a = 1, b; a += b = 4; [a, b] . print", "[5, 4]\n"); }
+    #[test] fn test_operator_array_assignment() { run_str("let a = [12]; a[0] += 4; a[0] . print", "16\n"); }
+    #[test] fn test_nested_operator_array_assignment() { run_str("let a = [[12]]; a[0][-1] += 4; a . print", "[[16]]\n"); }
+    #[test] fn test_weird_assignment() { run_str("let a = [[12]], b = 3; fn f() -> a; f()[0][-1] += b = 5; [f(), b] . print", "[[[17]], 5]\n"); }
+    #[test] fn test_mutable_array_in_array_1() { run_str("let a = [0], b = [a]; b[0] = 'hi'; b. print", "['hi']\n"); }
+    #[test] fn test_mutable_array_in_array_2() { run_str("let a = [0], b = [a]; b[0][0] = 'hi'; b. print", "[['hi']]\n"); }
+    #[test] fn test_mutable_arrays_in_assignments() { run_str("let a = [0], b = [a, a, a]; b[0][0] = 5; b . print", "[[5], [5], [5]]\n"); }
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }
     #[test] fn test_append_large_lists() { run("append_large_lists"); }

@@ -2,14 +2,18 @@ L01: 0000 Nil
 L03: 0001 Nil
 L05: 0002 Int(0 -> 3)
      0003 StoreGlobal(1)
-L06: 0004 Nil
-L07: 0005 Int(1 -> 5)
-     0006 StoreGlobal(2)
-     0007 Pop
-L09: 0008 Int(2 -> 7)
-     0009 StoreGlobal(1)
-     0010 Pop
-L11: 0011 Int(3 -> 9)
-     0012 StoreGlobal(0)
+     0004 Pop
+     0005 Nil
+L06: 0006 Int(1 -> 5)
+L07: 0007 StoreGlobal(2)
+     0008 Pop
+     0009 Pop
+     0010 Int(2 -> 7)
+L08: 0011 StoreGlobal(1)
+L09: 0012 Pop
      0013 Pop
-     0014 Exit
+     0014 Int(3 -> 9)
+     0015 StoreGlobal(0)
+L10: 0016 Pop
+L11: 0017 Pop
+     0018 Exit

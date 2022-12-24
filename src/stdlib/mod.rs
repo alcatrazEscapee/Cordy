@@ -224,7 +224,7 @@ fn load_bindings() -> Vec<StdBindingInfo> {
 #[allow(unused_variables)]
 pub fn invoke<VM>(bound: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult where VM : VirtualInterface
 {
-    trace::trace_interpreter!("stdlib::invoke() func={}, nargs={}", lookup_name(&bound), nargs);
+    trace::trace_interpreter!("stdlib::invoke() func={}, nargs={}", lookup_name(bound), nargs);
 
     // Dispatch macros for 0, 1, 2 and 3 argument functions
     // All dispatch!() cases support partial evaluation (where 0 < nargs < required args)
@@ -449,8 +449,12 @@ pub fn invoke<VM>(bound: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult wher
     }
 }
 
-pub fn list_index(list_ref: Mut<VecDeque<Value>>, r: i64) -> ValueResult {
-    lib_list::list_index(list_ref, r)
+pub fn list_get_index(list_ref: Mut<VecDeque<Value>>, index: i64) -> ValueResult {
+    lib_list::list_get_index(list_ref, index)
+}
+
+pub fn list_set_index(list_ref: Mut<VecDeque<Value>>, index: i64, value: Value) -> Result<(), Box<RuntimeError>> {
+    lib_list::list_set_index(list_ref, index, value)
 }
 
 pub fn list_slice(a1: Value, a2: Value, a3: Value, a4: Value) -> ValueResult {

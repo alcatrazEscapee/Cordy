@@ -59,7 +59,8 @@ pub enum ParserErrorType {
     LocalVariableConflict(String),
     UndeclaredIdentifier(String),
 
-    AssignmentToNotVariable(String),
+    InvalidAssignmentTarget,
+
     BreakOutsideOfLoop,
     ContinueOutsideOfLoop,
 }
@@ -189,7 +190,6 @@ impl Parser {
                 Some(KeywordFor) => self.parse_for(),
                 Some(KeywordBreak) => self.parse_break_statement(),
                 Some(KeywordContinue) => self.parse_continue_statement(),
-                Some(Identifier(_)) => self.parse_assignment(),
                 Some(OpenBrace) => self.parse_block_statement(),
                 Some(CloseBrace) => break, // Don't consume, but break if we're in an error mode
                 Some(KeywordExit) => {
@@ -623,54 +623,6 @@ impl Parser {
         }
     }
 
-    fn parse_assignment(self: &mut Self) {
-        trace::trace_parser!("rule <assignment-statement>");
-        let maybe_op: Option<Opcode> = match self.peek2() {
-            Some(Equals) => Some(OpEqual), // Fake operator
-            Some(PlusEquals) => Some(OpAdd),
-            Some(MinusEquals) => Some(OpSub),
-            Some(MulEquals) => Some(OpMul),
-            Some(DivEquals) => Some(OpDiv),
-            Some(AndEquals) => Some(OpBitwiseAnd),
-            Some(OrEquals) => Some(OpBitwiseOr),
-            Some(XorEquals) => Some(OpBitwiseXor),
-            Some(LeftShiftEquals) => Some(OpLeftShift),
-            Some(RightShiftEquals) => Some(OpRightShift),
-            Some(ModEquals) => Some(OpMod),
-            Some(PowEquals) => Some(OpPow),
-            _ => None
-        };
-        if let Some(op) = maybe_op {
-            self.push_delayed_pop();
-
-            // Resolve the variable name
-            let name: String = self.take_identifier();
-            let (store_op, push_op) = match self.resolve_identifier(&name) {
-                VariableType::Local(local) => (StoreLocal(local), PushLocal(local)),
-                VariableType::Global(local) => (StoreGlobal(local), PushGlobal(local)),
-                _ => {
-                    let token: String = name.clone();
-                    self.error(AssignmentToNotVariable(token));
-                    return
-                }
-            };
-            if op != OpEqual { // Only load the value in assignment expressions
-                self.push(push_op);
-            }
-            self.advance();
-            self.prevent_expression_statement = true;
-            self.parse_expression();
-            if op != OpEqual { // Only push the operator in assignment expressions
-                self.push(op);
-            }
-            self.push(store_op);
-        } else {
-            // In this case, we matched <name> without a following '=' or other assignment operator.
-            // This must be part of an expression statement.
-            self.parse_expression_statement();
-        }
-    }
-
     fn parse_expression_statement(self: &mut Self) {
         trace::trace_parser!("rule <expression-statement>");
         match self.peek() {
@@ -691,7 +643,7 @@ impl Parser {
 
     fn parse_expression(self: &mut Self) {
         trace::trace_parser!("rule <expression>");
-        self.parse_expr_9();
+        self.parse_expr_10();
     }
 
 
@@ -1144,6 +1096,90 @@ impl Parser {
         }
     }
 
+    fn parse_expr_10(self: &mut Self) {
+        trace::trace_parser!("rule <expr-10>");
+        self.parse_expr_9();
+        loop {
+            let maybe_op: Option<Opcode> = match self.peek() {
+                Some(Equals) => Some(OpEqual), // Fake operator
+                Some(PlusEquals) => Some(OpAdd), // Assignment Operators
+                Some(MinusEquals) => Some(OpSub),
+                Some(MulEquals) => Some(OpMul),
+                Some(DivEquals) => Some(OpDiv),
+                Some(AndEquals) => Some(OpBitwiseAnd),
+                Some(OrEquals) => Some(OpBitwiseOr),
+                Some(XorEquals) => Some(OpBitwiseXor),
+                Some(LeftShiftEquals) => Some(OpLeftShift),
+                Some(RightShiftEquals) => Some(OpRightShift),
+                Some(ModEquals) => Some(OpMod),
+                Some(PowEquals) => Some(OpPow),
+                _ => None
+            };
+
+            // We have to handle the left hand side, as we may need to rewrite the most recent tokens based on what we just parsed.
+            // Valid LHS expressions for a direct assignment, and their translations are:
+            // PushLocal(a)                => pop, and emit a StoreLocal(a) instead
+            // <expr> <expr> OpIndex       => pop, and emit a StoreArray instead
+            // <expr> <expr> OpPropertyGet => pop, and emit a StoreProperty instead
+            // If we have a assignment-expression operator, like `+=`, then we need to do it slightly differently
+            // PushLocal(a)                => parse <expr>, and emit <op>, StoreLocal(a)
+            // <expr> <expr> OpIndex       => pop, emit OpIndexPeek, parse <expr>, then emit <op>, StoreArray
+            // <expr> <expr> OpPropertyGet => pop, emit OpPropertyGetPeek, parse <expr>, then emit <op>, StoreProperty
+            //
+            // **Note**: Assignments are right-associative, so call <expr-10> recursively instead of <expr-9>
+            if let Some(OpEqual) = maybe_op { // // Direct assignment statement
+                self.advance();
+                let last: usize = self.last();
+                match self.output[last] {
+                    PushLocal(id) => {
+                        self.output.pop();
+                        self.parse_expr_10();
+                        self.push(StoreLocal(id));
+                    },
+                    PushGlobal(id) => {
+                        self.output.pop();
+                        self.parse_expr_10();
+                        self.push(StoreGlobal(id));
+                    },
+                    OpIndex => {
+                        self.output.pop();
+                        self.parse_expr_10();
+                        self.push(StoreArray);
+                    },
+                    // todo: property access
+                    _ => self.error(InvalidAssignmentTarget),
+                }
+            } else if let Some(op) = maybe_op {  // Assignment Expression
+                self.advance();
+                let last: usize = self.last();
+                match self.output[last] {
+                    PushLocal(id) => {
+                        self.parse_expr_10();
+                        self.push(op);
+                        self.push(StoreLocal(id));
+                    },
+                    PushGlobal(id) => {
+                        self.parse_expr_10();
+                        self.push(op);
+                        self.push(StoreGlobal(id));
+                    },
+                    OpIndex => {
+                        self.output.pop();
+                        self.push(OpIndexPeek);
+                        self.parse_expr_10();
+                        self.push(op);
+                        self.push(StoreArray);
+                    },
+                    // todo: property access
+                    _ => self.error(InvalidAssignmentTarget),
+                }
+            } else {
+                // Not any kind of assignment statement
+                break
+            }
+        }
+    }
+
 
     // ===== Semantic Analysis ===== //
 
@@ -1432,6 +1468,11 @@ impl Parser {
         trace::trace_parser!("push {:?}", token);
         self.output.push(token);
         self.line_numbers.push(self.lineno)
+    }
+
+    /// Returns the index of the last token that was just pushed.
+    fn last(self: &Self) -> usize {
+        self.output.len() - 1
     }
 
     /// Pushes a new error token into the output error stream.

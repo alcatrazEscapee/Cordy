@@ -21,13 +21,24 @@ macro_rules! slice_arg {
 }
 
 
-pub fn list_index(list_ref: Mut<VecDeque<Value>>, r: i64) -> ValueResult {
+pub fn list_get_index(list_ref: Mut<VecDeque<Value>>, rhs: i64) -> ValueResult {
     let list = list_ref.unbox();
-    let index: usize = if r < 0 { (list.len() as i64 + r) as usize } else { r as usize };
+    let index: usize = to_index(list.len() as i64, rhs) as usize;
     if index < list.len() {
         Ok(list[index].clone())
     } else {
-        IndexOutOfBounds(r, list.len()).err()
+        IndexOutOfBounds(rhs, list.len()).err()
+    }
+}
+
+pub fn list_set_index(list_ref: Mut<VecDeque<Value>>, rhs: i64, value: Value) -> Result<(), Box<RuntimeError>> {
+    let mut list = list_ref.unbox_mut();
+    let index: usize = to_index(list.len() as i64, rhs) as usize;
+    if index < list.len() {
+        list[index] = value;
+        Ok(())
+    } else {
+        IndexOutOfBounds(rhs, list.len()).err()
     }
 }
 

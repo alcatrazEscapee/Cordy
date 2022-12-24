@@ -12,9 +12,7 @@ use crate::stdlib::StdBinding;
 use crate::vm::error::RuntimeError;
 
 use Value::{*};
-use crate::vm::error::RuntimeError::TypeErrorArgMustBeIterable;
-
-type ValueResult = Result<Value, Box<RuntimeError>>;
+use RuntimeError::TypeErrorArgMustBeIterable;
 
 
 /// The runtime sum type used by the virtual machine
