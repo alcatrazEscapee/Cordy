@@ -447,6 +447,7 @@ impl<'a> Scanner<'a> {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
     use crate::compiler::{scanner};
     use crate::compiler::scanner::{ScanResult, ScanToken};
     use crate::reporting;
@@ -490,7 +491,7 @@ mod tests {
 
 
     fn run(path: &'static str) {
-        let root: String = trace::test::get_test_resource_path("scanner", path);
+        let root: PathBuf = trace::test::get_test_resource_path("scanner", path);
         let text: String = trace::test::get_test_resource_src(&root);
         let result: ScanResult = scanner::scan(&text);
 

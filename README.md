@@ -89,7 +89,7 @@ print(max(elves))
 - Heap methods that operate on lists
 - Format strings (just normal strings with the python `%` operator, but with rust formatting? does that even work?)
 - Regex (some sort of impl)
-- Pattern matching / deconstruction
+- Pattern matching / deconstruction / `StoreArray`
 - Even MORE standard library functions
 - Closures - capture value not variable (like in Java)?
 - [VS Code](https://code.visualstudio.com/api/language-extensions/overview)?

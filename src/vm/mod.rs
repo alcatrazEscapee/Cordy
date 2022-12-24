@@ -711,6 +711,7 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
 
 #[cfg(test)]
 mod test {
+    use std::path::PathBuf;
     use crate::{compiler, ErrorReporter, trace, VirtualMachine};
     use crate::vm::error::RuntimeErrorWithLineNumber;
 
@@ -810,6 +811,10 @@ mod test {
     #[test] fn test_str_list_slice_43() { run_str("[1, 2, 3, 4] [-10:1] . print", "[1]\n"); }
     #[test] fn test_str_list_slice_44() { run_str("[1, 2, 3, 4] [1:-10:-1] . print", "[2, 1]\n"); }
     #[test] fn test_str_list_slice_45() { run_str("[1, 2, 3, 4] [::0]", "Cannot slice a list with a step of 0\n  at: line 1 (<test>)\n  at:\n\n[1, 2, 3, 4] [::0]\n"); }
+    #[test] fn test_str_list_slice_46() { run_str("[1, 2, 3, 4][:-1] . print", "[1, 2, 3]\n"); }
+    #[test] fn test_str_list_slice_47() { run_str("[1, 2, 3, 4][:0] . print", "[]\n"); }
+    #[test] fn test_str_list_slice_48() { run_str("[1, 2, 3, 4][:1] . print", "[1]\n"); }
+    #[test] fn test_str_list_slice_49() { run_str("[1, 2, 3, 4][5:] . print", "[]\n"); }
     #[test] fn test_str_sum_list() { run_str("[1, 2, 3, 4] . sum . print", "10\n"); }
     #[test] fn test_str_sum_values() { run_str("sum(1, 3, 5, 7) . print", "16\n"); }
     #[test] fn test_str_sum_no_arg() { run_str("sum()", "Function 'sum' requires at least 1 parameter but none were present.\n  at: line 1 (<test>)\n  at:\n\nsum()\n"); }
@@ -949,10 +954,10 @@ mod test {
     }
 
     fn run(path: &'static str) {
-        let root: &String = &trace::test::get_test_resource_path("compiler", path);
+        let root: &PathBuf = &trace::test::get_test_resource_path("compiler", path);
         let text: &String = &trace::test::get_test_resource_src(&root);
 
-        let compile= compiler::compile(root, text).unwrap();
+        let compile= compiler::compile(&String::from(root.to_str().unwrap()), text).unwrap();
 
         let mut buf: Vec<u8> = Vec::new();
         let mut vm = VirtualMachine::new(compile, &b""[..], &mut buf);
