@@ -6,7 +6,7 @@ Cordy is a dynamically typed, interpreted, semi-functional / semi-procedural lan
 
 ### Usage
 
-It is a standard Rust project, and thus built with `cargo build --release`. The `cordy` executable serves both as the compiler and runtime.
+It is a standard Rust project, and thus built with `cargo build --release`. The `cordy` executable serves both as the compiler and runtime. Running `cordy` without any arguments opens a (primitive) REPL.
 
 ```
 cordy [options] <file>
@@ -34,11 +34,21 @@ This language is inspired by parts from Python, Rust, Haskell, Java, and JavaScr
 
 - The basic structure of the language is C-style, with `{` and `}` to separate code blocks, and imperative constructs such as `if`, `else`, `while`, etc.
 - `let x` is used to declare a variable. `fn(x, y, z)` declares a function. Functions can either be followed be expressions (like `fn(x) -> x + 1`) or blocks (like `fn (x) { print(x) }`).
-- The basic types are `nil` (the absence of a value, and the default value for all declared uninitialized variables), `bool` (a boolean), `int` (a 64-bit unsigned integer), `str` (a UTF-8 string), `function` (the type of all functions), and `list` (A basic array backed list).
+- A few basic types:
+    - `nil`: The absence of a value, and the default value for all declared uninitialized variables
+    - `bool`: A boolean
+    - `int`: A 64-bit unsigned integer
+    - `str`: A UTF-8 string
+    - `function`: The type of all functions
+- Along with some basic library collections:
+    - `list`: A `VecDeque`, so a ring buffer with O(1) index, pop/push front and back.
+    - `set`: A `LinkedHashSet`, so a collection with unique elements and O(1) `contains` checks.
+    - `dict`: A `LinkedHashMap`, a mapping from keys to values with O(1) lookups.
 - Expressions should be familiar from most imperative programming languages, as should be operator precedence.
     - Operators on their own are functions, so `(+)` is a two argument function which adds values.
     - `%` is mathematical modulo, and `/` rounds to negative infinity, and `-(a / b) == -a / b == a / -b` (similar to Python)
     - The `.` operator is actually a low precedence function composition operator: `a . b . c` is equivalent to `c(b(a))`, and it can be chained in a functional style.
+    - Short-circuiting `and` and `or` use the keywords from Python.
 - Most functions (that aren't variadic) can be partially evaluated (like Haskell): `(+ 3)` is a function which takes one argument and adds three.
 - The language is almost completely newline independent, and whitespace only used to delimit tokens. There are a few edge cases where whitespace (or semicolons) is required between expressions to reduce ambiguity.
 
@@ -67,14 +77,16 @@ print(max(elves))
 ```
 
 
+---
+
+
 ### To-Do
 
-- REPL, functional CLI and arguments.
+- Non expression based REPL with history
 - Implement `->` operator, basic named tuple types (structs), or binding resolution on macros
-- Sets (HashSet)
+- Set literals
 - Maps (HashMap) and dictionary literals (or just use list syntax?)
-- Polymorphic 'List' types that can be used as arbitrary iterators, etc. using rust traits rather than dispatch at every call site
-- Deque / Queue type (VecDeque)
+- Heap methods that operate on lists
 - Format strings (just normal strings with the python `%` operator, but with rust formatting? does that even work?)
 - Regex (some sort of impl)
 - Pattern matching / deconstruction
