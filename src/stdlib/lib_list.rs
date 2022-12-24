@@ -46,15 +46,15 @@ pub fn list_slice(a1: Value, a2: Value, a3: Value, a4: Value) -> ValueResult {
     }
 
     let low: i64 = slice_arg!(a2, "low", if step > 0 { 0 } else { -1 });
-    let high: i64 = slice_arg!(a3, "high", if step > 0 { 0 } else { -length - 1 });
+    let high: i64 = slice_arg!(a3, "high", if step > 0 { length } else { -length - 1 });
 
     let abs_start: i64 = to_index(length, low);
     let abs_step: usize = step.unsigned_abs() as usize;
 
     return Ok(if step > 0 {
-        let abs_stop: i64 = to_index(length, high - 1);
+        let abs_stop: i64 = to_index(length, high);
 
-        Value::iter_list((abs_start..=abs_stop).step_by(abs_step)
+        Value::iter_list((abs_start..abs_stop).step_by(abs_step)
             .filter_map(|i| safe_get(&list, i))
             .cloned())
     } else {

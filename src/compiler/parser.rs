@@ -1450,6 +1450,7 @@ impl Parser {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
     use crate::compiler::{parser, CompileResult, scanner};
     use crate::compiler::scanner::ScanResult;
     use crate::compiler::parser::Parser;
@@ -1587,7 +1588,7 @@ mod tests {
     }
 
     fn run(path: &'static str) {
-        let root: String = trace::test::get_test_resource_path("parser", path);
+        let root: PathBuf = trace::test::get_test_resource_path("parser", path);
         let text: String = trace::test::get_test_resource_src(&root);
 
         let scan_result: ScanResult = scanner::scan(&text);
