@@ -25,6 +25,8 @@ pub enum Opcode {
     PushGlobal(u16),
     StoreGlobal(u16),
 
+    StoreArray,
+
     // Push
     Nil,
     True,
@@ -44,6 +46,7 @@ pub enum Opcode {
     // Ordered by precedence, highest to lowest
     OpFuncEval(u8),
     OpIndex,
+    OpIndexPeek,
     OpSlice,
     OpSliceWithStep,
 

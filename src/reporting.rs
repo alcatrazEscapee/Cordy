@@ -189,7 +189,7 @@ impl AsError for ParserError {
             ParserErrorType::ExpectedCommaOrEndOfParameters(e) => format!("Expected a ',' or ')' after function parameter, got {} instead", e.format_error()),
             ParserErrorType::LocalVariableConflict(e) => format!("Multiple declarations for 'let {}' in the same scope", e),
             ParserErrorType::UndeclaredIdentifier(e) => format!("Undeclared identifier: '{}'", e),
-            ParserErrorType::AssignmentToNotVariable(e) => format!("Cannot to assign to '{}' as it is not a global or local variable", e),
+            ParserErrorType::InvalidAssignmentTarget => format!("The left hand side of an assignment expression must be a variable, array access, or property access"),
             ParserErrorType::BreakOutsideOfLoop => String::from("Invalid 'break' statement outside of an enclosing loop"),
             ParserErrorType::ContinueOutsideOfLoop => String::from("Invalid 'continue' statement outside of an enclosing loop"),
         }

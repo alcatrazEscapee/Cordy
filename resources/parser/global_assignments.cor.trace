@@ -3,17 +3,21 @@ L1: 0000 Nil
     0002 Int(0 -> 3)
 L2: 0003 Int(1 -> 1)
     0004 StoreGlobal(0)
-L3: 0005 PushGlobal(0)
-    0006 Int(2 -> 5)
-    0007 OpAdd
-    0008 StoreGlobal(1)
-L4: 0009 PushGlobal(2)
-    0010 PushGlobal(0)
-    0011 OpMul
-    0012 StoreGlobal(2)
-L5: 0013 PushGlobal(0)
-    0014 PushGlobal(2)
-    0015 OpSub
-    0016 StoreGlobal(0)
-    0017 PopN(3)
-    0018 Exit
+    0005 Pop
+    0006 PushGlobal(0)
+L3: 0007 Int(2 -> 5)
+    0008 OpAdd
+    0009 StoreGlobal(1)
+    0010 Pop
+    0011 PushGlobal(2)
+    0012 PushGlobal(0)
+L4: 0013 OpMul
+    0014 StoreGlobal(2)
+    0015 Pop
+    0016 PushGlobal(0)
+    0017 PushGlobal(2)
+L5: 0018 OpSub
+    0019 StoreGlobal(0)
+    0020 Pop
+    0021 PopN(3)
+    0022 Exit

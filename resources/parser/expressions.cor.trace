@@ -15,33 +15,36 @@ L2: 0007 Int(0 -> 1)
     0014 OpDiv
     0015 OpSub
     0016 StoreGlobal(0)
-L3: 0017 PushGlobal(1)
-    0018 PushGlobal(2)
-    0019 Int(5 -> 1)
-    0020 Int(6 -> 2)
-    0021 OpAdd
-    0022 OpFuncEval(1)
-    0023 OpFuncCompose
-    0024 PushGlobal(3)
-    0025 PushGlobal(0)
-    0026 OpFuncEval(1)
-    0027 OpFuncCompose
-    0028 PushGlobal(6)
-    0029 OpFuncCompose
-    0030 StoreGlobal(0)
-L4: 0031 PushGlobal(4)
-    0032 PushGlobal(5)
-    0033 OpFuncCompose
-    0034 JumpIfFalse(39)
-    0035 Pop
-    0036 Int(7 -> 1)
-    0037 Int(8 -> 2)
-    0038 OpGreaterThan
-    0039 JumpIfTrue(44)
-    0040 Pop
-    0041 Int(9 -> 6)
-    0042 Int(10 -> 7)
-    0043 OpGreaterThanEqual
-    0044 StoreGlobal(0)
-    0045 PopN(7)
-    0046 Exit
+    0017 Pop
+    0018 PushGlobal(1)
+L3: 0019 PushGlobal(2)
+    0020 Int(5 -> 1)
+    0021 Int(6 -> 2)
+    0022 OpAdd
+    0023 OpFuncEval(1)
+    0024 OpFuncCompose
+    0025 PushGlobal(3)
+    0026 PushGlobal(0)
+    0027 OpFuncEval(1)
+    0028 OpFuncCompose
+    0029 PushGlobal(6)
+    0030 OpFuncCompose
+    0031 StoreGlobal(0)
+    0032 Pop
+    0033 PushGlobal(4)
+    0034 PushGlobal(5)
+L4: 0035 OpFuncCompose
+    0036 JumpIfFalse(41)
+    0037 Pop
+    0038 Int(7 -> 1)
+    0039 Int(8 -> 2)
+    0040 OpGreaterThan
+    0041 JumpIfTrue(46)
+    0042 Pop
+    0043 Int(9 -> 6)
+    0044 Int(10 -> 7)
+    0045 OpGreaterThanEqual
+    0046 StoreGlobal(0)
+    0047 Pop
+    0048 PopN(7)
+    0049 Exit

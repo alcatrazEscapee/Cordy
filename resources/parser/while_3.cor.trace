@@ -11,4 +11,5 @@ L3: 0006 JumpIfFalsePop(12)
 L4: 0010 StoreGlobal(0)
     0011 Jump(1)
     0012 Pop
-    0013 Exit
+    0013 Pop
+    0014 Exit

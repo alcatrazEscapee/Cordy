@@ -3,26 +3,32 @@ L2: 0001 Int(0 -> 1)
     0002 Nil
     0003 OpAdd
     0004 StoreGlobal(0)
-L3: 0005 Nil
-    0006 UnarySub
-    0007 StoreGlobal(0)
-L4: 0008 Bound(Print)
-    0009 Nil
-    0010 OpFuncCompose
-    0011 StoreGlobal(0)
-L5: 0012 Bound(Print)
+    0005 Pop
+    0006 Nil
+L3: 0007 UnarySub
+    0008 StoreGlobal(0)
+    0009 Pop
+    0010 Bound(Print)
+    0011 Nil
+L4: 0012 OpFuncCompose
     0013 StoreGlobal(0)
-L6: 0014 Bound(Print)
-    0015 Int(1 -> 4)
-    0016 Nil
-    0017 OpFuncEval(2)
-    0018 StoreGlobal(0)
-L7: 0019 Bound(Print)
-    0020 Int(2 -> 5)
-    0021 OpFuncEval(1)
-    0022 StoreGlobal(0)
+    0014 Pop
+    0015 Bound(Print)
+    0016 StoreGlobal(0)
+    0017 Pop
+L5: 0018 Bound(Print)
+    0019 Int(1 -> 4)
+    0020 Nil
+    0021 OpFuncEval(2)
+L6: 0022 StoreGlobal(0)
     0023 Pop
-    0024 Exit
+    0024 Bound(Print)
+    0025 Int(2 -> 5)
+    0026 OpFuncEval(1)
+    0027 StoreGlobal(0)
+    0028 Pop
+L7: 0029 Pop
+    0030 Exit
 Expected an expression terminal, got '+' token instead
   at: line 2 (invalid_expressions.cor)
   at:
