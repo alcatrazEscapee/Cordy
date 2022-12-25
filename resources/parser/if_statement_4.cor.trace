@@ -1,17 +1,17 @@
 L1: 0000 False
-L2: 0001 JumpIfFalsePop(6)
-    0002 Bound(Print)
+    0001 JumpIfFalsePop(6)
+L2: 0002 Bound(Print)
     0003 Str(0 -> "one")
-L3: 0004 OpFuncEval(1)
-L4: 0005 Jump(15)
+    0004 OpFuncEval(1)
+L3: 0005 Jump(15)
     0006 True
     0007 JumpIfFalsePop(12)
-L6: 0008 Bound(Print)
+L4: 0008 Bound(Print)
     0009 Str(1 -> "two")
     0010 OpFuncEval(1)
-L7: 0011 Jump(15)
-    0012 Bound(Print)
+L5: 0011 Jump(15)
+L6: 0012 Bound(Print)
     0013 Str(2 -> "three")
     0014 OpFuncEval(1)
-    0015 Pop
+L7: 0015 Pop
     0016 Exit

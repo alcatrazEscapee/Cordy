@@ -1,6 +1,6 @@
 use std::io::{BufRead, Write};
 use std::rc::Rc;
-use error::{RuntimeErrorWithLineNumber, RuntimeError};
+use error::{DetailRuntimeError, RuntimeError};
 
 use crate::{stdlib, trace};
 use crate::compiler::CompileResult;
@@ -8,7 +8,6 @@ use crate::stdlib::StdBinding;
 use crate::vm::opcode::Opcode;
 use crate::vm::value::Value;
 use crate::vm::value::{FunctionImpl, PartialFunctionImpl};
-use crate::reporting::ProvidesLineNumber;
 
 use Opcode::{*};
 use RuntimeError::{*};
@@ -80,11 +79,11 @@ pub trait VirtualInterface {
 
 
 
-
-struct CallFrame {
+#[derive(Debug)]
+pub struct CallFrame {
     /// The return address
     /// When the function returns, execution transfers to this location
-    return_ip: usize,
+    pub return_ip: usize,
 
     /// A pointer into the current runtime stack, where this function's locals are stored
     /// The local at index 0 will be the function itself, local 1, ...N will be the N parameters, locals after that will be local variables to the function
@@ -111,7 +110,7 @@ impl<R, W> VirtualMachine<R, W> where
         }
     }
 
-    pub fn incremental_run(self: &mut Self, result: &CompileResult) -> Result<(), RuntimeErrorWithLineNumber> {
+    pub fn incremental_run(self: &mut Self, result: &CompileResult) -> Result<(), DetailRuntimeError> {
         self.ip += 1;
         self.code = result.code.clone();
         self.strings = result.strings.clone();
@@ -136,11 +135,13 @@ impl<R, W> VirtualMachine<R, W> where
         }
     }
 
-    pub fn run_until_completion(self: &mut Self) -> Result<(), RuntimeErrorWithLineNumber> {
+    pub fn run_until_completion(self: &mut Self) -> Result<(), DetailRuntimeError> {
         if let Err(e) = self.run() {
             match *e {
                 RuntimeExit => {},
-                _ => return Err(e.with(self.line_number(self.ip)))
+                _ => {
+                    return Err(error::detail_runtime_error(*e, self.ip - 1, &self.call_stack, &self.functions, &self.line_numbers))
+                }
             }
         }
         trace::trace_interpreter_stack!("final {}", self.debug_stack());
@@ -738,8 +739,8 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
 #[cfg(test)]
 mod test {
     use std::path::PathBuf;
-    use crate::{compiler, ErrorReporter, trace, VirtualMachine};
-    use crate::vm::error::RuntimeErrorWithLineNumber;
+    use crate::{compiler, ErrorReporter, reporting, trace, VirtualMachine};
+    use crate::vm::error::DetailRuntimeError;
 
     #[test] fn test_str_empty() { run_str("", ""); }
     #[test] fn test_str_hello_world() { run_str("print('hello world!')", "hello world!\n"); }
@@ -751,8 +752,8 @@ mod test {
     #[test] fn test_str_mul_str() { run_str("print('abc' * 3)", "abcabcabc\n"); }
     #[test] fn test_str_add_sub_mul_div_int() { run_str("print(5 - 3, 12 + 5, 3 * 9, 16 / 3)", "2 17 27 5\n"); }
     #[test] fn test_str_div_mod_int() { run_str("print(3 / 2, 3 / 3, -3 / 2, 10 % 3, 11 % 3, 12 % 3)", "1 1 -2 1 2 0\n"); }
-    #[test] fn test_str_div_by_zero() { run_str("print(15 / 0)", "TypeError: Cannot divide '15' of type 'int' and '0' of type 'int'\n  at: line 1 (<test>)\n  at:\n\nprint(15 / 0)\n"); }
-    #[test] fn test_str_mod_by_zero() { run_str("print(15 % 0)", "TypeError: Cannot modulo '15' of type 'int' and '0' of type 'int'\n  at: line 1 (<test>)\n  at:\n\nprint(15 % 0)\n"); }
+    #[test] fn test_str_div_by_zero() { run_str("print(15 / 0)", "TypeError: Cannot divide '15' of type 'int' and '0' of type 'int'\n    at: `print(15 / 0)` (line 1)\n    at: execution of script '<test>'\n"); }
+    #[test] fn test_str_mod_by_zero() { run_str("print(15 % 0)", "TypeError: Cannot modulo '15' of type 'int' and '0' of type 'int'\n    at: `print(15 % 0)` (line 1)\n    at: execution of script '<test>'\n"); }
     #[test] fn test_str_left_right_shift() { run_str("print(1 << 10, 16 >> 1, 16 << -1, 1 >> -10)", "1024 8 8 1024\n"); }
     #[test] fn test_str_compare_ints_1() { run_str("print(1 < 3, -5 < -10, 6 > 7, 6 > 4)", "true false false true\n"); }
     #[test] fn test_str_compare_ints_2() { run_str("print(1 <= 3, -5 < -10, 3 <= 3, 2 >= 2, 6 >= 7, 6 >= 4, 6 <= 6, 8 >= 8)", "true false true true false true true true\n"); }
@@ -790,7 +791,7 @@ mod test {
     #[test] fn test_str_list_add() { run_str("[1, 2, 3] + [4, 5, 6] . print", "[1, 2, 3, 4, 5, 6]\n"); }
     #[test] fn test_str_empty_list() { run_str("[] . print", "[]\n"); }
     #[test] fn test_str_list_and_index() { run_str("[1, 2, 3] [1] . print", "2\n"); }
-    #[test] fn test_str_list_index_out_of_bounds() { run_str("[1, 2, 3] [3] . print", "Index '3' is out of bounds for list of length [0, 3)\n  at: line 1 (<test>)\n  at:\n\n[1, 2, 3] [3] . print\n"); }
+    #[test] fn test_str_list_index_out_of_bounds() { run_str("[1, 2, 3] [3] . print", "Index '3' is out of bounds for list of length [0, 3)\n    at: `[1, 2, 3] [3] . print` (line 1)\n    at: execution of script '<test>'\n"); }
     #[test] fn test_str_list_index_negative() { run_str("[1, 2, 3] [-1] . print", "3\n"); }
     #[test] fn test_str_list_slice_01() { run_str("[1, 2, 3, 4] [:] . print", "[1, 2, 3, 4]\n"); }
     #[test] fn test_str_list_slice_02() { run_str("[1, 2, 3, 4] [::] . print", "[1, 2, 3, 4]\n"); }
@@ -836,14 +837,14 @@ mod test {
     #[test] fn test_str_list_slice_42() { run_str("[1, 2, 3, 4] [10:1:-1] . print", "[4, 3]\n"); }
     #[test] fn test_str_list_slice_43() { run_str("[1, 2, 3, 4] [-10:1] . print", "[1]\n"); }
     #[test] fn test_str_list_slice_44() { run_str("[1, 2, 3, 4] [1:-10:-1] . print", "[2, 1]\n"); }
-    #[test] fn test_str_list_slice_45() { run_str("[1, 2, 3, 4] [::0]", "Cannot slice a list with a step of 0\n  at: line 1 (<test>)\n  at:\n\n[1, 2, 3, 4] [::0]\n"); }
+    #[test] fn test_str_list_slice_45() { run_str("[1, 2, 3, 4] [::0]", "Cannot slice a list with a step of 0\n    at: `[1, 2, 3, 4] [::0]` (line 1)\n    at: execution of script '<test>'\n"); }
     #[test] fn test_str_list_slice_46() { run_str("[1, 2, 3, 4][:-1] . print", "[1, 2, 3]\n"); }
     #[test] fn test_str_list_slice_47() { run_str("[1, 2, 3, 4][:0] . print", "[]\n"); }
     #[test] fn test_str_list_slice_48() { run_str("[1, 2, 3, 4][:1] . print", "[1]\n"); }
     #[test] fn test_str_list_slice_49() { run_str("[1, 2, 3, 4][5:] . print", "[]\n"); }
     #[test] fn test_str_sum_list() { run_str("[1, 2, 3, 4] . sum . print", "10\n"); }
     #[test] fn test_str_sum_values() { run_str("sum(1, 3, 5, 7) . print", "16\n"); }
-    #[test] fn test_str_sum_no_arg() { run_str("sum()", "Function 'sum' requires at least 1 parameter but none were present.\n  at: line 1 (<test>)\n  at:\n\nsum()\n"); }
+    #[test] fn test_str_sum_no_arg() { run_str("sum()", "Function 'sum' requires at least 1 parameter but none were present.\n    at: `sum()` (line 1)\n    at: execution of script '<test>'\n"); }
     #[test] fn test_str_sum_empty_list() { run_str("[] . sum . print", "0\n"); }
     #[test] fn test_local_vars_01() { run_str("let x=0 { x.print }", "0\n"); }
     #[test] fn test_local_vars_02() { run_str("let x=0 { let x=1; x.print }", "1\n"); }
@@ -949,7 +950,7 @@ mod test {
     #[test] fn test_bare_operator_compose_and_eval() { run_str("2 . (+)(1) . print", "3\n"); }
     #[test] fn test_bare_operator_compose() { run_str("1 . (2 . (+)) . print", "3\n"); }
     #[test] fn test_reduce_list_1() { run_str("[1, 2, 3] . reduce (+) . print", "6\n"); }
-    #[test] fn test_reduce_list_2() { run_str("[1, 2, 3] . reduce (-) . print", "Function '(-)' requires 2 parameters but 1 were present.\n  at: line 1 (<test>)\n  at:\n\n[1, 2, 3] . reduce (-) . print\n"); }
+    #[test] fn test_reduce_list_2() { run_str("[1, 2, 3] . reduce (-) . print", "Function '(-)' requires 2 parameters but 1 were present.\n    at: `[1, 2, 3] . reduce (-) . print` (line 1)\n    at: execution of script '<test>'\n"); }
     #[test] fn test_str_to_list() { run_str("'funny beans' . list . print", "['f', 'u', 'n', 'n', 'y', ' ', 'b', 'e', 'a', 'n', 's']\n"); }
     #[test] fn test_str_to_set() { run_str("'funny beans' . set . print", "{'f', 'u', 'y', ' ', 'b', 'e', 'a', 'n', 's'}\n"); }
     #[test] fn test_str_to_set_to_sorted() { run_str("'funny' . set . sorted . print", "['f', 'n', 'u', 'y']\n"); }
@@ -973,23 +974,27 @@ mod test {
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }
     #[test] fn test_append_large_lists() { run("append_large_lists"); }
     #[test] fn test_fibonacci() { run("fibonacci"); }
+    #[test] fn test_runtime_error_with_trace() { run("runtime_error_with_trace"); }
 
 
     fn run_str(code: &'static str, expected: &'static str) {
         let text: &String = &String::from(code);
         let source: &String = &String::from("<test>");
-        let compile= compiler::compile(source, text).unwrap();
-        let mut buf: Vec<u8> = Vec::new();
-        let mut vm = VirtualMachine::new(compile, &b""[..], &mut buf);
+        let compile = compiler::compile(source, text);
 
-        let result: Result<(), RuntimeErrorWithLineNumber> = vm.run_until_completion();
+        assert!(compile.is_ok(), "Failed to compile: {:?}", compile.err().unwrap());
+
+        let mut buf: Vec<u8> = Vec::new();
+        let mut vm = VirtualMachine::new(compile.ok().unwrap(), &b""[..], &mut buf);
+
+        let result: Result<(), DetailRuntimeError> = vm.run_until_completion();
         assert!(vm.stack.is_empty() || result.is_err());
 
         let mut output: String = String::from_utf8(buf).unwrap();
 
         match result {
             Ok(_) => {},
-            Err(err) => output.push_str(ErrorReporter::new(text, source).format_runtime_error(&err).as_str()),
+            Err(err) => output.push_str(ErrorReporter::new(text, source).format_runtime_error(err).as_str()),
         }
 
         assert_eq!(output.as_str(), expected);
@@ -998,17 +1003,21 @@ mod test {
     fn run(path: &'static str) {
         let root: &PathBuf = &trace::test::get_test_resource_path("compiler", path);
         let text: &String = &trace::test::get_test_resource_src(&root);
+        let source = &String::from(path);
 
-        let compile= compiler::compile(&String::from(root.to_str().unwrap()), text).unwrap();
+        let compile= compiler::compile(source, text).unwrap();
 
         let mut buf: Vec<u8> = Vec::new();
         let mut vm = VirtualMachine::new(compile, &b""[..], &mut buf);
 
-        let result: Result<(), RuntimeErrorWithLineNumber> = vm.run_until_completion();
-        assert!(vm.stack.is_empty());
-        assert!(result.is_ok());
+        let result: Result<(), DetailRuntimeError> = vm.run_until_completion();
+        assert!(vm.stack.is_empty() || result.is_err());
 
-        let output: String = String::from_utf8(buf).unwrap();
+        let mut output: String = String::from_utf8(buf).unwrap();
+
+        if let Err(e) = result {
+            output.push_str(reporting::format_runtime_error(&text.split("\n").collect(), source, e).as_str());
+        }
 
         trace::test::compare_test_resource_content(&root, output.split("\n").map(|s| String::from(s)).collect::<Vec<String>>());
     }

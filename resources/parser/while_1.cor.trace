@@ -1,7 +1,7 @@
 L1: 0000 True
     0001 Bound(Bool)
     0002 OpFuncCompose
-L3: 0003 JumpIfFalsePop(6)
-    0004 Jump(6)
-    0005 Jump(0)
+    0003 JumpIfFalsePop(6)
+L2: 0004 Jump(6)
+L3: 0005 Jump(0)
     0006 Exit

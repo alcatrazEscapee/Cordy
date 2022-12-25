@@ -9,10 +9,10 @@ L4: 0005 Pop
     0008 OpGreaterThan
     0009 JumpIfFalsePop(13)
     0010 Jump(16)
-L5: 0011 Nil
+    0011 Nil
     0012 Jump(14)
     0013 Nil
-    0014 Pop
+L5: 0014 Pop
     0015 Jump(1)
     0016 Pop
     0017 Exit

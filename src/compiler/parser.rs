@@ -233,12 +233,14 @@ impl Parser {
         self.expect_resync(CloseParen);
 
         // Named functions are a complicated local variable, and needs to be declared as such
+        let mut func_id: Option<u16> = None;
         if let Some(name) = maybe_name {
             match self.declare_local(name.clone()) {
                 Some(index) => {
                     self.locals[index].initialized = true;  // Functions are always initialized, as they can be recursive
                     let func_start: usize = self.next_opcode() as usize + 2; // Declare the function literal. + 2 to the head because of the leading Jump and function local
                     let func: u16 = self.declare_function(func_start, name, args.clone());
+                    func_id = Some(func);
                     self.push(Opcode::Function(func));  // And push the function object itself
                 },
                 None => {
@@ -247,7 +249,7 @@ impl Parser {
             }
         }
 
-        self.parse_function_body(args);
+        self.parse_function_body(args, func_id);
     }
 
     fn parse_expression_function(self: &mut Self) {
@@ -265,7 +267,7 @@ impl Parser {
         let func: u16 = self.declare_function(func_start, String::from("_"), args.clone());
         self.push(Opcode::Function(func));  // And push the function object itself
 
-        self.parse_function_body(args);
+        self.parse_function_body(args, Some(func));
     }
 
     fn parse_function_name(self: &mut Self) -> Option<String> {
@@ -314,7 +316,7 @@ impl Parser {
         args
     }
 
-    fn parse_function_body(self: &mut Self, args: Vec<String>) {
+    fn parse_function_body(self: &mut Self, args: Vec<String>, func_id: Option<u16>) {
         trace::trace_parser!("rule <function-body>");
         let jump: u16 = self.reserve(); // Jump over the function itself, the first time we encounter it
         let prev_pop_status: bool = self.delay_pop_from_expression_statement; // Stack semantics for the delayed pop
@@ -368,6 +370,16 @@ impl Parser {
             }
         };
 
+        if is_block_function { // Expect the end of the function, so the Return opcode gets attributed on the same line as the '}'
+            self.expect_resync(CloseBrace);
+        }
+
+        // Update the function, if present, with the tail of the function
+        // This makes tracking ownership in containing functions easier during error reporting
+        if let Some(func_id) = func_id {
+            self.functions[func_id as usize].tail = self.next_opcode() as usize;
+        }
+
         self.push(Return); // Returns the last expression in the function
 
         self.prevent_expression_statement = false;
@@ -377,10 +389,6 @@ impl Parser {
         self.pop_locals_in_current_scope_depth(false); // Pop the parameters from the parser's knowledge of locals, but don't emit Pop / PopN
         self.function_depth -= 1;
         self.scope_depth -= 1;
-
-        if is_block_function {
-            self.expect_resync(CloseBrace);
-        }
 
         let end: u16 = self.next_opcode(); // Repair the jump
         self.output[jump as usize] = Jump(end);
@@ -1440,6 +1448,7 @@ impl Parser {
     fn reserve(self: &mut Self) -> u16 {
         trace::trace_parser!("reserve at {}", self.output.len());
         self.output.push(Noop);
+        self.line_numbers.push(self.lineno);
         (self.output.len() - 1) as u16
     }
 
@@ -1465,9 +1474,9 @@ impl Parser {
     /// Pushes a new token into the output stream.
     /// Returns the index of the token pushed, which allows callers to later mutate that token if they need to.
     fn push(self: &mut Self, token: Opcode) {
-        trace::trace_parser!("push {:?}", token);
+        trace::trace_parser!("push {:?} at L{:?}", token, self.lineno + 1);
         self.output.push(token);
-        self.line_numbers.push(self.lineno)
+        self.line_numbers.push(self.lineno);
     }
 
     /// Returns the index of the last token that was just pushed.

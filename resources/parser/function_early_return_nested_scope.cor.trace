@@ -1,14 +1,14 @@
-L01: 0000 Function(0 -> FunctionImpl { head: 2, nargs: 0, name: "foo", args: [] })
-L02: 0001 Jump(12)
-L04: 0002 Nil
-L06: 0003 Nil
-L07: 0004 Nil
-     0005 Nil
+L01: 0000 Function(0 -> FunctionImpl { head: 2, tail: 10, nargs: 0, name: "foo", args: [] })
+     0001 Jump(12)
+L02: 0002 Nil
+L04: 0003 Nil
+L06: 0004 Nil
+L07: 0005 Nil
      0006 Return
-L08: 0007 Pop
-L09: 0008 Pop
-     0009 Nil
-     0010 Return
-L10: 0011 Pop
+     0007 Pop
+L08: 0008 Pop
+L09: 0009 Nil
+L10: 0010 Return
+     0011 Pop
      0012 Pop
      0013 Exit

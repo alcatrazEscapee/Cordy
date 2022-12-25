@@ -1,19 +1,19 @@
 L1: 0000 Int(0 -> 3)
     0001 Int(1 -> 5)
     0002 OpLessThan
-L2: 0003 JumpIfFalsePop(8)
-    0004 Bound(Print)
+    0003 JumpIfFalsePop(8)
+L2: 0004 Bound(Print)
     0005 Str(0 -> "yes")
-L4: 0006 OpFuncEval(1)
-    0007 Jump(17)
-    0008 Int(2 -> 6)
-L5: 0009 Int(3 -> 7)
+    0006 OpFuncEval(1)
+L3: 0007 Jump(17)
+L4: 0008 Int(2 -> 6)
+    0009 Int(3 -> 7)
     0010 OpLessThan
     0011 JumpIfFalsePop(16)
-L6: 0012 Bound(Print)
-L7: 0013 Str(1 -> "no")
+L5: 0012 Bound(Print)
+    0013 Str(1 -> "no")
     0014 OpFuncEval(1)
-    0015 Jump(17)
+L6: 0015 Jump(17)
     0016 Nil
-    0017 Pop
+L7: 0017 Pop
     0018 Exit

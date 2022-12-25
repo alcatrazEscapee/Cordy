@@ -4,10 +4,11 @@ use crate::compiler::CompileResult;
 use crate::compiler::scanner::{ScanError, ScanErrorType, ScanToken};
 use crate::stdlib;
 use crate::stdlib::StdBinding;
-use crate::vm::error::{RuntimeError, RuntimeErrorWithLineNumber};
+use crate::vm::error::{RuntimeError, DetailRuntimeError, StackTraceFrame};
 use crate::vm::opcode::Opcode;
 use crate::vm::value::{FunctionImpl, Value};
 use crate::vm::VirtualMachine;
+use crate::misc;
 
 pub struct ErrorReporter<'a> {
     lines: Vec<&'a str>,
@@ -30,7 +31,7 @@ impl<'a> ErrorReporter<'a> {
         format_parse_error(&self.lines, self.src, error)
     }
 
-    pub fn format_runtime_error(self: &Self, error: &RuntimeErrorWithLineNumber) -> String {
+    pub fn format_runtime_error(self: &Self, error: DetailRuntimeError) -> String {
         format_runtime_error(&self.lines, self.src, error)
     }
 }
@@ -51,11 +52,16 @@ pub fn format_parse_error(source_lines: &Vec<&str>, source_file: &String, error:
     text
 }
 
-pub fn format_runtime_error(source_lines: &Vec<&str>, source_file: &String, error: &RuntimeErrorWithLineNumber) -> String {
-    let mut text: String = error.format_error();
-    text.push_str(format!("\n  at: line {} ({})\n  at:\n\n", error.lineno + 1, &source_file).as_str());
-    text.push_str(source_lines.get(error.lineno as usize).map(|t| *t).unwrap_or(""));
-    text.push('\n');
+pub fn format_runtime_error(source_lines: &Vec<&str>, source_file: &String, mut error: DetailRuntimeError) -> String {
+    let mut text: String = error.error.format_error();
+    let root: &mut StackTraceFrame = &mut error.stack[0];
+    let mut src: String = String::from(source_lines.get(root.lineno as usize).map(|t| *t).unwrap_or(""));
+    misc::strip_line_ending(&mut src);
+    root.src = Some(src);
+    for frame in error.stack {
+        text.push_str(format!("\n    at: `{}` (line {})", frame.src.unwrap(), frame.lineno + 1).as_str())
+    }
+    text.push_str(format!("\n    at: execution of script '{}'\n", source_file).as_str());
     text
 }
 
@@ -87,9 +93,9 @@ trait AsError {
 }
 
 
-impl AsError for RuntimeErrorWithLineNumber {
+impl AsError for RuntimeError {
     fn format_error(self: &Self) -> String {
-        match &self.error {
+        match self {
             RuntimeError::RuntimeExit => panic!("Not a real error"),
             RuntimeError::ValueIsNotFunctionEvaluable(v) => format!("Tried to evaluate {} but it is not a function.", v.format_error()),
             RuntimeError::BindingIsNotFunctionEvaluable(b) => format!("Tried to evaluate '{}' but it is not an evaluable function.", b.format_error()),

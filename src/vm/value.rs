@@ -79,14 +79,14 @@ impl Value {
             List(v) => format!("[{}]", v.unbox().iter().map(|t| t.as_repr_str()).collect::<Vec<String>>().join(", ")),
             Set(v) => format!("{{{}}}", v.unbox().iter().map(|t| t.as_repr_str()).collect::<Vec<String>>().join(", ")),
             Dict(v) => format!("{{{}}}", v.unbox().iter().map(|(k, v)| format!("{}: {}", k.as_repr_str(), v.as_repr_str())).collect::<Vec<String>>().join(", ")),
-            Function(f) => {
+            Function(f) => (*f).as_ref().borrow().as_str()/*{
                 let f = (*f).as_ref().borrow();
                 format!("fn {}({})", f.name, f.args.join(", "))
-            },
-            PartialFunction(f) => {
+            }*/,
+            PartialFunction(f) => (*f).as_ref().borrow().func.as_str()/*{
                 let f = (*f).as_ref().borrow();
                 format!("fn {}({})", f.func.name, f.func.args.join(", "))
-            },
+            }*/,
             Binding(b) => format!("fn {}()", stdlib::lookup_name(*b)),
             PartialBinding(b, _) => format!("fn {}()", stdlib::lookup_name(*b)),
         }
@@ -250,6 +250,7 @@ impl<T : Eq + PartialEq + Debug + Clone + Hash> Hash for Mut<T> {
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub struct FunctionImpl {
     pub head: usize, // Pointer to the first opcode of the function's execution
+    pub tail: usize, // Pointer to the final `Return` opcode.
     pub nargs: u8, // The number of arguments the function takes
     name: String, // The name of the function, useful to show in stack traces
     args: Vec<String>, // Names of the arguments
@@ -266,10 +267,15 @@ impl FunctionImpl {
     pub fn new(head: usize, name: String, args: Vec<String>) -> FunctionImpl {
         FunctionImpl {
             head,
+            tail: head + 1,
             nargs: args.len() as u8,
             name,
             args
         }
+    }
+
+    pub fn as_str(self: &Self) -> String {
+        format!("fn {}({})", self.name, self.args.join(", "))
     }
 }
 
