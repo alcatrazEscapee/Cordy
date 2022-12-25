@@ -12,6 +12,7 @@ pub mod vm;
 
 pub mod trace;
 pub mod reporting;
+pub mod misc;
 
 
 fn main() {
@@ -47,12 +48,7 @@ fn main() {
 
                 continuation = false;
                 buffer.push_str(line.as_str());
-                if buffer.ends_with('\n') {
-                    buffer.pop();
-                    if buffer.ends_with('\r') {
-                        buffer.pop();
-                    }
-                }
+                misc::strip_line_ending(&mut buffer);
                 if buffer.ends_with("\\") {
                     continuation = true;
                     continue
@@ -84,7 +80,7 @@ fn main() {
             };
             match result {
                 Err(e) => {
-                    println!("{}", ErrorReporter::new(&buffer, source).format_runtime_error(&e))
+                    println!("{}", ErrorReporter::new(&buffer, source).format_runtime_error(e))
                 },
                 Ok(_) => {}
             }
@@ -164,7 +160,7 @@ fn main() {
         };
         match result {
             Err(e) => {
-                eprintln!("{}", ErrorReporter::new(&text, file_ref).format_runtime_error(&e))
+                eprintln!("{}", ErrorReporter::new(&text, file_ref).format_runtime_error(e))
             },
             Ok(_) => {}
         }

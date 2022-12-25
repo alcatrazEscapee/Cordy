@@ -1,15 +1,15 @@
 L1: 0000 True
     0001 Bound(Bool)
     0002 OpFuncCompose
-L3: 0003 JumpIfFalsePop(14)
-    0004 Jump(14)
-    0005 False
-L4: 0006 Bound(Bool)
-L6: 0007 OpFuncCompose
-L7: 0008 JumpIfFalsePop(12)
-L8: 0009 Jump(5)
-    0010 Jump(12)
-    0011 Jump(5)
-    0012 Jump(0)
-    0013 Jump(0)
+    0003 JumpIfFalsePop(14)
+L2: 0004 Jump(14)
+L3: 0005 False
+    0006 Bound(Bool)
+    0007 OpFuncCompose
+    0008 JumpIfFalsePop(12)
+L4: 0009 Jump(5)
+L5: 0010 Jump(12)
+L6: 0011 Jump(5)
+L7: 0012 Jump(0)
+L8: 0013 Jump(0)
     0014 Exit

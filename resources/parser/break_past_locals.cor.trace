@@ -3,8 +3,8 @@ L3: 0001 Nil
 L5: 0002 Nil
 L6: 0003 PopN(2)
     0004 Jump(8)
-L7: 0005 Pop
-L8: 0006 Pop
-    0007 Jump(1)
+    0005 Pop
+L7: 0006 Pop
+L8: 0007 Jump(1)
     0008 Pop
     0009 Exit
