@@ -18,14 +18,13 @@ pub enum RuntimeError {
     IncorrectNumberOfArguments(StdBinding, u8, u8),
     IncorrectNumberOfArgumentsVariadicAtLeastOne(StdBinding),
     IndexOutOfBounds(i64, usize),
-    SliceStepZero,
+    ValueErrorStepCannotBeZero,
 
     TypeErrorUnaryOp(Opcode, Value),
     TypeErrorBinaryOp(Opcode, Value, Value),
     TypeErrorBinaryIs(Value, Value),
     TypeErrorCannotConvertToInt(Value),
     TypeErrorCannotSlice(Value),
-    TypeErrorSliceArgMustBeInt(&'static str, Value),
 
     TypeErrorArgMustBeInt(Value),
     TypeErrorArgMustBeStr(Value),

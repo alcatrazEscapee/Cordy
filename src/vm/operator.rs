@@ -35,6 +35,12 @@ pub fn binary_mul(a1: Value, a2: Value) -> ValueResult {
         (Value::Int(i1), Value::Int(i2)) => Ok(Value::Int(i1 * i2)),
         (Value::Str(s1), Value::Int(i2)) if i2 > 0 => Ok(Value::Str(Box::new(s1.repeat(i2 as usize)))),
         (Value::Int(i1), Value::Str(s2)) if i1 > 0 => Ok(Value::Str(Box::new(s2.repeat(i1 as usize)))),
+        (Value::List(l1), Value::Int(i1)) if i1 > 0 => {
+            let l1 = l1.unbox();
+            let len: usize = l1.len();
+            Ok(Value::iter_list(l1.iter().cycle().take(i1 as usize * len).cloned()))
+        },
+        (l @ Value::Int(_), r @ Value::List(_)) => binary_mul(r, l),
         (l, r) => TypeErrorBinaryOp(OpMul, l, r).err()
     }
 }

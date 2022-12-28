@@ -1,3 +1,4 @@
+use std::cmp::Reverse;
 use std::collections::VecDeque;
 
 use crate::vm::error::RuntimeError;
@@ -8,17 +9,6 @@ use RuntimeError::{*};
 use Value::{*};
 
 type ValueResult = Result<Value, Box<RuntimeError>>;
-
-
-macro_rules! slice_arg {
-    ($a:ident, $n:expr, $def:expr) => {
-        match $a {
-            Value::Int(x) => x,
-            Value::Nil => $def,
-            t => return TypeErrorSliceArgMustBeInt($n, t).err(),
-        }
-    };
-}
 
 
 pub fn list_get_index(list_ref: Mut<VecDeque<Value>>, rhs: i64) -> ValueResult {
@@ -51,13 +41,13 @@ pub fn list_slice(a1: Value, a2: Value, a3: Value, a4: Value) -> ValueResult {
     let list = list_ref.unbox();
     let length: i64 = list.len() as i64;
 
-    let step: i64 = slice_arg!(a4, "step", 1);
+    let step: i64 = a4.as_int_or(1)?;
     if step == 0 {
-        return SliceStepZero.err()
+        return ValueErrorStepCannotBeZero.err()
     }
 
-    let low: i64 = slice_arg!(a2, "low", if step > 0 { 0 } else { -1 });
-    let high: i64 = slice_arg!(a3, "high", if step > 0 { length } else { -length - 1 });
+    let low: i64 = a2.as_int_or(if step > 0 { 0 } else { -1 })?;
+    let high: i64 = a3.as_int_or(if step > 0 { length } else { -length - 1 })?;
 
     let abs_start: i64 = to_index(length, low);
     let abs_step: usize = step.unsigned_abs() as usize;
@@ -75,6 +65,28 @@ pub fn list_slice(a1: Value, a2: Value, a3: Value, a4: Value) -> ValueResult {
             .filter_map(|i| safe_get(&list, i))
             .cloned())
     })
+}
+
+pub fn range_1(a1: Value) -> ValueResult {
+    range_3(Value::Int(0), a1, Value::Int(1))
+}
+
+pub fn range_2(a1: Value, a2: Value) -> ValueResult {
+    range_3(a1, a2, Value::Int(1))
+}
+
+pub fn range_3(a1: Value, a2: Value, a3: Value) -> ValueResult {
+    let low: i64 = a1.as_int_or(0)?;
+    let high: i64 = a2.as_int()?;
+    let step: i64 = a3.as_int_or(1)?;
+
+    if step == 0 {
+        ValueErrorStepCannotBeZero.err()
+    } else if step > 0 {
+        Ok(Value::iter_list((low..high).step_by(step as usize).map(|i| Value::Int(i))))
+    } else {
+        Ok(Value::iter_list(rev_range(low, high).step_by(-step as usize).map(|i| Value::Int(i))))
+    }
 }
 
 
@@ -226,6 +238,7 @@ pub fn pop(a1: Value) -> ValueResult {
         List(v) => v.unbox_mut().pop_back(),
         Set(v) => v.unbox_mut().pop_back(),
         Dict(v) => v.unbox_mut().pop_back().map(|(k, _)| k),
+        Heap(v) => v.unbox_mut().heap.pop().map(|t| t.0),
         _ => return TypeErrorArgMustBeIterable(a1).err()
     } {
         Some(v) => Ok(v),
@@ -237,6 +250,7 @@ pub fn push(a1: Value, a2: Value) -> ValueResult {
     match &a2 {
         List(v) => { v.unbox_mut().push_back(a1); Ok(a2) }
         Set(v) => { v.unbox_mut().insert(a1); Ok(a2) }
+        Heap(v) => { v.unbox_mut().heap.push(Reverse(a1)); Ok(a2) }
         _ => TypeErrorArgMustBeIterable(a2).err()
     }
 }
@@ -251,8 +265,9 @@ pub fn last(a1: Value) -> ValueResult {
 
 pub fn head(a1: Value) -> ValueResult {
     match &a1 {
-        List(v) => Ok(v.unbox_mut().front().cloned().unwrap_or(Nil)),
-        Set(v) => Ok(v.unbox_mut().front().cloned().unwrap_or(Nil)),
+        List(v) => Ok(v.unbox().front().cloned().unwrap_or(Nil)),
+        Set(v) => Ok(v.unbox().front().cloned().unwrap_or(Nil)),
+        Heap(v) => Ok(v.unbox().heap.peek().cloned().map(|t| t.0).unwrap_or(Nil)),
         _ => TypeErrorArgMustBeIterable(a1).err()
     }
 }

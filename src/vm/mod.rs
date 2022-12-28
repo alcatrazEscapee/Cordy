@@ -29,7 +29,7 @@ pub struct VirtualMachine<R, W> {
     strings: Vec<String>,
     constants: Vec<i64>,
     functions: Vec<Rc<FunctionImpl>>,
-    pub line_numbers: Vec<u16>,
+    line_numbers: Vec<u16>,
 
     read: R,
     write: W,
@@ -837,7 +837,7 @@ mod test {
     #[test] fn test_str_list_slice_42() { run_str("[1, 2, 3, 4] [10:1:-1] . print", "[4, 3]\n"); }
     #[test] fn test_str_list_slice_43() { run_str("[1, 2, 3, 4] [-10:1] . print", "[1]\n"); }
     #[test] fn test_str_list_slice_44() { run_str("[1, 2, 3, 4] [1:-10:-1] . print", "[2, 1]\n"); }
-    #[test] fn test_str_list_slice_45() { run_str("[1, 2, 3, 4] [::0]", "Cannot slice a list with a step of 0\n    at: `[1, 2, 3, 4] [::0]` (line 1)\n    at: execution of script '<test>'\n"); }
+    #[test] fn test_str_list_slice_45() { run_str("[1, 2, 3, 4] [::0]", "ValueError: 'step' argument cannot be zero\n    at: `[1, 2, 3, 4] [::0]` (line 1)\n    at: execution of script '<test>'\n"); }
     #[test] fn test_str_list_slice_46() { run_str("[1, 2, 3, 4][:-1] . print", "[1, 2, 3]\n"); }
     #[test] fn test_str_list_slice_47() { run_str("[1, 2, 3, 4][:0] . print", "[]\n"); }
     #[test] fn test_str_list_slice_48() { run_str("[1, 2, 3, 4][:1] . print", "[1]\n"); }
@@ -969,7 +969,23 @@ mod test {
     #[test] fn test_weird_assignment() { run_str("let a = [[12]], b = 3; fn f() -> a; f()[0][-1] += b = 5; [f(), b] . print", "[[[17]], 5]\n"); }
     #[test] fn test_mutable_array_in_array_1() { run_str("let a = [0], b = [a]; b[0] = 'hi'; b. print", "['hi']\n"); }
     #[test] fn test_mutable_array_in_array_2() { run_str("let a = [0], b = [a]; b[0][0] = 'hi'; b. print", "[['hi']]\n"); }
+    #[test] fn test_list_mul_int() { run_str("[1, 2, 3] * 3 . print", "[1, 2, 3, 1, 2, 3, 1, 2, 3]\n"); }
+    #[test] fn test_int_mul_list() { run_str("3 * [1, 2, 3] . print", "[1, 2, 3, 1, 2, 3, 1, 2, 3]\n"); }
     #[test] fn test_mutable_arrays_in_assignments() { run_str("let a = [0], b = [a, a, a]; b[0][0] = 5; b . print", "[[5], [5], [5]]\n"); }
+    #[test] fn test_test_nested_array_multiplication() { run_str("let a = [[1]] * 3; a[0][0] = 2; a . print", "[[2], [2], [2]]\n"); }
+    #[test] fn test_heap_from_list() { run_str("let h = [1, 7, 3, 2, 7, 6] . heap; h . print", "[1, 2, 3, 7, 7, 6]\n"); }
+    #[test] fn test_heap_pop() { run_str("let h = [1, 7, 3, 2, 7, 6] . heap; [h.pop, h.pop, h.pop] . print", "[1, 2, 3]\n"); }
+    #[test] fn test_heap_push() { run_str("let h = [1, 7, 3, 2, 7, 6] . heap; h.push(3); h.push(-1); h.push(16); h . print", "[-1, 1, 3, 2, 7, 6, 3, 7, 16]\n"); }
+    #[test] fn test_range_1() { run_str("range(3) . print", "[0, 1, 2]\n"); }
+    #[test] fn test_range_2() { run_str("range(3, 7) . print", "[3, 4, 5, 6]\n"); }
+    #[test] fn test_range_3() { run_str("range(1, 9, 3) . print", "[1, 4, 7]\n"); }
+    #[test] fn test_range_4() { run_str("range(6, 3) . print", "[]\n"); }
+    #[test] fn test_range_5() { run_str("range(10, 4, -2) . print", "[10, 8, 6]\n"); }
+    #[test] fn test_range_6() { run_str("range(0, 20, -1) . print", "[]\n"); }
+    #[test] fn test_range_7() { run_str("range(10, 0, 3) . print", "[]\n"); }
+    #[test] fn test_range_8() { run_str("range(1, 1, 1) . print", "[]\n"); }
+    #[test] fn test_range_9() { run_str("range(1, 1, 0) . print", "ValueError: 'step' argument cannot be zero\n    at: `range(1, 1, 0) . print` (line 1)\n    at: execution of script '<test>'\n"); }
+
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }
     #[test] fn test_append_large_lists() { run("append_large_lists"); }
