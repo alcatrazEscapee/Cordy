@@ -12,9 +12,9 @@ use RuntimeError::{*};
 
 type ValueResult = Result<Value, Box<RuntimeError>>;
 
-mod lib_str;
-mod lib_list;
-mod lib_math;
+mod strings;
+mod lists;
+mod math;
 
 
 /// Looks up a `StdBinding`'s string name
@@ -66,9 +66,9 @@ pub enum StdBinding {
     List,
     Set,
     Dict,
+    Heap,
     Function,
     Repr,
-    Len,
 
     // Native Operators
     OperatorUnarySub,
@@ -104,6 +104,8 @@ pub enum StdBinding {
     Split,
 
     // lib_list
+    Len,
+    Range,
     Sum,
     Min,
     Max,
@@ -159,6 +161,7 @@ fn load_bindings() -> Vec<StdBindingInfo> {
         of!(List, "list"),
         of!(Set, "set"),
         of!(Dict, "dict"),
+        of!(Heap, "heap"),
         of!(Function, "function"),
 
         of!(Void, OperatorUnarySub, "(-)"),
@@ -199,6 +202,7 @@ fn load_bindings() -> Vec<StdBindingInfo> {
         of!(Min, "min"),
 
         of!(Len, "len"),
+        of!(Range, "range"),
         of!(Map, "map"),
         of!(Filter, "filter"),
         of!(Reduce, "reduce"),
@@ -226,9 +230,8 @@ pub fn invoke<VM>(bound: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult wher
 {
     trace::trace_interpreter!("stdlib::invoke() func={}, nargs={}", lookup_name(bound), nargs);
 
-    // Dispatch macros for 0, 1, 2 and 3 argument functions
-    // All dispatch!() cases support partial evaluation (where 0 < nargs < required args)
-    // This includes variants for default argument functions
+    // Dispatch macros for 0, 1, 2, 3 and variadic functions.
+    // Most of these will support partial evaluation where the function allows it.
     macro_rules! dispatch {
         ($ret:expr) => { // f() -> T
             match nargs {
@@ -301,6 +304,29 @@ pub fn invoke<VM>(bound: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult wher
                     let ret = $ret2;
                     ret
                 },
+                _ => IncorrectNumberOfArguments(bound.clone(), nargs, 1).err()
+            }
+        };
+        ($a1:ident, $ret1:expr, $a2:ident, $ret2:expr, $a3:ident, $ret3:expr) => { // f(T1), f(T1, T2), f(T1, T2, T3) -> T
+            match nargs {
+                1 => {
+                    let $a1: Value = vm.pop();
+                    let ret = $ret1;
+                    ret
+                },
+                2 => {
+                    let $a2: Value = vm.pop();
+                    let $a1: Value = vm.pop();
+                    let ret = $ret2;
+                    ret
+                },
+                3 => {
+                    let $a3: Value = vm.pop();
+                    let $a2: Value = vm.pop();
+                    let $a1: Value = vm.pop();
+                    let ret = $ret3;
+                    ret
+                }
                 _ => IncorrectNumberOfArguments(bound.clone(), nargs, 1).err()
             }
         };
@@ -390,8 +416,11 @@ pub fn invoke<VM>(bound: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult wher
             Ok(it) => Ok(Value::iter_set(it.into_iter().cloned())),
             Err(e) => Err(e),
         }),
+        Heap => dispatch!(a1, match a1.as_iter() {
+            Ok(it) => Ok(Value::iter_heap(it.into_iter().cloned())),
+            Err(e) => Err(e)
+        }),
         Repr => dispatch!(a1, Ok(Value::Str(Box::new(a1.as_repr_str())))),
-        Len => dispatch!(a1, a1.len().map(|u| Value::Int(u as i64))),
 
         // operator
         OperatorUnarySub => dispatch!(a1, operator::unary_sub(a1)),
@@ -417,48 +446,50 @@ pub fn invoke<VM>(bound: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult wher
         OperatorNotEqual => dispatch!(a1, a2, Ok(operator::binary_not_equals(a2, a1))),
 
         // lib_str
-        ToLower => dispatch!(a1, lib_str::to_lower(a1)),
-        ToUpper => dispatch!(a1, lib_str::to_upper(a1)),
-        Replace => dispatch!(a1, a2, a3, lib_str::replace(a1, a2, a3)),
-        Trim => dispatch!(a1, lib_str::trim(a1)),
-        IndexOf => dispatch!(a1, a2, lib_str::index_of(a1, a2)),
-        CountOf => dispatch!(a1, a2, lib_str::count_of(a1, a2)),
-        Split => dispatch!(a1, a2, lib_str::split(a1, a2)),
+        ToLower => dispatch!(a1, strings::to_lower(a1)),
+        ToUpper => dispatch!(a1, strings::to_upper(a1)),
+        Replace => dispatch!(a1, a2, a3, strings::replace(a1, a2, a3)),
+        Trim => dispatch!(a1, strings::trim(a1)),
+        IndexOf => dispatch!(a1, a2, strings::index_of(a1, a2)),
+        CountOf => dispatch!(a1, a2, strings::count_of(a1, a2)),
+        Split => dispatch!(a1, a2, strings::split(a1, a2)),
 
         // lib_list
-        Sum => dispatch!(an, lib_list::sum(an.into_iter()), Sum),
-        Max => dispatch!(an, lib_list::max(an.into_iter()), Max),
-        Min => dispatch!(an, lib_list::min(an.into_iter()), Min),
-        Map => dispatch!(a1, a2, lib_list::map(vm, a1, a2)),
-        Filter => dispatch!(a1, a2, lib_list::filter(vm, a1, a2)),
-        Reduce => dispatch!(a1, a2, lib_list::reduce(vm, a1, a2)),
-        Sorted => dispatch!(an, lib_list::sorted(an.into_iter()), Sorted),
-        Reversed => dispatch!(an, lib_list::reversed(an.into_iter()), Reversed),
+        Len => dispatch!(a1, a1.len().map(|u| Value::Int(u as i64))),
+        Range => dispatch!(a1, lists::range_1(a1), a2, lists::range_2(a1, a2), a3, lists::range_3(a1, a2, a3)),
+        Sum => dispatch!(an, lists::sum(an.into_iter()), Sum),
+        Max => dispatch!(an, lists::max(an.into_iter()), Max),
+        Min => dispatch!(an, lists::min(an.into_iter()), Min),
+        Map => dispatch!(a1, a2, lists::map(vm, a1, a2)),
+        Filter => dispatch!(a1, a2, lists::filter(vm, a1, a2)),
+        Reduce => dispatch!(a1, a2, lists::reduce(vm, a1, a2)),
+        Sorted => dispatch!(an, lists::sorted(an.into_iter()), Sorted),
+        Reversed => dispatch!(an, lists::reversed(an.into_iter()), Reversed),
 
-        Pop => dispatch!(a1, lib_list::pop(a1)),
-        Push => dispatch!(a1, a2, lib_list::push(a1, a2)),
-        Last => dispatch!(a1, lib_list::last(a1)),
-        Head => dispatch!(a1, lib_list::head(a1)),
-        Init => dispatch!(a1, lib_list::init(a1)),
-        Tail => dispatch!(a1, lib_list::tail(a1)),
+        Pop => dispatch!(a1, lists::pop(a1)),
+        Push => dispatch!(a1, a2, lists::push(a1, a2)),
+        Last => dispatch!(a1, lists::last(a1)),
+        Head => dispatch!(a1, lists::head(a1)),
+        Init => dispatch!(a1, lists::init(a1)),
+        Tail => dispatch!(a1, lists::tail(a1)),
 
         // lib_math
-        Abs => dispatch!(a1, lib_math::abs(a1)),
+        Abs => dispatch!(a1, math::abs(a1)),
 
         _ => BindingIsNotFunctionEvaluable(bound.clone()).err(),
     }
 }
 
 pub fn list_get_index(list_ref: Mut<VecDeque<Value>>, index: i64) -> ValueResult {
-    lib_list::list_get_index(list_ref, index)
+    lists::list_get_index(list_ref, index)
 }
 
 pub fn list_set_index(list_ref: Mut<VecDeque<Value>>, index: i64, value: Value) -> Result<(), Box<RuntimeError>> {
-    lib_list::list_set_index(list_ref, index, value)
+    lists::list_set_index(list_ref, index, value)
 }
 
 pub fn list_slice(a1: Value, a2: Value, a3: Value, a4: Value) -> ValueResult {
-    lib_list::list_slice(a1, a2, a3, a4)
+    lists::list_slice(a1, a2, a3, a4)
 }
 
 

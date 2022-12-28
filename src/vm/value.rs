@@ -1,7 +1,7 @@
 use std::borrow::Borrow;
 use std::cell::{Ref, RefCell, RefMut};
-use std::cmp::Ordering;
-use std::collections::VecDeque;
+use std::cmp::{Ordering, Reverse};
+use std::collections::{BinaryHeap, VecDeque};
 use std::fmt::Debug;
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
@@ -13,6 +13,7 @@ use crate::vm::error::RuntimeError;
 
 use Value::{*};
 use RuntimeError::TypeErrorArgMustBeIterable;
+use crate::vm::error::RuntimeError::TypeErrorArgMustBeInt;
 
 
 /// The runtime sum type used by the virtual machine
@@ -35,6 +36,9 @@ pub enum Value {
     Set(Mut<LinkedHashSet<Value>>),
     Dict(Mut<LinkedHashMap<Value, Value>>),
 
+    // Unique Structures
+    Heap(Mut<ValueHeap>), // `List` functions as both Array + Deque, but that makes it unviable for a heap. So, we have a dedicated heap structure
+
     // Functions
     Binding(StdBinding),
     PartialBinding(StdBinding, Box<Vec<Box<Value>>>),
@@ -45,7 +49,8 @@ impl Value {
 
     // Constructors
     pub fn iter_list(vec: impl Iterator<Item=Value>) -> Value { List(Mut::new(vec.collect::<VecDeque<Value>>())) }
-    pub fn iter_set(vec: impl Iterator<Item=Value>) -> Value { Set(Mut::new(vec.collect::<LinkedHashSet<Value>>()))}
+    pub fn iter_set(vec: impl Iterator<Item=Value>) -> Value { Set(Mut::new(vec.collect::<LinkedHashSet<Value>>())) }
+    pub fn iter_heap(vec: impl Iterator<Item=Value>) -> Value { Heap(Mut::new(ValueHeap::new(vec.map(|t| Reverse(t)).collect::<BinaryHeap<Reverse<Value>>>()))) }
 
     pub fn list(vec: Vec<Value>) -> Value { List(Mut::new(vec.into_iter().collect::<VecDeque<Value>>())) }
     pub fn set(set: LinkedHashSet<Value>) -> Value { Set(Mut::new(set)) }
@@ -79,14 +84,9 @@ impl Value {
             List(v) => format!("[{}]", v.unbox().iter().map(|t| t.as_repr_str()).collect::<Vec<String>>().join(", ")),
             Set(v) => format!("{{{}}}", v.unbox().iter().map(|t| t.as_repr_str()).collect::<Vec<String>>().join(", ")),
             Dict(v) => format!("{{{}}}", v.unbox().iter().map(|(k, v)| format!("{}: {}", k.as_repr_str(), v.as_repr_str())).collect::<Vec<String>>().join(", ")),
-            Function(f) => (*f).as_ref().borrow().as_str()/*{
-                let f = (*f).as_ref().borrow();
-                format!("fn {}({})", f.name, f.args.join(", "))
-            }*/,
-            PartialFunction(f) => (*f).as_ref().borrow().func.as_str()/*{
-                let f = (*f).as_ref().borrow();
-                format!("fn {}({})", f.func.name, f.func.args.join(", "))
-            }*/,
+            Heap(v) => format!("[{}]", v.unbox().heap.iter().map(|t| t.0.as_repr_str()).collect::<Vec<String>>().join(", ")),
+            Function(f) => (*f).as_ref().borrow().as_str(),
+            PartialFunction(f) => (*f).as_ref().borrow().func.as_str(),
             Binding(b) => format!("fn {}()", stdlib::lookup_name(*b)),
             PartialBinding(b, _) => format!("fn {}()", stdlib::lookup_name(*b)),
         }
@@ -102,6 +102,7 @@ impl Value {
             List(_) => "list",
             Set(_) => "set",
             Dict(_) => "dict",
+            Heap(_) => "heap",
             Function(_) => "function",
             PartialFunction(_) => "partial function",
             Binding(_) => "native function",
@@ -123,10 +124,27 @@ impl Value {
             List(l) => !l.unbox().is_empty(),
             Set(v) => !v.unbox().is_empty(),
             Dict(v) => !v.unbox().is_empty(),
+            Heap(v) => !v.unbox().heap.is_empty(),
             Function(_) => true,
             PartialFunction(_) => true,
             Binding(_) => true,
             PartialBinding(_, _) => true,
+        }
+    }
+
+    pub fn as_int(self: &Self) -> Result<i64, Box<RuntimeError>> {
+        match self {
+            Int(i) => Ok(*i),
+            _ => TypeErrorArgMustBeInt(self.clone()).err(),
+        }
+    }
+
+    /// Like `as_int()` but converts `Nil` to the provided default value
+    pub fn as_int_or(self: &Self, def: i64) -> Result<i64, Box<RuntimeError>> {
+        match self {
+            Nil => Ok(def),
+            Int(i) => Ok(*i),
+            _ => TypeErrorArgMustBeInt(self.clone()).err(),
         }
     }
 
@@ -141,6 +159,7 @@ impl Value {
             List(l) => Ok(ValueIntoIter::List(l.unbox())),
             Set(s) => Ok(ValueIntoIter::Set(s.unbox())),
             Dict(d) => Ok(ValueIntoIter::Dict(d.unbox())),
+            Heap(v) => Ok(ValueIntoIter::Heap(v.unbox())),
             _ => TypeErrorArgMustBeIterable(self.clone()).err(),
         }
     }
@@ -151,6 +170,7 @@ impl Value {
             List(it) => Ok(it.unbox().len()),
             Set(it) => Ok(it.unbox().len()),
             Dict(it) => Ok(it.unbox().len()),
+            Heap(it) => Ok(it.unbox().heap.len()),
             _ => TypeErrorArgMustBeIterable(self.clone()).err()
         }
     }
@@ -210,6 +230,11 @@ impl Ord for Value {
                 let rs = (*r).unbox();
                 ls.cmp(&rs)
             },
+            (Heap(l), Heap(r)) => {
+                let ls = (*l).unbox();
+                let rs = (*r).unbox();
+                ls.heap.iter().cmp(&rs.heap)
+            }
             // Un-order-able things are defined as equal ordering
             (_, _) => Ordering::Equal,
         }
@@ -291,12 +316,42 @@ impl Hash for PartialFunctionImpl {
     }
 }
 
+/// As `BinaryHeap` is missing `Eq`, `PartialEq`, and `Hash` implementations
+/// We also wrap values in `Reverse` as we want to expose a min-heap by default
+#[derive(Debug, Clone)]
+pub struct ValueHeap {
+    pub heap: BinaryHeap<Reverse<Value>>
+}
+
+impl ValueHeap {
+    pub fn new(heap: BinaryHeap<Reverse<Value>>) -> ValueHeap {
+        ValueHeap { heap }
+    }
+}
+
+impl PartialEq<Self> for ValueHeap {
+    fn eq(&self, other: &Self) -> bool {
+        self.heap.len() == other.heap.len() && self.heap.iter().zip(other.heap.iter()).all(|(x, y)| x == y)
+    }
+}
+
+impl Eq for ValueHeap {}
+
+impl Hash for ValueHeap {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        for v in &self.heap {
+            v.hash(state)
+        }
+    }
+}
+
 // Escapes iterators all having different concrete types
 pub enum ValueIter<'a> {
     Str(std::slice::Iter<'a, Value>),
     List(std::collections::vec_deque::Iter<'a, Value>),
     Set(hashlink::linked_hash_set::Iter<'a, Value>),
     Dict(hashlink::linked_hash_map::Keys<'a, Value, Value>),
+    Heap(std::collections::binary_heap::Iter<'a, Reverse<Value>>),
 }
 
 impl<'a> Iterator for ValueIter<'a> {
@@ -308,6 +363,7 @@ impl<'a> Iterator for ValueIter<'a> {
             ValueIter::List(it) => it.next(),
             ValueIter::Set(it) => it.next(),
             ValueIter::Dict(it) => it.next(),
+            ValueIter::Heap(it) => it.next().map(|u| &u.0),
         }
     }
 }
@@ -319,6 +375,7 @@ impl<'a> DoubleEndedIterator for ValueIter<'a> {
             ValueIter::List(it) => it.next_back(),
             ValueIter::Set(it) => it.next_back(),
             ValueIter::Dict(it) => it.next_back(),
+            ValueIter::Heap(it) => it.next_back().map(|u| &u.0),
         }
     }
 }
@@ -329,6 +386,7 @@ pub enum ValueIntoIter<'a> {
     List(Ref<'a, VecDeque<Value>>),
     Set(Ref<'a, LinkedHashSet<Value>>),
     Dict(Ref<'a, LinkedHashMap<Value, Value>>),
+    Heap(Ref<'a, ValueHeap>)
 }
 
 impl<'b: 'a, 'a> IntoIterator for &'b ValueIntoIter<'a> {
@@ -341,6 +399,7 @@ impl<'b: 'a, 'a> IntoIterator for &'b ValueIntoIter<'a> {
             ValueIntoIter::List(it) => ValueIter::List(it.iter()),
             ValueIntoIter::Set(it) => ValueIter::Set(it.iter()),
             ValueIntoIter::Dict(it) => ValueIter::Dict(it.keys()),
+            ValueIntoIter::Heap(it) => ValueIter::Heap(it.heap.iter()),
         }
     }
 }

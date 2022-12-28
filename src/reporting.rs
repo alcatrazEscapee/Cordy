@@ -7,7 +7,6 @@ use crate::stdlib::StdBinding;
 use crate::vm::error::{RuntimeError, DetailRuntimeError, StackTraceFrame};
 use crate::vm::opcode::Opcode;
 use crate::vm::value::{FunctionImpl, Value};
-use crate::vm::VirtualMachine;
 use crate::misc;
 
 pub struct ErrorReporter<'a> {
@@ -81,12 +80,6 @@ impl ProvidesLineNumber for CompileResult {
     }
 }
 
-impl<R, W> ProvidesLineNumber for VirtualMachine<R, W> {
-    fn line_number(self: &Self, ip: usize) -> u16 {
-        self.line_numbers.line_number(ip)
-    }
-}
-
 
 trait AsError {
     fn format_error(self: &Self) -> String;
@@ -103,13 +96,12 @@ impl AsError for RuntimeError {
             RuntimeError::IncorrectNumberOfArguments(b, e, a) => format!("Function '{}' requires {} parameters but {} were present.", b.format_error(), e, a),
             RuntimeError::IncorrectNumberOfArgumentsVariadicAtLeastOne(b) => format!("Function '{}' requires at least 1 parameter but none were present.", b.format_error()),
             RuntimeError::IndexOutOfBounds(i, ln) => format!("Index '{}' is out of bounds for list of length [0, {})", i, ln),
-            RuntimeError::SliceStepZero => String::from("Cannot slice a list with a step of 0"),
+            RuntimeError::ValueErrorStepCannotBeZero => String::from("ValueError: 'step' argument cannot be zero"),
             RuntimeError::TypeErrorUnaryOp(op, v) => format!("TypeError: Argument to unary '{}' must be an int, got {}", op.format_error(), v.format_error()),
             RuntimeError::TypeErrorBinaryOp(op, l, r) => format!("TypeError: Cannot {} {} and {}", op.format_error(), l.format_error(), r.format_error()),
             RuntimeError::TypeErrorBinaryIs(l, r) => format!("TypeError: {} is not a type and cannot be used with binary 'is' on {}", r.format_error(), l.format_error()),
             RuntimeError::TypeErrorCannotConvertToInt(v) => format!("TypeError: Cannot convert {} to an int", v.format_error()),
             RuntimeError::TypeErrorCannotSlice(ls) => format!("TypeError: Cannot slice {}", ls.format_error()),
-            RuntimeError::TypeErrorSliceArgMustBeInt(e, v) => format!("TypeError: Cannot slice list with {} argument {}", e, v.format_error()),
             RuntimeError::TypeErrorArgMustBeInt(v) => format!("TypeError: Expected {} to be a int", v.format_error()),
             RuntimeError::TypeErrorArgMustBeStr(v) => format!("TypeError: Expected {} to be a string", v.format_error()),
             RuntimeError::TypeErrorArgMustBeIterable(v) => format!("TypeError: Expected {} to be an iterable", v.format_error()),
