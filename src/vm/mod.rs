@@ -1017,6 +1017,8 @@ mod test {
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }
     #[test] fn test_append_large_lists() { run("append_large_lists"); }
     #[test] fn test_fibonacci() { run("fibonacci"); }
+    #[test] fn test_function_capture_from_inner_scope() { run("function_capture_from_inner_scope"); }
+    #[test] fn test_function_capture_from_outer_scope() { run("function_capture_from_outer_scope"); }
     #[test] fn test_runtime_error_with_trace() { run("runtime_error_with_trace"); }
 
 
