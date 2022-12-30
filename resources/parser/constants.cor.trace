@@ -1,0 +1,13 @@
+L1: 0000 Str(0) -> "hello"
+    0001 Int(0) -> 1
+    0002 OpFuncCompose
+    0003 Str(0) -> "hello"
+    0004 OpFuncCompose
+    0005 Int(0) -> 1
+    0006 OpFuncCompose
+    0007 Str(0) -> "hello"
+    0008 OpFuncCompose
+    0009 Int(0) -> 1
+    0010 OpFuncCompose
+    0011 Pop
+    0012 Exit

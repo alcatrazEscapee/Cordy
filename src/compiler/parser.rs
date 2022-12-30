@@ -1306,11 +1306,17 @@ impl Parser {
     // ===== Semantic Analysis ===== //
 
     fn declare_string(self: &mut Self, str: String) -> u16 {
+        if let Some(id) = self.strings.iter().position(|s| s == &str) {
+            return id as u16
+        }
         self.strings.push(str);
         (self.strings.len() - 1) as u16
     }
 
     fn declare_constant(self: &mut Self, int: i64) -> u16 {
+        if let Some(id) = self.constants.iter().position(|i| *i == int) {
+            return id as u16
+        }
         self.constants.push(int);
         (self.constants.len() - 1) as u16
     }
@@ -1743,6 +1749,7 @@ mod tests {
     #[test] fn test_let_no_expression() { run_err("let x = &", "Expected an expression terminal, got '&' token instead\n  at: line 1 (<test>)\n  at:\n\nlet x = &\n"); }
 
     #[test] fn test_break_past_locals() { run("break_past_locals"); }
+    #[test] fn test_constants() { run("constants"); }
     #[test] fn test_continue_past_locals() { run("continue_past_locals"); }
     #[test] fn test_empty() { run("empty"); }
     #[test] fn test_expressions() { run("expressions"); }
