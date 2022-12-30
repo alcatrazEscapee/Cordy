@@ -1,0 +1,3 @@
+for x in range(4, 7) {
+    x . print
+}

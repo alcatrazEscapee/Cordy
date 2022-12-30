@@ -571,7 +571,7 @@ impl Parser {
 
                 self.advance(); // Consume `range`
                 self.expect(OpenParen);
-                self.parse_expression(); // The first argument, places into `local_stop`
+                self.parse_expression(); // The first argument, places into `local_x`
                 match self.peek() {
                     Some(CloseParen) => {
                         // Single argument `range()`, so we set push 0 for `local_x`, and then use simple increment (+1) and less than (< local_stop)
@@ -582,7 +582,6 @@ impl Parser {
                         self.push(Swap);
 
                         // Initialize the loop variable, as we're now in the main block and it can be referenced
-                        // The loop variables cannot be referenced.
                         if let Some(local_x) = local_x {
                             self.locals[local_x].initialized = true;
                         }
@@ -617,7 +616,53 @@ impl Parser {
                     Some(Comma) => {
                         self.advance(); // Consume the `,` and continue
                     }
-                    t_ => {},
+                    _ => self.error_with(|t| ExpectedCommaOrEndOfArguments(t)),
+                }
+
+                self.parse_expression();
+                match self.peek() {
+                    Some(CloseParen) => {
+                        // Two argument `for x in range(start, stop)` intrinsic.
+                        // Since the step is known we can use `<` as a comparison
+                        // The two expressions (start, stop) have already been placed in the stack and we already declared a synthetic local for `stop`
+                        self.advance();
+
+                        // Initialize the loop variable, as we're now in the main block and it can be referenced
+                        if let Some(local_x) = local_x {
+                            self.locals[local_x].initialized = true;
+                        }
+
+                        // Bounds check and branch to end
+                        let jump = self.next_opcode();
+                        self.push_load_local(local_x.unwrap_or(0));
+                        self.push_load_local(local_stop);
+                        self.push(OpLessThan);
+                        let jump_if_false_pop = self.reserve();
+
+                        // Parse the body of the loop and emit
+                        self.parse_block_statement();
+                        self.push_delayed_pop();
+
+                        // Increment and jump to head
+                        let constant_1 = self.declare_constant(1);
+                        self.push_load_local(local_x.unwrap_or(0));
+                        self.push(Opcode::Int(constant_1));
+                        self.push(OpAdd);
+                        self.push_store_local(local_x.unwrap_or(0));
+                        self.push(Opcode::Pop);
+                        self.push(Jump(jump));
+
+                        // Fix the jump
+                        self.output[jump_if_false_pop] = JumpIfFalsePop(self.next_opcode());
+
+                        self.pop_locals_in_current_scope_depth(true);
+                        self.scope_depth -= 1;
+                        return
+                    },
+                    Some(Comma) => {
+                        self.advance(); // Consume `,`
+                    },
+                    _ => self.error_with(|t| ExpectedCommaOrEndOfArguments(t)),
                 }
             },
             _ => {
@@ -1749,6 +1794,7 @@ mod tests {
     #[test] fn test_continue_past_locals() { run("continue_past_locals"); }
     #[test] fn test_empty() { run("empty"); }
     #[test] fn test_expressions() { run("expressions"); }
+    #[test] fn test_for_intrinsic_range_start_stop() { run("for_intrinsic_range_start_stop"); }
     #[test] fn test_for_intrinsic_range_stop() { run("for_intrinsic_range_stop"); }
     #[test] fn test_for_no_intrinsic() { run("for_no_intrinsic"); }
     #[test] fn test_function() { run("function"); }

@@ -1011,6 +1011,7 @@ mod test {
     #[test] fn test_for_loop_no_intrinsic_with_set() { run_str("for x in 'foobar' . set { x . print }", "f\no\nb\na\nr\n") }
     #[test] fn test_for_loop_no_intrinsic_with_str() { run_str("for x in 'hello' { x . print }", "h\ne\nl\nl\no\n") }
     #[test] fn test_for_loop_intrinsic_range_stop() { run_str("for x in range(5) { x . print }", "0\n1\n2\n3\n4\n"); }
+    #[test] fn test_for_loop_intrinsic_range_start_stop() { run_str("for x in range(3, 6) { x . print }", "3\n4\n5\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }
