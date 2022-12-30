@@ -1,4 +1,4 @@
-L01: 0000 Function(0 -> FunctionImpl { head: 2, tail: 29, nargs: 0, name: "foo", args: [] })
+L01: 0000 Function(0) -> FunctionImpl { head: 2, tail: 29, nargs: 0, name: "foo", args: [] }
      0001 Jump(30)
 L02: 0002 True
      0003 JumpIfFalsePop(8)
@@ -18,7 +18,7 @@ L07: 0014 Nil
 L08: 0017 Pop
      0018 Nil
      0019 JumpIfFalsePop(24)
-L09: 0020 Int(0 -> 123)
+L09: 0020 Int(0) -> 123
      0021 Return
 L10: 0022 Nil
      0023 Jump(25)

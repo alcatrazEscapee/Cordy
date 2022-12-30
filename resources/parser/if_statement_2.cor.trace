@@ -1,13 +1,13 @@
-L1: 0000 Int(0 -> 5)
-    0001 Int(1 -> 3)
+L1: 0000 Int(0) -> 5
+    0001 Int(1) -> 3
     0002 OpLessThan
     0003 JumpIfFalsePop(8)
 L2: 0004 Bound(Print)
-    0005 Str(0 -> "yes")
+    0005 Str(0) -> "yes"
     0006 OpFuncEval(1)
 L3: 0007 Jump(11)
 L4: 0008 Bound(Print)
-    0009 Str(1 -> "no")
+    0009 Str(1) -> "no"
     0010 OpFuncEval(1)
 L5: 0011 Pop
     0012 Exit

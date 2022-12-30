@@ -4,6 +4,8 @@ use crate::reporting::{ErrorReporter, ProvidesLineNumber};
 use crate::vm::opcode::Opcode;
 use crate::vm::value::FunctionImpl;
 
+use Opcode::{*};
+
 pub mod scanner;
 pub mod parser;
 
@@ -45,6 +47,7 @@ pub struct CompileResult {
     pub functions: Vec<FunctionImpl>,
 
     pub line_numbers: Vec<u16>,
+    pub locals: Vec<String>,
 }
 
 
@@ -60,6 +63,7 @@ impl CompileResult {
         }
 
         let mut last_line_no: u16 = 0;
+        let mut locals = self.locals.iter();
         for (ip, token) in self.code.iter().enumerate() {
             let line_no = self.line_number(ip);
             let label: String = if line_no + 1 != last_line_no {
@@ -69,9 +73,16 @@ impl CompileResult {
                 " ".repeat(width + 3)
             };
             let asm: String = match token {
-                Opcode::Int(cid) => format!("Int({} -> {})", cid, self.constants[*cid as usize]),
-                Opcode::Str(sid) => format!("Str({} -> {:?})", sid, self.strings[*sid as usize]),
-                Opcode::Function(fid) => format!("Function({} -> {:?})", fid, self.functions[*fid as usize]),
+                Int(cid) => format!("Int({}) -> {}", cid, self.constants[*cid as usize]),
+                Str(sid) => format!("Str({}) -> {:?}", sid, self.strings[*sid as usize]),
+                Function(fid) => format!("Function({}) -> {:?}", fid, self.functions[*fid as usize]),
+                t @ (PushGlobal(_) | StoreGlobal(_) | PushLocal(_) | StoreLocal(_)) => {
+                    if let Some(local) = locals.next() {
+                        format!("{:?} -> {}", t, local)
+                    } else {
+                        format!("{:?}", t)
+                    }
+                },
                 t => format!("{:?}", t),
             };
             lines.push(format!("{}{:0>4} {}", label, ip % 10_000, asm));
