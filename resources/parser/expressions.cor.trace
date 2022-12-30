@@ -5,46 +5,46 @@ L1: 0000 Nil
     0004 Nil
     0005 Nil
     0006 Nil
-L2: 0007 Int(0 -> 1)
-    0008 Int(1 -> 2)
-    0009 Int(2 -> 3)
+L2: 0007 Int(0) -> 1
+    0008 Int(1) -> 2
+    0009 Int(2) -> 3
     0010 OpMul
     0011 OpAdd
-    0012 Int(3 -> 4)
-    0013 Int(4 -> 5)
+    0012 Int(3) -> 4
+    0013 Int(4) -> 5
     0014 OpDiv
     0015 OpSub
-    0016 StoreGlobal(0)
+    0016 StoreGlobal(0) -> x
     0017 Pop
-    0018 PushGlobal(1)
-L3: 0019 PushGlobal(2)
-    0020 Int(5 -> 1)
-    0021 Int(6 -> 2)
+    0018 PushGlobal(1) -> foo
+L3: 0019 PushGlobal(2) -> bar
+    0020 Int(5) -> 1
+    0021 Int(6) -> 2
     0022 OpAdd
     0023 OpFuncEval(1)
     0024 OpFuncCompose
-    0025 PushGlobal(3)
-    0026 PushGlobal(0)
+    0025 PushGlobal(3) -> baz
+    0026 PushGlobal(0) -> x
     0027 OpFuncEval(1)
     0028 OpFuncCompose
-    0029 PushGlobal(6)
+    0029 PushGlobal(6) -> z
     0030 OpFuncCompose
-    0031 StoreGlobal(0)
+    0031 StoreGlobal(0) -> x
     0032 Pop
-    0033 PushGlobal(4)
-    0034 PushGlobal(5)
+    0033 PushGlobal(4) -> three
+    0034 PushGlobal(5) -> four
 L4: 0035 OpFuncCompose
     0036 JumpIfFalse(41)
     0037 Pop
-    0038 Int(7 -> 1)
-    0039 Int(8 -> 2)
+    0038 Int(7) -> 1
+    0039 Int(8) -> 2
     0040 OpGreaterThan
     0041 JumpIfTrue(46)
     0042 Pop
-    0043 Int(9 -> 6)
-    0044 Int(10 -> 7)
+    0043 Int(9) -> 6
+    0044 Int(10) -> 7
     0045 OpGreaterThanEqual
-    0046 StoreGlobal(0)
+    0046 StoreGlobal(0) -> x
     0047 Pop
     0048 PopN(7)
     0049 Exit

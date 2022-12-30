@@ -1,6 +1,6 @@
 L1: 0000 Pop
-L2: 0001 Int(0 -> 3)
-L4: 0002 PushGlobal(0)
+L2: 0001 Int(0) -> 3
+L4: 0002 PushGlobal(0) -> y
     0003 Pop
 L5: 0004 Pop
     0005 Exit

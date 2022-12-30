@@ -25,6 +25,7 @@ pub fn parse(scan_result: ScanResult) -> CompileResult {
         functions: parser.functions,
 
         line_numbers: parser.line_numbers,
+        locals: parser.locals_reference,
     }
 }
 
@@ -75,6 +76,7 @@ struct Parser {
 
     lineno: u16,
     line_numbers: Vec<u16>,
+    locals_reference: Vec<String>, // A reference for local names on a per-instruction basis, used for disassembly
 
     // If we are in error recover mode, this flag is set
     error_recovery: bool,
@@ -152,6 +154,7 @@ impl Parser {
 
             lineno: 0,
             line_numbers: Vec::new(),
+            locals_reference: Vec::new(),
 
             error_recovery: false,
             prevent_expression_statement: false,
@@ -1251,17 +1254,17 @@ impl Parser {
                 let last: usize = self.last();
                 match self.output[last] {
                     PushLocal(id) => {
-                        self.output.pop();
+                        self.pop();
                         self.parse_expr_10();
                         self.push(StoreLocal(id));
                     },
                     PushGlobal(id) => {
-                        self.output.pop();
+                        self.pop();
                         self.parse_expr_10();
                         self.push(StoreGlobal(id));
                     },
                     OpIndex => {
-                        self.output.pop();
+                        self.pop();
                         self.parse_expr_10();
                         self.push(StoreArray);
                     },
@@ -1283,7 +1286,7 @@ impl Parser {
                         self.push(StoreGlobal(id));
                     },
                     OpIndex => {
-                        self.output.pop();
+                        self.pop();
                         self.push(OpIndexPeek);
                         self.parse_expr_10();
                         self.push(op);
@@ -1358,7 +1361,6 @@ impl Parser {
             }
         }
 
-        // Local variable is free of conflicts
         let local: Local = Local::new(name, self.scope_depth, self.function_depth, local_index);
         self.locals.push(local);
         self.locals.len() - 1
@@ -1395,6 +1397,20 @@ impl Parser {
             }
         }
         self.push_pop(local_depth);
+    }
+
+    fn resolve_local(self: &Self, local_id: u16, global: bool) -> &Local {
+        let mut local_index: u16 = 0;
+        let target_depth: u16 = if global { 0 } else { self.function_depth };
+        for local in &self.locals {
+            if local.function_depth == target_depth {
+                if local_id == local_index {
+                    return local
+                }
+                local_index += 1;
+            }
+        }
+        panic!("Could not find a local {} in locals {:?}", local_id, self.locals);
     }
 
     fn resolve_identifier(self: &mut Self, name: &String) -> VariableType {
@@ -1614,8 +1630,29 @@ impl Parser {
     /// Returns the index of the token pushed, which allows callers to later mutate that token if they need to.
     fn push(self: &mut Self, token: Opcode) {
         trace::trace_parser!("push {:?} at L{:?}", token, self.lineno + 1);
+        match &token {
+            PushGlobal(id) | StoreGlobal(id) => {
+                let local = self.resolve_local(*id, true);
+                self.locals_reference.push(local.name.clone());
+            },
+            PushLocal(id) | StoreLocal(id) => {
+                let local = self.resolve_local(*id, false);
+                self.locals_reference.push(local.name.clone());
+            },
+            _ => {},
+        }
         self.output.push(token);
         self.line_numbers.push(self.lineno);
+    }
+
+    /// Pops the last emitted token
+    fn pop(self: &mut Self) {
+        match self.output.pop().unwrap() {
+            PushGlobal(_) | StoreGlobal(_) | PushLocal(_) | StoreLocal(_) => {
+                self.locals_reference.pop();
+            },
+            _ => {},
+        };
     }
 
     /// Returns the index of the last token that was just pushed.
