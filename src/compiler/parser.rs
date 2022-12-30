@@ -324,7 +324,7 @@ impl Parser {
 
     fn parse_function_body(self: &mut Self, args: Vec<String>, func_id: Option<u16>) {
         trace::trace_parser!("rule <function-body>");
-        let jump: u16 = self.reserve(); // Jump over the function itself, the first time we encounter it
+        let jump = self.reserve(); // Jump over the function itself, the first time we encounter it
         let prev_pop_status: bool = self.delay_pop_from_expression_statement; // Stack semantics for the delayed pop
 
         // Functions have their own depth tracking in addition to scope
@@ -397,7 +397,7 @@ impl Parser {
         self.scope_depth -= 1;
 
         let end: u16 = self.next_opcode(); // Repair the jump
-        self.output[jump as usize] = Jump(end);
+        self.output[jump] = Jump(end);
         self.delay_pop_from_expression_statement = prev_pop_status; // Exit the stack
     }
 
@@ -441,7 +441,7 @@ impl Parser {
         self.advance();
         self.push_delayed_pop();
         self.parse_expression();
-        let jump_if_false: u16 = self.reserve(); // placeholder for jump to the beginning of an if branch, if it exists
+        let jump_if_false = self.reserve(); // placeholder for jump to the beginning of an if branch, if it exists
         self.parse_block_statement();
 
         // We treat `if` statements as expressions - each branch will create an value on the stack, and we set this flag at the end of parsing the `if`
@@ -457,18 +457,18 @@ impl Parser {
         match self.peek() {
             Some(KeywordElif) => {
                 // Don't advance, as `parse_if_statement()` will advance the first token
-                let jump: u16 = self.reserve();
+                let jump = self.reserve();
                 let after_if: u16 = self.next_opcode();
-                self.output[jump_if_false as usize] = JumpIfFalsePop(after_if);
+                self.output[jump_if_false] = JumpIfFalsePop(after_if);
                 self.delay_pop_from_expression_statement = false;
                 self.parse_if_statement();
                 let after_else: u16 = self.next_opcode();
-                self.output[jump as usize] = Jump(after_else);
+                self.output[jump] = Jump(after_else);
             },
             Some(KeywordElse) => {
                 // `else` is present, so we first insert an unconditional jump, parse the next block, then fix the first jump
                 self.advance();
-                let jump: u16 = self.reserve();
+                let jump = self.reserve();
                 let after_if: u16 = self.next_opcode();
                 self.output[jump_if_false as usize] = JumpIfFalsePop(after_if);
                 self.delay_pop_from_expression_statement = false;
@@ -478,16 +478,16 @@ impl Parser {
                     self.push(Opcode::Nil);
                 }
                 let after_else: u16 = self.next_opcode();
-                self.output[jump as usize] = Jump(after_else);
+                self.output[jump] = Jump(after_else);
             },
             _ => {
                 // No `else`, but we need to wire in a fake `else` statement which just pushes `Nil` so each branch still pushes a value
-                let jump: u16 = self.reserve();
+                let jump = self.reserve();
                 let after_if: u16 = self.next_opcode();
                 self.output[jump_if_false as usize] = JumpIfFalsePop(after_if);
                 self.push(Opcode::Nil);
                 let after_else: u16 = self.next_opcode();
-                self.output[jump as usize] = Jump(after_else);
+                self.output[jump] = Jump(after_else);
             },
         }
     }
@@ -512,7 +512,7 @@ impl Parser {
         self.parse_expression(); // While condition
         self.push(Bound(Bool)); // Evaluate the condition with `<expr> . bool` automatically
         self.push(OpFuncCompose);
-        let jump_if_false: u16 = self.reserve(); // Jump to the end
+        let jump_if_false = self.reserve(); // Jump to the end
         self.parse_block_statement(); // Inner loop statements, and jump back to front
         self.push(Jump(loop_start));
 
@@ -522,7 +522,7 @@ impl Parser {
             self.output[break_opcode as usize] = Jump(loop_end);
         }
 
-        self.output[jump_if_false as usize] = JumpIfFalsePop(loop_end); // Fix the initial conditional jump
+        self.output[jump_if_false] = JumpIfFalsePop(loop_end); // Fix the initial conditional jump
     }
 
     fn parse_loop_statement(self: &mut Self) {
@@ -629,7 +629,7 @@ impl Parser {
                 self.push(Bound(Len));
                 self.push(OpFuncCompose);
                 self.push(OpLessThan);
-                let jump_if_false_pop: u16 = self.reserve();
+                let jump_if_false_pop = self.reserve();
 
                 // Initialize the loop variable
                 if let Some(local_x) = local_x {
@@ -654,7 +654,7 @@ impl Parser {
                 self.push(Jump(jump));
 
                 // Fix the jump
-                self.output[jump_if_false_pop as usize] = JumpIfFalsePop(self.next_opcode());
+                self.output[jump_if_false_pop] = JumpIfFalsePop(self.next_opcode());
 
                 self.pop_locals_in_current_scope_depth(true);
                 self.scope_depth -= 1;
@@ -669,8 +669,8 @@ impl Parser {
         match self.loops.last() {
             Some(_) => {
                 self.pop_locals_in_current_loop();
-                let jump: u16 = self.reserve();
-                self.loops.last_mut().unwrap().break_statements.push(jump);
+                let jump = self.reserve();
+                self.loops.last_mut().unwrap().break_statements.push(jump as u16);
             },
             None => self.error(BreakOutsideOfLoop),
         }
@@ -1196,19 +1196,19 @@ impl Parser {
             match self.peek() {
                 Some(LogicalAnd) => {
                     self.advance();
-                    let jump_if_false: u16 = self.reserve();
+                    let jump_if_false = self.reserve();
                     self.push(Opcode::Pop);
                     self.parse_expr_8();
                     let jump_to: u16 = self.next_opcode();
-                    self.output[jump_if_false as usize] = JumpIfFalse(jump_to);
+                    self.output[jump_if_false] = JumpIfFalse(jump_to);
                 },
                 Some(LogicalOr) => {
                     self.advance();
-                    let jump_if_true: u16 = self.reserve();
+                    let jump_if_true = self.reserve();
                     self.push(Opcode::Pop);
                     self.parse_expr_8();
                     let jump_to: u16 = self.next_opcode();
-                    self.output[jump_if_true as usize] = JumpIfTrue(jump_to);
+                    self.output[jump_if_true] = JumpIfTrue(jump_to);
                 },
                 _ => break
             }
@@ -1566,11 +1566,11 @@ impl Parser {
 
     /// Reserves a space in the output code by inserting a `Noop` token
     /// Returns an index to the token, which can later be used to set the correct value
-    fn reserve(self: &mut Self) -> u16 {
+    fn reserve(self: &mut Self) -> usize {
         trace::trace_parser!("reserve at {}", self.output.len());
         self.output.push(Noop);
         self.line_numbers.push(self.lineno);
-        (self.output.len() - 1) as u16
+        self.output.len() - 1
     }
 
     /// If we previously delayed a `Pop` opcode from being omitted, push it now and reset the flag
