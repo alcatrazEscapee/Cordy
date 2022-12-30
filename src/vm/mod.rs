@@ -282,6 +282,13 @@ impl<R, W> VirtualMachine<R, W> where
                 trace::trace_interpreter!("dup {}", self.stack.last().unwrap().as_debug_str());
                 self.push(self.peek(0).clone());
             },
+            Swap => {
+                trace::trace_interpreter!("swap {} <-> {}", self.stack.last().unwrap().as_debug_str(), self.stack[self.stack.len() - 2].as_debug_str());
+                let a1: Value = self.pop();
+                let a2: Value = self.pop();
+                self.push(a1);
+                self.push(a2);
+            },
 
             PushLocal(local) => {
                 let local = self.frame_pointer() + local as usize;
@@ -1003,6 +1010,7 @@ mod test {
     #[test] fn test_for_loop_no_intrinsic_with_list() { run_str("for x in ['a', 'b', 'c'] { x . print }", "a\nb\nc\n") }
     #[test] fn test_for_loop_no_intrinsic_with_set() { run_str("for x in 'foobar' . set { x . print }", "f\no\nb\na\nr\n") }
     #[test] fn test_for_loop_no_intrinsic_with_str() { run_str("for x in 'hello' { x . print }", "h\ne\nl\nl\no\n") }
+    #[test] fn test_for_loop_intrinsic_range_stop() { run_str("for x in range(5) { x . print }", "0\n1\n2\n3\n4\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }

@@ -18,6 +18,7 @@ pub enum Opcode {
     Pop,
     PopN(u16),
     Dup,
+    Swap,
 
     // Note: Local + Global does not, for the VM, mean in terms of block scoped
     // Rather, it means if this variable is accessed in the stack relative to the stack frame, or relative to the stack bottom
