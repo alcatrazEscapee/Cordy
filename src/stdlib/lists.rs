@@ -89,6 +89,13 @@ pub fn range_3(a1: Value, a2: Value, a3: Value) -> ValueResult {
     }
 }
 
+pub fn enumerate(a1: Value) -> ValueResult {
+    match a1.as_iter() {
+        Ok(it) => Ok(Value::iter_list((&it).into_iter().cloned().enumerate().map(|(i, v)| Value::list(vec![Value::Int(i as i64), v])))),
+        Err(e) => Err(e)
+    }
+}
+
 
 #[inline(always)]
 fn to_index(len: i64, pos_or_neg: i64) -> i64 {

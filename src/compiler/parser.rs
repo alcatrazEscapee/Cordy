@@ -38,6 +38,7 @@ pub struct ParserError {
 pub enum ParserErrorType {
     UnexpectedEoF,
     UnexpectedEofExpectingVariableNameAfterLet,
+    UnexpectedEofExpectingVariableNameAfterFor,
     UnexpectedEofExpectingFunctionNameAfterFn,
     UnexpectedEofExpectingFunctionBlockOrArrowAfterFn,
     UnexpectedEoFExpecting(ScanToken),
@@ -51,6 +52,7 @@ pub enum ParserErrorType {
     ExpectedColonOrEndOfSlice(ScanToken),
     ExpectedStatement(ScanToken),
     ExpectedVariableNameAfterLet(ScanToken),
+    ExpectedVariableNameAfterFor(ScanToken),
     ExpectedFunctionNameAfterFn(ScanToken),
     ExpectedFunctionBlockOrArrowAfterFn(ScanToken),
     ExpectedParameterOrEndOfList(ScanToken),
@@ -85,6 +87,7 @@ struct Parser {
     delay_pop_from_expression_statement: bool,
 
     locals: Vec<Local>, // Table of all locals, placed at the bottom of the stack
+    synthetic_local_index: usize, // A counter for unique synthetic local variables (`$1`, `$2`, etc.)
     scope_depth: u16, // Scope depth
     function_depth: u16,
 
@@ -125,6 +128,8 @@ impl Local {
     fn new(name: String, scope_depth: u16, function_depth: u16, index: u16) -> Local {
         Local { name, scope_depth, function_depth, index, initialized: false }
     }
+
+    fn is_global(self: &Self) -> bool { self.function_depth == 0 }
 }
 
 #[derive(Eq, PartialEq, Debug, Clone)]
@@ -153,6 +158,7 @@ impl Parser {
             delay_pop_from_expression_statement: false,
 
             locals: Vec::new(),
+            synthetic_local_index: 0,
             scope_depth: 0,
             function_depth: 0,
 
@@ -187,7 +193,7 @@ impl Parser {
                 Some(KeywordIf) => self.parse_if_statement(),
                 Some(KeywordLoop) => self.parse_loop_statement(),
                 Some(KeywordWhile) => self.parse_while_statement(),
-                Some(KeywordFor) => self.parse_for(),
+                Some(KeywordFor) => self.parse_for_statement(),
                 Some(KeywordBreak) => self.parse_break_statement(),
                 Some(KeywordContinue) => self.parse_continue_statement(),
                 Some(OpenBrace) => self.parse_block_statement(),
@@ -487,7 +493,7 @@ impl Parser {
     }
 
     fn parse_while_statement(self: &mut Self) {
-        trace::trace_parser!("<while-statement>");
+        trace::trace_parser!("rule <while-statement>");
 
         // Translation
         // while <expr> {    | L1: <expr> ; JumpIfFalsePop L2
@@ -520,7 +526,7 @@ impl Parser {
     }
 
     fn parse_loop_statement(self: &mut Self) {
-        trace::trace_parser!("<loop-statement>");
+        trace::trace_parser!("rule <loop-statement>");
 
         // Translation:
         // loop {            | L1:
@@ -547,8 +553,113 @@ impl Parser {
         }
     }
 
-    fn parse_for(self: &mut Self) {
-        panic!("for statements not implemented in parser");
+    fn parse_for_statement(self: &mut Self) {
+        trace::trace_parser!("rule <for-statement>");
+
+        // `for` loops are handled in one of three ways:
+        // If we detect a `for` <name> `in` `range`
+        //   -> This uses direct iteration and bypasses creating a list from `range`
+        //   -> In order to do this we create two synthetic variables for the `step` and `iteration_limit`
+        // If we detect a `for` (<name>, <name>) `in` `enumerate`
+        //   -> todo: Bypass creating synthetic variables and pattern destructuring (once we have it)
+        // Otherwise, we destructure this as a C-style `for` loop.
+        // In order to support iteration through arbitrary structures, but allow modification during iteration for plain lists, we emit some brige bytecode to check the type of the iterable before converting it to a list.
+
+        self.push_delayed_pop();
+        self.advance(); // Consume `for`
+
+        // `for` loops have declared (including synthetic) variables within their own scope
+        self.scope_depth += 1;
+        let local_x: Option<usize> = match self.peek() {
+            Some(Identifier(_)) => {
+                let name = self.take_identifier();
+                self.declare_local(name)
+            },
+            Some(t) => {
+                let token: ScanToken = t.clone();
+                self.error(ExpectedVariableNameAfterFor(token));
+                None
+            },
+            None => {
+                self.error(UnexpectedEofExpectingVariableNameAfterFor);
+                return
+            }
+        };
+
+        self.expect(KeywordIn);
+
+        match self.peek() {
+            Some(Identifier(s)) if s == "range" => {
+                panic!("Special `for x in range` not implemented!")
+            },
+            _ => {
+                // Standard `for` loop destructuring.
+                // We need synthetic variables for the iterable and the loop index. The length is checked each iteration (as it may change)
+                let local_iter: usize = self.declare_synthetic_local();
+                let local_i: usize = self.declare_synthetic_local();
+
+                // Push `Nil` first, to initialize the loop variable's value
+                self.push(Opcode::Nil);
+
+                // Parse the expression, which will be the iterable (as it is declared first)
+                self.parse_expression();
+
+                // Initialize the loop variable, as we're now in the main block and it can be referenced
+                // The loop variables cannot be referenced.
+                if let Some(local_x) = local_x {
+                    self.locals[local_x].initialized = true;
+                }
+
+                // Bytecode to check the type of the iterable - if it's a list, do nothing, otherwise, invoke `list` on it.
+                self.push(Dup);
+                self.push(Bound(StdBinding::List));
+                self.push(OpIs);
+                self.push(JumpIfTruePop(self.next_opcode() + 3));
+                self.push(Bound(StdBinding::List));
+                self.push(OpFuncCompose);
+
+                // Push the loop index
+                let constant_0 = self.declare_constant(0);
+                self.push(Opcode::Int(constant_0));
+
+                // Bounds check and branch
+                let jump: u16 = self.next_opcode();
+                self.push_load_local(local_i);
+                self.push_load_local(local_iter);
+                self.push(Bound(Len));
+                self.push(OpFuncCompose);
+                self.push(OpLessThan);
+                let jump_if_false_pop: u16 = self.reserve();
+
+                // Initialize the loop variable
+                if let Some(local_x) = local_x {
+                    self.push_load_local(local_iter);
+                    self.push_load_local(local_i);
+                    self.push(OpIndex);
+                    self.push_store_local(local_x);
+                    self.push(Opcode::Pop);
+                }
+
+                // Parse the body of the loop and emit
+                self.parse_block_statement();
+                self.push_delayed_pop();
+
+                // Increment and jump to head
+                self.push_load_local(local_i);
+                let constant_1 = self.declare_constant(1);
+                self.push(Opcode::Int(constant_1)); // todo: special +=1 opcode? optimization for loops?
+                self.push(OpAdd);
+                self.push_store_local(local_i);
+                self.push(Opcode::Pop);
+                self.push(Jump(jump));
+
+                // Fix the jump
+                self.output[jump_if_false_pop as usize] = JumpIfFalsePop(self.next_opcode());
+
+                self.pop_locals_in_current_scope_depth(true);
+                self.scope_depth -= 1;
+            }
+        }
     }
 
     fn parse_break_statement(self: &mut Self) {
@@ -1226,6 +1337,19 @@ impl Parser {
             }
         }
 
+        // todo: do we handle binding conflicts at all?
+
+        Some(self.declare_local_internal(name))
+    }
+
+    /// Declares a synthetic local variable. Unlike `declare_local()`, this can never fail.
+    /// Returns the index of the local variable in `locals`.
+    fn declare_synthetic_local(self: &mut Self) -> usize {
+        self.synthetic_local_index += 1;
+        self.declare_local_internal(format!("${}", self.synthetic_local_index - 1))
+    }
+
+    fn declare_local_internal(self: &mut Self, name: String) -> usize {
         // Count the current number of locals at the current function depth
         let mut local_index: u16 = 0;
         for local in &self.locals {
@@ -1234,13 +1358,10 @@ impl Parser {
             }
         }
 
-
-        // todo: do we handle binding conflicts at all?
-
         // Local variable is free of conflicts
         let local: Local = Local::new(name, self.scope_depth, self.function_depth, local_index);
         self.locals.push(local);
-        Some(self.locals.len() - 1)
+        self.locals.len() - 1
     }
 
     /// Pops all locals declared in the current scope, *before* decrementing the scope depth
@@ -1461,13 +1582,31 @@ impl Parser {
         }
     }
 
-    /// Specialization of `pop` which may push nothing, Pop, or PopN(n)
+    /// Specialization of `push` which may push nothing, Pop, or PopN(n)
     fn push_pop(self: &mut Self, n: u16) {
         trace::trace_parser!("push Pop/PopN {}", n);
         match n {
             0 => {},
             1 => self.push(Opcode::Pop),
             n => self.push(PopN(n))
+        }
+    }
+
+    /// Specialization of `push` which pushes either `PushLocal` or `PushGlobal` for a given local
+    fn push_load_local(self: &mut Self, local: usize) {
+        trace::trace_parser!("push PushLocal/PushGlobal {}", local);
+        match self.locals[local].is_global() {
+            true => self.push(PushGlobal(local as u16)),
+            _ => self.push(PushLocal(local as u16)),
+        }
+    }
+
+    /// Specialization of `push` which pushes either `StoreLocal` or `StoreGlobal` for a given local
+    fn push_store_local(self: &mut Self, local: usize) {
+        trace::trace_parser!("push StoreLocal/StoreGlobal {}", local);
+        match self.locals[local].is_global() {
+            true => self.push(StoreGlobal(local as u16)),
+            _ => self.push(StoreLocal(local as u16)),
         }
     }
 
@@ -1570,6 +1709,7 @@ mod tests {
     #[test] fn test_continue_past_locals() { run("continue_past_locals"); }
     #[test] fn test_empty() { run("empty"); }
     #[test] fn test_expressions() { run("expressions"); }
+    #[test] fn test_for_1() { run("for_1"); }
     #[test] fn test_function() { run("function"); }
     #[test] fn test_function_early_return() { run("function_early_return"); }
     #[test] fn test_function_early_return_nested_scope() { run("function_early_return_nested_scope"); }

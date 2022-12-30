@@ -80,6 +80,9 @@ pub fn binary_is(a1: Value, a2: Value) -> ValueResult {
                 StdBinding::Int => a1.is_int(),
                 StdBinding::Str => a1.is_str(),
                 StdBinding::Function => a1.is_function(),
+                StdBinding::List => a1.is_list(),
+                StdBinding::Set => a1.is_set(),
+                StdBinding::Dict => a1.is_dict(),
                 _ => return TypeErrorBinaryIs(a1, Value::Binding(b)).err()
             };
             Ok(Value::Bool(ret))

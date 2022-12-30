@@ -236,6 +236,14 @@ impl<R, W> VirtualMachine<R, W> where
                     self.ip = jump;
                 }
             },
+            JumpIfTruePop(ip) => {
+                trace::trace_interpreter!("jump if true pop {} -> {}", self.stack.last().unwrap().as_debug_str(), ip);
+                let jump: usize = ip as usize;
+                let a1: Value = self.pop();
+                if a1.as_bool() {
+                    self.ip = jump;
+                }
+            },
             Jump(ip) => {
                 trace::trace_interpreter!("jump -> {}", ip);
                 self.ip = ip as usize;
@@ -269,7 +277,11 @@ impl<R, W> VirtualMachine<R, W> where
                 for _ in 0..n {
                     self.pop();
                 }
-            }
+            },
+            Dup => {
+                trace::trace_interpreter!("dup {}", self.stack.last().unwrap().as_debug_str());
+                self.push(self.peek(0).clone());
+            },
 
             PushLocal(local) => {
                 let local = self.frame_pointer() + local as usize;
@@ -985,6 +997,12 @@ mod test {
     #[test] fn test_range_7() { run_str("range(10, 0, 3) . print", "[]\n"); }
     #[test] fn test_range_8() { run_str("range(1, 1, 1) . print", "[]\n"); }
     #[test] fn test_range_9() { run_str("range(1, 1, 0) . print", "ValueError: 'step' argument cannot be zero\n    at: `range(1, 1, 0) . print` (line 1)\n    at: execution of script '<test>'\n"); }
+    #[test] fn test_enumerate_1() { run_str("[] . enumerate . print", "[]\n"); }
+    #[test] fn test_enumerate_2() { run_str("[1, 2, 3] . enumerate . print", "[[0, 1], [1, 2], [2, 3]]\n"); }
+    #[test] fn test_enumerate_3() { run_str("'foobar' . enumerate . print", "[[0, 'f'], [1, 'o'], [2, 'o'], [3, 'b'], [4, 'a'], [5, 'r']]\n"); }
+    #[test] fn test_for_loop_no_intrinsic_with_list() { run_str("for x in ['a', 'b', 'c'] { x . print }", "a\nb\nc\n") }
+    #[test] fn test_for_loop_no_intrinsic_with_set() { run_str("for x in 'foobar' . set { x . print }", "f\no\nb\na\nr\n") }
+    #[test] fn test_for_loop_no_intrinsic_with_str() { run_str("for x in 'hello' { x . print }", "h\ne\nl\nl\no\n") }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }
