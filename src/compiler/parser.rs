@@ -37,27 +37,20 @@ pub struct ParserError {
 
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub enum ParserErrorType {
-    UnexpectedEoF,
-    UnexpectedEofExpectingVariableNameAfterLet,
-    UnexpectedEofExpectingVariableNameAfterFor,
-    UnexpectedEofExpectingFunctionNameAfterFn,
-    UnexpectedEofExpectingFunctionBlockOrArrowAfterFn,
-    UnexpectedEoFExpecting(ScanToken),
     UnexpectedTokenAfterEoF(ScanToken),
+    ExpectedToken(ScanToken, Option<ScanToken>),
 
-    Expecting(ScanToken, ScanToken),
-
-    ExpectedExpressionTerminal(ScanToken),
-    ExpectedCommaOrEndOfArguments(ScanToken),
-    ExpectedCommaOrEndOfList(ScanToken),
-    ExpectedColonOrEndOfSlice(ScanToken),
-    ExpectedStatement(ScanToken),
-    ExpectedVariableNameAfterLet(ScanToken),
-    ExpectedVariableNameAfterFor(ScanToken),
-    ExpectedFunctionNameAfterFn(ScanToken),
-    ExpectedFunctionBlockOrArrowAfterFn(ScanToken),
-    ExpectedParameterOrEndOfList(ScanToken),
-    ExpectedCommaOrEndOfParameters(ScanToken),
+    ExpectedExpressionTerminal(Option<ScanToken>),
+    ExpectedCommaOrEndOfArguments(Option<ScanToken>),
+    ExpectedCommaOrEndOfList(Option<ScanToken>),
+    ExpectedColonOrEndOfSlice(Option<ScanToken>),
+    ExpectedStatement(Option<ScanToken>),
+    ExpectedVariableNameAfterLet(Option<ScanToken>),
+    ExpectedVariableNameAfterFor(Option<ScanToken>),
+    ExpectedFunctionNameAfterFn(Option<ScanToken>),
+    ExpectedFunctionBlockOrArrowAfterFn(Option<ScanToken>),
+    ExpectedParameterOrEndOfList(Option<ScanToken>),
+    ExpectedCommaOrEndOfParameters(Option<ScanToken>),
 
     LocalVariableConflict(String),
     UndeclaredIdentifier(String),
@@ -283,13 +276,8 @@ impl Parser {
         trace::trace_parser!("rule <function-name>");
         match self.peek() {
             Some(Identifier(_)) => Some(self.take_identifier()),
-            Some(t) => {
-                let token: ScanToken = t.clone();
-                self.error(ExpectedFunctionNameAfterFn(token));
-                None // Continue parsing as we can resync on the ')' and '}'
-            },
-            None => {
-                self.error(UnexpectedEofExpectingFunctionNameAfterFn);
+            _ => {
+                self.error_with(|t| ExpectedFunctionNameAfterFn(t));
                 None
             }
         }
@@ -303,23 +291,19 @@ impl Parser {
             match self.peek() {
                 Some(Identifier(_)) => args.push(self.take_identifier()),
                 Some(CloseParen) => break,
-                Some(t) => {
-                    let token = t.clone();
-                    self.error(ExpectedParameterOrEndOfList(token));
+                _ => {
+                    self.error_with(|t| ExpectedParameterOrEndOfList(t));
                     break
                 },
-                None => break
             }
 
             match self.peek() {
                 Some(Comma) => self.skip(),
                 Some(CloseParen) => break,
-                Some(t) => {
-                    let token: ScanToken = t.clone();
-                    self.error(ExpectedCommaOrEndOfParameters(token));
+                _ => {
+                    self.error_with(|t| ExpectedCommaOrEndOfParameters(t));
                     break
                 },
-                None => break
             }
         }
         args
@@ -368,14 +352,9 @@ impl Parser {
                 self.parse_expression(); // So parse an expression
                 false
             },
-            Some(t) => {
-                let token: ScanToken = t.clone();
-                self.error(ExpectedFunctionBlockOrArrowAfterFn(token));
+            _ => {
+                self.error_with(|t| ExpectedFunctionBlockOrArrowAfterFn(t));
                 true
-            },
-            None => {
-                self.error(UnexpectedEofExpectingFunctionBlockOrArrowAfterFn);
-                return
             }
         };
 
@@ -578,14 +557,9 @@ impl Parser {
                 let name = self.take_identifier();
                 self.declare_local(name)
             },
-            Some(t) => {
-                let token: ScanToken = t.clone();
-                self.error(ExpectedVariableNameAfterFor(token));
+            _  => {
+                self.error_with(|t| ExpectedVariableNameAfterFor(t));
                 None
-            },
-            None => {
-                self.error(UnexpectedEofExpectingVariableNameAfterFor);
-                return
             }
         };
 
@@ -635,8 +609,15 @@ impl Parser {
 
                         // Fix the jump
                         self.output[jump_if_false_pop] = JumpIfFalsePop(self.next_opcode());
+
+                        self.pop_locals_in_current_scope_depth(true);
+                        self.scope_depth -= 1;
+                        return
                     },
-                    _ => {},
+                    Some(Comma) => {
+                        self.advance(); // Consume the `,` and continue
+                    }
+                    t_ => {},
                 }
             },
             _ => {
@@ -703,6 +684,7 @@ impl Parser {
 
                 self.pop_locals_in_current_scope_depth(true);
                 self.scope_depth -= 1;
+                return
             }
         }
     }
@@ -750,13 +732,8 @@ impl Parser {
                         None => break
                     }
                 },
-                Some(t) => {
-                    let token: ScanToken = t.clone();
-                    self.error(ExpectedVariableNameAfterLet(token));
-                    break
-                },
-                None => {
-                    self.error(UnexpectedEofExpectingVariableNameAfterLet);
+                _ => {
+                    self.error_with(|t| ExpectedVariableNameAfterLet(t));
                     break
                 }
             };
@@ -789,19 +766,13 @@ impl Parser {
 
     fn parse_expression_statement(self: &mut Self) {
         trace::trace_parser!("rule <expression-statement>");
-        match self.peek() {
-            Some(t) => {
-                let token: ScanToken = t.clone();
-                if !self.prevent_expression_statement {
-                    self.prevent_expression_statement = true;
-                    self.push_delayed_pop();
-                    self.parse_expression();
-                    self.delay_pop_from_expression_statement = true;
-                } else {
-                    self.error(ExpectedStatement(token))
-                }
-            },
-            None => {},
+        if !self.prevent_expression_statement {
+            self.prevent_expression_statement = true;
+            self.push_delayed_pop();
+            self.parse_expression();
+            self.delay_pop_from_expression_statement = true;
+        } else {
+            self.error_with(|t| ExpectedStatement(t))
         }
     }
 
@@ -857,11 +828,7 @@ impl Parser {
                             match self.peek() {
                                 Some(Comma) => self.skip(), // Allow trailing commas, as this loops to the top again
                                 Some(CloseSquareBracket) => {}, // Skip
-                                Some(t) => {
-                                    let token: ScanToken = t.clone();
-                                    self.error(ExpectedCommaOrEndOfList(token))
-                                }
-                                None => break
+                                _ => self.error_with(|t| ExpectedCommaOrEndOfList(t)),
                             }
                         },
                         None => break,
@@ -873,16 +840,8 @@ impl Parser {
             },
             Some(KeywordFn) => {
                 self.parse_expression_function();
-            }
-            Some(e) => {
-                let token: ScanToken = e.clone();
-                self.push(Opcode::Nil);
-                self.error(ExpectedExpressionTerminal(token));
             },
-            _ => {
-                self.push(Opcode::Nil);
-                self.error(UnexpectedEoF)
-            },
+            _ => self.error_with(|t| ExpectedExpressionTerminal(t)),
         }
     }
 
@@ -1010,18 +969,14 @@ impl Parser {
                                 }
                                 match self.peek() {
                                     Some(CloseParen) => self.skip(),
-                                    Some(c) => {
-                                        let token: ScanToken = c.clone();
-                                        self.error(ExpectedCommaOrEndOfArguments(token))
-                                    },
-                                    _ => self.error(UnexpectedEoF),
+                                    _ => self.error_with(|t| ExpectedCommaOrEndOfArguments(t)),
                                 }
 
                                 // Evaluate the number of arguments we parsed
                                 self.push(OpFuncEval(count));
                             }
                         }
-                        None => self.error(UnexpectedEoF),
+                        _ => self.error_with(|t| ExpectedCommaOrEndOfArguments(t)),
                     }
                 },
                 Some(OpenSquareBracket) => {
@@ -1045,12 +1000,10 @@ impl Parser {
                         Some(Colon) => { // At least two arguments, so continue parsing
                             self.advance();
                         },
-                        Some(t) => { // Anything else was a syntax error
-                            let token: ScanToken = t.clone();
-                            self.error(ExpectedColonOrEndOfSlice(token));
+                        _ => {
+                            self.error_with(|t| ExpectedColonOrEndOfSlice(t));
                             continue
                         },
-                        _ => self.expect(CloseSquareBracket),
                     }
 
                     // Consumed `[` <expression> `:` so far
@@ -1078,12 +1031,10 @@ impl Parser {
                             // Three arguments, so continue parsing
                             self.advance();
                         },
-                        Some(t) => { // Anything else was a syntax error
-                            let token: ScanToken = t.clone();
-                            self.error(ExpectedColonOrEndOfSlice(token));
-                            continue;
+                        _ => {
+                            self.error_with(|t| ExpectedColonOrEndOfSlice(t));
+                            continue
                         },
-                        _ => self.expect(CloseSquareBracket),
                     }
 
                     // Consumed `[` <expression> `:` <expression> `:` so far
@@ -1493,12 +1444,8 @@ impl Parser {
             Some(t) if t == &token => {
                 trace::trace_parser!("expect {:?} -> pass", token);
                 self.advance();
-            }
-            Some(t) => {
-                let t0: ScanToken = t.clone();
-                self.error(Expecting(token, t0))
             },
-            None => self.error(UnexpectedEoFExpecting(token)),
+            _ => self.error_with(move |t| ExpectedToken(token, t)),
         }
     }
 
@@ -1708,6 +1655,13 @@ impl Parser {
         self.output.len() - 1
     }
 
+    /// A specialization of `error()` which provides the last token (the result of `peek()`) to the provided error function
+    /// This avoids ugly borrow checker issues where `match self.peek() { ... t => self.error(Error(t)) }` does not work, despite the semantics being identical.
+    fn error_with<F : FnOnce(Option<ScanToken>) -> ParserErrorType>(self: &mut Self, error: F) {
+        let token = self.peek().cloned();
+        self.error(error(token));
+    }
+
     /// Pushes a new error token into the output error stream.
     fn error(self: &mut Self, error: ParserErrorType) {
         trace::trace_parser!("push_err (error = {}) {:?}", self.error_recovery, error);
@@ -1737,7 +1691,7 @@ mod tests {
     use Opcode::{*};
 
 
-    #[test] fn test_empty_expr() { run_expr("", vec![Nil]); }
+    #[test] fn test_empty_expr() { run_expr("", vec![]); }
     #[test] fn test_int() { run_expr("123", vec![Int(123)]); }
     #[test] fn test_str() { run_expr("'abc'", vec![Str(0)]); }
     #[test] fn test_unary_minus() { run_expr("-3", vec![Int(3), UnarySub]); }
@@ -1785,9 +1739,9 @@ mod tests {
     #[test] fn test_slice_12() { run_expr("1 [2:3]", vec![Int(1), Int(2), Int(3), OpSlice]); }
     #[test] fn test_binary_ops() { run_expr("(*) * (+) + (/)", vec![Bound(OperatorMul), Bound(OperatorAdd), OpMul, Bound(OperatorDiv), OpAdd]); }
 
-    #[test] fn test_let_eof() { run_err("let", "Unexpected end of file, was expecting variable name after 'let' keyword\n  at: line 1 (<test>)\n  at:\n\nlet\n"); }
+    #[test] fn test_let_eof() { run_err("let", "Expecting a variable name after 'let' keyword, got end of input instead\n  at: line 1 (<test>)\n  at:\n\nlet\n"); }
     #[test] fn test_let_no_identifier() { run_err("let =", "Expecting a variable name after 'let' keyword, got '=' token instead\n  at: line 1 (<test>)\n  at:\n\nlet =\n"); }
-    #[test] fn test_let_expression_eof() { run_err("let x =", "Unexpected end of file.\n  at: line 1 (<test>)\n  at:\n\nlet x =\n"); }
+    #[test] fn test_let_expression_eof() { run_err("let x =", "Expected an expression terminal, got end of input instead\n  at: line 1 (<test>)\n  at:\n\nlet x =\n"); }
     #[test] fn test_let_no_expression() { run_err("let x = &", "Expected an expression terminal, got '&' token instead\n  at: line 1 (<test>)\n  at:\n\nlet x = &\n"); }
 
     #[test] fn test_break_past_locals() { run("break_past_locals"); }

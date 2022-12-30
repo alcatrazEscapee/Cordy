@@ -168,14 +168,8 @@ impl AsError for StdBinding {
 impl AsError for ParserError {
     fn format_error(self: &Self) -> String {
         match &self.error {
-            ParserErrorType::UnexpectedEoF => String::from("Unexpected end of file."),
-            ParserErrorType::UnexpectedEofExpectingVariableNameAfterLet => String::from("Unexpected end of file, was expecting variable name after 'let' keyword"),
-            ParserErrorType::UnexpectedEofExpectingVariableNameAfterFor => String::from("Unexpected end of file, was expecting variable name after 'for' keyword"),
-            ParserErrorType::UnexpectedEofExpectingFunctionNameAfterFn => String::from("Unexpected end of file, was expecting function name after 'fn' keyword"),
-            ParserErrorType::UnexpectedEofExpectingFunctionBlockOrArrowAfterFn => String::from("Unexpected end of file, was expecting function body starting with '{' or '->' after 'fn' keyword"),
-            ParserErrorType::UnexpectedEoFExpecting(e) => format!("Unexpected end of file, was expecting {}.", e.format_error()),
             ParserErrorType::UnexpectedTokenAfterEoF(e) => format!("Unexpected {} after parsing finished", e.format_error()),
-            ParserErrorType::Expecting(e, a) => format!("Expected a {}, got {} instead", e.format_error(), a.format_error()),
+            ParserErrorType::ExpectedToken(e, a) => format!("Expected a {}, got {} instead", e.format_error(), a.format_error()),
             ParserErrorType::ExpectedExpressionTerminal(e) => format!("Expected an expression terminal, got {} instead", e.format_error()),
             ParserErrorType::ExpectedCommaOrEndOfArguments(e) => format!("Expected a ',' or ')' after function invocation, got {} instead", e.format_error()),
             ParserErrorType::ExpectedCommaOrEndOfList(e) => format!("Expected a ',' or ']' after list literal, got {} instead", e.format_error()),
@@ -203,6 +197,15 @@ impl AsError for ScanError {
             ScanErrorType::InvalidNumericValue(e) => format!("Invalid numeric value: {}", e),
             ScanErrorType::InvalidCharacter(c) => format!("Invalid character: '{}'", c),
             ScanErrorType::UnterminatedStringLiteral => String::from("Unterminated string literal (missing a closing single quote)")
+        }
+    }
+}
+
+impl AsError for Option<ScanToken> {
+    fn format_error(self: &Self) -> String {
+        match self {
+            Some(t) => t.format_error(),
+            None => String::from("end of input"),
         }
     }
 }
