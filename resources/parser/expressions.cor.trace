@@ -18,8 +18,8 @@ L2: 0007 Int(0) -> 1
     0017 Pop
     0018 PushGlobal(1) -> foo
 L3: 0019 PushGlobal(2) -> bar
-    0020 Int(5) -> 1
-    0021 Int(6) -> 2
+    0020 Int(0) -> 1
+    0021 Int(1) -> 2
     0022 OpAdd
     0023 OpFuncEval(1)
     0024 OpFuncCompose
@@ -36,13 +36,13 @@ L3: 0019 PushGlobal(2) -> bar
 L4: 0035 OpFuncCompose
     0036 JumpIfFalse(41)
     0037 Pop
-    0038 Int(7) -> 1
-    0039 Int(8) -> 2
+    0038 Int(0) -> 1
+    0039 Int(1) -> 2
     0040 OpGreaterThan
     0041 JumpIfTrue(46)
     0042 Pop
-    0043 Int(9) -> 6
-    0044 Int(10) -> 7
+    0043 Int(5) -> 6
+    0044 Int(6) -> 7
     0045 OpGreaterThanEqual
     0046 StoreGlobal(0) -> x
     0047 Pop
