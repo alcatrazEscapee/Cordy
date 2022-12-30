@@ -170,6 +170,7 @@ impl AsError for ParserError {
         match &self.error {
             ParserErrorType::UnexpectedEoF => String::from("Unexpected end of file."),
             ParserErrorType::UnexpectedEofExpectingVariableNameAfterLet => String::from("Unexpected end of file, was expecting variable name after 'let' keyword"),
+            ParserErrorType::UnexpectedEofExpectingVariableNameAfterFor => String::from("Unexpected end of file, was expecting variable name after 'for' keyword"),
             ParserErrorType::UnexpectedEofExpectingFunctionNameAfterFn => String::from("Unexpected end of file, was expecting function name after 'fn' keyword"),
             ParserErrorType::UnexpectedEofExpectingFunctionBlockOrArrowAfterFn => String::from("Unexpected end of file, was expecting function body starting with '{' or '->' after 'fn' keyword"),
             ParserErrorType::UnexpectedEoFExpecting(e) => format!("Unexpected end of file, was expecting {}.", e.format_error()),
@@ -181,6 +182,7 @@ impl AsError for ParserError {
             ParserErrorType::ExpectedColonOrEndOfSlice(e) => format!("Expected a ':' or ']' in slice, got {} instead", e.format_error()),
             ParserErrorType::ExpectedStatement(e) => format!("Expecting a statement, got {} instead", e.format_error()),
             ParserErrorType::ExpectedVariableNameAfterLet(e) => format!("Expecting a variable name after 'let' keyword, got {} instead", e.format_error()),
+            ParserErrorType::ExpectedVariableNameAfterFor(e) => format!("Expecting a variable name after 'for' keyword, got {} instead", e.format_error()),
             ParserErrorType::ExpectedFunctionNameAfterFn(e) => format!("Expecting a function name after 'fn' keyword, got {} instead", e.format_error()),
             ParserErrorType::ExpectedFunctionBlockOrArrowAfterFn(e) => format!("Expecting a function body starting with '{{' or `->` after 'fn', got {} instead", e.format_error()),
             ParserErrorType::ExpectedParameterOrEndOfList(e) => format!("Expected a function parameter or ')' after function declaration, got {} instead", e.format_error()),

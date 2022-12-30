@@ -106,6 +106,7 @@ pub enum StdBinding {
     // lib_list
     Len,
     Range,
+    Enumerate,
     Sum,
     Min,
     Max,
@@ -203,6 +204,7 @@ fn load_bindings() -> Vec<StdBindingInfo> {
 
         of!(Len, "len"),
         of!(Range, "range"),
+        of!(Enumerate, "enumerate"),
         of!(Map, "map"),
         of!(Filter, "filter"),
         of!(Reduce, "reduce"),
@@ -457,6 +459,7 @@ pub fn invoke<VM>(bound: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult wher
         // lib_list
         Len => dispatch!(a1, a1.len().map(|u| Value::Int(u as i64))),
         Range => dispatch!(a1, lists::range_1(a1), a2, lists::range_2(a1, a2), a3, lists::range_3(a1, a2, a3)),
+        Enumerate => dispatch!(a1, lists::enumerate(a1)),
         Sum => dispatch!(an, lists::sum(an.into_iter()), Sum),
         Max => dispatch!(an, lists::max(an.into_iter()), Max),
         Min => dispatch!(an, lists::min(an.into_iter()), Min),

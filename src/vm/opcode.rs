@@ -10,12 +10,14 @@ pub enum Opcode {
     JumpIfFalse(u16),
     JumpIfFalsePop(u16),
     JumpIfTrue(u16),
+    JumpIfTruePop(u16),
     Jump(u16),
     Return,
 
     // Stack Operations
     Pop,
     PopN(u16),
+    Dup,
 
     // Note: Local + Global does not, for the VM, mean in terms of block scoped
     // Rather, it means if this variable is accessed in the stack relative to the stack frame, or relative to the stack bottom

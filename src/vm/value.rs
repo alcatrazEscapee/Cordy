@@ -12,8 +12,7 @@ use crate::stdlib::StdBinding;
 use crate::vm::error::RuntimeError;
 
 use Value::{*};
-use RuntimeError::TypeErrorArgMustBeIterable;
-use crate::vm::error::RuntimeError::TypeErrorArgMustBeInt;
+use RuntimeError::{TypeErrorArgMustBeIterable, TypeErrorArgMustBeInt};
 
 
 /// The runtime sum type used by the virtual machine
@@ -35,9 +34,7 @@ pub enum Value {
     List(Mut<VecDeque<Value>>),
     Set(Mut<LinkedHashSet<Value>>),
     Dict(Mut<LinkedHashMap<Value, Value>>),
-
-    // Unique Structures
-    Heap(Mut<ValueHeap>), // `List` functions as both Array + Deque, but that makes it unviable for a heap. So, we have a dedicated heap structure
+    Heap(Mut<ValueHeap>), // `List` functions as both Array + Deque, but that makes it un-viable for a heap. So, we have a dedicated heap structure
 
     // Functions
     Binding(StdBinding),
@@ -175,33 +172,10 @@ impl Value {
         }
     }
 
-    pub fn is_nil(self: &Self) -> bool {
-        match self {
-            Nil => true,
-            _ => false
-        }
-    }
-
-    pub fn is_bool(self: &Self) -> bool {
-        match self {
-            Bool(_) => true,
-            _ => false
-        }
-    }
-
-    pub fn is_int(self: &Self) -> bool {
-        match self {
-            Int(_) => true,
-            _ => false
-        }
-    }
-
-    pub fn is_str(self: &Self) -> bool {
-        match self {
-            Str(_) => true,
-            _ => false
-        }
-    }
+    pub fn is_nil(self: &Self) -> bool { match self { Nil => true, _ => false } }
+    pub fn is_bool(self: &Self) -> bool { match self { Bool(_) => true, _ => false } }
+    pub fn is_int(self: &Self) -> bool { match self { Int(_) => true, _ => false } }
+    pub fn is_str(self: &Self) -> bool { match self { Str(_) => true, _ => false } }
 
     pub fn is_function(self: &Self) -> bool {
         match self {
@@ -209,6 +183,10 @@ impl Value {
             _ => false
         }
     }
+
+    pub fn is_list(self: &Self) -> bool { match self { List(_) => true, _ => false } }
+    pub fn is_set(self: &Self) -> bool { match self { Set(_) => true, _ => false } }
+    pub fn is_dict(self: &Self) -> bool { match self { Dict(_) => true, _ => false } }
 }
 
 /// Implement Ord and PartialOrd explicitly, to derive implementations for each individual type.
