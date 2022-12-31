@@ -25,8 +25,10 @@ pub struct VirtualMachine<R, W> {
     code: Vec<Opcode>,
     stack: Vec<Value>,
     call_stack: Vec<CallFrame>,
+    global_count: usize,
 
     strings: Vec<String>,
+    globals: Vec<String>,
     constants: Vec<i64>,
     functions: Vec<Rc<FunctionImpl>>,
     line_numbers: Vec<u16>,
@@ -95,38 +97,15 @@ impl<R, W> VirtualMachine<R, W> where
     R: BufRead,
     W: Write {
 
-    pub fn incremental(read: R, write: W) -> VirtualMachine<R, W> {
-        VirtualMachine {
-            ip: 0,
-            code: Vec::new(),
-            stack: Vec::with_capacity(256), // Just guesses, not hard limits
-            call_stack: Vec::with_capacity(32),
-            strings: Vec::new(),
-            constants: Vec::new(),
-            functions: Vec::new(),
-            line_numbers: Vec::new(),
-            read,
-            write,
-        }
-    }
-
-    pub fn incremental_run(self: &mut Self, result: &CompileResult) -> Result<(), DetailRuntimeError> {
-        self.ip += 1;
-        self.code = result.code.clone();
-        self.strings = result.strings.clone();
-        self.constants = result.constants.clone();
-        self.functions = result.functions.iter().cloned().map(|f| Rc::new(f)).collect();
-        self.line_numbers = result.line_numbers.clone();
-        self.run_until_completion()
-    }
-
     pub fn new(result: CompileResult, read: R, write: W) -> VirtualMachine<R, W> {
         VirtualMachine {
             ip: 0,
             code: result.code,
             stack: Vec::with_capacity(256), // Just guesses, not hard limits
             call_stack: Vec::with_capacity(32),
+            global_count: 0,
             strings: result.strings,
+            globals: result.globals,
             constants: result.constants,
             functions: result.functions.into_iter().map(|f| Rc::new(f)).collect(),
             line_numbers: result.line_numbers,
@@ -300,18 +279,32 @@ impl<R, W> VirtualMachine<R, W> where
                 trace::trace_interpreter!("store local {} : {} -> {}", local, self.stack.last().unwrap().as_debug_str(), self.stack[local].as_debug_str());
                 self.stack[local] = self.peek(0).clone();
             },
-            PushGlobal(local) => {
+            PushGlobal(local, is_local) => {
                 // Globals are fancy locals that don't use the frame pointer to offset their local variable ID
                 // 'global' just means a variable declared outside of an enclosing function
+                // As we allow late binding for globals, we need to check that this has been declared first, based on the globals count.
                 let local: usize = local as usize;
                 trace::trace_interpreter!("push global {} : {}", local, self.stack[local].as_debug_str());
-                self.push(self.stack[local].clone());
+                if local < self.global_count || is_local {
+                    self.push(self.stack[local].clone());
+                } else {
+                    return ValueErrorVariableNotDeclaredYet(self.globals[local].clone()).err()
+                }
             },
-            StoreGlobal(local) => {
+            StoreGlobal(local, is_local) => {
                 let local: usize = local as usize;
                 trace::trace_interpreter!("store global {} : {} -> {}", local, self.stack.last().unwrap().as_debug_str(), self.stack[local].as_debug_str());
-                self.stack[local] = self.peek(0).clone();
+                if local < self.global_count || is_local {
+                    self.stack[local] = self.peek(0).clone();
+                } else {
+                    return ValueErrorVariableNotDeclaredYet(self.globals[local].clone()).err()
+                }
             },
+
+            IncGlobalCount => {
+                trace::trace_interpreter!("inc global count -> {}", self.global_count + 1);
+                self.global_count += 1;
+            }
 
             StoreArray => {
                 trace::trace_interpreter!("store array array = {}, index = {}, value = {}", self.stack[self.stack.len() - 3].as_debug_str(), self.stack[self.stack.len() - 2].as_debug_str(), self.stack.last().unwrap().as_debug_str());
@@ -884,20 +877,14 @@ mod test {
     #[test] fn test_functions_04() { run_str("fn foo(a) { 'hello ' + a . print } ; foo(1)", "hello 1\n"); }
     #[test] fn test_functions_05() { run_str("fn foo(a, b, c) { a + b + c . print } ; foo(1, 2, 3)", "6\n"); }
     #[test] fn test_functions_06() { run_str("fn foo() { 'hello' . print } ; fn bar() { foo() } bar()", "hello\n"); }
-    #[test] fn test_functions_07() { run_str("{ fn foo() { 'hello' . print } ; fn bar() { foo() } bar() }", "hello\n"); }
-    #[test] fn test_functions_08() { run_str("{ fn foo() { 'hello' . print } ; { fn bar() { foo() } bar() } }", "hello\n"); }
-    #[test] fn test_functions_09() { run_str("fn foo() { 'hello' . print } ; fn bar(a) { foo() } bar(1)", "hello\n"); }
-    #[test] fn test_functions_10() { run_str("{ fn foo() { 'hello' . print } ; fn bar(a) { foo() } bar(1) }", "hello\n"); }
-    #[test] fn test_functions_11() { run_str("{ fn foo() { 'hello' . print } ; { fn bar(a) { foo() } bar(1) } }", "hello\n"); }
-    #[test] fn test_functions_12() { run_str("fn foo(a) { a . print } ; fn bar(a, b, c) { foo(a + b + c) } bar(1, 2, 3)", "6\n"); }
-    #[test] fn test_functions_13() { run_str("fn foo(h, w) { h + ' ' + w . print } ; fn bar(w) { foo('hello', w) } bar('world')", "hello world\n"); }
-    #[test] fn test_functions_14() { run_str("let x = 'hello' ; fn foo(x) { x . print } foo(x)", "hello\n"); }
-    #[test] fn test_functions_15() { run_str("{ let x = 'hello' ; fn foo(x) { x . print } foo(x) }", "hello\n"); }
-    #[test] fn test_functions_16() { run_str("{ let x = 'hello' ; { fn foo(x) { x . print } foo(x) } }", "hello\n"); }
-    #[test] fn test_functions_17() { run_str("let x = 'hello' ; { fn foo() { x . print } foo()", "hello\n"); }
-    #[test] fn test_functions_18() { run_str("{ let x = 'hello' ; { fn foo() { x . print } foo() }", "hello\n"); }
-    #[test] fn test_functions_19() { run_str("{ let x = 'hello' ; { { fn foo() { x . print } foo() } }", "hello\n"); }
-    #[test] fn test_functions_20() { run_str("fn foo(x) { 'hello ' + x . print } 'world' . foo", "hello world\n"); }
+    #[test] fn test_functions_07() { run_str("fn foo() { 'hello' . print } ; fn bar(a) { foo() } bar(1)", "hello\n"); }
+    #[test] fn test_functions_08() { run_str("fn foo(a) { a . print } ; fn bar(a, b, c) { foo(a + b + c) } bar(1, 2, 3)", "6\n"); }
+    #[test] fn test_functions_09() { run_str("fn foo(h, w) { h + ' ' + w . print } ; fn bar(w) { foo('hello', w) } bar('world')", "hello world\n"); }
+    #[test] fn test_functions_10() { run_str("let x = 'hello' ; fn foo(x) { x . print } foo(x)", "hello\n"); }
+    #[test] fn test_functions_11() { run_str("{ let x = 'hello' ; fn foo(x) { x . print } foo(x) }", "hello\n"); }
+    #[test] fn test_functions_12() { run_str("{ let x = 'hello' ; { fn foo(x) { x . print } foo(x) } }", "hello\n"); }
+    #[test] fn test_functions_13() { run_str("let x = 'hello' ; { fn foo() { x . print } foo()", "hello\n"); }
+    #[test] fn test_functions_14() { run_str("fn foo(x) { 'hello ' + x . print } 'world' . foo", "hello world\n"); }
     #[test] fn test_function_implicit_return_01() { run_str("fn foo() { } foo() . print", "nil\n"); }
     #[test] fn test_function_implicit_return_02() { run_str("fn foo() { 'hello' } foo() . print", "hello\n"); }
     #[test] fn test_function_implicit_return_03() { run_str("fn foo(x) { if x > 1 {} else {} } foo(2) . print", "nil\n"); }
@@ -913,7 +900,13 @@ mod test {
     #[test] fn test_function_implicit_return_13() { run_str("fn foo(x) { if x > 1 { if true { 'hello' } } } foo(0) . print", "nil\n"); }
     #[test] fn test_function_implicit_return_14() { run_str("fn foo(x) { loop { if x > 1 { break } } } foo(2) . print", "nil\n"); }
     #[test] fn test_function_implicit_return_15() { run_str("fn foo(x) { loop { if x > 1 { continue } else { break } } } foo(0) . print", "nil\n"); }
-    #[test] fn test_closures_01() { run_str("fn foo() { let x = 'hello' ; fn bar() { x . print } bar() } foo()", "hello\n"); } // todo: closures
+    #[test] fn test_closures_01() { run_str("fn foo() { let x = 'hello' ; fn bar() { x . print } bar() } foo()", "hello\n"); }
+    #[test] fn test_closures_02() { run_str("{ fn foo() { 'hello' . print } ; fn bar() { foo() } bar() }", "hello\n"); }
+    #[test] fn test_closures_03() { run_str("{ fn foo() { 'hello' . print } ; { fn bar() { foo() } bar() } }", "hello\n"); }
+    #[test] fn test_closures_04() { run_str("{ fn foo() { 'hello' . print } ; fn bar(a) { foo() } bar(1) }", "hello\n"); }
+    #[test] fn test_closures_05() { run_str("{ fn foo() { 'hello' . print } ; { fn bar(a) { foo() } bar(1) } }", "hello\n"); }
+    #[test] fn test_closures_06() { run_str("{ let x = 'hello' ; { fn foo() { x . print } foo() }", "hello\n"); }
+    #[test] fn test_closures_07() { run_str("{ let x = 'hello' ; { { fn foo() { x . print } foo() } }", "hello\n"); }
     #[test] fn test_function_return_1() { run_str("fn foo() { return 3 } foo() . print", "3\n"); }
     #[test] fn test_function_return_2() { run_str("fn foo() { let x = 3; return x } foo() . print", "3\n"); }
     #[test] fn test_function_return_3() { run_str("fn foo() { let x = 3; { return x } } foo() . print", "3\n"); }
@@ -1019,6 +1012,8 @@ mod test {
     #[test] fn test_fibonacci() { run("fibonacci"); }
     #[test] fn test_function_capture_from_inner_scope() { run("function_capture_from_inner_scope"); }
     #[test] fn test_function_capture_from_outer_scope() { run("function_capture_from_outer_scope"); }
+    #[test] fn test_late_bound_global() { run("late_bound_global"); }
+    #[test] fn test_late_bound_global_invalid() { run("late_bound_global_invalid"); }
     #[test] fn test_runtime_error_with_trace() { run("runtime_error_with_trace"); }
 
 
@@ -1027,7 +1022,10 @@ mod test {
         let source: &String = &String::from("<test>");
         let compile = compiler::compile(source, text);
 
-        assert!(compile.is_ok(), "Failed to compile: {:?}", compile.err().unwrap());
+        if compile.is_err() {
+            assert_eq!(format!("Compile Error:\n\n{}", compile.err().unwrap().join("\n")).as_str(), expected);
+            return
+        }
 
         let mut buf: Vec<u8> = Vec::new();
         let mut vm = VirtualMachine::new(compile.ok().unwrap(), &b""[..], &mut buf);
@@ -1049,8 +1047,14 @@ mod test {
         let root: &PathBuf = &trace::test::get_test_resource_path("compiler", path);
         let text: &String = &trace::test::get_test_resource_src(&root);
         let source = &String::from(path);
+        let compile= compiler::compile(source, text);
 
-        let compile= compiler::compile(source, text).unwrap();
+        if compile.is_err() {
+            assert_eq!(format!("Compile Error:\n\n{}", compile.err().unwrap().join("\n")).as_str(), "Compiled");
+            return
+        }
+
+        let compile = compile.unwrap();
 
         let mut buf: Vec<u8> = Vec::new();
         let mut vm = VirtualMachine::new(compile, &b""[..], &mut buf);

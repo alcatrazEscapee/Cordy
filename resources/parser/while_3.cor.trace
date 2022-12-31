@@ -1,15 +1,16 @@
 L1: 0000 Int(0) -> 0
-L2: 0001 PushGlobal(0) -> x
-    0002 Int(1) -> 10
-    0003 OpGreaterThan
-    0004 Bound(Bool)
-    0005 OpFuncCompose
-    0006 JumpIfFalsePop(12)
-L3: 0007 PushGlobal(0) -> x
-    0008 Int(2) -> 1
-    0009 OpAdd
-    0010 StoreGlobal(0) -> x
-L4: 0011 Jump(1)
-    0012 Pop
+    0001 IncGlobalCount
+L2: 0002 PushGlobal(0, false) -> x
+    0003 Int(1) -> 10
+    0004 OpGreaterThan
+    0005 Bound(Bool)
+    0006 OpFuncCompose
+    0007 JumpIfFalsePop(13)
+L3: 0008 PushGlobal(0, false) -> x
+    0009 Int(2) -> 1
+    0010 OpAdd
+    0011 StoreGlobal(0, false) -> x
+L4: 0012 Jump(2)
     0013 Pop
-    0014 Exit
+    0014 Pop
+    0015 Exit

@@ -1,17 +1,17 @@
 L1: 0000 Int(0) -> 4
     0001 Int(1) -> 7
-    0002 PushGlobal(0) -> x
-    0003 PushGlobal(1) -> $0
+    0002 PushGlobal(0, true) -> x
+    0003 PushGlobal(1, true) -> $0
     0004 OpLessThan
     0005 JumpIfFalsePop(16)
-L2: 0006 PushGlobal(0) -> x
+L2: 0006 PushGlobal(0, true) -> x
     0007 Bound(Print)
     0008 OpFuncCompose
 L3: 0009 Pop
-    0010 PushGlobal(0) -> x
+    0010 PushGlobal(0, true) -> x
     0011 Int(2) -> 1
     0012 OpAdd
-    0013 StoreGlobal(0) -> x
+    0013 StoreGlobal(0, true) -> x
     0014 Pop
     0015 Jump(2)
     0016 PopN(2)

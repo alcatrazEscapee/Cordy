@@ -1,14 +1,24 @@
 L1: 0000 Nil
-L2: 0001 Nil
-L3: 0002 Nil
-    0003 Nil
-L4: 0004 Int(0) -> 3
-L5: 0005 Nil
-L6: 0006 Int(1) -> 6
-    0007 Int(2) -> 5
-    0008 OpAdd
-L7: 0009 Nil
-    0010 True
-    0011 False
-    0012 PopN(10)
-    0013 Exit
+    0001 IncGlobalCount
+L2: 0002 Nil
+    0003 IncGlobalCount
+L3: 0004 Nil
+    0005 IncGlobalCount
+    0006 Nil
+    0007 IncGlobalCount
+L4: 0008 Int(0) -> 3
+    0009 IncGlobalCount
+L5: 0010 Nil
+    0011 IncGlobalCount
+L6: 0012 Int(1) -> 6
+    0013 Int(2) -> 5
+    0014 OpAdd
+    0015 IncGlobalCount
+L7: 0016 Nil
+    0017 IncGlobalCount
+    0018 True
+    0019 IncGlobalCount
+    0020 False
+    0021 IncGlobalCount
+    0022 PopN(10)
+    0023 Exit

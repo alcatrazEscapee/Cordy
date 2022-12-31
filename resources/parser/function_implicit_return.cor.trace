@@ -1,18 +1,19 @@
-L1: 0000 Function(0) -> FunctionImpl { head: 2, tail: 9, nargs: 1, name: "foo", args: ["x"] }
-    0001 Jump(10)
-L2: 0002 PushLocal(0) -> x
-    0003 Int(0) -> 1
-    0004 OpGreaterThan
-    0005 JumpIfFalsePop(8)
-L3: 0006 True
-L4: 0007 Jump(9)
-L5: 0008 False
-L7: 0009 Return
-L9: 0010 PushGlobal(0) -> foo
-    0011 Int(1) -> 2
-    0012 OpFuncEval(1)
-    0013 Bound(Print)
-    0014 OpFuncCompose
-    0015 Pop
+L1: 0000 IncGlobalCount
+    0001 Function(0) -> FunctionImpl { head: 3, tail: 10, nargs: 1, name: "foo", args: ["x"] }
+    0002 Jump(11)
+L2: 0003 PushLocal(0) -> x
+    0004 Int(0) -> 1
+    0005 OpGreaterThan
+    0006 JumpIfFalsePop(9)
+L3: 0007 True
+L4: 0008 Jump(10)
+L5: 0009 False
+L7: 0010 Return
+L9: 0011 PushGlobal(0, false) -> foo
+    0012 Int(1) -> 2
+    0013 OpFuncEval(1)
+    0014 Bound(Print)
+    0015 OpFuncCompose
     0016 Pop
-    0017 Exit
+    0017 Pop
+    0018 Exit

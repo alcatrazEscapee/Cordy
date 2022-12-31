@@ -26,6 +26,7 @@ pub fn parse(scan_result: ScanResult) -> CompileResult {
 
         line_numbers: parser.line_numbers,
         locals: parser.locals_reference,
+        globals: parser.globals_reference,
     }
 }
 
@@ -33,6 +34,12 @@ pub fn parse(scan_result: ScanResult) -> CompileResult {
 pub struct ParserError {
     pub error: ParserErrorType,
     pub lineno: usize,
+}
+
+impl ParserError {
+    fn new(error: ParserErrorType, lineno: usize) -> ParserError {
+        ParserError { error, lineno }
+    }
 }
 
 #[derive(Eq, PartialEq, Debug, Clone)]
@@ -53,6 +60,7 @@ pub enum ParserErrorType {
     ExpectedCommaOrEndOfParameters(Option<ScanToken>),
 
     LocalVariableConflict(String),
+    LocalVariableConflictWithNativeFunction(String),
     UndeclaredIdentifier(String),
 
     InvalidAssignmentTarget,
@@ -69,7 +77,9 @@ struct Parser {
 
     lineno: u16,
     line_numbers: Vec<u16>,
+
     locals_reference: Vec<String>, // A reference for local names on a per-instruction basis, used for disassembly
+    globals_reference: Vec<String>, // A reference for global names, in stack order, used for runtime errors due to invalid late bound globals
 
     // If we are in error recover mode, this flag is set
     error_recovery: bool,
@@ -82,6 +92,7 @@ struct Parser {
     delay_pop_from_expression_statement: bool,
 
     locals: Vec<Local>, // Table of all locals, placed at the bottom of the stack
+    late_bound_globals: Vec<LateBoundGlobal>, // Table of all late bound globals, as they occur.
     synthetic_local_index: usize, // A counter for unique synthetic local variables (`$1`, `$2`, etc.)
     scope_depth: u16, // Scope depth
     function_depth: u16,
@@ -125,15 +136,31 @@ impl Local {
     }
 
     fn is_global(self: &Self) -> bool { self.function_depth == 0 }
+    fn is_true_global(self: &Self) -> bool { self.function_depth == 0 && self.scope_depth == 0 }
 }
 
 #[derive(Eq, PartialEq, Debug, Clone)]
 enum VariableType {
     //StructOrDerivedBinding, // this one is complicated, since it is a type based dispatch against user defined types...
+    NativeFunction(StdBinding),
     Local(u16),
     Global(u16),
-    TopLevelBinding(StdBinding),
+    TrueGlobal(u16),
+    LateBoundGlobal(LateBoundGlobal),
     None,
+}
+
+#[derive(Eq, PartialEq, Debug, Clone)]
+struct LateBoundGlobal {
+    name: String,
+    opcode: usize, // Index in output[] of the `load` opcode
+    error: Option<ParserError>, // An error that would be thrown from here, if the variable does not end up bound
+}
+
+impl LateBoundGlobal {
+    fn new(name: String, opcode: usize, error: Option<ParserError>) -> LateBoundGlobal {
+        LateBoundGlobal { name, opcode, error }
+    }
 }
 
 
@@ -148,12 +175,15 @@ impl Parser {
             lineno: 0,
             line_numbers: Vec::new(),
             locals_reference: Vec::new(),
+            globals_reference: Vec::new(),
 
             error_recovery: false,
             prevent_expression_statement: false,
             delay_pop_from_expression_statement: false,
 
             locals: Vec::new(),
+            late_bound_globals: Vec::new(),
+
             synthetic_local_index: 0,
             scope_depth: 0,
             function_depth: 0,
@@ -174,6 +204,11 @@ impl Parser {
         if let Some(t) = self.peek() {
             let token: ScanToken = t.clone();
             self.error(UnexpectedTokenAfterEoF(token));
+        }
+        for global in self.late_bound_globals.drain(..) {
+            if let Some(error) = global.error {
+                self.errors.push(error);
+            }
         }
         self.push(Exit);
     }
@@ -240,7 +275,9 @@ impl Parser {
             match self.declare_local(name.clone()) {
                 Some(index) => {
                     self.locals[index].initialized = true;  // Functions are always initialized, as they can be recursive
-                    let func_start: usize = self.next_opcode() as usize + 2; // Declare the function literal. + 2 to the head because of the leading Jump and function local
+                    self.push_inc_global(index);
+
+                    let func_start: usize = self.next_opcode() as usize + 2; // Declare the function literal. + 2 to the head because of the leading Jump, Function()
                     let func: u16 = self.declare_function(func_start, name, args.clone());
                     func_id = Some(func);
                     self.push(Opcode::Function(func));  // And push the function object itself
@@ -326,6 +363,7 @@ impl Parser {
                 Some(index) => {
                     // They are automatically initialized, and we don't need to push `Nil` for them, since they're provided from the stack due to call semantics
                     self.locals[index].initialized = true;
+                    self.push_inc_global(index);
                 },
                 None => {
                     // todo: error case, parameter conflict
@@ -798,6 +836,7 @@ impl Parser {
             // They just push their value onto the stack, and we know the location will equal that of the Local's index
             // However, after we initialize a local we need to mark it initialized, so we can refer to it in expressions
             self.locals[local].initialized = true;
+            self.push_inc_global(local);
 
             match self.peek() {
                 Some(Comma) => { // Multiple declarations
@@ -843,9 +882,14 @@ impl Parser {
             Some(Identifier(_)) => {
                 let string: String = self.take_identifier();
                 match self.resolve_identifier(&string) {
+                    VariableType::NativeFunction(b) => self.push(Bound(b)),
                     VariableType::Local(local) => self.push(PushLocal(local)),
-                    VariableType::Global(local) => self.push(PushGlobal(local)),
-                    VariableType::TopLevelBinding(b) => self.push(Bound(b)),
+                    VariableType::Global(local) => self.push(PushGlobal(local, true)),
+                    VariableType::TrueGlobal(local) => self.push(PushGlobal(local, false)),
+                    VariableType::LateBoundGlobal(global) => {
+                        self.late_bound_globals.push(global);
+                        self.push(Noop) // Push `Noop` for now, fix it later
+                    },
                     _ => self.error(UndeclaredIdentifier(string))
                 };
             },
@@ -1296,10 +1340,10 @@ impl Parser {
                         self.parse_expr_10();
                         self.push(StoreLocal(id));
                     },
-                    PushGlobal(id) => {
+                    PushGlobal(id, local) => {
                         self.pop();
                         self.parse_expr_10();
-                        self.push(StoreGlobal(id));
+                        self.push(StoreGlobal(id, local));
                     },
                     OpIndex => {
                         self.pop();
@@ -1318,10 +1362,10 @@ impl Parser {
                         self.push(op);
                         self.push(StoreLocal(id));
                     },
-                    PushGlobal(id) => {
+                    PushGlobal(id, is_local) => {
                         self.parse_expr_10();
                         self.push(op);
-                        self.push(StoreGlobal(id));
+                        self.push(StoreGlobal(id, is_local));
                     },
                     OpIndex => {
                         self.pop();
@@ -1373,6 +1417,12 @@ impl Parser {
     /// Returns the index of the local variable in `locals` if the declaration was successful. Note that the index in `locals is **not** the same as the index used to reference the local (if it is a true local, it will be an offset due to the call stack)
     fn declare_local(self: &mut Self, name: String) -> Option<usize> {
 
+        // Lookup the name as a binding - if it is, it will be denied as we don't allow shadowing global native functions
+        if let Some(_) = stdlib::lookup_named_binding(&name) {
+            self.error(LocalVariableConflictWithNativeFunction(name.clone()));
+            return None;
+        }
+
         // Walk backwards down the locals stack, and check if there are any locals with the same name in the same scope
         for local in self.locals.iter().rev() {
             if local.scope_depth != self.scope_depth {
@@ -1384,9 +1434,28 @@ impl Parser {
             }
         }
 
-        // todo: do we handle binding conflicts at all?
+        let local: usize = self.declare_local_internal(name);
 
-        Some(self.declare_local_internal(name))
+        if self.function_depth == 0 && self.scope_depth == 0 {
+
+            let name: String = self.locals[local].name.clone();
+            let local_index: u16 = self.locals[local].index;
+
+            // Fix references to this global
+            for global in &self.late_bound_globals {
+                if global.name == name {
+                    self.output[global.opcode] = PushGlobal(local_index, false);
+                }
+            }
+
+            // And remove them
+            self.late_bound_globals.retain(|global| global.name != name);
+
+            // Declare this global variable's name
+            self.globals_reference.push(name);
+        }
+
+        Some(local)
     }
 
     /// Declares a synthetic local variable. Unlike `declare_local()`, this can never fail.
@@ -1457,25 +1526,44 @@ impl Parser {
         panic!("Could not find a local {} in locals {:?}", local_id, self.locals);
     }
 
+    /// Resolve an identifier, which can be one of many things, each of which are tried in-order
+    ///
+    /// 1. Native Functions. These cannot be shadowed (as it creates interesting conflict scenarios), and they are all technically global functions.
+    /// 2. Locals (in the current call frame), with the same function depth. Locals at a higher scope are shadowed (hidden) by locals in a deeper scope.
+    /// 3. Globals (relative to the origin of the stack, with function depth == 0 and stack depth == 0)
+    /// 4. Late Bound Globals:
+    ///     - If we are in a >0 function depth, we *do* allow late binding globals.
+    ///     - Note: we have to use a special opcode which checks if the global actually exists first. *And*, we need to fix it later if the global does not end up being bound by the end of compilation.
     fn resolve_identifier(self: &mut Self, name: &String) -> VariableType {
-        // Search for local variables in reverse order
-        // Locals can be accessed in multiple ways:
-        // 1. Locals (in the current call frame), with the same function depth
-        // 2. Globals (relative to the stack base), with function depth == 0
-        // 3. UpValues (todo)
+        if let Some(b) = stdlib::lookup_named_binding(name) {
+            return VariableType::NativeFunction(b);
+        }
+
         for local in self.locals.iter().rev() {
             if &local.name == name && local.initialized {
-                if local.function_depth == 0 {
-                    return VariableType::Global(local.index);
-                } else if local.function_depth == self.function_depth {
+                // Globals lie at function depth 0, and are referencable if the global is at scope 0 (and we're in a function), or the global is at any scope (and we're not in a function)
+                if local.function_depth == 0 && (self.function_depth == 0 || local.scope_depth == 0) {
+                    return if local.scope_depth == 0 {
+                        VariableType::TrueGlobal(local.index)
+                    } else {
+                        VariableType::Global(local.index)
+                    }
+                }
+                // Locals lie at any scope, as long as they're in the same function depth
+                // The exception is that if the local and current function depth is zero, they are caught as global variables instead.
+                if local.function_depth == self.function_depth {
                     return VariableType::Local(local.index);
                 }
             }
         }
 
-        if let Some(b) = stdlib::lookup_named_binding(name) {
-            return VariableType::TopLevelBinding(b);
+        if self.function_depth > 0 {
+            // Assume a late bound global
+            let error = self.deferred_error(UndeclaredIdentifier(name.clone()));
+            let global = LateBoundGlobal::new(name.clone(), self.next_opcode() as usize, error);
+            return VariableType::LateBoundGlobal(global);
         }
+
         VariableType::None
     }
 
@@ -1651,8 +1739,9 @@ impl Parser {
     /// Specialization of `push` which pushes either `PushLocal` or `PushGlobal` for a given local
     fn push_load_local(self: &mut Self, local: usize) {
         trace::trace_parser!("push PushLocal/PushGlobal {}", local);
+        let is_true_global: bool = self.locals[local].is_true_global();
         match self.locals[local].is_global() {
-            true => self.push(PushGlobal(local as u16)),
+            true => self.push(PushGlobal(local as u16, !is_true_global)),
             _ => self.push(PushLocal(local as u16)),
         }
     }
@@ -1660,9 +1749,18 @@ impl Parser {
     /// Specialization of `push` which pushes either `StoreLocal` or `StoreGlobal` for a given local
     fn push_store_local(self: &mut Self, local: usize) {
         trace::trace_parser!("push StoreLocal/StoreGlobal {}", local);
+        let is_true_global: bool = self.locals[local].is_true_global();
         match self.locals[local].is_global() {
-            true => self.push(StoreGlobal(local as u16)),
+            true => self.push(StoreGlobal(local as u16, !is_true_global)),
             _ => self.push(StoreLocal(local as u16)),
+        }
+    }
+
+    /// Specialization of `push` which pushes a `IncGlobalCount` if we need to, for the given local
+    /// Called immediately after a local `initialized` is set to `true
+    fn push_inc_global(self: &mut Self, local: usize) {
+        if self.locals[local].is_true_global() {
+            self.push(IncGlobalCount);
         }
     }
 
@@ -1671,7 +1769,7 @@ impl Parser {
     fn push(self: &mut Self, token: Opcode) {
         trace::trace_parser!("push {:?} at L{:?}", token, self.lineno + 1);
         match &token {
-            PushGlobal(id) | StoreGlobal(id) => {
+            PushGlobal(id, _) | StoreGlobal(id, _) => {
                 let local = self.resolve_local(*id, true);
                 self.locals_reference.push(local.name.clone());
             },
@@ -1688,7 +1786,7 @@ impl Parser {
     /// Pops the last emitted token
     fn pop(self: &mut Self) {
         match self.output.pop().unwrap() {
-            PushGlobal(_) | StoreGlobal(_) | PushLocal(_) | StoreLocal(_) => {
+            PushGlobal(_, _) | StoreGlobal(_, _) | PushLocal(_) | StoreLocal(_) => {
                 self.locals_reference.pop();
             },
             _ => {},
@@ -1711,12 +1809,18 @@ impl Parser {
     fn error(self: &mut Self, error: ParserErrorType) {
         trace::trace_parser!("push_err (error = {}) {:?}", self.error_recovery, error);
         if !self.error_recovery {
-            self.errors.push(ParserError {
-                error,
-                lineno: self.lineno as usize,
-            });
+            self.errors.push(ParserError::new(error, self.lineno as usize));
         }
         self.error_recovery = true;
+    }
+
+    /// Creates an optional error, which will be deferred until later to be emitted
+    fn deferred_error(self: &Self, error: ParserErrorType) -> Option<ParserError> {
+        if self.error_recovery {
+            None
+        } else {
+            Some(ParserError::new(error, self.lineno as usize))
+        }
     }
 }
 

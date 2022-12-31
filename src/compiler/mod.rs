@@ -48,6 +48,7 @@ pub struct CompileResult {
 
     pub line_numbers: Vec<u16>,
     pub locals: Vec<String>,
+    pub globals: Vec<String>,
 }
 
 
@@ -76,7 +77,7 @@ impl CompileResult {
                 Int(cid) => format!("Int({}) -> {}", cid, self.constants[*cid as usize]),
                 Str(sid) => format!("Str({}) -> {:?}", sid, self.strings[*sid as usize]),
                 Function(fid) => format!("Function({}) -> {:?}", fid, self.functions[*fid as usize]),
-                t @ (PushGlobal(_) | StoreGlobal(_) | PushLocal(_) | StoreLocal(_)) => {
+                t @ (PushGlobal(_, _) | StoreGlobal(_, _) | PushLocal(_) | StoreLocal(_)) => {
                     if let Some(local) = locals.next() {
                         format!("{:?} -> {}", t, local)
                     } else {
