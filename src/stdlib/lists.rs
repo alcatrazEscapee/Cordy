@@ -17,7 +17,7 @@ pub fn list_get_index(list_ref: Mut<VecDeque<Value>>, rhs: i64) -> ValueResult {
     if index < list.len() {
         Ok(list[index].clone())
     } else {
-        IndexOutOfBounds(rhs, list.len()).err()
+        ValueErrorIndexOutOfBounds(rhs, list.len()).err()
     }
 }
 
@@ -28,7 +28,7 @@ pub fn list_set_index(list_ref: Mut<VecDeque<Value>>, rhs: i64, value: Value) ->
         list[index] = value;
         Ok(())
     } else {
-        IndexOutOfBounds(rhs, list.len()).err()
+        ValueErrorIndexOutOfBounds(rhs, list.len()).err()
     }
 }
 

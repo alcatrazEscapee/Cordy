@@ -1,18 +1,19 @@
 L1: 0000 Int(0) -> 0
-L3: 0001 PushGlobal(0) -> x
-    0002 Int(1) -> 1
-    0003 OpAdd
-    0004 StoreGlobal(0) -> x
-L4: 0005 Pop
-    0006 PushGlobal(0) -> x
-    0007 Int(2) -> 10
-    0008 OpGreaterThan
-    0009 JumpIfFalsePop(13)
-    0010 Jump(16)
-    0011 Nil
-    0012 Jump(14)
-    0013 Nil
-L5: 0014 Pop
-    0015 Jump(1)
-    0016 Pop
-    0017 Exit
+    0001 IncGlobalCount
+L3: 0002 PushGlobal(0, false) -> x
+    0003 Int(1) -> 1
+    0004 OpAdd
+    0005 StoreGlobal(0, false) -> x
+L4: 0006 Pop
+    0007 PushGlobal(0, false) -> x
+    0008 Int(2) -> 10
+    0009 OpGreaterThan
+    0010 JumpIfFalsePop(14)
+    0011 Jump(17)
+    0012 Nil
+    0013 Jump(15)
+    0014 Nil
+L5: 0015 Pop
+    0016 Jump(2)
+    0017 Pop
+    0018 Exit

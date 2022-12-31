@@ -17,8 +17,10 @@ pub enum RuntimeError {
     IncorrectNumberOfFunctionArguments(FunctionImpl, u8),
     IncorrectNumberOfArguments(StdBinding, u8, u8),
     IncorrectNumberOfArgumentsVariadicAtLeastOne(StdBinding),
-    IndexOutOfBounds(i64, usize),
+
+    ValueErrorIndexOutOfBounds(i64, usize),
     ValueErrorStepCannotBeZero,
+    ValueErrorVariableNotDeclaredYet(String),
 
     TypeErrorUnaryOp(Opcode, Value),
     TypeErrorBinaryOp(Opcode, Value, Value),

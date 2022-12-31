@@ -1,19 +1,20 @@
 L01: 0000 Nil
-L03: 0001 Nil
-L05: 0002 Int(0) -> 3
-     0003 StoreGlobal(1) -> x
-     0004 Pop
-     0005 Nil
-L06: 0006 Int(1) -> 5
-L07: 0007 StoreGlobal(2) -> x
-     0008 Pop
+     0001 IncGlobalCount
+L03: 0002 Nil
+L05: 0003 Int(0) -> 3
+     0004 StoreGlobal(1, true) -> x
+     0005 Pop
+     0006 Nil
+L06: 0007 Int(1) -> 5
+L07: 0008 StoreGlobal(2, true) -> x
      0009 Pop
-     0010 Int(2) -> 7
-L08: 0011 StoreGlobal(1) -> x
-L09: 0012 Pop
-     0013 Pop
-     0014 Int(3) -> 9
-     0015 StoreGlobal(0) -> x
-L10: 0016 Pop
-L11: 0017 Pop
-     0018 Exit
+     0010 Pop
+     0011 Int(2) -> 7
+L08: 0012 StoreGlobal(1, true) -> x
+L09: 0013 Pop
+     0014 Pop
+     0015 Int(3) -> 9
+     0016 StoreGlobal(0, false) -> x
+L10: 0017 Pop
+L11: 0018 Pop
+     0019 Exit

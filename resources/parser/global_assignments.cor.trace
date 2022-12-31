@@ -1,23 +1,26 @@
 L1: 0000 Nil
-    0001 Nil
-    0002 Int(0) -> 3
-L2: 0003 Int(1) -> 1
-    0004 StoreGlobal(0) -> x
-    0005 Pop
-    0006 PushGlobal(0) -> x
-L3: 0007 Int(2) -> 5
-    0008 OpAdd
-    0009 StoreGlobal(1) -> y
-    0010 Pop
-    0011 PushGlobal(2) -> z
-    0012 PushGlobal(0) -> x
-L4: 0013 OpMul
-    0014 StoreGlobal(2) -> z
-    0015 Pop
-    0016 PushGlobal(0) -> x
-    0017 PushGlobal(2) -> z
-L5: 0018 OpSub
-    0019 StoreGlobal(0) -> x
-    0020 Pop
-    0021 PopN(3)
-    0022 Exit
+    0001 IncGlobalCount
+    0002 Nil
+    0003 IncGlobalCount
+    0004 Int(0) -> 3
+    0005 IncGlobalCount
+L2: 0006 Int(1) -> 1
+    0007 StoreGlobal(0, false) -> x
+    0008 Pop
+    0009 PushGlobal(0, false) -> x
+L3: 0010 Int(2) -> 5
+    0011 OpAdd
+    0012 StoreGlobal(1, false) -> y
+    0013 Pop
+    0014 PushGlobal(2, false) -> z
+    0015 PushGlobal(0, false) -> x
+L4: 0016 OpMul
+    0017 StoreGlobal(2, false) -> z
+    0018 Pop
+    0019 PushGlobal(0, false) -> x
+    0020 PushGlobal(2, false) -> z
+L5: 0021 OpSub
+    0022 StoreGlobal(0, false) -> x
+    0023 Pop
+    0024 PopN(3)
+    0025 Exit

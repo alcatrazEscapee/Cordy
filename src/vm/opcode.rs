@@ -25,10 +25,14 @@ pub enum Opcode {
     // In this regard it refers to variables outside of functions (top level, even within block scopes), and variables within functions
     PushLocal(u16),
     StoreLocal(u16),
-    PushGlobal(u16),
-    StoreGlobal(u16),
+    PushGlobal(u16, bool), // bool = is_local = !is_true_global
+    StoreGlobal(u16, bool),
 
     StoreArray,
+
+    // Increments the count of currently declared global variables. This is checked on every `CheckGlobalCount` to verify that no global is referenced before it is initialized
+    // Due to late binding allowed in the parser, we cannot ensure this does not happen at runtime, so it needs to be checked.
+    IncGlobalCount,
 
     // Push
     Nil,
