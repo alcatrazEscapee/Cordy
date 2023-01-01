@@ -1,4 +1,5 @@
 use std::rc::Rc;
+
 use crate::compiler::parser::{ParserError, ParserErrorType};
 use crate::compiler::CompileResult;
 use crate::compiler::scanner::{ScanError, ScanErrorType, ScanToken};

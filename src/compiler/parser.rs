@@ -124,13 +124,11 @@ struct Locals {
     locals: Vec<Local>,
     /// An array of captured upvalues for this function, either due to an inner function requiring them, or this function needing to capture locals from it's enclosing function
     upvalues: Vec<UpValue>,
-    /// `true` if this is the top level 'global' function.
-    is_global: bool,
 }
 
 impl Locals {
-    fn new(is_global: bool) -> Locals {
-        Locals { locals: Vec::new(), upvalues: Vec::new(), is_global }
+    fn new() -> Locals {
+        Locals { locals: Vec::new(), upvalues: Vec::new() }
     }
 }
 
@@ -173,6 +171,7 @@ impl Local {
         Local { name, index: index as u16, scope_depth, function_depth, initialized: false }
     }
 
+    /// Sets this local as `initialized`, meaning it is pushed onto the stack and can be referred to in expressions.
     fn initialize(self: &mut Self) { self.initialized = true; }
 
     fn is_global(self: &Self) -> bool { self.function_depth == 0 }
@@ -223,7 +222,7 @@ impl Parser {
             prevent_expression_statement: false,
             delay_pop_from_expression_statement: false,
 
-            locals: vec![Locals::new(true)],
+            locals: vec![Locals::new()],
             late_bound_globals: Vec::new(),
 
             synthetic_local_index: 0,
@@ -316,7 +315,7 @@ impl Parser {
         if let Some(name) = maybe_name {
             match self.declare_local(name.clone()) {
                 Some(index) => {
-                    self.current_locals_mut().locals[index].initialized = true;  // Functions are always initialized, as they can be recursive
+                    self.current_locals_mut().locals[index].initialize();  // Functions are always initialized, as they can be recursive
                     self.push_inc_global(index);
 
                     let func_start: usize = self.next_opcode() as usize + 2; // Declare the function literal. + 2 to the head because of the leading Jump, Function()
@@ -397,7 +396,7 @@ impl Parser {
         // In addition, we let parameters have their own scope depth one outside locals to the function
         // This lets us 1) declare parameters here, in the right scope,
         // and 2) avoid popping parameters at the end of a function call (as they're handled by the `Return` opcode instead)
-        self.locals.push(Locals::new(false));
+        self.locals.push(Locals::new());
         self.function_depth += 1;
         self.scope_depth += 1;
 
@@ -405,7 +404,7 @@ impl Parser {
             match self.declare_local(arg) {
                 Some(index) => {
                     // They are automatically initialized, and we don't need to push `Nil` for them, since they're provided from the stack due to call semantics
-                    self.current_locals_mut().locals[index].initialized = true;
+                    self.current_locals_mut().locals[index].initialize();
                     self.push_inc_global(index);
                 },
                 None => {
@@ -574,7 +573,7 @@ impl Parser {
         self.loops.push(Loop::new(loop_start, self.scope_depth));
 
         self.parse_expression(); // While condition
-        self.push(Bound(Bool)); // Evaluate the condition with `<expr> . bool` automatically
+        self.push(NativeFunction(Bool)); // Evaluate the condition with `<expr> . bool` automatically
         self.push(OpFuncCompose);
         let jump_if_false = self.reserve(); // Jump to the end
         self.parse_block_statement(); // Inner loop statements, and jump back to front
@@ -665,7 +664,7 @@ impl Parser {
 
                         // Initialize the loop variable, as we're now in the main block and it can be referenced
                         if let Some(local_x) = local_x {
-                            self.current_locals_mut().locals[local_x].initialized = true;
+                            self.current_locals_mut().locals[local_x].initialize();
                         }
 
                         // Bounds check and branch to end
@@ -711,7 +710,7 @@ impl Parser {
 
                         // Initialize the loop variable, as we're now in the main block and it can be referenced
                         if let Some(local_x) = local_x {
-                            self.current_locals_mut().locals[local_x].initialized = true;
+                            self.current_locals_mut().locals[local_x].initialize();
                         }
 
                         // Bounds check and branch to end
@@ -762,15 +761,15 @@ impl Parser {
                 // Initialize the loop variable, as we're now in the main block and it can be referenced
                 // The loop variables cannot be referenced.
                 if let Some(local_x) = local_x {
-                    self.current_locals_mut().locals[local_x].initialized = true;
+                    self.current_locals_mut().locals[local_x].initialize();
                 }
 
                 // Bytecode to check the type of the iterable - if it's a list, do nothing, otherwise, invoke `list` on it.
                 self.push(Dup);
-                self.push(Bound(StdBinding::List));
+                self.push(NativeFunction(StdBinding::List));
                 self.push(OpIs);
                 self.push(JumpIfTruePop(self.next_opcode() + 3));
-                self.push(Bound(StdBinding::List));
+                self.push(NativeFunction(StdBinding::List));
                 self.push(OpFuncCompose);
 
                 // Push the loop index
@@ -781,7 +780,7 @@ impl Parser {
                 let jump: u16 = self.next_opcode();
                 self.push_load_local(local_i);
                 self.push_load_local(local_iter);
-                self.push(Bound(Len));
+                self.push(NativeFunction(Len));
                 self.push(OpFuncCompose);
                 self.push(OpLessThan);
                 let jump_if_false_pop = self.reserve();
@@ -879,7 +878,7 @@ impl Parser {
             // Local declarations don't have an explicit `store` opcode
             // They just push their value onto the stack, and we know the location will equal that of the Local's index
             // However, after we initialize a local we need to mark it initialized, so we can refer to it in expressions
-            self.current_locals_mut().locals[local].initialized = true;
+            self.current_locals_mut().locals[local].initialize();
             self.push_inc_global(local);
 
             match self.peek() {
@@ -926,7 +925,7 @@ impl Parser {
             Some(Identifier(_)) => {
                 let string: String = self.take_identifier();
                 match self.resolve_identifier(&string) {
-                    VariableType::NativeFunction(b) => self.push(Bound(b)),
+                    VariableType::NativeFunction(b) => self.push(NativeFunction(b)),
                     VariableType::Local(local) => self.push(PushLocal(local)),
                     VariableType::Global(local) => self.push(PushGlobal(local, true)),
                     VariableType::TrueGlobal(local) => self.push(PushGlobal(local, false)),
@@ -1022,7 +1021,7 @@ impl Parser {
             match self.peek2() {
                 Some(CloseParen) => {
                     self.advance(); // The unary operator
-                    self.push(Bound(op)); // Push the binding - there is no partial evaluation so that's all we need
+                    self.push(NativeFunction(op)); // Push the binding - there is no partial evaluation so that's all we need
                     self.advance(); // The close paren
                     true
                 },
@@ -1033,13 +1032,13 @@ impl Parser {
             match self.peek() {
                 Some(CloseParen) => {
                     // No expression follows this operator, so we have `(` <op> `)`, which just returns the operator itself
-                    self.push(Bound(op));
+                    self.push(NativeFunction(op));
                     self.advance();
                 },
                 _ => {
                     // Anything else, and we try and parse an expression and partially evaluate
                     self.parse_expression(); // Parse the expression following a binary prefix operator
-                    self.push(Bound(op)); // Push the binding
+                    self.push(NativeFunction(op)); // Push the binding
                     self.push(OpFuncCompose); // And partially evaluate it
                     self.expect(CloseParen);
                 }
@@ -1880,24 +1879,24 @@ mod tests {
     #[test] fn test_binary_add_and_mod_rev() { run_expr("1 % 2 + 3", vec![Int(1), Int(2), OpMod, Int(3), OpAdd]); }
     #[test] fn test_binary_shifts() { run_expr("1 << 2 >> 3", vec![Int(1), Int(2), OpLeftShift, Int(3), OpRightShift]); }
     #[test] fn test_binary_shifts_and_operators() { run_expr("1 & 2 << 3 | 5", vec![Int(1), Int(2), Int(3), OpLeftShift, OpBitwiseAnd, Int(5), OpBitwiseOr]); }
-    #[test] fn test_function_composition() { run_expr("print . read", vec![Bound(Print), Bound(Read), OpFuncCompose]); }
+    #[test] fn test_function_composition() { run_expr("print . read", vec![NativeFunction(Print), NativeFunction(Read), OpFuncCompose]); }
     #[test] fn test_precedence_with_parens() { run_expr("(1 + 2) * 3", vec![Int(1), Int(2), OpAdd, Int(3), OpMul]); }
     #[test] fn test_precedence_with_parens_2() { run_expr("6 / (5 - 3)", vec![Int(6), Int(5), Int(3), OpSub, OpDiv]); }
     #[test] fn test_precedence_with_parens_3() { run_expr("-(1 - 3)", vec![Int(1), Int(3), OpSub, UnarySub]); }
-    #[test] fn test_function_no_args() { run_expr("print", vec![Bound(Print)]); }
-    #[test] fn test_function_one_arg() { run_expr("print(1)", vec![Bound(Print), Int(1), OpFuncEval(1)]); }
-    #[test] fn test_function_many_args() { run_expr("print(1,2,3)", vec![Bound(Print), Int(1), Int(2), Int(3), OpFuncEval(3)]); }
+    #[test] fn test_function_no_args() { run_expr("print", vec![NativeFunction(Print)]); }
+    #[test] fn test_function_one_arg() { run_expr("print(1)", vec![NativeFunction(Print), Int(1), OpFuncEval(1)]); }
+    #[test] fn test_function_many_args() { run_expr("print(1,2,3)", vec![NativeFunction(Print), Int(1), Int(2), Int(3), OpFuncEval(3)]); }
     #[test] fn test_multiple_unary_ops() { run_expr("- ~ ! 1", vec![Int(1), UnaryLogicalNot, UnaryBitwiseNot, UnarySub]); }
-    #[test] fn test_multiple_function_calls() { run_expr("print (1) (2) (3)", vec![Bound(Print), Int(1), OpFuncEval(1), Int(2), OpFuncEval(1), Int(3), OpFuncEval(1)]); }
-    #[test] fn test_multiple_function_calls_some_args() { run_expr("print () (1) (2, 3)", vec![Bound(Print), OpFuncEval(0), Int(1), OpFuncEval(1), Int(2), Int(3), OpFuncEval(2)]); }
-    #[test] fn test_multiple_function_calls_no_args() { run_expr("print () () ()", vec![Bound(Print), OpFuncEval(0), OpFuncEval(0), OpFuncEval(0)]); }
-    #[test] fn test_function_call_unary_op_precedence() { run_expr("- print ()", vec![Bound(Print), OpFuncEval(0), UnarySub]); }
-    #[test] fn test_function_call_unary_op_precedence_with_parens() { run_expr("(- print) ()", vec![Bound(Print), UnarySub, OpFuncEval(0)]); }
-    #[test] fn test_function_call_unary_op_precedence_with_parens_2() { run_expr("- (print () )", vec![Bound(Print), OpFuncEval(0), UnarySub]); }
-    #[test] fn test_function_call_binary_op_precedence() { run_expr("print ( 1 ) + ( 2 ( 3 ) )", vec![Bound(Print), Int(1), OpFuncEval(1), Int(2), Int(3), OpFuncEval(1), OpAdd]); }
-    #[test] fn test_function_call_parens_1() { run_expr("print . read (1 + 3) (5)", vec![Bound(Print), Bound(Read), Int(1), Int(3), OpAdd, OpFuncEval(1), Int(5), OpFuncEval(1), OpFuncCompose]); }
-    #[test] fn test_function_call_parens_2() { run_expr("( print . read (1 + 3) ) (5)", vec![Bound(Print), Bound(Read), Int(1), Int(3), OpAdd, OpFuncEval(1), OpFuncCompose, Int(5), OpFuncEval(1)]); }
-    #[test] fn test_function_composition_with_is() { run_expr("'123' . int is int . print", vec![Str(0), Bound(StdBinding::Int), Bound(StdBinding::Int), OpIs, OpFuncCompose, Bound(Print), OpFuncCompose]); }
+    #[test] fn test_multiple_function_calls() { run_expr("print (1) (2) (3)", vec![NativeFunction(Print), Int(1), OpFuncEval(1), Int(2), OpFuncEval(1), Int(3), OpFuncEval(1)]); }
+    #[test] fn test_multiple_function_calls_some_args() { run_expr("print () (1) (2, 3)", vec![NativeFunction(Print), OpFuncEval(0), Int(1), OpFuncEval(1), Int(2), Int(3), OpFuncEval(2)]); }
+    #[test] fn test_multiple_function_calls_no_args() { run_expr("print () () ()", vec![NativeFunction(Print), OpFuncEval(0), OpFuncEval(0), OpFuncEval(0)]); }
+    #[test] fn test_function_call_unary_op_precedence() { run_expr("- print ()", vec![NativeFunction(Print), OpFuncEval(0), UnarySub]); }
+    #[test] fn test_function_call_unary_op_precedence_with_parens() { run_expr("(- print) ()", vec![NativeFunction(Print), UnarySub, OpFuncEval(0)]); }
+    #[test] fn test_function_call_unary_op_precedence_with_parens_2() { run_expr("- (print () )", vec![NativeFunction(Print), OpFuncEval(0), UnarySub]); }
+    #[test] fn test_function_call_binary_op_precedence() { run_expr("print ( 1 ) + ( 2 ( 3 ) )", vec![NativeFunction(Print), Int(1), OpFuncEval(1), Int(2), Int(3), OpFuncEval(1), OpAdd]); }
+    #[test] fn test_function_call_parens_1() { run_expr("print . read (1 + 3) (5)", vec![NativeFunction(Print), NativeFunction(Read), Int(1), Int(3), OpAdd, OpFuncEval(1), Int(5), OpFuncEval(1), OpFuncCompose]); }
+    #[test] fn test_function_call_parens_2() { run_expr("( print . read (1 + 3) ) (5)", vec![NativeFunction(Print), NativeFunction(Read), Int(1), Int(3), OpAdd, OpFuncEval(1), OpFuncCompose, Int(5), OpFuncEval(1)]); }
+    #[test] fn test_function_composition_with_is() { run_expr("'123' . int is int . print", vec![Str(0), NativeFunction(StdBinding::Int), NativeFunction(StdBinding::Int), OpIs, OpFuncCompose, NativeFunction(Print), OpFuncCompose]); }
     #[test] fn test_and() { run_expr("1 < 2 and 3 < 4", vec![Int(1), Int(2), OpLessThan, JumpIfFalse(8), Pop, Int(3), Int(4), OpLessThan]); }
     #[test] fn test_or() { run_expr("1 < 2 or 3 < 4", vec![Int(1), Int(2), OpLessThan, JumpIfTrue(8), Pop, Int(3), Int(4), OpLessThan]); }
     #[test] fn test_precedence_1() { run_expr("1 . 2 & 3 > 4", vec![Int(1), Int(2), Int(3), OpBitwiseAnd, OpFuncCompose, Int(4), OpGreaterThan]); }
@@ -1913,7 +1912,7 @@ mod tests {
     #[test] fn test_slice_10() { run_expr("1 [2:]", vec![Int(1), Int(2), Nil, OpSlice]); }
     #[test] fn test_slice_11() { run_expr("1 [:3]", vec![Int(1), Nil, Int(3), OpSlice]); }
     #[test] fn test_slice_12() { run_expr("1 [2:3]", vec![Int(1), Int(2), Int(3), OpSlice]); }
-    #[test] fn test_binary_ops() { run_expr("(*) * (+) + (/)", vec![Bound(OperatorMul), Bound(OperatorAdd), OpMul, Bound(OperatorDiv), OpAdd]); }
+    #[test] fn test_binary_ops() { run_expr("(*) * (+) + (/)", vec![NativeFunction(OperatorMul), NativeFunction(OperatorAdd), OpMul, NativeFunction(OperatorDiv), OpAdd]); }
 
     #[test] fn test_let_eof() { run_err("let", "Expecting a variable name after 'let' keyword, got end of input instead\n  at: line 1 (<test>)\n  at:\n\nlet\n"); }
     #[test] fn test_let_no_identifier() { run_err("let =", "Expecting a variable name after 'let' keyword, got '=' token instead\n  at: line 1 (<test>)\n  at:\n\nlet =\n"); }

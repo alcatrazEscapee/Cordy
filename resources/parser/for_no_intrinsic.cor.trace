@@ -1,15 +1,15 @@
 L1: 0000 Nil
     0001 Str(0) -> "abcdef"
     0002 Dup
-    0003 Bound(List)
+    0003 NativeFunction(List)
     0004 OpIs
     0005 JumpIfTruePop(8)
-    0006 Bound(List)
+    0006 NativeFunction(List)
     0007 OpFuncCompose
     0008 Int(0) -> 0
     0009 PushGlobal(2, true) -> $1
     0010 PushGlobal(1, true) -> $0
-    0011 Bound(Len)
+    0011 NativeFunction(Len)
     0012 OpFuncCompose
     0013 OpLessThan
     0014 JumpIfFalsePop(30)
@@ -19,7 +19,7 @@ L1: 0000 Nil
     0018 StoreGlobal(0, true) -> letter
     0019 Pop
 L2: 0020 PushGlobal(0, true) -> letter
-    0021 Bound(Print)
+    0021 NativeFunction(Print)
     0022 OpFuncCompose
 L3: 0023 Pop
     0024 PushGlobal(2, true) -> $1

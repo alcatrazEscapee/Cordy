@@ -2,7 +2,7 @@ L1: 0000 Int(0) -> 3
     0001 Int(1) -> 5
     0002 OpLessThan
     0003 JumpIfFalsePop(8)
-L2: 0004 Bound(Print)
+L2: 0004 NativeFunction(Print)
     0005 Str(0) -> "yes"
     0006 OpFuncEval(1)
 L3: 0007 Jump(9)

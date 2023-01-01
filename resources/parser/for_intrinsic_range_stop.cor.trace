@@ -6,7 +6,7 @@ L1: 0000 Int(0) -> 10
     0005 OpLessThan
     0006 JumpIfFalsePop(17)
 L2: 0007 PushGlobal(0, true) -> i
-    0008 Bound(Print)
+    0008 NativeFunction(Print)
     0009 OpFuncCompose
 L3: 0010 Pop
     0011 PushGlobal(0, true) -> i

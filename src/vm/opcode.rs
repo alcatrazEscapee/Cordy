@@ -34,6 +34,10 @@ pub enum Opcode {
     // Due to late binding allowed in the parser, we cannot ensure this does not happen at runtime, so it needs to be checked.
     IncGlobalCount,
 
+    // Take a closure, and add the respective local or upvalue to the closure
+    CloseLocal(u16),
+    CloseUpvalue(u16),
+
     // Push
     Nil,
     True,
@@ -41,7 +45,7 @@ pub enum Opcode {
     Int(u16),
     Str(u16),
     Function(u16),
-    Bound(StdBinding),
+    NativeFunction(StdBinding),
     List(u16),
 
     // Unary Operators
