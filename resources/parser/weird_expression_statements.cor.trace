@@ -1,9 +1,9 @@
 L1: 0000 Str(0) -> "hello"
-    0001 Bound(Print)
+    0001 NativeFunction(Print)
     0002 OpFuncCompose
     0003 Pop
 L2: 0004 Str(1) -> "world"
-    0005 Bound(Print)
+    0005 NativeFunction(Print)
     0006 OpFuncCompose
     0007 Pop
     0008 Exit

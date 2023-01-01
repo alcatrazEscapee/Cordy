@@ -12,7 +12,7 @@ L7: 0010 Return
 L9: 0011 PushGlobal(0, false) -> foo
     0012 Int(1) -> 2
     0013 OpFuncEval(1)
-    0014 Bound(Print)
+    0014 NativeFunction(Print)
     0015 OpFuncCompose
     0016 Pop
     0017 Pop

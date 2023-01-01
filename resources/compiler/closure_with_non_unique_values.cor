@@ -1,0 +1,12 @@
+fn makeClosure(value) {
+    fn closure() {
+        value . print
+    }
+    closure
+}
+
+let toast = makeClosure('toast');
+let bread = makeClosure('bread');
+
+toast();
+bread();

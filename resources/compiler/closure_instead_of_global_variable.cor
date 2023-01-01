@@ -1,0 +1,11 @@
+let x = 'global'
+
+fn outer() {
+    let x = 'outer'
+    fn inner() {
+        x . print
+    }
+    inner()
+}
+
+outer()

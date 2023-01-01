@@ -1,5 +1,5 @@
 L1: 0000 True
-    0001 Bound(Bool)
+    0001 NativeFunction(Bool)
     0002 OpFuncCompose
     0003 JumpIfFalsePop(6)
 L2: 0004 Jump(6)

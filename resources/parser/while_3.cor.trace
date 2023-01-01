@@ -3,7 +3,7 @@ L1: 0000 Int(0) -> 0
 L2: 0002 PushGlobal(0, false) -> x
     0003 Int(1) -> 10
     0004 OpGreaterThan
-    0005 Bound(Bool)
+    0005 NativeFunction(Bool)
     0006 OpFuncCompose
     0007 JumpIfFalsePop(13)
 L3: 0008 PushGlobal(0, false) -> x

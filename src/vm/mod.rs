@@ -301,11 +301,6 @@ impl<R, W> VirtualMachine<R, W> where
                 }
             },
 
-            IncGlobalCount => {
-                trace::trace_interpreter!("inc global count -> {}", self.global_count + 1);
-                self.global_count += 1;
-            }
-
             StoreArray => {
                 trace::trace_interpreter!("store array array = {}, index = {}, value = {}", self.stack[self.stack.len() - 3].as_debug_str(), self.stack[self.stack.len() - 2].as_debug_str(), self.stack.last().unwrap().as_debug_str());
                 let a3: Value = self.pop();
@@ -318,6 +313,18 @@ impl<R, W> VirtualMachine<R, W> where
                     },
                     (l, r) => return TypeErrorBinaryOp(OpIndex, l, r).err()
                 }
+            },
+
+            IncGlobalCount => {
+                trace::trace_interpreter!("inc global count -> {}", self.global_count + 1);
+                self.global_count += 1;
+            },
+
+            CloseLocal(index) => {
+                trace::trace_interpreter!("close local {}", index);
+            },
+            CloseUpvalue(index) => {
+                trace::trace_interpreter!("close upvalue {}", index);
             },
 
             // Push Operations
@@ -351,7 +358,7 @@ impl<R, W> VirtualMachine<R, W> where
                 trace::trace_interpreter!("push {} -> {}", fid, func.as_debug_str());
                 self.push(func);
             },
-            Bound(b) => {
+            NativeFunction(b) => {
                 trace::trace_interpreter!("push {}", Value::Binding(b).as_debug_str());
                 self.push(Value::NativeFunction(b));
             },
@@ -1009,6 +1016,9 @@ mod test {
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }
     #[test] fn test_append_large_lists() { run("append_large_lists"); }
+    #[test] fn test_closure_instead_of_global_variable() { run("closure_instead_of_global_variable"); }
+    #[test] fn test_closure_with_non_unique_values() { run("closure_with_non_unique_values"); }
+    #[test] fn test_closure_without_stack_semantics() { run("closure_without_stack_semantics"); }
     #[test] fn test_fibonacci() { run("fibonacci"); }
     #[test] fn test_function_capture_from_inner_scope() { run("function_capture_from_inner_scope"); }
     #[test] fn test_function_capture_from_outer_scope() { run("function_capture_from_outer_scope"); }
