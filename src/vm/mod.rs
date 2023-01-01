@@ -353,7 +353,7 @@ impl<R, W> VirtualMachine<R, W> where
             },
             Bound(b) => {
                 trace::trace_interpreter!("push {}", Value::Binding(b).as_debug_str());
-                self.push(Value::Binding(b));
+                self.push(Value::NativeFunction(b));
             },
             List(cid) => {
                 trace::trace_interpreter!("push [n={}]", cid);
@@ -562,7 +562,7 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
                 }
                 Ok(FunctionType::User)
             },
-            Value::Binding(b) => {
+            Value::NativeFunction(b) => {
                 trace::trace_interpreter!("invoke_func_compose -> {}", Value::Binding(b.clone()).as_debug_str());
                 // invoke_func_binding() will pop `nargs` arguments off the stack and pass them to the provided function
                 // Unlike `OpFuncEval`, we have already popped the binding off the stack initially
@@ -572,7 +572,7 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
                 }
                 Ok(FunctionType::Native)
             },
-            Value::PartialBinding(b, nargs) => {
+            Value::PartialNativeFunction(b, nargs) => {
                 trace::trace_interpreter!("invoke_func_compose -> {}", Value::Binding(b.clone()).as_debug_str());
                 // Need to consume the arguments and set up the stack for calling as if all partial arguments were just pushed
                 // Top of the stack contains `argN+1`, and `nargs` contains `[argN, argN-1, ... arg1]`
@@ -655,7 +655,7 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
                 }
                 Ok(FunctionType::User)
             },
-            Value::Binding(b) => {
+            Value::NativeFunction(b) => {
                 trace::trace_interpreter!("invoke_func_eval -> {}, nargs = {}", Value::Binding(b.clone()).as_debug_str(), nargs);
                 match stdlib::invoke(*b, nargs, self) {
                     Ok(v) => {
@@ -666,14 +666,14 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
                 }
                 Ok(FunctionType::Native)
             },
-            Value::PartialBinding(b, _) => {
+            Value::PartialNativeFunction(b, _) => {
                 trace::trace_interpreter!("invoke_func_eval -> {}, nargs = {}", Value::Binding(b.clone()).as_debug_str(), nargs);
                 // Need to consume the arguments and set up the stack for calling as if all partial arguments were just pushed
                 // Surgically extract the binding via std::mem::replace
                 let binding: StdBinding = *b;
                 let i: usize = self.stack.len() - 1 - nargs as usize;
                 let args: Vec<Box<Value>> = match std::mem::replace(&mut self.stack[i], Value::Nil) {
-                    Value::PartialBinding(_, x) => *x,
+                    Value::PartialNativeFunction(_, x) => *x,
                     _ => panic!("Stack corruption")
                 };
 

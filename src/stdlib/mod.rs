@@ -504,5 +504,5 @@ fn wrap_as_partial<VM>(bound: StdBinding, nargs: u8, vm: &mut VM) -> Value where
     for _ in 0..nargs {
         args.push(Box::new(vm.pop().clone()));
     }
-    Value::PartialBinding(bound, Box::new(args))
+    Value::PartialNativeFunction(bound, Box::new(args))
 }

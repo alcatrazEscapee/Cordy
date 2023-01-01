@@ -82,6 +82,7 @@ print(max(elves))
 
 ### To-Do
 
+- Semantic parser errors that don't initiate parser error recovery
 - Non expression based REPL with history
 - Implement `->` operator, basic named tuple types (structs), or binding resolution on macros
 - Set literals

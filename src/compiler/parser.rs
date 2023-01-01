@@ -13,6 +13,7 @@ use Opcode::{*};
 use StdBinding::{*};
 
 
+/// Top level API - parses a `ScanResult`, does semantic analysis, and returns a fully compiled program.
 pub fn parse(scan_result: ScanResult) -> CompileResult {
     let mut parser: Parser = Parser::new(scan_result.tokens);
     parser.parse();
@@ -30,6 +31,10 @@ pub fn parse(scan_result: ScanResult) -> CompileResult {
     }
 }
 
+
+// ===== Parser Data Structures ===== //
+
+
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub struct ParserError {
     pub error: ParserErrorType,
@@ -41,6 +46,7 @@ impl ParserError {
         ParserError { error, lineno }
     }
 }
+
 
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub enum ParserErrorType {
@@ -81,59 +87,93 @@ struct Parser {
     locals_reference: Vec<String>, // A reference for local names on a per-instruction basis, used for disassembly
     globals_reference: Vec<String>, // A reference for global names, in stack order, used for runtime errors due to invalid late bound globals
 
-    // If we are in error recover mode, this flag is set
+    /// If we are in error recover mode, this flag is set
     error_recovery: bool,
-    // If a expression statement has already been parsed before a new line or ';', this flag is set
-    // This denies two unrelated expression statements on the same line, unless seperated by a token such as `;`, `{` or `}`
+    /// If a expression statement has already been parsed before a new line or ';', this flag is set
+    /// This denies two unrelated expression statements on the same line, unless seperated by a token such as `;`, `{` or `}`
     prevent_expression_statement: bool,
-    // We delay the last `Pop` emitted from an expression statement wherever possible
-    // This allows more statement-like constructs to act like expression statements automatically
-    // If this flag is `true`, then we need to emit a `Pop` or risk mangling the stack.
+    /// We delay the last `Pop` emitted from an expression statement wherever possible
+    /// This allows more statement-like constructs to act like expression statements automatically
+    /// If this flag is `true`, then we need to emit a `Pop` or risk mangling the stack.
     delay_pop_from_expression_statement: bool,
 
-    locals: Vec<Local>, // Table of all locals, placed at the bottom of the stack
+    /// A stack of nested functions, each of which have their own table of locals.
+    /// While this mirrors the call stack it may not be representative. The only thing we can assume is that when a function is declared, all locals in the enclosing function are accessible.
+    locals: Vec<Locals>,
+
     late_bound_globals: Vec<LateBoundGlobal>, // Table of all late bound globals, as they occur.
     synthetic_local_index: usize, // A counter for unique synthetic local variables (`$1`, `$2`, etc.)
-    scope_depth: u16, // Scope depth
+    scope_depth: u16, // Current scope depth
     function_depth: u16,
 
     strings: Vec<String>,
     constants: Vec<i64>,
     functions: Vec<FunctionImpl>,
 
-    // Loop stack
-    // Each frame represents a single loop, which `break` and `continue` statements refer to
-    // `continue` jumps back to the beginning of the loop, aka the first `usize` (loop start)
-    // `break` statements jump back to the end of the loop, which needs to be patched later. The values to be patched record themselves in the stack at the current loop level
+    /// Loop stack
+    /// Each frame represents a single loop, which `break` and `continue` statements refer to
+    /// `continue` jumps back to the beginning of the loop, aka the first `usize` (loop start)
+    /// `break` statements jump back to the end of the loop, which needs to be patched later. The values to be patched record themselves in the stack at the current loop level
     loops: Vec<Loop>,
+}
+
+#[derive(Debug)]
+struct Locals {
+    /// The local variables in the current function.
+    /// Top level local variables are considered global, even though they still might be block scoped ('true global' are top level function in no block scope, as they can never go out of scope).
+    locals: Vec<Local>,
+    /// An array of captured upvalues for this function, either due to an inner function requiring them, or this function needing to capture locals from it's enclosing function
+    upvalues: Vec<UpValue>,
+    /// `true` if this is the top level 'global' function.
+    is_global: bool,
+}
+
+impl Locals {
+    fn new(is_global: bool) -> Locals {
+        Locals { locals: Vec::new(), upvalues: Vec::new(), is_global }
+    }
+}
+
+#[derive(Debug)]
+struct UpValue {
+    name: String,
+
+    /// `true` = local variable in enclosing function, `false` = upvalue in enclosing function
+    is_local: bool,
+
+    /// Either a reference to an index in the enclosing function's `locals` (which are stack offset),
+    /// or a reference to the enclosing function's `upvalues` (which can be accessed via stack offset 0 -> upvalues, if it is a closure
+    index: u16,
 }
 
 #[derive(Eq, PartialEq, Debug, Clone)]
 struct Loop {
     start_index: u16,
-    depth: u16,
+    scope_depth: u16,
     break_statements: Vec<u16>
 }
 
 impl Loop {
     fn new(start_index: u16, depth: u16) -> Loop {
-        Loop { start_index, depth, break_statements: Vec::new() }
+        Loop { start_index, scope_depth: depth, break_statements: Vec::new() }
     }
 }
 
 #[derive(Eq, PartialEq, Debug, Clone)]
 struct Local {
     name: String,
+    index: u16,
     scope_depth: u16,
     function_depth: u16,
-    index: u16,
     initialized: bool,
 }
 
 impl Local {
-    fn new(name: String, scope_depth: u16, function_depth: u16, index: u16) -> Local {
-        Local { name, scope_depth, function_depth, index, initialized: false }
+    fn new(name: String, index: usize, scope_depth: u16, function_depth: u16) -> Local {
+        Local { name, index: index as u16, scope_depth, function_depth, initialized: false }
     }
+
+    fn initialize(self: &mut Self) { self.initialized = true; }
 
     fn is_global(self: &Self) -> bool { self.function_depth == 0 }
     fn is_true_global(self: &Self) -> bool { self.function_depth == 0 && self.scope_depth == 0 }
@@ -141,7 +181,6 @@ impl Local {
 
 #[derive(Eq, PartialEq, Debug, Clone)]
 enum VariableType {
-    //StructOrDerivedBinding, // this one is complicated, since it is a type based dispatch against user defined types...
     NativeFunction(StdBinding),
     Local(u16),
     Global(u16),
@@ -164,6 +203,9 @@ impl LateBoundGlobal {
 }
 
 
+// ===== Main Parser Implementation ===== //
+
+
 impl Parser {
 
     fn new(tokens: Vec<ScanToken>) -> Parser {
@@ -181,7 +223,7 @@ impl Parser {
             prevent_expression_statement: false,
             delay_pop_from_expression_statement: false,
 
-            locals: Vec::new(),
+            locals: vec![Locals::new(true)],
             late_bound_globals: Vec::new(),
 
             synthetic_local_index: 0,
@@ -274,7 +316,7 @@ impl Parser {
         if let Some(name) = maybe_name {
             match self.declare_local(name.clone()) {
                 Some(index) => {
-                    self.locals[index].initialized = true;  // Functions are always initialized, as they can be recursive
+                    self.current_locals_mut().locals[index].initialized = true;  // Functions are always initialized, as they can be recursive
                     self.push_inc_global(index);
 
                     let func_start: usize = self.next_opcode() as usize + 2; // Declare the function literal. + 2 to the head because of the leading Jump, Function()
@@ -355,6 +397,7 @@ impl Parser {
         // In addition, we let parameters have their own scope depth one outside locals to the function
         // This lets us 1) declare parameters here, in the right scope,
         // and 2) avoid popping parameters at the end of a function call (as they're handled by the `Return` opcode instead)
+        self.locals.push(Locals::new(false));
         self.function_depth += 1;
         self.scope_depth += 1;
 
@@ -362,7 +405,7 @@ impl Parser {
             match self.declare_local(arg) {
                 Some(index) => {
                     // They are automatically initialized, and we don't need to push `Nil` for them, since they're provided from the stack due to call semantics
-                    self.locals[index].initialized = true;
+                    self.current_locals_mut().locals[index].initialized = true;
                     self.push_inc_global(index);
                 },
                 None => {
@@ -413,6 +456,7 @@ impl Parser {
         self.scope_depth -= 1;
 
         self.pop_locals_in_current_scope_depth(false); // Pop the parameters from the parser's knowledge of locals, but don't emit Pop / PopN
+        self.locals.pop().unwrap();
         self.function_depth -= 1;
         self.scope_depth -= 1;
 
@@ -621,7 +665,7 @@ impl Parser {
 
                         // Initialize the loop variable, as we're now in the main block and it can be referenced
                         if let Some(local_x) = local_x {
-                            self.locals[local_x].initialized = true;
+                            self.current_locals_mut().locals[local_x].initialized = true;
                         }
 
                         // Bounds check and branch to end
@@ -667,7 +711,7 @@ impl Parser {
 
                         // Initialize the loop variable, as we're now in the main block and it can be referenced
                         if let Some(local_x) = local_x {
-                            self.locals[local_x].initialized = true;
+                            self.current_locals_mut().locals[local_x].initialized = true;
                         }
 
                         // Bounds check and branch to end
@@ -718,7 +762,7 @@ impl Parser {
                 // Initialize the loop variable, as we're now in the main block and it can be referenced
                 // The loop variables cannot be referenced.
                 if let Some(local_x) = local_x {
-                    self.locals[local_x].initialized = true;
+                    self.current_locals_mut().locals[local_x].initialized = true;
                 }
 
                 // Bytecode to check the type of the iterable - if it's a list, do nothing, otherwise, invoke `list` on it.
@@ -835,7 +879,7 @@ impl Parser {
             // Local declarations don't have an explicit `store` opcode
             // They just push their value onto the stack, and we know the location will equal that of the Local's index
             // However, after we initialize a local we need to mark it initialized, so we can refer to it in expressions
-            self.locals[local].initialized = true;
+            self.current_locals_mut().locals[local].initialized = true;
             self.push_inc_global(local);
 
             match self.peek() {
@@ -1414,48 +1458,43 @@ impl Parser {
     }
 
     /// After a `let <name>` or `fn <name>` declaration, tries to declare this as a local variable in the current scope
-    /// Returns the index of the local variable in `locals` if the declaration was successful. Note that the index in `locals is **not** the same as the index used to reference the local (if it is a true local, it will be an offset due to the call stack)
+    /// Returns the index of the local variable in `self.current_locals().locals`
     fn declare_local(self: &mut Self, name: String) -> Option<usize> {
 
         // Lookup the name as a binding - if it is, it will be denied as we don't allow shadowing global native functions
         if let Some(_) = stdlib::lookup_named_binding(&name) {
             self.error(LocalVariableConflictWithNativeFunction(name.clone()));
-            return None;
+            return None
         }
 
-        // Walk backwards down the locals stack, and check if there are any locals with the same name in the same scope
-        for local in self.locals.iter().rev() {
-            if local.scope_depth != self.scope_depth {
-                break
-            }
-            if local.name == name {
+        // Ensure there are no conflicts within the current scope, as we don't allow shadowing in the same scope.
+        for local in &self.locals.last().unwrap().locals {
+            if local.scope_depth == self.scope_depth && local.name == name {
                 self.error(LocalVariableConflict(name.clone()));
-                return None;
+                return None
             }
         }
 
-        let local: usize = self.declare_local_internal(name);
+        let index = self.declare_local_internal(name);
+        let local = &self.locals.last().unwrap().locals[index];
 
-        if self.function_depth == 0 && self.scope_depth == 0 {
-
-            let name: String = self.locals[local].name.clone();
-            let local_index: u16 = self.locals[local].index;
+        if local.is_true_global() {
 
             // Fix references to this global
             for global in &self.late_bound_globals {
-                if global.name == name {
-                    self.output[global.opcode] = PushGlobal(local_index, false);
+                if global.name == local.name {
+                    self.output[global.opcode] = PushGlobal(local.index, false);
                 }
             }
 
             // And remove them
-            self.late_bound_globals.retain(|global| global.name != name);
+            self.late_bound_globals.retain(|global| global.name != local.name);
 
             // Declare this global variable's name
-            self.globals_reference.push(name);
+            self.globals_reference.push(local.name.clone());
         }
 
-        Some(local)
+        Some(index)
     }
 
     /// Declares a synthetic local variable. Unlike `declare_local()`, this can never fail.
@@ -1465,34 +1504,21 @@ impl Parser {
         self.declare_local_internal(format!("${}", self.synthetic_local_index - 1))
     }
 
+    /// Declares a local variable by the name `name` in the current scope.
     fn declare_local_internal(self: &mut Self, name: String) -> usize {
-        // Count the current number of locals at the current function depth
-        let mut local_index: u16 = 0;
-        for local in &self.locals {
-            if local.function_depth == self.function_depth {
-                local_index += 1;
-            }
-        }
-
-        let local: Local = Local::new(name, self.scope_depth, self.function_depth, local_index);
-        self.locals.push(local);
-        self.locals.len() - 1
+        let local: Local = Local::new(name, self.locals.last().unwrap().locals.len(), self.scope_depth, self.function_depth);
+        self.locals.last_mut().unwrap().locals.push(local);
+        self.locals.last().unwrap().locals.len() - 1
     }
 
     /// Pops all locals declared in the current scope, *before* decrementing the scope depth
     /// Also emits the relevant `OpPop` opcodes to the output token stream.
     fn pop_locals_in_current_scope_depth(self: &mut Self, emit_pop_token: bool) {
-        let mut local_depth: u16 = 0;
-        while let Some(local) = self.locals.last() {
-            if local.scope_depth == self.scope_depth {
-                self.locals.pop().unwrap();
-                local_depth += 1;
-            } else {
-                break
-            }
-        }
+        let local_count = self.current_locals().locals.len();
+        let scope_depth = self.scope_depth;
+        self.current_locals_mut().locals.retain(|e| e.scope_depth != scope_depth);
         if emit_pop_token {
-            self.push_pop(local_depth);
+            self.push_pop((local_count - self.current_locals().locals.len()) as u16);
         }
     }
 
@@ -1500,30 +1526,26 @@ impl Parser {
     /// It **does not** modify the local variable stack, and only outputs these tokens for the purposes of a jump across scopes.
     fn pop_locals_in_current_loop(self: &mut Self) {
         let loop_stmt: &Loop = self.loops.last().unwrap();
-        let mut local_depth: u16 = 0;
+        let mut count: u16 = 0;
 
-        for local in self.locals.iter().rev() {
-            if local.scope_depth > loop_stmt.depth {
-                local_depth += 1;
+        for local in self.current_locals().locals.iter().rev() {
+            if local.scope_depth > loop_stmt.scope_depth {
+                count += 1;
             } else {
                 break
             }
         }
-        self.push_pop(local_depth);
+        self.push_pop(count);
     }
 
-    fn resolve_local(self: &Self, local_id: u16, global: bool) -> &Local {
-        let mut local_index: u16 = 0;
-        let target_depth: u16 = if global { 0 } else { self.function_depth };
-        for local in &self.locals {
-            if local.function_depth == target_depth {
-                if local_id == local_index {
-                    return local
-                }
-                local_index += 1;
-            }
-        }
-        panic!("Could not find a local {} in locals {:?}", local_id, self.locals);
+    /// Returns the current function's `locals`
+    fn current_locals(self: &Self) -> &Locals {
+        self.locals.last().unwrap()
+    }
+
+    /// Returns the current function's `locals`
+    fn current_locals_mut(self: &mut Self) -> &mut Locals {
+        self.locals.last_mut().unwrap()
     }
 
     /// Resolve an identifier, which can be one of many things, each of which are tried in-order
@@ -1539,20 +1561,23 @@ impl Parser {
             return VariableType::NativeFunction(b);
         }
 
-        for local in self.locals.iter().rev() {
-            if &local.name == name && local.initialized {
-                // Globals lie at function depth 0, and are referencable if the global is at scope 0 (and we're in a function), or the global is at any scope (and we're not in a function)
-                if local.function_depth == 0 && (self.function_depth == 0 || local.scope_depth == 0) {
-                    return if local.scope_depth == 0 {
-                        VariableType::TrueGlobal(local.index)
-                    } else {
-                        VariableType::Global(local.index)
-                    }
+        // If we're in a nonzero function depth, search for matching locals to this function
+        if self.function_depth > 0 {
+            for local in self.current_locals().locals.iter().rev() {
+                if &local.name == name && local.initialized {
+                    return VariableType::Local(local.index)
                 }
-                // Locals lie at any scope, as long as they're in the same function depth
-                // The exception is that if the local and current function depth is zero, they are caught as global variables instead.
-                if local.function_depth == self.function_depth {
-                    return VariableType::Local(local.index);
+            }
+        }
+
+        // Otherwise, look for locals in function depth = 0, which we can reference either as true globals, or globals (if we're also in function depth 0)
+        for local in self.locals[0].locals.iter().rev() {
+            if &local.name == name && local.initialized {
+                if local.scope_depth == 0 {
+                    return VariableType::TrueGlobal(local.index)
+                }
+                if self.function_depth == 0 {
+                    return VariableType::Global(local.index)
                 }
             }
         }
@@ -1737,29 +1762,37 @@ impl Parser {
     }
 
     /// Specialization of `push` which pushes either `PushLocal` or `PushGlobal` for a given local
-    fn push_load_local(self: &mut Self, local: usize) {
-        trace::trace_parser!("push PushLocal/PushGlobal {}", local);
-        let is_true_global: bool = self.locals[local].is_true_global();
-        match self.locals[local].is_global() {
-            true => self.push(PushGlobal(local as u16, !is_true_global)),
-            _ => self.push(PushLocal(local as u16)),
+    fn push_load_local(self: &mut Self, index: usize) {
+        trace::trace_parser!("push PushLocal/PushGlobal {}", index);
+
+        let local = &self.current_locals_mut().locals[index];
+        if local.is_true_global() {
+            self.push(PushGlobal(index as u16, false))
+        } else if local.is_global() {
+            self.push(PushGlobal(index as u16, true))
+        } else {
+            self.push(PushLocal(index as u16))
         }
     }
 
     /// Specialization of `push` which pushes either `StoreLocal` or `StoreGlobal` for a given local
-    fn push_store_local(self: &mut Self, local: usize) {
-        trace::trace_parser!("push StoreLocal/StoreGlobal {}", local);
-        let is_true_global: bool = self.locals[local].is_true_global();
-        match self.locals[local].is_global() {
-            true => self.push(StoreGlobal(local as u16, !is_true_global)),
-            _ => self.push(StoreLocal(local as u16)),
+    fn push_store_local(self: &mut Self, index: usize) {
+        trace::trace_parser!("push StoreLocal/StoreGlobal {}", index);
+
+        let local = &self.current_locals_mut().locals[index];
+        if local.is_true_global() {
+            self.push(StoreGlobal(index as u16, false))
+        } else if local.is_global() {
+            self.push(StoreGlobal(index as u16, true))
+        } else {
+            self.push(StoreLocal(index as u16))
         }
     }
 
     /// Specialization of `push` which pushes a `IncGlobalCount` if we need to, for the given local
     /// Called immediately after a local `initialized` is set to `true
     fn push_inc_global(self: &mut Self, local: usize) {
-        if self.locals[local].is_true_global() {
+        if self.current_locals_mut().locals[local].is_true_global() {
             self.push(IncGlobalCount);
         }
     }
@@ -1769,14 +1802,8 @@ impl Parser {
     fn push(self: &mut Self, token: Opcode) {
         trace::trace_parser!("push {:?} at L{:?}", token, self.lineno + 1);
         match &token {
-            PushGlobal(id, _) | StoreGlobal(id, _) => {
-                let local = self.resolve_local(*id, true);
-                self.locals_reference.push(local.name.clone());
-            },
-            PushLocal(id) | StoreLocal(id) => {
-                let local = self.resolve_local(*id, false);
-                self.locals_reference.push(local.name.clone());
-            },
+            PushGlobal(id, _) | StoreGlobal(id, _) => self.locals_reference.push(self.locals[0].locals[*id as usize].name.clone()),
+            PushLocal(id) | StoreLocal(id) => self.locals_reference.push(self.locals[self.function_depth as usize].locals[*id as usize].name.clone()),
             _ => {},
         }
         self.output.push(token);

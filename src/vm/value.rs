@@ -24,8 +24,6 @@ pub enum Value {
     Bool(bool),
     Int(i64),
     Str(Box<String>),
-    Function(Rc<FunctionImpl>),
-    PartialFunction(Box<PartialFunctionImpl>),
 
     // Reference (Mutable) Types
     // Memory is not really managed at all and cycles are entirely possible.
@@ -37,8 +35,11 @@ pub enum Value {
     Heap(Mut<ValueHeap>), // `List` functions as both Array + Deque, but that makes it un-viable for a heap. So, we have a dedicated heap structure
 
     // Functions
-    Binding(StdBinding),
-    PartialBinding(StdBinding, Box<Vec<Box<Value>>>),
+    Function(Rc<FunctionImpl>),
+    PartialFunction(Box<PartialFunctionImpl>),
+    NativeFunction(StdBinding),
+    PartialNativeFunction(StdBinding, Box<Vec<Box<Value>>>),
+    Closure(Box<ClosureImpl>),
 }
 
 
@@ -62,8 +63,8 @@ impl Value {
             Str(s) => *s.clone(),
             Function(f) => f.name.clone(),
             PartialFunction(f) => f.func.name.clone(),
-            Binding(b) => String::from(stdlib::lookup_name(*b)),
-            PartialBinding(b, _) => String::from(stdlib::lookup_name(*b)),
+            NativeFunction(b) => String::from(stdlib::lookup_name(*b)),
+            PartialNativeFunction(b, _) => String::from(stdlib::lookup_name(*b)),
             _ => self.as_repr_str(),
         }
     }
@@ -84,8 +85,9 @@ impl Value {
             Heap(v) => format!("[{}]", v.unbox().heap.iter().map(|t| t.0.as_repr_str()).collect::<Vec<String>>().join(", ")),
             Function(f) => (*f).as_ref().borrow().as_str(),
             PartialFunction(f) => (*f).as_ref().borrow().func.as_str(),
-            Binding(b) => format!("fn {}()", stdlib::lookup_name(*b)),
-            PartialBinding(b, _) => format!("fn {}()", stdlib::lookup_name(*b)),
+            NativeFunction(b) => format!("fn {}()", stdlib::lookup_name(*b)),
+            PartialNativeFunction(b, _) => format!("fn {}()", stdlib::lookup_name(*b)),
+            Closure(c) => (*c).func.as_ref().borrow().as_str(),
         }
     }
 
@@ -102,8 +104,9 @@ impl Value {
             Heap(_) => "heap",
             Function(_) => "function",
             PartialFunction(_) => "partial function",
-            Binding(_) => "native function",
-            PartialBinding(_, _) => "partial native function",
+            NativeFunction(_) => "native function",
+            PartialNativeFunction(_, _) => "partial native function",
+            Closure(_) => "closure",
         })
     }
 
@@ -122,10 +125,7 @@ impl Value {
             Set(v) => !v.unbox().is_empty(),
             Dict(v) => !v.unbox().is_empty(),
             Heap(v) => !v.unbox().heap.is_empty(),
-            Function(_) => true,
-            PartialFunction(_) => true,
-            Binding(_) => true,
-            PartialBinding(_, _) => true,
+            Function(_) | PartialFunction(_) | NativeFunction(_) | PartialNativeFunction(_, _) | Closure(_) => true,
         }
     }
 
@@ -149,7 +149,7 @@ impl Value {
         match self {
             Str(s) => {
                 let chars: Vec<Value> = s.chars()
-                    .map(|c| Value::Str(Box::new(String::from(c))))
+                    .map(|c| Str(Box::new(String::from(c))))
                     .collect::<Vec<Value>>();
                 Ok(ValueIntoIter::Str(chars))
             },
@@ -177,16 +177,16 @@ impl Value {
     pub fn is_int(self: &Self) -> bool { match self { Int(_) => true, _ => false } }
     pub fn is_str(self: &Self) -> bool { match self { Str(_) => true, _ => false } }
 
-    pub fn is_function(self: &Self) -> bool {
-        match self {
-            Function(_) | PartialFunction(_) | Binding(_) | PartialBinding(_, _) => true,
-            _ => false
-        }
-    }
-
     pub fn is_list(self: &Self) -> bool { match self { List(_) => true, _ => false } }
     pub fn is_set(self: &Self) -> bool { match self { Set(_) => true, _ => false } }
     pub fn is_dict(self: &Self) -> bool { match self { Dict(_) => true, _ => false } }
+
+    pub fn is_function(self: &Self) -> bool {
+        match self {
+            Function(_) | PartialFunction(_) | NativeFunction(_) | PartialNativeFunction(_, _) | Closure(_) => true,
+            _ => false
+        }
+    }
 }
 
 /// Implement Ord and PartialOrd explicitly, to derive implementations for each individual type.
@@ -259,13 +259,6 @@ pub struct FunctionImpl {
     args: Vec<String>, // Names of the arguments
 }
 
-#[derive(Eq, PartialEq, Debug, Clone)]
-pub struct PartialFunctionImpl {
-    pub func: Rc<FunctionImpl>,
-    pub args: Vec<Box<Value>>,
-}
-
-
 impl FunctionImpl {
     pub fn new(head: usize, name: String, args: Vec<String>) -> FunctionImpl {
         FunctionImpl {
@@ -288,11 +281,38 @@ impl Hash for FunctionImpl {
     }
 }
 
+
+#[derive(Eq, PartialEq, Debug, Clone)]
+pub struct PartialFunctionImpl {
+    pub func: Rc<FunctionImpl>,
+    pub args: Vec<Box<Value>>,
+}
+
 impl Hash for PartialFunctionImpl {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.func.hash(state)
     }
 }
+
+
+/// A closure is a combination of a function, and a set of `environment` variables.
+/// These variables are references either to locals in the enclosing function, or captured variables from the enclosing function itself.
+#[derive(Eq, PartialEq, Debug, Clone)]
+pub struct ClosureImpl {
+    func: Rc<FunctionImpl>,
+    environment: Vec<Value>,
+}
+
+impl ClosureImpl {
+
+}
+
+impl Hash for ClosureImpl {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.func.hash(state)
+    }
+}
+
 
 /// As `BinaryHeap` is missing `Eq`, `PartialEq`, and `Hash` implementations
 /// We also wrap values in `Reverse` as we want to expose a min-heap by default

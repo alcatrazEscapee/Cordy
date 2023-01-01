@@ -73,7 +73,7 @@ pub fn binary_pow(a1: Value, a2: Value) -> ValueResult {
 
 pub fn binary_is(a1: Value, a2: Value) -> ValueResult {
     match a2 {
-        Value::Binding(b) => {
+        Value::NativeFunction(b) => {
             let ret: bool = match b {
                 StdBinding::Nil => a1.is_nil(),
                 StdBinding::Bool => a1.is_bool(),
@@ -83,10 +83,10 @@ pub fn binary_is(a1: Value, a2: Value) -> ValueResult {
                 StdBinding::List => a1.is_list(),
                 StdBinding::Set => a1.is_set(),
                 StdBinding::Dict => a1.is_dict(),
-                _ => return TypeErrorBinaryIs(a1, Value::Binding(b)).err()
+                _ => return TypeErrorBinaryIs(a1, Value::NativeFunction(b)).err()
             };
             Ok(Value::Bool(ret))
-        },
+        }
         _ => return TypeErrorBinaryIs(a1, a2).err()
     }
 }
