@@ -136,12 +136,22 @@ impl Locals {
 struct UpValue {
     name: String,
 
+    /// The origin function depth of the upvalue.
+    /// Used to deduplicate upvalues, as a (depth, name) pair can uniquely identify a given target for an upvalue
+    depth: u16,
+
     /// `true` = local variable in enclosing function, `false` = upvalue in enclosing function
     is_local: bool,
 
     /// Either a reference to an index in the enclosing function's `locals` (which are stack offset),
     /// or a reference to the enclosing function's `upvalues` (which can be accessed via stack offset 0 -> upvalues, if it is a closure
     index: u16,
+}
+
+impl UpValue {
+    fn new(name: String, depth: u16, is_local: bool, index: u16) -> UpValue {
+        UpValue { name, depth, is_local, index }
+    }
 }
 
 #[derive(Eq, PartialEq, Debug, Clone)]
@@ -176,6 +186,17 @@ impl Local {
 
     fn is_global(self: &Self) -> bool { self.function_depth == 0 }
     fn is_true_global(self: &Self) -> bool { self.function_depth == 0 && self.scope_depth == 0 }
+
+    /// Resolves the `local` as a `VariableType`, based on the function and scope depth of the local.
+    fn resolve_type(self: &Self) -> VariableType {
+        if self.is_true_global() {
+            VariableType::TrueGlobal(self.index)
+        } else if self.is_global() {
+            VariableType::Global(self.index)
+        } else {
+            VariableType::Local(self.index)
+        }
+    }
 }
 
 #[derive(Eq, PartialEq, Debug, Clone)]
@@ -185,6 +206,7 @@ enum VariableType {
     Global(u16),
     TrueGlobal(u16),
     LateBoundGlobal(LateBoundGlobal),
+    UpValue(u16, bool), // index, is_local
     None,
 }
 
@@ -450,17 +472,32 @@ impl Parser {
 
         self.push(Return); // Returns the last expression in the function
 
+        let end: u16 = self.next_opcode(); // Repair the jump, to skip the function body itself
+        self.output[jump] = Jump(end);
+
+        if !self.current_locals().upvalues.is_empty() {
+            // If this function has captured any upvalues, we need to emit the correct tokens for them now, including wrapping the function in a closure
+            self.push(Closure);
+            let it = self.current_locals().upvalues
+                .iter()
+                .map(|upvalue| if upvalue.is_local { CloseLocal(upvalue.index) } else { CloseUpValue(upvalue.index) })
+                .collect::<Vec<Opcode>>();
+            for op in it {
+                self.push(op);
+            }
+        }
+
+        // Since `Return` cleans up all function locals, we just discard them from the parser without emitting any `Pop` tokens.
+        // We do this twice, once for function locals, and once for function parameters (since they live in their own scope)
         self.prevent_expression_statement = false;
-        self.pop_locals_in_current_scope_depth(true);
+        self.pop_locals_in_current_scope_depth(false);
         self.scope_depth -= 1;
 
-        self.pop_locals_in_current_scope_depth(false); // Pop the parameters from the parser's knowledge of locals, but don't emit Pop / PopN
+        self.pop_locals_in_current_scope_depth(false);
         self.locals.pop().unwrap();
         self.function_depth -= 1;
         self.scope_depth -= 1;
 
-        let end: u16 = self.next_opcode(); // Repair the jump
-        self.output[jump] = Jump(end);
         self.delay_pop_from_expression_statement = prev_pop_status; // Exit the stack
     }
 
@@ -933,6 +970,7 @@ impl Parser {
                         self.late_bound_globals.push(global);
                         self.push(Noop) // Push `Noop` for now, fix it later
                     },
+                    VariableType::UpValue(index, is_local) => self.push(PushUpValue(index, is_local)),
                     _ => self.error(UndeclaredIdentifier(string))
                 };
             },
@@ -1560,27 +1598,40 @@ impl Parser {
             return VariableType::NativeFunction(b);
         }
 
-        // If we're in a nonzero function depth, search for matching locals to this function
-        if self.function_depth > 0 {
-            for local in self.current_locals().locals.iter().rev() {
-                if &local.name == name && local.initialized {
-                    return VariableType::Local(local.index)
-                }
-            }
-        }
-
-        // Otherwise, look for locals in function depth = 0, which we can reference either as true globals, or globals (if we're also in function depth 0)
-        for local in self.locals[0].locals.iter().rev() {
+        // 1. Search for locals in the current function. This may return `Local`, `Global`, or `TrueGlobal` based on the scope of the variable.
+        for local in self.current_locals().locals.iter().rev() {
             if &local.name == name && local.initialized {
-                if local.scope_depth == 0 {
-                    return VariableType::TrueGlobal(local.index)
-                }
-                if self.function_depth == 0 {
-                    return VariableType::Global(local.index)
+                return local.resolve_type()
+            }
+        }
+
+        // 2. If we are in function depth > 0, we search in enclosing functions (and global scope), for values that can be captured by this function.
+        //   - Globals that are not true globals can be captured in the same manner as upvalues (these are fairly uncommon in practice)
+        //   - Locals in an enclosing function can be captured.
+        if self.function_depth > 0 {
+            for depth in (0..self.function_depth).rev() { // Iterate through the range of [function_depth - 1, ... 0]
+                for local in self.locals[depth as usize].locals.iter().rev() { // In reverse, as we go inner -> outer scopes
+                    if &local.name == name && local.initialized && (local.function_depth > 0 || local.scope_depth > 0) { // Note that it must **not** be a true global, anything else can be captured as an upvalue
+                        return self.resolve_upvalue(name, depth, local.index);
+                    }
                 }
             }
         }
 
+        // 3. If we are in a function depth > 0, then we can also resolve true globals
+        // If we are in function depth == 0, any true globals will be caught and resolved as locals by (1.) (but the opcodes for global load/store will still be emitted)
+        if self.function_depth > 0 {
+            for local in self.locals[0].locals.iter().rev() {
+                if &local.name == name && local.initialized {
+                    if local.is_true_global() {
+                        return VariableType::TrueGlobal(local.index)
+                    }
+                }
+            }
+        }
+
+        // 4. If we are in function depth > 0, we can assume that the variable must be a late bound global.
+        // We cannot late bind globals in function depth == 0, as all code there is still procedural.
         if self.function_depth > 0 {
             // Assume a late bound global
             let error = self.deferred_error(UndeclaredIdentifier(name.clone()));
@@ -1588,7 +1639,62 @@ impl Parser {
             return VariableType::LateBoundGlobal(global);
         }
 
+        // In global scope if we still could not resolve a variable, we return `None`
         VariableType::None
+    }
+
+    /// Resolves an `UpValue` reference.
+    /// For a given reference to a local, defined at a function depth `local_depth` at index `local_index`, this will
+    /// bubble up the upvalue through each of the enclosing functions between here and `self.function_depth`, and ensure the variable is added as an `UpValue`.
+    fn resolve_upvalue(self: &mut Self, name: &String, local_depth: u16, local_index: u16) -> VariableType {
+
+        // Capture the local at index `local_index` in the function at `local_depth`
+        // If it already exists (is `is_local` and has the same `index` as the target), just grab the upvalue index, otherwise add it and bubble up
+        let mut maybe_index: Option<u16> = None;
+        for upvalue in &self.locals[local_depth as usize].upvalues {
+            if upvalue.index == local_index && upvalue.is_local {
+                maybe_index = Some(upvalue.index);
+                break
+            }
+        }
+
+        // If we did not find it, then capture the local - add this as an upvalue to the function at this depth
+        let mut is_local = true;
+        let mut index = if let Some(index) = maybe_index {
+            index
+        } else {
+            self.locals[local_depth as usize].upvalues.push(UpValue::new(name.clone(), local_depth, true, local_index));
+            (self.locals[local_depth as usize].upvalues.len() - 1) as u16
+        };
+
+        // For any function depths between the enclosing function (self.function_depth - 1), and the function above where we referenced the local (local_depth + 1),
+        // we need to add this as an upvalue, referencing an upvalue one level down, to each depth.
+        for depth in local_depth + 1..self.function_depth {
+
+            // Only add it if we haven't found an upvalue with the same index and `!is_local` (which is unique).
+            let mut found: bool = false;
+            for upvalue in &self.locals[depth as usize].upvalues {
+                if upvalue.index == index && !upvalue.is_local {
+                    index = upvalue.index; // Update the index
+                    found = true; // And mark that we found an existing one
+                    break
+                }
+            }
+
+            // If we did not find an upvalue, then we must add one, referencing the upvalue from the outer function
+            if !found {
+                self.locals[depth as usize].upvalues.push(UpValue::new(name.clone(), depth, false, index));
+                index = (self.locals[depth as usize].upvalues.len() - 1) as u16
+            }
+
+            // This is no longer a local upvalue reference, the final upvalue will be a reference to a enclosing upvalue
+            is_local = false;
+        }
+
+        // Finally, the last value of `index` will be one set from the directly enclosing function
+        // We can thus return a `UpValue` reference, which contains the index of the upvalue in the enclosing function
+        // We also return if the upvalue was local or not, as that's also needed to emit the correct bytecode
+        return VariableType::UpValue(index, is_local)
     }
 
 
