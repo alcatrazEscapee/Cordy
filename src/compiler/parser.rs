@@ -475,18 +475,6 @@ impl Parser {
         let end: u16 = self.next_opcode(); // Repair the jump, to skip the function body itself
         self.output[jump] = Jump(end);
 
-        if !self.current_locals().upvalues.is_empty() {
-            // If this function has captured any upvalues, we need to emit the correct tokens for them now, including wrapping the function in a closure
-            self.push(Closure);
-            let it = self.current_locals().upvalues
-                .iter()
-                .map(|upvalue| if upvalue.is_local { CloseLocal(upvalue.index) } else { CloseUpValue(upvalue.index) })
-                .collect::<Vec<Opcode>>();
-            for op in it {
-                self.push(op);
-            }
-        }
-
         // Since `Return` cleans up all function locals, we just discard them from the parser without emitting any `Pop` tokens.
         // We do this twice, once for function locals, and once for function parameters (since they live in their own scope)
         self.prevent_expression_statement = false;
@@ -497,6 +485,18 @@ impl Parser {
         self.locals.pop().unwrap();
         self.function_depth -= 1;
         self.scope_depth -= 1;
+
+        // If this function has captured any upvalues, we need to emit the correct tokens for them now, including wrapping the function in a closure
+        if !self.current_locals().upvalues.is_empty() {
+            self.push(Closure);
+            let it = self.current_locals().upvalues
+                .iter()
+                .map(|upvalue| if upvalue.is_local { CloseLocal(upvalue.index) } else { CloseUpValue(upvalue.index) })
+                .collect::<Vec<Opcode>>();
+            for op in it {
+                self.push(op);
+            }
+        }
 
         self.delay_pop_from_expression_statement = prev_pop_status; // Exit the stack
     }

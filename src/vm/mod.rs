@@ -315,24 +315,48 @@ impl<R, W> VirtualMachine<R, W> where
                 }
             },
 
+            PushUpValue(index, _) => {
+                let value: Value = match &self.stack[self.frame_pointer() - 1] {
+                    Value::Closure(c) => c.environment[index as usize].clone(),
+                    _ => panic!("Malformed bytecode"),
+                };
+                self.push(value);
+            },
+
             IncGlobalCount => {
                 trace::trace_interpreter!("inc global count -> {}", self.global_count + 1);
                 self.global_count += 1;
             },
 
-            PushUpValue(_, _) => {
-                // todo: upvalues
-                self.push(Value::Nil); // for now, this is a placeholder
-            },
             Closure => {
-                // todo: closures!
+                trace::trace_interpreter!("close closure {}", self.stack.last().unwrap().as_debug_str());
+                match self.pop() {
+                    Value::Function(f) => self.push(Value::closure(f)),
+                    _ => panic!("Malformed bytecode"),
+                }
             },
 
             CloseLocal(index) => {
-                trace::trace_interpreter!("close local {}", index);
+                trace::trace_interpreter!("close local {} into {}", index, self.stack.last().unwrap().as_debug_str());
+                let local: usize = self.frame_pointer() + index as usize;
+                let value: Value = self.stack[local].clone();
+                match self.stack.last_mut().unwrap() {
+                    Value::Closure(c) => c.environment.push(value),
+                    _ => panic!("Malformed bytecode"),
+                }
             },
             CloseUpValue(index) => {
-                trace::trace_interpreter!("close upvalue {}", index);
+                trace::trace_interpreter!("close upvalue {} into {} from {}", index, self.stack.last().unwrap().as_debug_str(), &self.stack[self.frame_pointer() - 1].as_debug_str());
+                let index: usize = index as usize;
+                let value: Value = match &self.stack[self.frame_pointer() - 1] {
+                    Value::Closure(c) => c.environment[index].clone(),
+                    _ => panic!("Malformed bytecode"),
+                };
+
+                match self.stack.last_mut().unwrap() {
+                    Value::Closure(c) => c.environment.push(value),
+                    _ => panic!("Malformed bytecode"),
+                }
             },
 
             // Push Operations
@@ -708,7 +732,28 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
                     Err(e) => return Err(e),
                 }
                 Ok(FunctionType::Native)
-            }
+            },
+            Value::Closure(c) => {
+                trace::trace_interpreter!("invoke_func_eval -> {}, nargs = {}", Value::Function(c.func.clone()).as_debug_str(), nargs);
+                let func = &c.func;
+                if func.nargs == nargs {
+                    // Evaluate directly
+                    self.call_function(func.head, func.nargs);
+                } else if func.nargs > nargs && nargs > 0 {
+                    // Evaluate as a partial function
+                    // todo: fix this for partial closures
+                    let arg: Vec<Value> = self.popn(nargs as usize);
+                    let func: Rc<FunctionImpl> = match self.pop() {  // Pop the function, so we can interact with it directly
+                        Value::Function(f) => f,
+                        _ => panic!("Stack corruption"),
+                    };
+                    let partial: Value = Value::partial(func, arg);
+                    self.push(partial);
+                } else {
+                    return IncorrectNumberOfFunctionArguments((**func).clone(), nargs).err();
+                }
+                Ok(FunctionType::User)
+            },
             _ => return ValueIsNotFunctionEvaluable(f.clone()).err(),
         }
     }
