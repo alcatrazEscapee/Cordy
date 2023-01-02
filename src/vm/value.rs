@@ -57,6 +57,8 @@ impl Value {
     pub fn partial1(func: Rc<FunctionImpl>, arg: Value) -> Value { PartialFunction(Box::new(PartialFunctionImpl { func, args: vec![Box::new(arg)] }))}
     pub fn partial(func: Rc<FunctionImpl>, args: Vec<Value>) -> Value { PartialFunction(Box::new(PartialFunctionImpl { func, args: args.into_iter().map(|v| Box::new(v)).collect() }))}
 
+    pub fn closure(func: Rc<FunctionImpl>) -> Value { Closure(Box::new(ClosureImpl { func, environment: Vec::new() })) }
+
     /// Converts the `Value` to a `String`. This is equivalent to the stdlib function `str()`
     pub fn as_str(self: &Self) -> String {
         match self {
@@ -299,8 +301,8 @@ impl Hash for PartialFunctionImpl {
 /// These variables are references either to locals in the enclosing function, or captured variables from the enclosing function itself.
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub struct ClosureImpl {
-    func: Rc<FunctionImpl>,
-    environment: Vec<Value>,
+    pub func: Rc<FunctionImpl>,
+    pub environment: Vec<Value>,
 }
 
 impl ClosureImpl {
