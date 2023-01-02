@@ -1,0 +1,5 @@
+L2: 0000 Int(0) -> 1
+    0001 Int(1) -> 2
+    0002 OpFuncEval(1)
+    0003 Pop
+    0004 Exit

@@ -1,0 +1,2 @@
+// should emit three errors, not just one
+x + y + z . print
