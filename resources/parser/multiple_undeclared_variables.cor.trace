@@ -1,0 +1,23 @@
+L2: 0000 OpAdd
+    0001 OpAdd
+    0002 NativeFunction(Print)
+    0003 OpFuncCompose
+    0004 Pop
+    0005 Exit
+Undeclared identifier: 'x'
+  at: line 2 (multiple_undeclared_variables.cor)
+  at:
+
+x + y + z . print
+
+Undeclared identifier: 'y'
+  at: line 2 (multiple_undeclared_variables.cor)
+  at:
+
+x + y + z . print
+
+Undeclared identifier: 'z'
+  at: line 2 (multiple_undeclared_variables.cor)
+  at:
+
+x + y + z . print

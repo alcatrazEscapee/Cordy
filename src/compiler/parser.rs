@@ -862,7 +862,7 @@ impl Parser {
                 let jump = self.reserve();
                 self.loops.last_mut().unwrap().break_statements.push(jump as u16);
             },
-            None => self.error(BreakOutsideOfLoop),
+            None => self.semantic_error(BreakOutsideOfLoop),
         }
     }
 
@@ -876,7 +876,7 @@ impl Parser {
                 self.pop_locals_in_current_loop();
                 self.push(Jump(jump_to));
             },
-            None => self.error(ContinueOutsideOfLoop),
+            None => self.semantic_error(ContinueOutsideOfLoop),
         }
     }
 
@@ -971,7 +971,7 @@ impl Parser {
                         self.push(Noop) // Push `Noop` for now, fix it later
                     },
                     VariableType::UpValue(index, is_local) => self.push(PushUpValue(index, is_local)),
-                    _ => self.error(UndeclaredIdentifier(string))
+                    _ => self.semantic_error(UndeclaredIdentifier(string))
                 };
             },
             Some(StringLiteral(_)) => {
@@ -1111,7 +1111,8 @@ impl Parser {
 
         // Suffix operators
         loop {
-            match self.peek() {
+            // The opening token of a suffix operator must be on the same line
+            match self.peek_no_newline() {
                 Some(OpenParen) => {
                     self.advance();
                     match self.peek() {
@@ -1500,14 +1501,14 @@ impl Parser {
 
         // Lookup the name as a binding - if it is, it will be denied as we don't allow shadowing global native functions
         if let Some(_) = stdlib::lookup_named_binding(&name) {
-            self.error(LocalVariableConflictWithNativeFunction(name.clone()));
+            self.semantic_error(LocalVariableConflictWithNativeFunction(name.clone()));
             return None
         }
 
         // Ensure there are no conflicts within the current scope, as we don't allow shadowing in the same scope.
         for local in &self.locals.last().unwrap().locals {
             if local.scope_depth == self.scope_depth && local.name == name {
-                self.error(LocalVariableConflict(name.clone()));
+                self.semantic_error(LocalVariableConflict(name.clone()));
                 return None
             }
         }
@@ -1779,6 +1780,17 @@ impl Parser {
         }
     }
 
+    /// Specialization of `peek()`, does not consume newlines, for checking if a specific syntax token is on the same line as the preceeding one.
+    fn peek_no_newline(self: &mut Self) -> Option<&ScanToken> {
+        if self.error_recovery {
+            return None
+        }
+        for token in &self.input {
+            return Some(token)
+        }
+        None
+    }
+
     /// Peeks at the next incoming token.
     /// Note that this function only returns a read-only reference to the underlying token, suitable for matching
     /// If the token data needs to be unboxed, i.e. as with `Identifier` tokens, it must be extracted only via `advance()`
@@ -1946,6 +1958,15 @@ impl Parser {
         self.error_recovery = true;
     }
 
+    /// Pushes a new error token into the output error stream, but does not initiate error recovery.
+    /// This is useful for semantic errors which are valid lexically, but still need to report errors.
+    fn semantic_error(self: &mut Self, error: ParserErrorType) {
+        trace::trace_parser!("push_err (error = {}) {:?}", self.error_recovery, error);
+        if !self.error_recovery {
+            self.errors.push(ParserError::new(error, self.lineno as usize));
+        }
+    }
+
     /// Creates an optional error, which will be deferred until later to be emitted
     fn deferred_error(self: &Self, error: ParserErrorType) -> Option<ParserError> {
         if self.error_recovery {
@@ -2025,6 +2046,8 @@ mod tests {
     #[test] fn test_let_expression_eof() { run_err("let x =", "Expected an expression terminal, got end of input instead\n  at: line 1 (<test>)\n  at:\n\nlet x =\n"); }
     #[test] fn test_let_no_expression() { run_err("let x = &", "Expected an expression terminal, got '&' token instead\n  at: line 1 (<test>)\n  at:\n\nlet x = &\n"); }
 
+    #[test] fn test_array_access_after_newline() { run("array_access_after_newline"); }
+    #[test] fn test_array_access_no_newline() { run("array_access_no_newline"); }
     #[test] fn test_break_past_locals() { run("break_past_locals"); }
     #[test] fn test_constants() { run("constants"); }
     #[test] fn test_continue_past_locals() { run("continue_past_locals"); }
@@ -2034,6 +2057,8 @@ mod tests {
     #[test] fn test_for_intrinsic_range_stop() { run("for_intrinsic_range_stop"); }
     #[test] fn test_for_no_intrinsic() { run("for_no_intrinsic"); }
     #[test] fn test_function() { run("function"); }
+    #[test] fn test_function_call_after_newline() { run("function_call_after_newline"); }
+    #[test] fn test_function_call_no_newline() { run("function_call_no_newline"); }
     #[test] fn test_function_early_return() { run("function_early_return"); }
     #[test] fn test_function_early_return_nested_scope() { run("function_early_return_nested_scope"); }
     #[test] fn test_function_implicit_return() { run("function_implicit_return"); }
@@ -2052,6 +2077,7 @@ mod tests {
     #[test] fn test_loop_2() { run("loop_2"); }
     #[test] fn test_loop_3() { run("loop_3"); }
     #[test] fn test_loop_4() { run("loop_4"); }
+    #[test] fn test_multiple_undeclared_variables() { run("multiple_undeclared_variables"); }
     #[test] fn test_weird_expression_statements() { run("weird_expression_statements"); }
     #[test] fn test_weird_locals() { run("weird_locals"); }
     #[test] fn test_while_1() { run("while_1"); }

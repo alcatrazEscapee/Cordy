@@ -33,7 +33,8 @@ And replace the values for the traces you want to enable with `on`:
 This language is inspired by parts from Python, Rust, Haskell, Java, and JavaScript. It is also heavily inspired by the [Crafting Interpreters](https://craftinginterpreters.com/) book. A basic rundown of the syntax:
 
 - The basic structure of the language is C-style, with `{` and `}` to separate code blocks, and imperative constructs such as `if`, `else`, `while`, etc.
-- `let x` is used to declare a variable. `fn(x, y, z)` declares a function. Functions can either be followed be expressions (like `fn(x) -> x + 1`) or blocks (like `fn (x) { print(x) }`).
+- `let x` is used to declare a variable. `fn foo(x, y, z)` declares a function. Functions can either be followed be expressions (like `fn add1(x) -> x + 1`) or blocks (like `fn my_print(x) { print(x) }`).
+    - Functions can be used in expressions, too, as anonymous functions by omitting the name, i.e. `let x = fn() -> 3`. They can be followed by either `->` or `{` when used in expressions.
 - A few basic types:
     - `nil`: The absence of a value, and the default value for all declared uninitialized variables
     - `bool`: A boolean
@@ -44,6 +45,7 @@ This language is inspired by parts from Python, Rust, Haskell, Java, and JavaScr
     - `list`: A `VecDeque`, so a ring buffer with O(1) index, pop/push front and back.
     - `set`: A `LinkedHashSet`, so a collection with unique elements and O(1) `contains` checks.
     - `dict`: A `LinkedHashMap`, a mapping from keys to values with O(1) lookups.
+    - `heap`: A `BinaryHeap<Reversed>`, aka a min-heap.
 - Expressions should be familiar from most imperative programming languages, as should be operator precedence.
     - Operators on their own are functions, so `(+)` is a two argument function which adds values.
     - `%` is mathematical modulo, and `/` rounds to negative infinity, and `-(a / b) == -a / b == a / -b` (similar to Python)
@@ -55,7 +57,7 @@ This language is inspired by parts from Python, Rust, Haskell, Java, and JavaScr
 
 ### Examples
 
-Below is a solution to [Advent of Code Day 1 Part 1](https://adventofcode.com/2022/day/1), written in a functional style:
+Below is a solution to [Advent of Code 2022 Day 1 Part 1](https://adventofcode.com/2022/day/1), written in a functional style:
 
 ```java
 'input.txt' . read_text . split ('\n\n')
@@ -67,30 +69,32 @@ Below is a solution to [Advent of Code Day 1 Part 1](https://adventofcode.com/20
 Or the same solution, written in a different style, with the same language:
 
 ```java
-let inp = read_text('input.txt')
-let lines = inp.split('\n\n')
-let elves = lines.map(fn(g) {
-    let elf = g.split('\n')
-    elf.map(int).sum
-})
-print(max(elves))
-```
+let inp = read_text('../aoc_inputs/2022_01_01.txt')
+let answer = 0
+for group in inp.split('\n\n') {
+    let elf = 0
+    for weight in group.split('\n') {
+        elf += int(weight)
+    }
+    answer = max(answer, elf)
+}
+print(answer)
 
+```
 
 ---
 
 
 ### To-Do
 
-- Semantic parser errors that don't initiate parser error recovery
 - Non expression based REPL with history
 - Implement `->` operator, basic named tuple types (structs), or binding resolution on macros
-- Set literals
-- Maps (HashMap) and dictionary literals (or just use list syntax?)
-- Heap methods that operate on lists
+- Set / Map literals
 - Format strings (just normal strings with the python `%` operator, but with rust formatting? does that even work?)
 - Regex (some sort of impl)
-- Pattern matching / deconstruction / `StoreArray`
+- Pattern matching / deconstruction
 - Even MORE standard library functions
-- Closures - capture value not variable (like in Java)?
+- Improved non-java-like-closures, that allow assignment to the target variable.
+
+
 - [VS Code](https://code.visualstudio.com/api/language-extensions/overview)?
