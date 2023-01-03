@@ -134,12 +134,6 @@ impl Locals {
 
 #[derive(Debug)]
 struct UpValue {
-    name: String,
-
-    /// The origin function depth of the upvalue.
-    /// Used to deduplicate upvalues, as a (depth, name) pair can uniquely identify a given target for an upvalue
-    depth: u16,
-
     /// `true` = local variable in enclosing function, `false` = upvalue in enclosing function
     is_local: bool,
 
@@ -149,8 +143,8 @@ struct UpValue {
 }
 
 impl UpValue {
-    fn new(name: String, depth: u16, is_local: bool, index: u16) -> UpValue {
-        UpValue { name, depth, is_local, index }
+    fn new(is_local: bool, index: u16) -> UpValue {
+        UpValue { is_local, index }
     }
 }
 
@@ -1612,7 +1606,7 @@ impl Parser {
             for depth in (0..self.function_depth).rev() { // Iterate through the range of [function_depth - 1, ... 0]
                 for local in self.locals[depth as usize].locals.iter().rev() { // In reverse, as we go inner -> outer scopes
                     if &local.name == name && local.initialized && (local.function_depth > 0 || local.scope_depth > 0) { // Note that it must **not** be a true global, anything else can be captured as an upvalue
-                        return self.resolve_upvalue(name, depth, local.index);
+                        return self.resolve_upvalue(depth, local.index);
                     }
                 }
             }
@@ -1646,7 +1640,7 @@ impl Parser {
     /// Resolves an `UpValue` reference.
     /// For a given reference to a local, defined at a function depth `local_depth` at index `local_index`, this will
     /// bubble up the upvalue through each of the enclosing functions between here and `self.function_depth`, and ensure the variable is added as an `UpValue`.
-    fn resolve_upvalue(self: &mut Self, name: &String, local_depth: u16, local_index: u16) -> VariableType {
+    fn resolve_upvalue(self: &mut Self, local_depth: u16, local_index: u16) -> VariableType {
 
         // Capture the local at index `local_index` in the function at `local_depth`
         // If it already exists (is `is_local` and has the same `index` as the target), just grab the upvalue index, otherwise add it and bubble up
@@ -1663,7 +1657,7 @@ impl Parser {
         let mut index = if let Some(index) = maybe_index {
             index
         } else {
-            self.locals[local_depth as usize].upvalues.push(UpValue::new(name.clone(), local_depth, true, local_index));
+            self.locals[local_depth as usize].upvalues.push(UpValue::new(true, local_index));
             (self.locals[local_depth as usize].upvalues.len() - 1) as u16
         };
 
@@ -1683,7 +1677,7 @@ impl Parser {
 
             // If we did not find an upvalue, then we must add one, referencing the upvalue from the outer function
             if !found {
-                self.locals[depth as usize].upvalues.push(UpValue::new(name.clone(), depth, false, index));
+                self.locals[depth as usize].upvalues.push(UpValue::new(false, index));
                 index = (self.locals[depth as usize].upvalues.len() - 1) as u16
             }
 
