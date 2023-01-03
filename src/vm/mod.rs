@@ -46,14 +46,6 @@ pub enum FunctionType {
 pub trait VirtualInterface {
     // Invoking Functions
 
-    /// Invokes the action of an `OpFuncCompose` opcode.
-    ///
-    /// The stack must be setup as `[..., arg, f ]`, where `arg` is a singular argument to the function `f`.
-    /// The one argument and function will be popped and the return value will be left on the top of the stack.
-    ///
-    /// Returns a `Result` which may contain an error which occurred during function evaluation.
-    fn invoke_func_compose(self: &mut Self) -> Result<FunctionType, Box<RuntimeError>>;
-
     /// Invokes the action of an `OpFuncEval(nargs)` opcode.
     ///
     /// The stack must be setup as `[..., f, arg1, arg2, ... argN ]`, where `f` is the function to be invoked with arguments `arg1, arg2, ... argN`.
@@ -186,7 +178,7 @@ impl<R, W> VirtualMachine<R, W> where
         }
 
         match op {
-            Noop => {},
+            Noop => panic!("Noop should only be emitted as a temporary instruction"),
 
             // Flow Control
             // All jumps are absolute (because we don't have variable length instructions and it's easy to do so)
@@ -407,6 +399,14 @@ impl<R, W> VirtualMachine<R, W> where
                 self.push(list);
             },
 
+            OpFuncEval(nargs) => {
+                trace::trace_interpreter!("op function evaluate n = {}", nargs);
+                match self.invoke_func_eval(nargs) {
+                    Err(e) => return e.err(),
+                    _ => {},
+                }
+            }
+
             // Unary Operators
             UnarySub => operator!(operator::unary_sub(a1), a1, "-"),
             UnaryLogicalNot => operator!(operator::unary_logical_not(a1), a1, "!"),
@@ -431,21 +431,6 @@ impl<R, W> VirtualMachine<R, W> where
             OpBitwiseAnd => operator!(operator::binary_bitwise_and, a1, a2, "&"),
             OpBitwiseOr => operator!(operator::binary_bitwise_or, a1, a2, "|"),
             OpBitwiseXor => operator!(operator::binary_bitwise_xor, a1, a2, "^"),
-
-            OpFuncCompose => {
-                trace::trace_interpreter!("op binary .");
-                match self.invoke_func_compose() {
-                    Err(e) => return e.err(),
-                    _ => {},
-                }
-            },
-            OpFuncEval(nargs) => {
-                trace::trace_interpreter!("op function evaluate n = {}", nargs);
-                match self.invoke_func_eval(nargs) {
-                    Err(e) => return e.err(),
-                    _ => {},
-                }
-            }
 
             OpIndex => {
                 trace::trace_interpreter!("op []");
@@ -549,91 +534,6 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
     W : Write
 {
     // ===== Calling Functions External Interface ===== //
-
-    fn invoke_func_compose(self: &mut Self) -> Result<FunctionType, Box<RuntimeError>> {
-        let f: Value = self.pop();
-        match f {
-            Value::Function(func) => {
-                trace::trace_interpreter!("invoke_func_compose -> {}", Value::Function(func.clone()).as_debug_str());
-                match func.nargs {
-                    0 => return IncorrectNumberOfFunctionArguments((*func).clone(), 1).err(),
-                    1 => {
-                        // Call function directly
-                        // Before we call, we need to pop-push to reorder the arguments, so we have the correct calling convention
-                        let arg: Value = self.pop();
-                        let head: usize = func.head;
-                        self.push(Value::Function(func));
-                        self.push(arg);
-                        self.call_function(head, 1);
-                    },
-                    _ => {
-                        // Function has >1 argument, so evaluate as partial function
-                        let arg: Value = self.pop();
-                        let partial: Value = Value::partial1(func, arg);
-                        self.push(partial);
-                    }
-                }
-                Ok(FunctionType::User)
-            },
-            Value::PartialFunction(partial) => {
-                trace::trace_interpreter!("invoke_func_compose -> {}", Value::Function(Rc::new((*partial.func).clone())).as_debug_str());
-                let mut partial = *partial;
-                let nargs: u8 = partial.args.len() as u8 + 1;
-                if partial.func.nargs > nargs {
-                    // Not enough arguments, so pop the argument and push a new partial function
-                    let arg: Value = self.pop();
-                    partial.args.push(Box::new(arg));
-                    self.push(Value::PartialFunction(Box::new(partial)));
-                } else if partial.func.nargs == nargs {
-                    // Exactly enough arguments to invoke the function
-                    // Before we call, we need to pop-push to reorder the arguments and setup partial arguments, so we have the correct calling convention
-                    let arg: Value = self.pop();
-                    let head: usize = partial.func.head;
-                    self.push(Value::Function(partial.func.clone()));
-                    for par in partial.args {
-                        self.push(*par);
-                    }
-                    self.push(arg);
-                    self.call_function(head, nargs);
-
-                } else {
-                    return IncorrectNumberOfFunctionArguments((*partial.func).clone(), partial.func.nargs).err()
-                }
-                Ok(FunctionType::User)
-            },
-            Value::NativeFunction(b) => {
-                trace::trace_interpreter!("invoke_func_compose -> {}", Value::NativeFunction(b.clone()).as_debug_str());
-                // invoke_func_binding() will pop `nargs` arguments off the stack and pass them to the provided function
-                // Unlike `OpFuncEval`, we have already popped the binding off the stack initially
-                match stdlib::invoke(b, 1, self) {
-                    Ok(ret) => self.push(ret),
-                    Err(e) => return Err(e),
-                }
-                Ok(FunctionType::Native)
-            },
-            Value::PartialNativeFunction(b, nargs) => {
-                trace::trace_interpreter!("invoke_func_compose -> {}", Value::NativeFunction(b.clone()).as_debug_str());
-                // Need to consume the arguments and set up the stack for calling as if all partial arguments were just pushed
-                // Top of the stack contains `argN+1`, and `nargs` contains `[argN, argN-1, ... arg1]`
-                // After this, it should contain `[..., arg1, arg2, ... argN, argN+1]
-                let held: Value = self.pop();
-                let partial_args: u8 = nargs.len() as u8;
-                for arg in nargs.into_iter().rev() {
-                    self.push(*arg);
-                }
-                self.push(held);
-
-                // invoke_func_binding() will pop `nargs` arguments off the stack and pass them to the provided function
-                // Unlike `OpFuncEval`, we have already popped the binding off the stack initially
-                match stdlib::invoke(b, partial_args + 1, self) {
-                    Ok(ret) => self.push(ret),
-                    Err(e) => return Err(e),
-                }
-                Ok(FunctionType::Native)
-            }
-            _ => return ValueIsNotFunctionEvaluable(f.clone()).err(),
-        }
-    }
 
     fn invoke_func_eval(self: &mut Self, nargs: u8) -> Result<FunctionType, Box<RuntimeError>> {
         let f: &Value = self.peek(nargs as usize);

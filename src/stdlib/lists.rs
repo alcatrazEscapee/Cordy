@@ -175,9 +175,9 @@ pub fn map<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : Virt
             let rs = (&rs).into_iter();
             let mut acc: Vec<Value> = Vec::with_capacity(len);
             for r in rs {
-                vm.push(r.clone());
                 vm.push(l.clone());
-                let f = match vm.invoke_func_compose() {
+                vm.push(r.clone());
+                let f = match vm.invoke_func_eval(1) {
                     Err(e) => return e.err(),
                     Ok(f) => f
                 };
@@ -197,9 +197,9 @@ pub fn filter<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : V
             let rs = (&rs).into_iter();
             let mut acc: Vec<Value> = Vec::with_capacity(len);
             for r in rs {
-                vm.push(r.clone());
                 vm.push(l.clone());
-                let f = match vm.invoke_func_compose() {
+                vm.push(r.clone());
+                let f = match vm.invoke_func_eval(1) {
                     Err(e) => return e.err(),
                     Ok(f) => f
                 };

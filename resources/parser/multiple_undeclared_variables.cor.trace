@@ -1,9 +1,10 @@
 L2: 0000 OpAdd
     0001 OpAdd
     0002 NativeFunction(Print)
-    0003 OpFuncCompose
-    0004 Pop
-    0005 Exit
+    0003 Swap
+    0004 OpFuncEval(1)
+    0005 Pop
+    0006 Exit
 Undeclared identifier: 'x'
   at: line 2 (multiple_undeclared_variables.cor)
   at:

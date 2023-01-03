@@ -609,9 +609,9 @@ impl Parser {
         let loop_start: u16 = self.next_opcode(); // Top of the loop, push onto the loop stack
         self.loops.push(Loop::new(loop_start, self.scope_depth));
 
-        self.parse_expression(); // While condition
         self.push(NativeFunction(Bool)); // Evaluate the condition with `<expr> . bool` automatically
-        self.push(OpFuncCompose);
+        self.parse_expression(); // While condition
+        self.push(OpFuncEval(1));
         let jump_if_false = self.reserve(); // Jump to the end
         self.parse_block_statement(); // Inner loop statements, and jump back to front
         self.push(Jump(loop_start));
@@ -805,9 +805,10 @@ impl Parser {
                 self.push(Dup);
                 self.push(NativeFunction(StdBinding::List));
                 self.push(OpIs);
-                self.push(JumpIfTruePop(self.next_opcode() + 3));
+                self.push(JumpIfTruePop(self.next_opcode() + 4));
                 self.push(NativeFunction(StdBinding::List));
-                self.push(OpFuncCompose);
+                self.push(Swap);
+                self.push(OpFuncEval(1));
 
                 // Push the loop index
                 let constant_0 = self.declare_constant(0);
@@ -816,9 +817,9 @@ impl Parser {
                 // Bounds check and branch
                 let jump: u16 = self.next_opcode();
                 self.push_load_local(local_i);
-                self.push_load_local(local_iter);
                 self.push(NativeFunction(Len));
-                self.push(OpFuncCompose);
+                self.push_load_local(local_iter);
+                self.push(OpFuncEval(1));
                 self.push(OpLessThan);
                 let jump_if_false_pop = self.reserve();
 
@@ -1077,7 +1078,8 @@ impl Parser {
                     // Anything else, and we try and parse an expression and partially evaluate
                     self.parse_expression(); // Parse the expression following a binary prefix operator
                     self.push(NativeFunction(op)); // Push the binding
-                    self.push(OpFuncCompose); // And partially evaluate it
+                    self.push(Swap);
+                    self.push(OpFuncEval(1)); // And partially evaluate it
                     self.expect(CloseParen);
                 }
             }
@@ -1317,17 +1319,14 @@ impl Parser {
         trace::trace_parser!("rule <expr-7>");
         self.parse_expr_6();
         loop {
-            let maybe_op: Option<Opcode> = match self.peek() {
-                Some(Dot) => Some(OpFuncCompose),
-                _ => None
-            };
-            match maybe_op {
-                Some(op) => {
+            match self.peek() {
+                Some(Dot) => {
                     self.advance();
                     self.parse_expr_6();
-                    self.push(op);
+                    self.push(Swap);
+                    self.push(OpFuncEval(1));
                 },
-                None => break
+                _ => break
             }
         }
     }
@@ -2006,7 +2005,7 @@ mod tests {
     #[test] fn test_binary_add_and_mod_rev() { run_expr("1 % 2 + 3", vec![Int(1), Int(2), OpMod, Int(3), OpAdd]); }
     #[test] fn test_binary_shifts() { run_expr("1 << 2 >> 3", vec![Int(1), Int(2), OpLeftShift, Int(3), OpRightShift]); }
     #[test] fn test_binary_shifts_and_operators() { run_expr("1 & 2 << 3 | 5", vec![Int(1), Int(2), Int(3), OpLeftShift, OpBitwiseAnd, Int(5), OpBitwiseOr]); }
-    #[test] fn test_function_composition() { run_expr("print . read", vec![NativeFunction(Print), NativeFunction(Read), OpFuncCompose]); }
+    #[test] fn test_function_composition() { run_expr("print . read", vec![NativeFunction(Print), NativeFunction(Read), Swap, OpFuncEval(1)]); }
     #[test] fn test_precedence_with_parens() { run_expr("(1 + 2) * 3", vec![Int(1), Int(2), OpAdd, Int(3), OpMul]); }
     #[test] fn test_precedence_with_parens_2() { run_expr("6 / (5 - 3)", vec![Int(6), Int(5), Int(3), OpSub, OpDiv]); }
     #[test] fn test_precedence_with_parens_3() { run_expr("-(1 - 3)", vec![Int(1), Int(3), OpSub, UnarySub]); }
@@ -2021,12 +2020,12 @@ mod tests {
     #[test] fn test_function_call_unary_op_precedence_with_parens() { run_expr("(- print) ()", vec![NativeFunction(Print), UnarySub, OpFuncEval(0)]); }
     #[test] fn test_function_call_unary_op_precedence_with_parens_2() { run_expr("- (print () )", vec![NativeFunction(Print), OpFuncEval(0), UnarySub]); }
     #[test] fn test_function_call_binary_op_precedence() { run_expr("print ( 1 ) + ( 2 ( 3 ) )", vec![NativeFunction(Print), Int(1), OpFuncEval(1), Int(2), Int(3), OpFuncEval(1), OpAdd]); }
-    #[test] fn test_function_call_parens_1() { run_expr("print . read (1 + 3) (5)", vec![NativeFunction(Print), NativeFunction(Read), Int(1), Int(3), OpAdd, OpFuncEval(1), Int(5), OpFuncEval(1), OpFuncCompose]); }
-    #[test] fn test_function_call_parens_2() { run_expr("( print . read (1 + 3) ) (5)", vec![NativeFunction(Print), NativeFunction(Read), Int(1), Int(3), OpAdd, OpFuncEval(1), OpFuncCompose, Int(5), OpFuncEval(1)]); }
-    #[test] fn test_function_composition_with_is() { run_expr("'123' . int is int . print", vec![Str(0), NativeFunction(StdBinding::Int), NativeFunction(StdBinding::Int), OpIs, OpFuncCompose, NativeFunction(Print), OpFuncCompose]); }
+    #[test] fn test_function_call_parens_1() { run_expr("print . read (1 + 3) (5)", vec![NativeFunction(Print), NativeFunction(Read), Int(1), Int(3), OpAdd, OpFuncEval(1), Int(5), OpFuncEval(1), Swap, OpFuncEval(1)]); }
+    #[test] fn test_function_call_parens_2() { run_expr("( print . read (1 + 3) ) (5)", vec![NativeFunction(Print), NativeFunction(Read), Int(1), Int(3), OpAdd, OpFuncEval(1), Swap, OpFuncEval(1), Int(5), OpFuncEval(1)]); }
+    #[test] fn test_function_composition_with_is() { run_expr("'123' . int is int . print", vec![Str(0), NativeFunction(StdBinding::Int), NativeFunction(StdBinding::Int), OpIs, Swap, OpFuncEval(1), NativeFunction(Print), Swap, OpFuncEval(1)]); }
     #[test] fn test_and() { run_expr("1 < 2 and 3 < 4", vec![Int(1), Int(2), OpLessThan, JumpIfFalse(8), Pop, Int(3), Int(4), OpLessThan]); }
     #[test] fn test_or() { run_expr("1 < 2 or 3 < 4", vec![Int(1), Int(2), OpLessThan, JumpIfTrue(8), Pop, Int(3), Int(4), OpLessThan]); }
-    #[test] fn test_precedence_1() { run_expr("1 . 2 & 3 > 4", vec![Int(1), Int(2), Int(3), OpBitwiseAnd, OpFuncCompose, Int(4), OpGreaterThan]); }
+    #[test] fn test_precedence_1() { run_expr("1 . 2 & 3 > 4", vec![Int(1), Int(2), Int(3), OpBitwiseAnd, Swap, OpFuncEval(1), Int(4), OpGreaterThan]); }
     #[test] fn test_slice_01() { run_expr("1 [::]", vec![Int(1), Nil, Nil, Nil, OpSliceWithStep]); }
     #[test] fn test_slice_02() { run_expr("1 [2::]", vec![Int(1), Int(2), Nil, Nil, OpSliceWithStep]); }
     #[test] fn test_slice_03() { run_expr("1 [:3:]", vec![Int(1), Nil, Int(3), Nil, OpSliceWithStep]); }

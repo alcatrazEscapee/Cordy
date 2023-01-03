@@ -3,30 +3,32 @@ L1: 0000 Nil
     0002 Dup
     0003 NativeFunction(List)
     0004 OpIs
-    0005 JumpIfTruePop(8)
+    0005 JumpIfTruePop(9)
     0006 NativeFunction(List)
-    0007 OpFuncCompose
-    0008 Int(0) -> 0
-    0009 PushGlobal(2, true) -> $1
-    0010 PushGlobal(1, true) -> $0
+    0007 Swap
+    0008 OpFuncEval(1)
+    0009 Int(0) -> 0
+    0010 PushGlobal(2, true) -> $1
     0011 NativeFunction(Len)
-    0012 OpFuncCompose
-    0013 OpLessThan
-    0014 JumpIfFalsePop(30)
-    0015 PushGlobal(1, true) -> $0
-    0016 PushGlobal(2, true) -> $1
-    0017 OpIndex
-    0018 StoreGlobal(0, true) -> letter
-    0019 Pop
-L2: 0020 PushGlobal(0, true) -> letter
-    0021 NativeFunction(Print)
-    0022 OpFuncCompose
-L3: 0023 Pop
-    0024 PushGlobal(2, true) -> $1
-    0025 Int(1) -> 1
-    0026 OpAdd
-    0027 StoreGlobal(2, true) -> $1
-    0028 Pop
-    0029 Jump(9)
-    0030 PopN(3)
-    0031 Exit
+    0012 PushGlobal(1, true) -> $0
+    0013 OpFuncEval(1)
+    0014 OpLessThan
+    0015 JumpIfFalsePop(32)
+    0016 PushGlobal(1, true) -> $0
+    0017 PushGlobal(2, true) -> $1
+    0018 OpIndex
+    0019 StoreGlobal(0, true) -> letter
+    0020 Pop
+L2: 0021 PushGlobal(0, true) -> letter
+    0022 NativeFunction(Print)
+    0023 Swap
+    0024 OpFuncEval(1)
+L3: 0025 Pop
+    0026 PushGlobal(2, true) -> $1
+    0027 Int(1) -> 1
+    0028 OpAdd
+    0029 StoreGlobal(2, true) -> $1
+    0030 Pop
+    0031 Jump(10)
+    0032 PopN(3)
+    0033 Exit
