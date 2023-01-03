@@ -538,18 +538,17 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
     fn invoke_func_eval(self: &mut Self, nargs: u8) -> Result<FunctionType, Box<RuntimeError>> {
         let f: &Value = self.peek(nargs as usize);
         match f {
-            Value::Function(func) => {
-                trace::trace_interpreter!("invoke_func_eval -> {}, nargs = {}", Value::Function(func.clone()).as_debug_str(), nargs);
+            f @ (Value::Function(_) | Value::Closure(_)) => {
+                trace::trace_interpreter!("invoke_func_eval -> {}, nargs = {}", f.as_debug_str(), nargs);
+
+                let func = f.as_function();
                 if func.nargs == nargs {
                     // Evaluate directly
                     self.call_function(func.head, func.nargs);
                 } else if func.nargs > nargs && nargs > 0 {
                     // Evaluate as a partial function
                     let arg: Vec<Value> = self.popn(nargs as usize);
-                    let func: Rc<FunctionImpl> = match self.pop() {  // Pop the function, so we can interact with it directly
-                        Value::Function(f) => f,
-                        _ => panic!("Stack corruption"),
-                    };
+                    let func: Value = self.pop();
                     let partial: Value = Value::partial(func, arg);
                     self.push(partial);
                 } else {
@@ -557,16 +556,17 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
                 }
                 Ok(FunctionType::User)
             },
-            Value::PartialFunction(_partial) => {
-                trace::trace_interpreter!("invoke_func_eval -> {}, nargs = {}", Value::Function(Rc::new((*_partial.func).clone())).as_debug_str(), nargs);
+            Value::PartialFunction(_) => {
+                trace::trace_interpreter!("invoke_func_eval -> {}, nargs = {}", f.as_debug_str(), nargs);
                 // Surgically extract the partial binding from the stack
                 let i: usize = self.stack.len() - nargs as usize - 1;
                 let mut partial: PartialFunctionImpl = match std::mem::replace(&mut self.stack[i], Value::Nil) {
                     Value::PartialFunction(x) => *x,
                     _ => panic!("Stack corruption")
                 };
+                let func = partial.func.as_function();
                 let total_nargs: u8 = partial.args.len() as u8 + nargs;
-                if partial.func.nargs > total_nargs {
+                if func.nargs > total_nargs {
                     // Not enough arguments, so pop the argument and push a new partial function
                     let top = self.stack.len();
                     for arg in self.stack.splice(top - nargs as usize..top, std::iter::empty()) {
@@ -574,13 +574,13 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
                     }
                     self.pop(); // Should pop the `Nil` we swapped earlier
                     self.push(Value::PartialFunction(Box::new(partial)));
-                } else if partial.func.nargs == total_nargs {
+                } else if func.nargs == total_nargs {
                     // Exactly enough arguments to invoke the function
                     // Before we call, we need to pop-push to reorder the arguments and setup partial arguments, so we have the correct calling convention
                     let args: Vec<Value> = self.popn(nargs as usize);
-                    let head: usize = partial.func.head;
+                    let head: usize = func.head;
                     self.pop(); // Should pop the `Nil` we swapped earlier
-                    self.push(Value::Function(partial.func));
+                    self.push(partial.func);
                     for par in partial.args {
                         self.push(*par);
                     }
@@ -590,7 +590,7 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
                     self.call_function(head, total_nargs);
 
                 } else {
-                    return IncorrectNumberOfFunctionArguments((*partial.func).clone(), total_nargs).err()
+                    return IncorrectNumberOfFunctionArguments((**func).clone(), total_nargs).err()
                 }
                 Ok(FunctionType::User)
             },
@@ -632,27 +632,6 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
                     Err(e) => return Err(e),
                 }
                 Ok(FunctionType::Native)
-            },
-            Value::Closure(c) => {
-                trace::trace_interpreter!("invoke_func_eval -> {}, nargs = {}", Value::Function(c.func.clone()).as_debug_str(), nargs);
-                let func = &c.func;
-                if func.nargs == nargs {
-                    // Evaluate directly
-                    self.call_function(func.head, func.nargs);
-                } else if func.nargs > nargs && nargs > 0 {
-                    // Evaluate as a partial function
-                    // todo: fix this for partial closures
-                    let arg: Vec<Value> = self.popn(nargs as usize);
-                    let func: Rc<FunctionImpl> = match self.pop() {  // Pop the function, so we can interact with it directly
-                        Value::Function(f) => f,
-                        _ => panic!("Stack corruption"),
-                    };
-                    let partial: Value = Value::partial(func, arg);
-                    self.push(partial);
-                } else {
-                    return IncorrectNumberOfFunctionArguments((**func).clone(), nargs).err();
-                }
-                Ok(FunctionType::User)
             },
             _ => return ValueIsNotFunctionEvaluable(f.clone()).err(),
         }
@@ -973,6 +952,7 @@ mod test {
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }
     #[test] fn test_append_large_lists() { run("append_large_lists"); }
     #[test] fn test_closure_instead_of_global_variable() { run("closure_instead_of_global_variable"); }
+    #[test] fn test_closure_of_partial_function() { run("closure_of_partial_function"); }
     #[test] fn test_closure_with_non_unique_values() { run("closure_with_non_unique_values"); }
     #[test] fn test_closure_without_stack_semantics() { run("closure_without_stack_semantics"); }
     #[test] fn test_fibonacci() { run("fibonacci"); }

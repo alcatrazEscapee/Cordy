@@ -54,8 +54,7 @@ impl Value {
     pub fn set(set: LinkedHashSet<Value>) -> Value { Set(Mut::new(set)) }
     pub fn dict(dict: LinkedHashMap<Value, Value>) -> Value { Dict(Mut::new(dict)) }
 
-    pub fn partial1(func: Rc<FunctionImpl>, arg: Value) -> Value { PartialFunction(Box::new(PartialFunctionImpl { func, args: vec![Box::new(arg)] }))}
-    pub fn partial(func: Rc<FunctionImpl>, args: Vec<Value>) -> Value { PartialFunction(Box::new(PartialFunctionImpl { func, args: args.into_iter().map(|v| Box::new(v)).collect() }))}
+    pub fn partial(func: Value, args: Vec<Value>) -> Value { PartialFunction(Box::new(PartialFunctionImpl { func, args: args.into_iter().map(|v| Box::new(v)).collect() }))}
 
     pub fn closure(func: Rc<FunctionImpl>) -> Value { Closure(Box::new(ClosureImpl { func, environment: Vec::new() })) }
 
@@ -64,7 +63,7 @@ impl Value {
         match self {
             Str(s) => *s.clone(),
             Function(f) => f.name.clone(),
-            PartialFunction(f) => f.func.name.clone(),
+            PartialFunction(f) => f.func.as_str(),
             NativeFunction(b) => String::from(stdlib::lookup_name(*b)),
             PartialNativeFunction(b, _) => String::from(stdlib::lookup_name(*b)),
             _ => self.as_repr_str(),
@@ -160,6 +159,16 @@ impl Value {
             Dict(d) => Ok(ValueIntoIter::Dict(d.unbox())),
             Heap(v) => Ok(ValueIntoIter::Heap(v.unbox())),
             _ => TypeErrorArgMustBeIterable(self.clone()).err(),
+        }
+    }
+
+    /// Returns the internal `FunctionImpl` of this value.
+    /// Must only be called on a `Function` or `Closure`, will panic otherwise
+    pub fn as_function(self: &Self) -> &Rc<FunctionImpl> {
+        match self {
+            Function(f) => f,
+            Closure(c) => &c.func,
+            _ => panic!("Tried to unwrap a {:?} as a function", self),
         }
     }
 
@@ -286,8 +295,13 @@ impl Hash for FunctionImpl {
 
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub struct PartialFunctionImpl {
-    pub func: Rc<FunctionImpl>,
+    /// The `Value` must be either a `Function` or `Closure`
+    pub func: Value,
     pub args: Vec<Box<Value>>,
+}
+
+impl PartialFunctionImpl {
+
 }
 
 impl Hash for PartialFunctionImpl {
