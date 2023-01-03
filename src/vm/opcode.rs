@@ -53,6 +53,16 @@ pub enum Opcode {
     NativeFunction(StdBinding),
     List(u16),
 
+
+    /// Opcode for function evaluation (either with `()` or with `.`). The `u8` parameter is the number of arguments to the function.
+    ///
+    /// - The stack must be setup with the function to be called (which must be a callable type, i.e. return `true` to `value.is_function()`, followed by `n` arguments.
+    /// - A call frame will be pushed, and the `frame_pointer()` of the VM will point to the first local of the new frame. The function itself can be accessed via `stack[frame_pointer() - 1]`.
+    /// - Upon reaching a `Return` opcode, everything above and including `frame_pointer() - 1` will be popped off the stack, and the return value will be pushed onto the stack (replacing the spot where the function was).
+    ///
+    /// Implementation Note: In order to implement function composition (the `.` operator), this is preceded with a `Swap` opcode to reverse the order of the argument and function to be called.
+    OpFuncEval(u8),
+
     // Unary Operators
     UnarySub,
     UnaryLogicalNot,
@@ -60,7 +70,7 @@ pub enum Opcode {
 
     // Binary Operators
     // Ordered by precedence, highest to lowest
-    OpFuncEval(u8),
+
     OpIndex,
     OpIndexPeek,
     OpSlice,
@@ -81,8 +91,6 @@ pub enum Opcode {
     OpBitwiseAnd,
     OpBitwiseOr,
     OpBitwiseXor,
-
-    OpFuncCompose,
 
     OpLessThan,
     OpGreaterThan,

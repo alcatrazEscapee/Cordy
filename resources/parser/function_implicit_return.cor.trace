@@ -13,7 +13,8 @@ L9: 0011 PushGlobal(0, false) -> foo
     0012 Int(1) -> 2
     0013 OpFuncEval(1)
     0014 NativeFunction(Print)
-    0015 OpFuncCompose
-    0016 Pop
+    0015 Swap
+    0016 OpFuncEval(1)
     0017 Pop
-    0018 Exit
+    0018 Pop
+    0019 Exit

@@ -29,29 +29,33 @@ L3: 0026 PushGlobal(2, false) -> bar
     0028 Int(1) -> 2
     0029 OpAdd
     0030 OpFuncEval(1)
-    0031 OpFuncCompose
-    0032 PushGlobal(3, false) -> baz
-    0033 PushGlobal(0, false) -> x
-    0034 OpFuncEval(1)
-    0035 OpFuncCompose
-    0036 PushGlobal(6, false) -> z
-    0037 OpFuncCompose
-    0038 StoreGlobal(0, false) -> x
-    0039 Pop
-    0040 PushGlobal(4, false) -> three
-    0041 PushGlobal(5, false) -> four
-L4: 0042 OpFuncCompose
-    0043 JumpIfFalse(48)
-    0044 Pop
-    0045 Int(0) -> 1
-    0046 Int(1) -> 2
-    0047 OpGreaterThan
-    0048 JumpIfTrue(53)
-    0049 Pop
-    0050 Int(5) -> 6
-    0051 Int(6) -> 7
-    0052 OpGreaterThanEqual
-    0053 StoreGlobal(0, false) -> x
-    0054 Pop
-    0055 PopN(7)
-    0056 Exit
+    0031 Swap
+    0032 OpFuncEval(1)
+    0033 PushGlobal(3, false) -> baz
+    0034 PushGlobal(0, false) -> x
+    0035 OpFuncEval(1)
+    0036 Swap
+    0037 OpFuncEval(1)
+    0038 PushGlobal(6, false) -> z
+    0039 Swap
+    0040 OpFuncEval(1)
+    0041 StoreGlobal(0, false) -> x
+    0042 Pop
+    0043 PushGlobal(4, false) -> three
+    0044 PushGlobal(5, false) -> four
+L4: 0045 Swap
+    0046 OpFuncEval(1)
+    0047 JumpIfFalse(52)
+    0048 Pop
+    0049 Int(0) -> 1
+    0050 Int(1) -> 2
+    0051 OpGreaterThan
+    0052 JumpIfTrue(57)
+    0053 Pop
+    0054 Int(5) -> 6
+    0055 Int(6) -> 7
+    0056 OpGreaterThanEqual
+    0057 StoreGlobal(0, false) -> x
+    0058 Pop
+    0059 PopN(7)
+    0060 Exit

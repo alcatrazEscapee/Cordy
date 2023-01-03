@@ -1,11 +1,11 @@
-L1: 0000 True
-    0001 NativeFunction(Bool)
-    0002 OpFuncCompose
+L1: 0000 NativeFunction(Bool)
+    0001 True
+    0002 OpFuncEval(1)
     0003 JumpIfFalsePop(14)
 L2: 0004 Jump(14)
-L3: 0005 False
-    0006 NativeFunction(Bool)
-    0007 OpFuncCompose
+L3: 0005 NativeFunction(Bool)
+    0006 False
+    0007 OpFuncEval(1)
     0008 JumpIfFalsePop(12)
 L4: 0009 Jump(5)
 L5: 0010 Jump(12)

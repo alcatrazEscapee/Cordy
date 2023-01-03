@@ -145,7 +145,6 @@ impl AsError for Opcode {
             Opcode::OpBitwiseAnd => "&",
             Opcode::OpBitwiseOr => "|",
             Opcode::OpBitwiseXor => "^",
-            Opcode::OpFuncCompose => ".",
             Opcode::OpLessThan => "<",
             Opcode::OpGreaterThan => ">",
             Opcode::OpLessThanEqual => "<=",

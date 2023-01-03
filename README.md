@@ -82,8 +82,6 @@ print(answer)
 
 ```
 
----
-
 
 ### To-Do
 

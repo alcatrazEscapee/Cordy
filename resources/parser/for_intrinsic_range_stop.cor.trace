@@ -4,16 +4,17 @@ L1: 0000 Int(0) -> 10
     0003 PushGlobal(0, true) -> i
     0004 PushGlobal(1, true) -> $0
     0005 OpLessThan
-    0006 JumpIfFalsePop(17)
+    0006 JumpIfFalsePop(18)
 L2: 0007 PushGlobal(0, true) -> i
     0008 NativeFunction(Print)
-    0009 OpFuncCompose
-L3: 0010 Pop
-    0011 PushGlobal(0, true) -> i
-    0012 Int(2) -> 1
-    0013 OpAdd
-    0014 StoreGlobal(0, true) -> i
-    0015 Pop
-    0016 Jump(3)
-    0017 PopN(2)
-    0018 Exit
+    0009 Swap
+    0010 OpFuncEval(1)
+L3: 0011 Pop
+    0012 PushGlobal(0, true) -> i
+    0013 Int(2) -> 1
+    0014 OpAdd
+    0015 StoreGlobal(0, true) -> i
+    0016 Pop
+    0017 Jump(3)
+    0018 PopN(2)
+    0019 Exit
