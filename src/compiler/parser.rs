@@ -1006,6 +1006,9 @@ impl Parser {
             Some(KeywordFn) => {
                 self.parse_expression_function();
             },
+            Some(KeywordIf) => {
+                self.parse_expr_1_inline_if_then_else();
+            }
             _ => self.error_with(|t| ExpectedExpressionTerminal(t)),
         }
     }
@@ -1081,6 +1084,24 @@ impl Parser {
         } else {
             false
         }
+    }
+
+    fn parse_expr_1_inline_if_then_else(self: &mut Self) {
+        trace::trace_parser!("rule <expr-1-inline-if-then-else>");
+
+        self.advance(); // Consume `if`
+        self.push(NativeFunction(Bool)); // Evaluate `if` arguments with `bool`
+        self.parse_expression(); // condition
+        self.push(OpFuncEval(1));
+        let jump_if_false_pop = self.reserve();
+        self.expect(KeywordThen);
+        self.parse_expression(); // Value if true
+        let jump = self.reserve();
+        self.output[jump_if_false_pop] = JumpIfFalsePop(self.next_opcode());
+        self.expect(KeywordElse);
+        self.parse_expression(); // Value if false
+        self.output[jump] = Jump(self.next_opcode());
+
     }
 
     fn parse_expr_2_unary(self: &mut Self) {
@@ -1984,6 +2005,7 @@ mod tests {
 
     use StdBinding::{Print, Read, OperatorAdd, OperatorDiv, OperatorMul};
     use Opcode::{*};
+    use crate::stdlib::StdBinding::Bool;
 
 
     #[test] fn test_empty_expr() { run_expr("", vec![]); }
@@ -2033,6 +2055,7 @@ mod tests {
     #[test] fn test_slice_11() { run_expr("1 [:3]", vec![Int(1), Nil, Int(3), OpSlice]); }
     #[test] fn test_slice_12() { run_expr("1 [2:3]", vec![Int(1), Int(2), Int(3), OpSlice]); }
     #[test] fn test_binary_ops() { run_expr("(*) * (+) + (/)", vec![NativeFunction(OperatorMul), NativeFunction(OperatorAdd), OpMul, NativeFunction(OperatorDiv), OpAdd]); }
+    #[test] fn test_if_then_else() { run_expr("if true then 1 else 2", vec![NativeFunction(Bool), True, OpFuncEval(1), JumpIfFalsePop(6), Int(1), Jump(7), Int(2)]); }
 
     #[test] fn test_let_eof() { run_err("let", "Expecting a variable name after 'let' keyword, got end of input instead\n  at: line 1 (<test>)\n  at:\n\nlet\n"); }
     #[test] fn test_let_no_identifier() { run_err("let =", "Expecting a variable name after 'let' keyword, got '=' token instead\n  at: line 1 (<test>)\n  at:\n\nlet =\n"); }
