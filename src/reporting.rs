@@ -227,6 +227,7 @@ impl AsError for ScanToken {
             ScanToken::KeywordIf => String::from("'if' keyword"),
             ScanToken::KeywordElif => String::from("'elif' keyword"),
             ScanToken::KeywordElse => String::from("'else' keyword"),
+            ScanToken::KeywordThen => String::from("'then' keyword"),
             ScanToken::KeywordLoop => String::from("'loop' keyword"),
             ScanToken::KeywordWhile => String::from("'while' keyword"),
             ScanToken::KeywordFor => String::from("'for' keyword"),

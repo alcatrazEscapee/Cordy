@@ -1,0 +1,20 @@
+// Closures are poor man's classes
+
+let cls = (fn() {
+    let x_ = [0]
+    fn set_(x) -> x_[0] = x
+    fn get_() -> x_[0]
+
+    return [set_, get_]
+})
+
+let obj1 = cls()
+let obj2 = cls()
+
+fn display() -> print('obj1.x =', obj1[1](), 'obj2.x =', obj2[1]())
+
+display()
+obj1[0](5)
+display()
+obj2[0](70)
+display()

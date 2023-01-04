@@ -953,6 +953,11 @@ mod test {
     #[test] fn test_gcd_iter() { run_str("[12, 18, 16] . gcd . print", "2\n"); }
     #[test] fn test_lcm() { run_str("lcm(9, 7) . print", "63\n"); }
     #[test] fn test_lcm_iter() { run_str("[12, 10, 18] . lcm . print", "180\n"); }
+    #[test] fn test_if_then_else_1() { run_str("(if true then 'hello' else 'goodbye') . print", "hello\n"); }
+    #[test] fn test_if_then_else_2() { run_str("(if false then 'hello' else 'goodbye') . print", "goodbye\n"); }
+    #[test] fn test_if_then_else_3() { run_str("(if [] then 'hello' else 'goodbye') . print", "goodbye\n"); }
+    #[test] fn test_if_then_else_4() { run_str("(if 3 then 'hello' else 'goodbye') . print", "hello\n"); }
+    #[test] fn test_if_then_else_5() { run_str("(if false then (fn() -> 'hello' . print)() else 'nope') . print", "nope\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }
@@ -961,6 +966,7 @@ mod test {
     #[test] fn test_closure_of_partial_function() { run("closure_of_partial_function"); }
     #[test] fn test_closure_with_non_unique_values() { run("closure_with_non_unique_values"); }
     #[test] fn test_closure_without_stack_semantics() { run("closure_without_stack_semantics"); }
+    #[test] fn test_closures_are_poor_mans_classes() { run("closures_are_poor_mans_classes"); }
     #[test] fn test_fibonacci() { run("fibonacci"); }
     #[test] fn test_function_capture_from_inner_scope() { run("function_capture_from_inner_scope"); }
     #[test] fn test_function_capture_from_outer_scope() { run("function_capture_from_outer_scope"); }
