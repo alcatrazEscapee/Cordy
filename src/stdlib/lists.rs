@@ -146,14 +146,14 @@ pub fn sum<'a>(args: impl Iterator<Item=&'a Value>) -> ValueResult {
 pub fn max<'a>(args: impl Iterator<Item=&'a Value>) -> ValueResult {
     match args.max() {
         Some(v) => Ok(v.clone()),
-        None => TypeErrorArgMustNotBeEmpty.err()
+        None => ValueErrorValueMustBeNonEmpty.err()
     }
 }
 
 pub fn min<'a>(args: impl Iterator<Item=&'a Value>) -> ValueResult {
     match args.min() {
         Some(v) => Ok(v.clone()),
-        None => TypeErrorArgMustNotBeEmpty.err()
+        None => ValueErrorValueMustBeNonEmpty.err()
     }
 }
 
@@ -220,7 +220,7 @@ pub fn reduce<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : V
             let mut iter = (&rs).into_iter().cloned();
             let mut acc: Value = match iter.next() {
                 Some(v) => v,
-                None => return TypeErrorArgMustNotBeEmpty.err()
+                None => return ValueErrorValueMustBeNonEmpty.err()
             };
 
             for r in iter {
@@ -249,7 +249,7 @@ pub fn pop(a1: Value) -> ValueResult {
         _ => return TypeErrorArgMustBeIterable(a1).err()
     } {
         Some(v) => Ok(v),
-        None => TypeErrorArgMustNotBeEmpty.err()
+        None => ValueErrorValueMustBeNonEmpty.err()
     }
 }
 

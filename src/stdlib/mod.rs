@@ -128,6 +128,7 @@ pub enum StdBinding {
 
     // lib_math
     Abs,
+    Sqrt,
     Gcd,
     Lcm,
 }
@@ -219,6 +220,7 @@ fn load_bindings() -> Vec<StdBindingInfo> {
         of!(Init, "init"),
 
         of!(Abs, "abs"),
+        of!(Sqrt, "sqrt"),
         of!(Gcd, "gcd"),
         of!(Lcm, "lcm"),
     ]
@@ -478,6 +480,9 @@ pub fn invoke<VM>(bound: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult wher
 
         // lib_math
         Abs => dispatch!(a1, math::abs(a1)),
+        Sqrt => dispatch!(a1, math::sqrt(a1)),
+        Gcd => dispatch!(a1, math::gcd(a1.into_iter()), Gcd),
+        Lcm => dispatch!(a1, math::lcm(a1.into_iter()), Lcm),
 
         _ => BindingIsNotFunctionEvaluable(bound.clone()).err(),
     }

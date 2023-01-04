@@ -947,6 +947,12 @@ mod test {
     #[test] fn test_list_literal_empty() { run_str("[] . print", "[]\n"); }
     #[test] fn test_list_literal_len_1() { run_str("['hello'] . print", "['hello']\n"); }
     #[test] fn test_list_literal_len_2() { run_str("['hello', 'world'] . print", "['hello', 'world']\n"); }
+    #[test] fn test_sqrt() { run_str("[0, 1, 4, 9, 25, 3, 6, 8, 13] . map(sqrt) . print", "[0, 1, 2, 3, 5, 1, 2, 2, 3]\n"); }
+    #[test] fn test_very_large_sqrt() { run_str("[1 << 62, (1 << 62) + 1, (1 << 62) - 1] . map(sqrt) . print", "[2147483648, 2147483648, 2147483647]\n"); }
+    #[test] fn test_gcd() { run_str("gcd(12, 8) . print", "4\n"); }
+    #[test] fn test_gcd_iter() { run_str("[12, 18, 16] . gcd . print", "2\n"); }
+    #[test] fn test_lcm() { run_str("lcm(9, 7) . print", "63\n"); }
+    #[test] fn test_lcm_iter() { run_str("[12, 10, 18] . lcm . print", "180\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }
