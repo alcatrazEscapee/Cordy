@@ -21,6 +21,8 @@ pub enum RuntimeError {
     ValueErrorIndexOutOfBounds(i64, usize),
     ValueErrorStepCannotBeZero,
     ValueErrorVariableNotDeclaredYet(String),
+    ValueErrorValueMustBeNonNegative(i64),
+    ValueErrorValueMustBeNonEmpty,
 
     TypeErrorUnaryOp(Opcode, Value),
     TypeErrorBinaryOp(Opcode, Value, Value),
@@ -31,7 +33,6 @@ pub enum RuntimeError {
     TypeErrorArgMustBeInt(Value),
     TypeErrorArgMustBeStr(Value),
     TypeErrorArgMustBeIterable(Value),
-    TypeErrorArgMustNotBeEmpty,
 
     // Deprecated - find a better generic way to do this
     TypeErrorFunc1(&'static str, Value),
