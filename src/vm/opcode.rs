@@ -53,6 +53,10 @@ pub enum Opcode {
     NativeFunction(StdBinding),
     List(u16),
 
+    // Runtime specific type checks
+    // Both of these opcodes pop the top (a length), and peek the next, and validate the length of the peek'd variable is greater than or equal to the provided value.
+    CheckLengthGreaterThan,
+    CheckLengthEqualTo,
 
     /// Opcode for function evaluation (either with `()` or with `.`). The `u8` parameter is the number of arguments to the function.
     ///
@@ -63,6 +67,14 @@ pub enum Opcode {
     /// Implementation Note: In order to implement function composition (the `.` operator), this is preceded with a `Swap` opcode to reverse the order of the argument and function to be called.
     OpFuncEval(u8),
 
+    /// Takes a stack of `[index, list, ...]`, pops the top two elements, and pushes `list[index]`
+    OpIndex,
+    /// Takes a stack of `[index, list, ...]`, and pushes `list[index]` (does not pop any values)
+    OpIndexPeek,
+
+    OpSlice,
+    OpSliceWithStep,
+
     // Unary Operators
     UnarySub,
     UnaryLogicalNot,
@@ -70,11 +82,6 @@ pub enum Opcode {
 
     // Binary Operators
     // Ordered by precedence, highest to lowest
-
-    OpIndex,
-    OpIndexPeek,
-    OpSlice,
-    OpSliceWithStep,
 
     OpMul,
     OpDiv,

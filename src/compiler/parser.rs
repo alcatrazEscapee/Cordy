@@ -51,8 +51,8 @@ impl ParserError {
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub enum ParserErrorType {
     UnexpectedTokenAfterEoF(ScanToken),
-    ExpectedToken(ScanToken, Option<ScanToken>),
 
+    ExpectedToken(ScanToken, Option<ScanToken>),
     ExpectedExpressionTerminal(Option<ScanToken>),
     ExpectedCommaOrEndOfArguments(Option<ScanToken>),
     ExpectedCommaOrEndOfList(Option<ScanToken>),
@@ -64,13 +64,17 @@ pub enum ParserErrorType {
     ExpectedFunctionBlockOrArrowAfterFn(Option<ScanToken>),
     ExpectedParameterOrEndOfList(Option<ScanToken>),
     ExpectedCommaOrEndOfParameters(Option<ScanToken>),
+    ExpectedPatternTerm(Option<ScanToken>),
+    ExpectedUnderscoreOrVariableNameAfterVariadicInPattern(Option<ScanToken>),
+    ExpectedUnderscoreOrVariableNameOrPattern(Option<ScanToken>),
 
     LocalVariableConflict(String),
     LocalVariableConflictWithNativeFunction(String),
     UndeclaredIdentifier(String),
 
     InvalidAssignmentTarget,
-
+    MultipleVariadicTermsInPattern,
+    LetWithPatternBindingNoExpression,
     BreakOutsideOfLoop,
     ContinueOutsideOfLoop,
 }
@@ -214,6 +218,147 @@ struct LateBoundGlobal {
 impl LateBoundGlobal {
     fn new(name: String, opcode: usize, error: Option<ParserError>) -> LateBoundGlobal {
         LateBoundGlobal { name, opcode, error }
+    }
+}
+
+enum VariableBinding {
+    Pattern(Pattern),
+    Named(usize),
+    Empty
+}
+
+enum Pattern {
+    TermEmpty,
+    TermVarEmpty,
+    Term(usize),
+    TermVar(usize),
+    Terms(Vec<Pattern>)
+}
+
+impl Pattern {
+
+    /// Emits code for initializing all local variables (to `Nil`) as part of this pattern.
+    fn emit_local_default_values(self: &Self, parser: &mut Parser) {
+        match self {
+            Pattern::TermEmpty | Pattern::TermVarEmpty => {},
+            Pattern::Term(_) | Pattern::TermVar(_) => parser.push(Opcode::Nil),
+            Pattern::Terms(terms) => {
+                for term in terms {
+                    term.emit_local_default_values(parser);
+                }
+            }
+        }
+    }
+
+    /// Initializes all local variables used in this pattern
+    fn init_all_locals(self: &Self, parser: &mut Parser) {
+        match self {
+            Pattern::TermEmpty | Pattern::TermVarEmpty => {},
+            Pattern::Term(local) | Pattern::TermVar(local) => {
+                parser.current_locals_mut().locals[*local].initialize();
+                parser.push_inc_global(*local);
+            },
+            Pattern::Terms(terms) => {
+                for term in terms {
+                    term.init_all_locals(parser);
+                }
+            }
+        }
+    }
+
+    /// Emits code for destructuring this pattern
+    /// Assumes the variable containing the to-be-destructured iterable sits atop the stack, and that all local variables are already present (and initialized to `Nil`) in their respective stack slots
+    fn emit_destructuring(self: &Self, parser: &mut Parser) {
+        let terms = match self {
+            Pattern::Terms(v) => v,
+            _ => panic!("Top level pattern must be a `Pattern::Terms`")
+        };
+
+        let is_variadic = terms.iter()
+            .any(|t| t.is_variadic_term());
+        let len: i64 = if is_variadic { terms.len() - 1 } else { terms.len() } as i64;
+        let constant_len = parser.declare_constant(len);
+
+        parser.push(Opcode::Int(constant_len));
+        parser.push(if is_variadic { CheckLengthGreaterThan } else { CheckLengthEqualTo }); // Pops `constant_len`
+
+        let mut index: i64 = 0;
+        for term in terms {
+            match term {
+                Pattern::TermEmpty => {
+                    // Just advance the index
+                    index += 1;
+                },
+                Pattern::TermVarEmpty => {
+                    // Advance the index by the missing elements (start indexing in reverse)
+                    index = -(len - index);
+                },
+                Pattern::Term(local) => {
+                    let constant_index = parser.declare_constant(index);
+
+                    parser.push(Opcode::Int(constant_index));
+                    parser.push(OpIndexPeek); // [ it[index], index, it, ...]
+                    parser.push_store_local(*local); // stores it[index]
+                    parser.push(PopN(2)); // [it, ...]
+
+                    index += 1;
+                },
+                Pattern::TermVar(local) => {
+                    // index = the next index in the iterable to take = the number of elements already accessed
+                    // therefor, len - index = the number of elements left we need to access exactly, which must be indices -1, -2, ... -(len - index)
+                    // so our slice excludes these, so the 'high' value must be -(len - index)
+                    // this is then also exactly what we set our index to next
+                    let constant_low = parser.declare_constant(index);
+                    index = -(len - index);
+                    let constant_high = parser.declare_constant(index);
+
+                    parser.push(Dup); // [it, it, ...]
+                    parser.push(Opcode::Int(constant_low)); // [low, it, it, ...]
+                    parser.push(Opcode::Int(constant_high)); // [high, low, it, it, ...]
+                    parser.push(OpSlice); // [it[low:high], it, ...]
+                    parser.push_store_local(*local); // stores it[low:high]
+                    parser.push(Opcode::Pop); // [it, ...]
+                },
+                terms @ Pattern::Terms(_) => {
+                    // Index as if this was a `Term`, but then invoke the emit recursively, with the value still on the stack, treating it as the iterable.
+                    let constant_index = parser.declare_constant(index);
+
+                    parser.push(Opcode::Int(constant_index));
+                    parser.push(OpIndexPeek); // [ it[index], index, it, ...]
+                    terms.emit_destructuring(parser);
+                    parser.push(PopN(2)); // [it, ...]
+
+                    index += 1;
+                }
+            }
+        }
+    }
+
+    fn is_simple(self: &Self) -> Option<usize> {
+        let terms = match self {
+            Pattern::Terms(v) => v,
+            _ => panic!("Top level pattern must be a `Pattern::Terms`")
+        };
+
+        if terms.iter().all(|t| t.is_simple_term()) {
+            Some(terms.len())
+        } else {
+            None
+        }
+    }
+
+    fn is_variadic_term(self: &Self) -> bool {
+        match self {
+            Pattern::TermVarEmpty | Pattern::TermVar(_) => true,
+            _ => false
+        }
+    }
+
+    fn is_simple_term(self: &Self) -> bool {
+        match self {
+            Pattern::Term(_) => true,
+            _ => false
+        }
     }
 }
 
@@ -880,38 +1025,70 @@ impl Parser {
     fn parse_let_statement(self: &mut Self) {
         trace::trace_parser!("rule <let-statement>");
         self.push_delayed_pop();
-        self.advance();
+        self.advance(); // Consume `let`
+
         loop {
-            let local: usize = match self.peek() {
-                Some(Identifier(_)) => {
-                    let name: String = self.take_identifier();
-                    match self.declare_local(name) {
-                        Some(l) => l,
-                        None => break
-                    }
-                },
-                _ => {
-                    self.error_with(|t| ExpectedVariableNameAfterLet(t));
-                    break
-                }
+            let variable: VariableBinding = match self.parse_variable_binding() {
+                // Note that `let _` is rather silly but we can emit perfectly legal code for it, so we allow it
+                Some(v) => v,
+                None => break
             };
 
-            match self.peek() {
+            let expression_present = match self.peek() {
                 Some(Equals) => { // x = <expr>, so parse the expression
                     self.advance();
                     self.prevent_expression_statement = true;
+
+                    // Before we parse an expression, if we're declaring a pattern variable, then emit the pattern's locals
+                    // We need the expression to be on the top of the stack to do destructuring
+                    if let VariableBinding::Pattern(pattern) = &variable {
+                        pattern.emit_local_default_values(self)
+                    }
+
                     self.parse_expression();
+                    true
                 },
                 _ => {
-                    self.push(Opcode::Nil); // Initialize to 'nil'
+                    match &variable {
+                        VariableBinding::Pattern(pattern) => {
+                            // If the pattern is a simple pattern (just `x, y, z, ...`), then this is actually legal - and we need to push the respective amount of `Nil`, which we assumed was a pattern instead of a sequence of `let` declarations.
+                            if let Some(n) = pattern.is_simple() {
+                                for _ in 0..n {
+                                    self.push(Opcode::Nil)
+                                }
+                            } else {
+                                self.semantic_error(LetWithPatternBindingNoExpression);
+                            }
+                        },
+                        _ => {
+                            self.push(Opcode::Nil); // Initialize to 'nil'
+                        }
+                    }
+                    false
+                },
+            };
+
+            match &variable {
+                VariableBinding::Pattern(pattern) => {
+                    // A pattern binding needs to emit a sequence of code that takes the top operand on the stack, and initializes all local variables
+                    // This sequence requires the variables to already have stack slots, which we setup before parsing the expression
+                    // So, we just need to emit code for the destructuring, and initialize all local variables
+                    pattern.init_all_locals(self);
+                    if pattern.is_simple().is_none() || expression_present {
+                        pattern.emit_destructuring(self);
+                    }
+                },
+                VariableBinding::Named(local) => {
+                    // Local declarations don't have an explicit `store` opcode
+                    // They just push their value onto the stack, and we know the location will equal that of the Local's index
+                    // However, after we initialize a local we need to mark it initialized, so we can refer to it in expressions
+                    self.current_locals_mut().locals[*local].initialize();
+                    self.push_inc_global(*local);
+                },
+                VariableBinding::Empty => {
+                    self.push(Opcode::Pop); // No variable to bind to, so just pop the expression (or `Nil`, if we emitted it)
                 },
             }
-
-            // Local declarations don't have an explicit `store` opcode
-            // They just push their value onto the stack, and we know the location will equal that of the Local's index
-            // However, after we initialize a local we need to mark it initialized, so we can refer to it in expressions
-            self.current_locals_mut().locals[local].initialize();
-            self.push_inc_global(local);
 
             match self.peek() {
                 Some(Comma) => { // Multiple declarations
@@ -938,6 +1115,135 @@ impl Parser {
     fn parse_expression(self: &mut Self) {
         trace::trace_parser!("rule <expression>");
         self.parse_expr_10();
+    }
+
+
+    // ===== Pattern Parsing ===== //
+
+    /// Parses a variable binding.
+    /// A variable binding may be a named variable (like in `let x`), an empty binding (`let _`, although in this context this is useless), or a pattern (`let x, (_, y), *z = `
+    /// All local variables named in either the named variable or pattern will be defined as locals by this method, and the variable binding is returned, if present. Otherwise, `None` is returned and an error will have been raised already.
+    fn parse_variable_binding(self: &mut Self) -> Option<VariableBinding> {
+        trace::trace_parser!("rule <variable-binding>");
+
+        if let Some(p) = self.parse_pattern() {
+            Some(VariableBinding::Pattern(p))
+        } else {
+            match self.peek() {
+                Some(Identifier(_)) => {
+                    let name: String = self.take_identifier();
+                    match self.declare_local(name) {
+                        Some(local) => Some(VariableBinding::Named(local)),
+                        None => None
+                    }
+                }
+                Some(Underscore) => {
+                    self.advance();
+                    Some(VariableBinding::Empty)
+                },
+                _ => {
+                    self.error_with(|t| ExpectedUnderscoreOrVariableNameOrPattern(t));
+                    None
+                }
+            }
+        }
+    }
+
+    /// Optionally parses a `Pattern`, which will always be a top level `Pattern::Terms`
+    /// If this does not parse a pattern (i.e. returns `None`), the parser state will not be modified.
+    fn parse_pattern(self: &mut Self) -> Option<Pattern> {
+        if self.detect_pattern() {
+            trace::trace_parser!("rule <pattern>");
+            let mut terms: Vec<Pattern> = Vec::new();
+            let mut found_variadic_term: bool = false;
+
+            terms.push(self.parse_pattern_term());
+            loop {
+                match self.peek() {
+                    Some(Comma) => {
+                        self.advance();
+                        let term = self.parse_pattern_term();
+                        if term.is_variadic_term() {
+                            if found_variadic_term {
+                                self.error(MultipleVariadicTermsInPattern);
+                            } else {
+                                found_variadic_term = true;
+                            }
+                        }
+                        terms.push(term)
+                    },
+                    _ => break
+                }
+            }
+
+            Some(Pattern::Terms(terms))
+        } else {
+            None
+        }
+    }
+
+    fn parse_pattern_term(self: &mut Self) -> Pattern {
+        trace::trace_parser!("rule <pattern-term>");
+        match self.peek() {
+            Some(Identifier(_)) => {
+                let name: String = self.take_identifier();
+                match self.declare_local(name) {
+                    Some(local) => Pattern::Term(local),
+                    _ => Pattern::TermEmpty,
+                }
+            },
+            Some(Underscore) => {
+                self.advance();
+                Pattern::TermEmpty
+            },
+            Some(Mul) => {
+                self.advance();
+                match self.peek() {
+                    Some(Identifier(_)) => {
+                        let name: String = self.take_identifier();
+                        match self.declare_local(name) {
+                            Some(local) => Pattern::TermVar(local),
+                            _ => Pattern::TermEmpty,
+                        }
+                    },
+                    Some(Underscore) => {
+                        Pattern::TermVarEmpty
+                    },
+                    _ => {
+                        self.error_with(|t| ExpectedUnderscoreOrVariableNameAfterVariadicInPattern(t));
+                        Pattern::TermEmpty
+                    }
+                }
+            },
+            Some(OpenParen) => {
+                self.advance();
+                let term = match self.parse_pattern() {
+                    Some(t) => t,
+                    None => {
+                        self.error_with(|t| ExpectedPatternTerm(t));
+                        Pattern::TermEmpty
+                    }
+                };
+                self.expect(CloseParen);
+                term
+            },
+            _ => {
+                self.error_with(|t| ExpectedPatternTerm(t));
+                Pattern::TermEmpty
+            },
+        }
+    }
+
+    fn detect_pattern(self: &mut Self) -> bool {
+        match self.peek() {
+            Some(Identifier(_)) => match self.peek2() {
+                Some(Comma) => true,
+                _ => false
+            },
+            // todo: single underscore isn't a pattern, it's a special invisible local
+            Some(Underscore) | Some(OpenParen) | Some(Mul) => true,
+            _ => false
+        }
     }
 
 
@@ -2057,8 +2363,8 @@ mod tests {
     #[test] fn test_binary_ops() { run_expr("(*) * (+) + (/)", vec![NativeFunction(OperatorMul), NativeFunction(OperatorAdd), OpMul, NativeFunction(OperatorDiv), OpAdd]); }
     #[test] fn test_if_then_else() { run_expr("if true then 1 else 2", vec![NativeFunction(Bool), True, OpFuncEval(1), JumpIfFalsePop(6), Int(1), Jump(7), Int(2)]); }
 
-    #[test] fn test_let_eof() { run_err("let", "Expecting a variable name after 'let' keyword, got end of input instead\n  at: line 1 (<test>)\n  at:\n\nlet\n"); }
-    #[test] fn test_let_no_identifier() { run_err("let =", "Expecting a variable name after 'let' keyword, got '=' token instead\n  at: line 1 (<test>)\n  at:\n\nlet =\n"); }
+    #[test] fn test_let_eof() { run_err("let", "Expected a variable binding, either a name, or '_', or pattern (i.e. 'x, (_, y), *z'), got end of input instead\n  at: line 1 (<test>)\n  at:\n\nlet\n"); }
+    #[test] fn test_let_no_identifier() { run_err("let =", "Expected a variable binding, either a name, or '_', or pattern (i.e. 'x, (_, y), *z'), got '=' token instead\n  at: line 1 (<test>)\n  at:\n\nlet =\n"); }
     #[test] fn test_let_expression_eof() { run_err("let x =", "Expected an expression terminal, got end of input instead\n  at: line 1 (<test>)\n  at:\n\nlet x =\n"); }
     #[test] fn test_let_no_expression() { run_err("let x = &", "Expected an expression terminal, got '&' token instead\n  at: line 1 (<test>)\n  at:\n\nlet x = &\n"); }
 
