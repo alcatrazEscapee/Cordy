@@ -407,11 +407,29 @@ impl<R, W> VirtualMachine<R, W> where
                 }
             },
 
-            CheckLengthGreaterThan => {
-                trace::trace_interpreter!("check len >");
+            CheckLengthGreaterThan(len) => {
+                let len = self.constants[len as usize] as usize;
+                trace::trace_interpreter!("check len > {}", len);
+                let a1: &Value = self.peek(0);
+                let actual = match a1.len() {
+                    Ok(len) => len,
+                    Err(e) => return Err(e),
+                };
+                if len > actual {
+                    return ValueErrorCannotUnpackLengthMustBeGreaterThan(len, actual, a1.clone()).err()
+                }
             },
-            CheckLengthEqualTo => {
-                trace::trace_interpreter!("check len =");
+            CheckLengthEqualTo(len) => {
+                let len = self.constants[len as usize] as usize;
+                trace::trace_interpreter!("check len == {}", len);
+                let a1: &Value = self.peek(0);
+                let actual = match a1.len() {
+                    Ok(len) => len,
+                    Err(e) => return Err(e),
+                };
+                if len != actual {
+                    return ValueErrorCannotUnpackLengthMustBeEqual(len, actual, a1.clone()).err()
+                }
             },
 
             OpIndex => {
@@ -965,6 +983,18 @@ mod test {
     #[test] fn test_if_then_else_3() { run_str("(if [] then 'hello' else 'goodbye') . print", "goodbye\n"); }
     #[test] fn test_if_then_else_4() { run_str("(if 3 then 'hello' else 'goodbye') . print", "hello\n"); }
     #[test] fn test_if_then_else_5() { run_str("(if false then (fn() -> 'hello' . print)() else 'nope') . print", "nope\n"); }
+    #[test] fn test_pattern_in_let_works() { run_str("let x, y = [1, 2] ; [x, y] . print", "[1, 2]\n"); }
+    #[test] fn test_pattern_in_let_too_long() { run_str("let x, y, z = [1, 2] ; [x, y] . print", "ValueError: Cannot unpack '[1, 2]' of type 'list' with length 2, expected exactly 3 elements\n    at: `let x, y, z = [1, 2] ; [x, y] . print` (line 1)\n    at: execution of script '<test>'\n"); }
+    #[test] fn test_pattern_in_let_too_short() { run_str("let x, y = [1, 2, 3] ; [x, y] . print", "ValueError: Cannot unpack '[1, 2, 3]' of type 'list' with length 3, expected exactly 2 elements\n    at: `let x, y = [1, 2, 3] ; [x, y] . print` (line 1)\n    at: execution of script '<test>'\n"); }
+    #[test] fn test_pattern_in_let_with_var_at_end() { run_str("let x, *y = [1, 2, 3, 4] ; [x, y] . print", "[1, [2, 3, 4]]\n"); }
+    #[test] fn test_pattern_in_let_with_var_at_start() { run_str("let *x, y = [1, 2, 3, 4] ; [x, y] . print", "[[1, 2, 3], 4]\n"); }
+    #[test] fn test_pattern_in_let_with_var_at_middle() { run_str("let x, *y, z = [1, 2, 3, 4] ; [x, y, z] . print", "[1, [2, 3], 4]\n"); }
+    #[test] fn test_pattern_in_let_with_var_zero_len_at_end() { run_str("let x, *y = [1] ; [x, y] . print", "[1, []]\n"); }
+    #[test] fn test_pattern_in_let_with_var_zero_len_at_start() { run_str("let *x, y = [1] ; [x, y] . print", "[[], 1]\n"); }
+    #[test] fn test_pattern_in_let_with_var_zero_len_at_middle() { run_str("let x, *y, z = [1, 2] ; [x, y, z] . print", "[1, [], 2]\n"); }
+    #[test] fn test_pattern_in_let_with_var_one_len_at_end() { run_str("let x, *y = [1, 2] ; [x, y] . print", "[1, [2]]\n"); }
+    #[test] fn test_pattern_in_let_with_var_one_len_at_start() { run_str("let *x, y = [1, 2] ; [x, y] . print", "[[1], 2]\n"); }
+    #[test] fn test_pattern_in_let_with_var_one_len_at_middle() { run_str("let x, *y, z = [1, 2, 3] ; [x, y, z] . print", "[1, [2], 3]\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }

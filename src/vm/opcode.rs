@@ -54,9 +54,11 @@ pub enum Opcode {
     List(u16),
 
     // Runtime specific type checks
-    // Both of these opcodes pop the top (a length), and peek the next, and validate the length of the peek'd variable is greater than or equal to the provided value.
-    CheckLengthGreaterThan,
-    CheckLengthEqualTo,
+
+    /// Takes an `Int` constant, and checks that the top of the stack is an iterable with length > the provided constant
+    CheckLengthGreaterThan(u16),
+    /// Takes an `Int` constant, and checks that the top of the stack is an iterable with length = the provided constant
+    CheckLengthEqualTo(u16),
 
     /// Opcode for function evaluation (either with `()` or with `.`). The `u8` parameter is the number of arguments to the function.
     ///

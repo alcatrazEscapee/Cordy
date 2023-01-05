@@ -23,6 +23,8 @@ pub enum RuntimeError {
     ValueErrorVariableNotDeclaredYet(String),
     ValueErrorValueMustBeNonNegative(i64),
     ValueErrorValueMustBeNonEmpty,
+    ValueErrorCannotUnpackLengthMustBeGreaterThan(usize, usize, Value), // expected, actual
+    ValueErrorCannotUnpackLengthMustBeEqual(usize, usize, Value), // expected, actual
 
     TypeErrorUnaryOp(Opcode, Value),
     TypeErrorBinaryOp(Opcode, Value, Value),
@@ -41,6 +43,7 @@ pub enum RuntimeError {
 }
 
 impl RuntimeError {
+    #[cold]
     pub fn err<T>(self: Self) -> Result<T, Box<RuntimeError>> {
         Err(Box::new(self))
     }

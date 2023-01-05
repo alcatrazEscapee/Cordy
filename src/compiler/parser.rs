@@ -267,7 +267,8 @@ impl Pattern {
     }
 
     /// Emits code for destructuring this pattern
-    /// Assumes the variable containing the to-be-destructured iterable sits atop the stack, and that all local variables are already present (and initialized to `Nil`) in their respective stack slots
+    /// Assumes the variable containing the to-be-destructured iterable sits atop the stack, and that all local variables are already present (and initialized to `Nil`) in their respective stack slots.
+    /// This will ultimately pop the iterable on top of the stack, once all variables have been assigned from this pattern.
     fn emit_destructuring(self: &Self, parser: &mut Parser) {
         let terms = match self {
             Pattern::Terms(v) => v,
@@ -279,8 +280,7 @@ impl Pattern {
         let len: i64 = if is_variadic { terms.len() - 1 } else { terms.len() } as i64;
         let constant_len = parser.declare_constant(len);
 
-        parser.push(Opcode::Int(constant_len));
-        parser.push(if is_variadic { CheckLengthGreaterThan } else { CheckLengthEqualTo }); // Pops `constant_len`
+        parser.push(if is_variadic { CheckLengthGreaterThan(constant_len) } else { CheckLengthEqualTo(constant_len) });
 
         let mut index: i64 = 0;
         for term in terms {
@@ -314,7 +314,7 @@ impl Pattern {
 
                     parser.push(Dup); // [it, it, ...]
                     parser.push(Opcode::Int(constant_low)); // [low, it, it, ...]
-                    parser.push(Opcode::Int(constant_high)); // [high, low, it, it, ...]
+                    parser.push(if index == 0 { Opcode::Nil } else { Opcode::Int(constant_high) }); // [high, low, it, it, ...]
                     parser.push(OpSlice); // [it[low:high], it, ...]
                     parser.push_store_local(*local); // stores it[low:high]
                     parser.push(Opcode::Pop); // [it, ...]
@@ -325,13 +325,15 @@ impl Pattern {
 
                     parser.push(Opcode::Int(constant_index));
                     parser.push(OpIndexPeek); // [ it[index], index, it, ...]
-                    terms.emit_destructuring(parser);
-                    parser.push(PopN(2)); // [it, ...]
+                    terms.emit_destructuring(parser); // [ index, it, ...]
+                    parser.push(Opcode::Pop); // [it, ...]
 
                     index += 1;
                 }
             }
         }
+
+        parser.push(Opcode::Pop); // Pop the iterable
     }
 
     fn is_simple(self: &Self) -> Option<usize> {

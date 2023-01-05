@@ -192,6 +192,13 @@ impl Value {
     pub fn is_set(self: &Self) -> bool { match self { Set(_) => true, _ => false } }
     pub fn is_dict(self: &Self) -> bool { match self { Dict(_) => true, _ => false } }
 
+    pub fn is_iter(self: &Self) -> bool {
+        match self {
+            Str(_) | List(_) | Set(_) | Dict(_) | Heap(_) => true,
+            _ => false
+        }
+    }
+
     pub fn is_function(self: &Self) -> bool {
         match self {
             Function(_) | PartialFunction(_) | NativeFunction(_) | PartialNativeFunction(_, _) | Closure(_) => true,
@@ -421,9 +428,25 @@ impl<'b: 'a, 'a> IntoIterator for &'b ValueIntoIter<'a> {
 
 #[cfg(test)]
 mod test {
+    use std::rc::Rc;
+    use hashlink::{LinkedHashMap, LinkedHashSet};
+    use crate::stdlib::StdBinding;
     use crate::vm::error::RuntimeError;
-    use crate::vm::value::Value;
+    use crate::vm::value::{FunctionImpl, Value};
 
     #[test] fn test_layout() { assert_eq!(16, std::mem::size_of::<Value>()); }
     #[test] fn test_result_box_layout() { assert_eq!(16, std::mem::size_of::<Result<Value, Box<RuntimeError>>>()); }
+
+    #[test]
+    fn test_consistency() {
+        for v in all_values() {
+            assert_eq!(v.is_iter(), v.as_iter().is_ok(), "is_iter() and as_iter() not consistent for {}", v.as_type_str());
+            assert_eq!(v.is_iter(), v.len().is_ok(), "is_iter() and len() not consistent for {}", v.as_type_str());
+        }
+    }
+
+    fn all_values() -> Vec<Value> {
+        let rc = Rc::new(FunctionImpl::new(0, String::new(), vec![]));
+        vec![Value::Nil, Value::Bool(true), Value::Int(1), Value::list(vec![]), Value::set(LinkedHashSet::new()), Value::dict(LinkedHashMap::new()), Value::iter_heap(std::iter::empty()), Value::Function(rc.clone()), Value::partial(Value::Function(rc.clone()), vec![]), Value::NativeFunction(StdBinding::Void), Value::PartialNativeFunction(StdBinding::Void, Box::new(vec![])), Value::closure(rc.clone())]
+    }
 }
