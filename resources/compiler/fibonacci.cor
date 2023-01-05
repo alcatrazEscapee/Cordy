@@ -1,6 +1,4 @@
-let x, y, i = 0
-x = 1
-y = 1
+let x = 1, y = 1, i = 0
 
 loop {
     x . print

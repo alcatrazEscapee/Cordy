@@ -172,6 +172,7 @@ impl AsError for ParserError {
     fn format_error(self: &Self) -> String {
         match &self.error {
             ParserErrorType::UnexpectedTokenAfterEoF(e) => format!("Unexpected {} after parsing finished", e.format_error()),
+
             ParserErrorType::ExpectedToken(e, a) => format!("Expected a {}, got {} instead", e.format_error(), a.format_error()),
             ParserErrorType::ExpectedExpressionTerminal(e) => format!("Expected an expression terminal, got {} instead", e.format_error()),
             ParserErrorType::ExpectedCommaOrEndOfArguments(e) => format!("Expected a ',' or ')' after function invocation, got {} instead", e.format_error()),
@@ -184,10 +185,17 @@ impl AsError for ParserError {
             ParserErrorType::ExpectedFunctionBlockOrArrowAfterFn(e) => format!("Expecting a function body starting with '{{' or `->` after 'fn', got {} instead", e.format_error()),
             ParserErrorType::ExpectedParameterOrEndOfList(e) => format!("Expected a function parameter or ')' after function declaration, got {} instead", e.format_error()),
             ParserErrorType::ExpectedCommaOrEndOfParameters(e) => format!("Expected a ',' or ')' after function parameter, got {} instead", e.format_error()),
+            ParserErrorType::ExpectedPatternTerm(e) => format!("Expected a name, '_', or variadic term in a pattern variable, got {} instead", e.format_error()),
+            ParserErrorType::ExpectedUnderscoreOrVariableNameAfterVariadicInPattern(e) => format!("Expected a name or '_' after '*' in a pattern variable, got {} instead", e.format_error()),
+            ParserErrorType::ExpectedUnderscoreOrVariableNameOrPattern(e) => format!("Expected a variable binding, either a name, or '_', or pattern (i.e. 'x, (_, y), *z'), got {} instead", e.format_error()),
+
             ParserErrorType::LocalVariableConflict(e) => format!("Multiple declarations for 'let {}' in the same scope", e),
             ParserErrorType::LocalVariableConflictWithNativeFunction(e) => format!("Name for variable '{}' conflicts with the native function by the same name", e),
             ParserErrorType::UndeclaredIdentifier(e) => format!("Undeclared identifier: '{}'", e),
+
             ParserErrorType::InvalidAssignmentTarget => format!("The left hand side of an assignment expression must be a variable, array access, or property access"),
+            ParserErrorType::MultipleVariadicTermsInPattern => format!("Pattern is not allowed to have more than one variadic (i.e. '*') term."),
+            ParserErrorType::LetWithPatternBindingNoExpression => format!("'let' with a pattern variable must be followed by an expression if the pattern contains non-simple elements such as variadic (i.e. '*'), empty (i.e. '_'), or nested (i.e. 'x, (_, y)) terms."),
             ParserErrorType::BreakOutsideOfLoop => String::from("Invalid 'break' statement outside of an enclosing loop"),
             ParserErrorType::ContinueOutsideOfLoop => String::from("Invalid 'continue' statement outside of an enclosing loop"),
         }

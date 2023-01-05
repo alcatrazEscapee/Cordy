@@ -1,16 +1,16 @@
 L1: 0000 Nil
-    0001 IncGlobalCount
+    0001 Nil
     0002 Nil
-    0003 IncGlobalCount
+    0003 Nil
     0004 Nil
-    0005 IncGlobalCount
+    0005 Nil
     0006 Nil
     0007 IncGlobalCount
-    0008 Nil
+    0008 IncGlobalCount
     0009 IncGlobalCount
-    0010 Nil
+    0010 IncGlobalCount
     0011 IncGlobalCount
-    0012 Nil
+    0012 IncGlobalCount
     0013 IncGlobalCount
 L2: 0014 Int(0) -> 1
     0015 Int(1) -> 2

@@ -405,32 +405,14 @@ impl<R, W> VirtualMachine<R, W> where
                     Err(e) => return e.err(),
                     _ => {},
                 }
-            }
+            },
 
-            // Unary Operators
-            UnarySub => operator!(operator::unary_sub(a1), a1, "-"),
-            UnaryLogicalNot => operator!(operator::unary_logical_not(a1), a1, "!"),
-            UnaryBitwiseNot => operator!(operator::unary_bitwise_not(a1), a1, "~"),
-
-            // Binary Operators
-            OpMul => operator!(operator::binary_mul, a1, a2, "*"),
-            OpDiv => operator!(operator::binary_div, a1, a2, "/"),
-            OpMod => operator!(operator::binary_mod, a1, a2, "%"),
-            OpPow => operator!(operator::binary_pow, a1, a2, "**"),
-            OpIs => operator!(operator::binary_is, a1, a2, "is"),
-            OpAdd => operator!(operator::binary_add, a1, a2, "+"),
-            OpSub => operator!(operator::binary_sub, a1, a2, "-"),
-            OpLeftShift => operator!(operator::binary_left_shift, a1, a2, "<<"),
-            OpRightShift => operator!(operator::binary_right_shift, a1, a2, ">>"),
-            OpLessThan => operator_unchecked!(operator::binary_less_than, a1, a2, "<"),
-            OpGreaterThan => operator_unchecked!(operator::binary_greater_than, a1, a2, ">"),
-            OpLessThanEqual => operator_unchecked!(operator::binary_less_than_or_equal, a1, a2, "<="),
-            OpGreaterThanEqual => operator_unchecked!(operator::binary_greater_than_or_equal, a1, a2, ">="),
-            OpEqual => operator_unchecked!(operator::binary_equals, a1, a2, "=="),
-            OpNotEqual => operator_unchecked!(operator::binary_not_equals, a1, a2, "!="),
-            OpBitwiseAnd => operator!(operator::binary_bitwise_and, a1, a2, "&"),
-            OpBitwiseOr => operator!(operator::binary_bitwise_or, a1, a2, "|"),
-            OpBitwiseXor => operator!(operator::binary_bitwise_xor, a1, a2, "^"),
+            CheckLengthGreaterThan => {
+                trace::trace_interpreter!("check len >");
+            },
+            CheckLengthEqualTo => {
+                trace::trace_interpreter!("check len =");
+            },
 
             OpIndex => {
                 trace::trace_interpreter!("op []");
@@ -477,6 +459,31 @@ impl<R, W> VirtualMachine<R, W> where
                     Err(e) => return Err(e),
                 }
             },
+
+            // Unary Operators
+            UnarySub => operator!(operator::unary_sub(a1), a1, "-"),
+            UnaryLogicalNot => operator!(operator::unary_logical_not(a1), a1, "!"),
+            UnaryBitwiseNot => operator!(operator::unary_bitwise_not(a1), a1, "~"),
+
+            // Binary Operators
+            OpMul => operator!(operator::binary_mul, a1, a2, "*"),
+            OpDiv => operator!(operator::binary_div, a1, a2, "/"),
+            OpMod => operator!(operator::binary_mod, a1, a2, "%"),
+            OpPow => operator!(operator::binary_pow, a1, a2, "**"),
+            OpIs => operator!(operator::binary_is, a1, a2, "is"),
+            OpAdd => operator!(operator::binary_add, a1, a2, "+"),
+            OpSub => operator!(operator::binary_sub, a1, a2, "-"),
+            OpLeftShift => operator!(operator::binary_left_shift, a1, a2, "<<"),
+            OpRightShift => operator!(operator::binary_right_shift, a1, a2, ">>"),
+            OpBitwiseAnd => operator!(operator::binary_bitwise_and, a1, a2, "&"),
+            OpBitwiseOr => operator!(operator::binary_bitwise_or, a1, a2, "|"),
+            OpBitwiseXor => operator!(operator::binary_bitwise_xor, a1, a2, "^"),
+            OpLessThan => operator_unchecked!(operator::binary_less_than, a1, a2, "<"),
+            OpGreaterThan => operator_unchecked!(operator::binary_greater_than, a1, a2, ">"),
+            OpLessThanEqual => operator_unchecked!(operator::binary_less_than_or_equal, a1, a2, "<="),
+            OpGreaterThanEqual => operator_unchecked!(operator::binary_greater_than_or_equal, a1, a2, ">="),
+            OpEqual => operator_unchecked!(operator::binary_equals, a1, a2, "=="),
+            OpNotEqual => operator_unchecked!(operator::binary_not_equals, a1, a2, "!="),
 
             Exit => return RuntimeExit.err(),
         }
