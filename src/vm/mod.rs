@@ -995,6 +995,32 @@ mod test {
     #[test] fn test_pattern_in_let_with_var_one_len_at_end() { run_str("let x, *y = [1, 2] ; [x, y] . print", "[1, [2]]\n"); }
     #[test] fn test_pattern_in_let_with_var_one_len_at_start() { run_str("let *x, y = [1, 2] ; [x, y] . print", "[[1], 2]\n"); }
     #[test] fn test_pattern_in_let_with_var_one_len_at_middle() { run_str("let x, *y, z = [1, 2, 3] ; [x, y, z] . print", "[1, [2], 3]\n"); }
+    #[test] fn test_pattern_in_let_with_only_empty() { run_str("let _ = 'hello' . print", "hello\n"); }
+    #[test] fn test_pattern_in_let_empty_x3() { run_str("let _, _, _ = [1, 2, 3]", ""); }
+    #[test] fn test_pattern_in_let_empty_x3_too_long() { run_str("let _, _, _ = [1, 2, 3, 4]", "ValueError: Cannot unpack '[1, 2, 3, 4]' of type 'list' with length 4, expected exactly 3 elements\n    at: `let _, _, _ = [1, 2, 3, 4]` (line 1)\n    at: execution of script '<test>'\n"); }
+    #[test] fn test_pattern_in_let_empty_x3_too_short() { run_str("let _, _, _ = [1, 2]", "ValueError: Cannot unpack '[1, 2]' of type 'list' with length 2, expected exactly 3 elements\n    at: `let _, _, _ = [1, 2]` (line 1)\n    at: execution of script '<test>'\n"); }
+    #[test] fn test_pattern_in_let_empty_x2_at_end() { run_str("let _, _, x = [1, 2, 3] ; x . print", "3\n"); }
+    #[test] fn test_pattern_in_let_empty_x2_at_middle() { run_str("let _, x, _ = [1, 2, 3] ; x . print", "2\n"); }
+    #[test] fn test_pattern_in_let_empty_x2_at_start() { run_str("let x, _, _ = [1, 2, 3] ; x . print", "1\n"); }
+    #[test] fn test_pattern_in_let_empty_at_middle() { run_str("let x, _, y = [1, 2, 3] ; [x, y] . print", "[1, 3]\n"); }
+    #[test] fn test_pattern_in_let_with_varargs_empty_at_end() { run_str("let x, *_ = [1, 2, 3, 4] ; x . print", "1\n"); }
+    #[test] fn test_pattern_in_let_with_varargs_empty_at_middle() { run_str("let x, *_, y = [1, 2, 3, 4] ; [x, y] . print", "[1, 4]\n"); }
+    #[test] fn test_pattern_in_let_with_varargs_empty_at_start() { run_str("let *_, x = [1, 2, 3, 4] ; x . print", "4\n"); }
+    #[test] fn test_pattern_in_let_with_varargs_var_at_end() { run_str("let _, *x = [1, 2, 3, 4] ; x . print", "[2, 3, 4]\n"); }
+    #[test] fn test_pattern_in_let_with_varargs_var_at_middle() { run_str("let _, *x, _ = [1, 2, 3, 4] ; x . print", "[2, 3]\n"); }
+    #[test] fn test_pattern_in_let_with_varargs_var_at_start() { run_str("let *x, _ = [1, 2, 3, 4] ; x . print", "[1, 2, 3]\n"); }
+    #[test] fn test_pattern_in_let_with_varargs_empty_to_empty() { run_str("let *_ = []", ""); }
+    #[test] fn test_pattern_in_let_with_varargs_empty_to_var_at_end_too_short() { run_str("let *_, x = []", "ValueError: Cannot unpack '[]' of type 'list' with length 0, expected at least 1 elements\n    at: `let *_, x = []` (line 1)\n    at: execution of script '<test>'\n"); }
+    #[test] fn test_pattern_in_let_with_varargs_empty_to_var_at_start_too_short() { run_str("let x, *_ = []", "ValueError: Cannot unpack '[]' of type 'list' with length 0, expected at least 1 elements\n    at: `let x, *_ = []` (line 1)\n    at: execution of script '<test>'\n"); }
+    #[test] fn test_pattern_in_let_with_varargs_empty_to_var_at_end() { run_str("let *_, x = [1] ; x . print", "1\n"); }
+    #[test] fn test_pattern_in_let_with_varargs_empty_to_var_at_start() { run_str("let x, *_ = [1] ; x . print", "1\n"); }
+    #[test] fn test_pattern_in_let_with_varargs_empty_to_var_at_middle() { run_str("let x, *_, y = [1, 2] ; [x, y] . print", "[1, 2]\n"); }
+    #[test] fn test_pattern_in_let_with_nested_pattern() { run_str("let x, (y, _) = [[1, 2], [3, 4]] ; [x, y] . print", "[[1, 2], 3]\n"); }
+    #[test] fn test_pattern_in_let_with_parens_on_one_empty() { run_str("let (_) = [[nil]]", ""); }
+    #[test] fn test_pattern_in_let_with_parens_on_one_empty_one_var() { run_str("let (_, x) = [[1, 2]] ; x . print", "2\n"); }
+    #[test] fn test_pattern_in_let_with_complex_patterns_1() { run_str("let *_, (_, x, _), _ = [[1, 2, 3], [4, 5, 6], [7, 8, 9]] ; x . print", "5\n"); }
+    #[test] fn test_pattern_in_let_with_complex_patterns_2() { run_str("let _, (_, (_, (_, (x, *_)))) = [1, [2, [3, [4, [5, [6, [7, [8, [9, nil]]]]]]]]] ; x . print", "5\n"); }
+    #[test] fn test_pattern_in_let_with_complex_patterns_3() { run_str("let ((*x, _), (_, (*y, _), _), *_) = [[[1, 2, 3], [[1, 2, 3], [2, 3, 4], [3, 4, 5]], [[1], [2], [3]]]] ; [x, y] . print", "[[1, 2], [2, 3]]\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }

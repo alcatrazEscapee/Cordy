@@ -221,12 +221,14 @@ impl LateBoundGlobal {
     }
 }
 
+#[derive(Debug, Clone)]
 enum VariableBinding {
     Pattern(Pattern),
     Named(usize),
     Empty
 }
 
+#[derive(Debug, Clone)]
 enum Pattern {
     TermEmpty,
     TermVarEmpty,
@@ -1129,6 +1131,24 @@ impl Parser {
         trace::trace_parser!("rule <variable-binding>");
 
         if let Some(p) = self.parse_pattern() {
+
+            // Recognize special patterns, which we do not want to emit pattern-like declarations for
+            // These are single non-variadic terms, which can either be a local variable or empty binding
+            let terms = match &p {
+                Pattern::Terms(terms) => terms,
+                _ => panic!("Should always be top-level Pattern::Terms")
+            };
+
+            trace::trace_parser!("pattern {:?}", p);
+
+            if terms.len() == 1 {
+                match &terms[0] {
+                    Pattern::Term(local) => return Some(VariableBinding::Named(*local)),
+                    Pattern::TermEmpty => return Some(VariableBinding::Empty),
+                    _ => {} // Single, non-simple term
+                }
+            }
+
             Some(VariableBinding::Pattern(p))
         } else {
             match self.peek() {
@@ -1172,6 +1192,7 @@ impl Parser {
                                 found_variadic_term = true;
                             }
                         }
+                        trace::trace_parser!("pattern term {:?}", term);
                         terms.push(term)
                     },
                     _ => break
@@ -1209,6 +1230,7 @@ impl Parser {
                         }
                     },
                     Some(Underscore) => {
+                        self.advance();
                         Pattern::TermVarEmpty
                     },
                     _ => {
@@ -1242,7 +1264,6 @@ impl Parser {
                 Some(Comma) => true,
                 _ => false
             },
-            // todo: single underscore isn't a pattern, it's a special invisible local
             Some(Underscore) | Some(OpenParen) | Some(Mul) => true,
             _ => false
         }
