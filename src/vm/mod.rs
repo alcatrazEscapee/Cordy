@@ -1027,6 +1027,12 @@ mod test {
     #[test] fn test_construct_vector() { run_str("vector(1, 2, 3) . print", "(1, 2, 3)\n"); }
     #[test] fn test_add_vectors() { run_str("vector(1, 2, 3) + vector(6, 3, 2) . print", "(7, 5, 5)\n"); }
     #[test] fn test_add_vector_and_constant() { run_str("vector(1, 2, 3) + 3 . print", "(4, 5, 6)\n"); }
+    #[test] fn test_empty_str() { run_str("str() . print", "\n"); }
+    #[test] fn test_empty_list() { run_str("list() . print", "[]\n"); }
+    #[test] fn test_empty_set() { run_str("set() . print", "{}\n"); }
+    #[test] fn test_empty_dict() { run_str("dict() . print", "{}\n"); }
+    #[test] fn test_empty_heap() { run_str("heap() . print", "[]\n"); }
+    #[test] fn test_empty_vector() { run_str("vector() . print", "()\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }

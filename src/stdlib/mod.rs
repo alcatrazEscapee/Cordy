@@ -1,5 +1,6 @@
-use std::collections::VecDeque;
+use std::collections::{BinaryHeap, VecDeque};
 use std::fs;
+use hashlink::{LinkedHashMap, LinkedHashSet};
 use lazy_static::lazy_static;
 
 use crate::vm::{operator, VirtualInterface};
@@ -13,7 +14,7 @@ use RuntimeError::{*};
 type ValueResult = Result<Value, Box<RuntimeError>>;
 
 mod strings;
-mod lists;
+mod collections;
 mod math;
 
 
@@ -336,9 +337,23 @@ pub fn invoke<VM>(bound: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult wher
                 _ => IncorrectNumberOfArguments(bound.clone(), nargs, 1).err()
             }
         };
-        ($a_var:ident, $ret_var:expr, $op:expr) => { // f(...) -> T
+        ($a_var:ident, $ret_var:expr, $op:expr) => { // f(... >0) -> T
             match nargs {
                 0 => IncorrectNumberOfArgumentsVariadicAtLeastOne($op).err(),
+                1 => match vm.pop().as_iter() {
+                    Ok($a_var) => $ret_var,
+                    Err(e) => Err(e),
+                },
+                _ => {
+                    let varargs = vm.popn(nargs as usize);
+                    let mut $a_var = varargs.iter();
+                    $ret_var
+                },
+            }
+        };
+        ($ret0:expr, $a_var:ident, $ret_var:expr, $op:expr) => { // f(... >= 0) -> T
+            match nargs {
+                0 => $ret0,
                 1 => match vm.pop().as_iter() {
                     Ok($a_var) => $ret_var,
                     Err(e) => Err(e),
@@ -413,11 +428,12 @@ pub fn invoke<VM>(bound: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult wher
             },
             _ => TypeErrorCannotConvertToInt(a1).err(),
         }),
-        Str => dispatch!(a1, Ok(Value::Str(Box::new(a1.as_str())))),
-        List => dispatch!(a1, Ok(Value::iter_list(a1.into_iter().cloned())), List),
-        Set => dispatch!(a1, Ok(Value::iter_set(a1.into_iter().cloned())), Set),
-        Heap => dispatch!(a1, Ok(Value::iter_heap(a1.into_iter().cloned())), Heap),
-        Vector => dispatch!(a1, Ok(Value::iter_vector(a1.into_iter().cloned())), Vector),
+        Str => dispatch!(Ok(Value::Str(Box::new(String::new()))), a1, Ok(Value::Str(Box::new(a1.as_str())))),
+        List => dispatch!(Ok(Value::list(VecDeque::new())), a1, Ok(Value::iter_list(a1.into_iter().cloned())), List),
+        Set => dispatch!(Ok(Value::set(LinkedHashSet::new())), a1, Ok(Value::iter_set(a1.into_iter().cloned())), Set),
+        Dict => dispatch!(Ok(Value::dict(LinkedHashMap::new())), a1, collections::collect_into_dict(a1.into_iter().cloned()), Dict),
+        Heap => dispatch!(Ok(Value::heap(BinaryHeap::new())), a1, Ok(Value::iter_heap(a1.into_iter().cloned())), Heap),
+        Vector => dispatch!(Ok(Value::vector(vec![])), a1, Ok(Value::iter_vector(a1.into_iter().cloned())), Vector),
         Repr => dispatch!(a1, Ok(Value::Str(Box::new(a1.as_repr_str())))),
 
         // operator
@@ -454,23 +470,23 @@ pub fn invoke<VM>(bound: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult wher
 
         // lib_list
         Len => dispatch!(a1, a1.len().map(|u| Value::Int(u as i64))),
-        Range => dispatch!(a1, lists::range_1(a1), a2, lists::range_2(a1, a2), a3, lists::range_3(a1, a2, a3)),
-        Enumerate => dispatch!(a1, lists::enumerate(a1)),
-        Sum => dispatch!(an, lists::sum(an.into_iter()), Sum),
-        Max => dispatch!(an, lists::max(an.into_iter()), Max),
-        Min => dispatch!(an, lists::min(an.into_iter()), Min),
-        Map => dispatch!(a1, a2, lists::map(vm, a1, a2)),
-        Filter => dispatch!(a1, a2, lists::filter(vm, a1, a2)),
-        Reduce => dispatch!(a1, a2, lists::reduce(vm, a1, a2)),
-        Sorted => dispatch!(an, lists::sorted(an.into_iter()), Sorted),
-        Reversed => dispatch!(an, lists::reversed(an.into_iter()), Reversed),
+        Range => dispatch!(a1, collections::range_1(a1), a2, collections::range_2(a1, a2), a3, collections::range_3(a1, a2, a3)),
+        Enumerate => dispatch!(a1, collections::enumerate(a1)),
+        Sum => dispatch!(an, collections::sum(an.into_iter()), Sum),
+        Max => dispatch!(an, collections::max(an.into_iter()), Max),
+        Min => dispatch!(an, collections::min(an.into_iter()), Min),
+        Map => dispatch!(a1, a2, collections::map(vm, a1, a2)),
+        Filter => dispatch!(a1, a2, collections::filter(vm, a1, a2)),
+        Reduce => dispatch!(a1, a2, collections::reduce(vm, a1, a2)),
+        Sorted => dispatch!(an, collections::sorted(an.into_iter()), Sorted),
+        Reversed => dispatch!(an, collections::reversed(an.into_iter()), Reversed),
 
-        Pop => dispatch!(a1, lists::pop(a1)),
-        Push => dispatch!(a1, a2, lists::push(a1, a2)),
-        Last => dispatch!(a1, lists::last(a1)),
-        Head => dispatch!(a1, lists::head(a1)),
-        Init => dispatch!(a1, lists::init(a1)),
-        Tail => dispatch!(a1, lists::tail(a1)),
+        Pop => dispatch!(a1, collections::pop(a1)),
+        Push => dispatch!(a1, a2, collections::push(a1, a2)),
+        Last => dispatch!(a1, collections::last(a1)),
+        Head => dispatch!(a1, collections::head(a1)),
+        Init => dispatch!(a1, collections::init(a1)),
+        Tail => dispatch!(a1, collections::tail(a1)),
 
         // lib_math
         Abs => dispatch!(a1, math::abs(a1)),
@@ -485,17 +501,17 @@ pub fn invoke<VM>(bound: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult wher
 
 pub fn get_index(a1: &Value, a2: &Value) -> ValueResult {
     let indexable = a1.to_index()?;
-    let index: usize = lists::get_checked_index(a1.len()?, a2.as_int()?)?;
+    let index: usize = collections::get_checked_index(a1.len()?, a2.as_int()?)?;
 
     Ok(indexable.get_index(index))
 }
 
 pub fn get_slice(a1: Value, a2: Value, a3: Value, a4: Value) -> ValueResult {
-    lists::list_slice(a1, a2, a3, a4)
+    collections::list_slice(a1, a2, a3, a4)
 }
 
 pub fn list_set_index(list_ref: Mut<VecDeque<Value>>, index: i64, value: Value) -> Result<(), Box<RuntimeError>> {
-    lists::list_set_index(list_ref, index, value)
+    collections::list_set_index(list_ref, index, value)
 }
 
 

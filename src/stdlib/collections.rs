@@ -1,5 +1,6 @@
 use std::cmp::Reverse;
 use std::collections::VecDeque;
+use hashlink::LinkedHashMap;
 
 use crate::vm::error::RuntimeError;
 use crate::vm::value::{Mut, Value};
@@ -280,4 +281,17 @@ pub fn tail(a1: Value) -> ValueResult {
         Set(v) => Ok(Value::iter_set(v.unbox().iter().skip(1).cloned())),
         _ => TypeErrorArgMustBeIterable(a1).err()
     }
+}
+
+pub fn collect_into_dict(iter: impl Iterator<Item=Value>) -> ValueResult {
+    Ok(Value::dict(iter.map(|t| {
+        let index = t.to_index()?;
+        if index.len() == 2 {
+            Ok((index.get_index(0), index.get_index(1)))
+        } else {
+            ValueErrorCannotCollectIntoDict(t.clone()).err()
+        }
+    }).collect::<Result<Vec<(Value, Value)>, Box<RuntimeError>>>()?
+        .into_iter()
+        .collect::<LinkedHashMap<Value, Value>>()))
 }

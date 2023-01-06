@@ -25,6 +25,7 @@ pub enum RuntimeError {
     ValueErrorValueMustBeNonEmpty,
     ValueErrorCannotUnpackLengthMustBeGreaterThan(usize, usize, Value), // expected, actual
     ValueErrorCannotUnpackLengthMustBeEqual(usize, usize, Value), // expected, actual
+    ValueErrorCannotCollectIntoDict(Value),
 
     TypeErrorUnaryOp(Opcode, Value),
     TypeErrorBinaryOp(Opcode, Value, Value),
