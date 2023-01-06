@@ -103,6 +103,7 @@ impl AsError for RuntimeError {
             RuntimeError::ValueErrorCannotUnpackLengthMustBeGreaterThan(e, a, v) => format!("ValueError: Cannot unpack {} with length {}, expected at least {} elements", v.format_error(), a, e),
             RuntimeError::ValueErrorCannotUnpackLengthMustBeEqual(e, a, v) => format!("ValueError: Cannot unpack {} with length {}, expected exactly {} elements", v.format_error(), a, e),
             RuntimeError::ValueErrorValueMustBeNonNegative(v) => format!("ValueError: Expected value '{}: int' to be non-negative", v),
+            RuntimeError::ValueErrorCannotCollectIntoDict(v) => format!("ValueError: Cannot collect key-value pair {} into a dict", v.format_error()),
 
             RuntimeError::TypeErrorUnaryOp(op, v) => format!("TypeError: Argument to unary '{}' must be an int, got {}", op.format_error(), v.format_error()),
             RuntimeError::TypeErrorBinaryOp(op, l, r) => format!("TypeError: Cannot {} {} and {}", op.format_error(), l.format_error(), r.format_error()),

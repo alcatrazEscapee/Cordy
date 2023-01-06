@@ -56,6 +56,7 @@ impl Value {
     pub fn list(vec: VecDeque<Value>) -> Value { List(Mut::new(vec.into_iter().collect::<VecDeque<Value>>())) }
     pub fn set(set: LinkedHashSet<Value>) -> Value { Set(Mut::new(set)) }
     pub fn dict(dict: LinkedHashMap<Value, Value>) -> Value { Dict(Mut::new(dict)) }
+    pub fn heap(heap: BinaryHeap<Reverse<Value>>) -> Value { Heap(Mut::new(ValueHeap::new(heap))) }
     pub fn vector(vec: Vec<Value>) -> Value { Vector(Mut::new(vec)) }
 
     pub fn partial(func: Value, args: Vec<Value>) -> Value { PartialFunction(Box::new(PartialFunctionImpl { func, args: args.into_iter().map(|v| Box::new(v)).collect() }))}
@@ -466,6 +467,14 @@ pub enum ValueAsIndex<'a> {
 
 impl<'a> ValueAsIndex<'a> {
 
+    pub fn len(self: &Self) -> usize {
+        match self {
+            ValueAsIndex::Str(it) => it.len(),
+            ValueAsIndex::List(it) => it.len(),
+            ValueAsIndex::Vector(it) => it.len(),
+        }
+    }
+
     pub fn get_index(self: &Self, index: usize) -> Value {
         match self {
             ValueAsIndex::Str(it) => Value::str(it.chars().nth(index).unwrap()),
@@ -483,6 +492,7 @@ pub enum ValueAsSlice<'a> {
 }
 
 impl<'a> ValueAsSlice<'a> {
+
     pub fn len(self: &Self) -> usize {
         match self {
             ValueAsSlice::Str(it, _) => it.len(),
