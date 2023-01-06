@@ -925,6 +925,59 @@ impl Parser {
                     },
                     _ => self.error_with(|t| ExpectedCommaOrEndOfArguments(t)),
                 }
+
+                self.parse_expression();
+                self.expect(CloseParen);
+
+                // Three argument `for x in range(start, stop, step)`
+                // We need to do a number of things to handle this correctly
+                // 1. We need to check if step == 0, and emit an error if so. We use the CheckNonZero instruction to do so
+                // 2. Based on `step` either being positive or negative, the 'at end' check of the for loop might involve a > or < op, and needs to be handled differently for each case.
+
+                // Two more locals
+                let local_step = self.declare_synthetic_local();
+                let local_step_is_positive = self.declare_synthetic_local();
+                let constant_0 = self.declare_constant(0);
+
+                self.push(CheckNonZero); // Assert step is nonzero
+                self.push(Dup);
+                self.push(Opcode::Int(constant_0));
+                self.push(OpGreaterThan); // initialize local step_is_positive with (step > 0)
+
+                // Initialize the loop variable, as we're now in the main block and it can be referenced
+                if let Some(local_x) = local_x {
+                    self.current_locals_mut().locals[local_x].initialize();
+                }
+
+                // Bounds check and branch to end
+                let jump = self.next_opcode();
+                self.push_load_local(local_x.unwrap_or(0));
+                self.push_load_local(local_stop);
+                self.push_load_local(local_step_is_positive); // Either push OpLessThan or OpGreaterThan depending on the sign of `step`
+                self.push(JumpIfTruePop(self.next_opcode() + 3)); // Skip this + the `OpGreaterThan` and `Jump`
+                self.push(OpGreaterThan);
+                self.push(Jump(self.next_opcode() + 2)); // Skip this + the `OpLessThan`
+                self.push(OpLessThan);
+                let jump_if_false_pop = self.reserve();
+
+                // Parse the body of the loop and emit
+                self.parse_block_statement();
+                self.push_delayed_pop();
+
+                // Increment and jump to head
+                self.push_load_local(local_x.unwrap_or(0));
+                self.push_load_local(local_step); // Use the step local instead of constant +1
+                self.push(OpAdd);
+                self.push_store_local(local_x.unwrap_or(0));
+                self.push(Opcode::Pop);
+                self.push(Jump(jump));
+
+                // Fix the jump
+                self.output[jump_if_false_pop] = JumpIfFalsePop(self.next_opcode());
+
+                self.pop_locals_in_current_scope_depth(true);
+                self.scope_depth -= 1;
+                return
             },
             _ => {
                 // Standard `for` loop destructuring.
@@ -2399,6 +2452,7 @@ mod tests {
     #[test] fn test_empty() { run("empty"); }
     #[test] fn test_expressions() { run("expressions"); }
     #[test] fn test_for_intrinsic_range_start_stop() { run("for_intrinsic_range_start_stop"); }
+    #[test] fn test_for_intrinsic_range_start_stop_step() { run("for_intrinsic_range_start_stop_step"); }
     #[test] fn test_for_intrinsic_range_stop() { run("for_intrinsic_range_stop"); }
     #[test] fn test_for_no_intrinsic() { run("for_no_intrinsic"); }
     #[test] fn test_function() { run("function"); }

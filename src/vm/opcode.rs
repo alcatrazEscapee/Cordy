@@ -59,6 +59,8 @@ pub enum Opcode {
     CheckLengthGreaterThan(u16),
     /// Takes an `Int` constant, and checks that the top of the stack is an iterable with length = the provided constant
     CheckLengthEqualTo(u16),
+    /// Checks that the top of the stack is nonzero
+    CheckNonZero,
 
     /// Opcode for function evaluation (either with `()` or with `.`). The `u8` parameter is the number of arguments to the function.
     ///
