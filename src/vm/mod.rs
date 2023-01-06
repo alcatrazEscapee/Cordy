@@ -431,6 +431,13 @@ impl<R, W> VirtualMachine<R, W> where
                     return ValueErrorCannotUnpackLengthMustBeEqual(len, actual, a1.clone()).err()
                 }
             },
+            CheckNonZero => {
+                trace::trace_interpreter!("check != 0");
+                let a1: i64 = self.peek(0).as_int()?;
+                if a1 == 0 {
+                    return ValueErrorStepCannotBeZero.err()
+                }
+            }
 
             OpIndex => {
                 trace::trace_interpreter!("op []");
@@ -443,7 +450,7 @@ impl<R, W> VirtualMachine<R, W> where
                 trace::trace_interpreter!("op [] peek");
                 let a2: &Value = self.peek(0);
                 let a1: &Value = self.peek(1);
-                let ret = stdlib::get_index(&a1, &a2)?;
+                let ret = stdlib::get_index(a1, a2)?;
                 self.push(ret);
             },
             OpSlice => {
@@ -955,6 +962,9 @@ mod test {
     #[test] fn test_for_loop_no_intrinsic_with_str() { run_str("for x in 'hello' { x . print }", "h\ne\nl\nl\no\n") }
     #[test] fn test_for_loop_intrinsic_range_stop() { run_str("for x in range(5) { x . print }", "0\n1\n2\n3\n4\n"); }
     #[test] fn test_for_loop_intrinsic_range_start_stop() { run_str("for x in range(3, 6) { x . print }", "3\n4\n5\n"); }
+    #[test] fn test_for_loop_intrinsic_range_start_stop_step_positive() { run_str("for x in range(1, 10, 3) { x . print }", "1\n4\n7\n"); }
+    #[test] fn test_for_loop_intrinsic_range_start_stop_step_negative() { run_str("for x in range(11, 0, -4) { x . print }", "11\n7\n3\n"); }
+    #[test] fn test_for_loop_intrinsic_range_start_stop_step_zero() { run_str("for x in range(1, 2, 0) { x . print }", "ValueError: 'step' argument cannot be zero\n    at: `for x in range(1, 2, 0) { x . print }` (line 1)\n    at: execution of script '<test>'\n"); }
     #[test] fn test_list_literal_empty() { run_str("[] . print", "[]\n"); }
     #[test] fn test_list_literal_len_1() { run_str("['hello'] . print", "['hello']\n"); }
     #[test] fn test_list_literal_len_2() { run_str("['hello', 'world'] . print", "['hello', 'world']\n"); }

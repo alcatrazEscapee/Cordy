@@ -1,0 +1,28 @@
+L1: 0000 Int(0) -> 1
+    0001 Int(1) -> 10
+    0002 Int(2) -> 3
+    0003 CheckNonZero
+    0004 Dup
+    0005 Int(3) -> 0
+    0006 OpGreaterThan
+    0007 PushGlobal(0, true) -> i
+    0008 PushGlobal(1, true) -> $0
+    0009 PushGlobal(3, true) -> $2
+    0010 JumpIfTruePop(13)
+    0011 OpGreaterThan
+    0012 Jump(14)
+    0013 OpLessThan
+    0014 JumpIfFalsePop(26)
+L2: 0015 PushGlobal(0, true) -> i
+    0016 NativeFunction(Print)
+    0017 Swap
+    0018 OpFuncEval(1)
+L3: 0019 Pop
+    0020 PushGlobal(0, true) -> i
+    0021 PushGlobal(2, true) -> $1
+    0022 OpAdd
+    0023 StoreGlobal(0, true) -> i
+    0024 Pop
+    0025 Jump(7)
+    0026 PopN(4)
+    0027 Exit
