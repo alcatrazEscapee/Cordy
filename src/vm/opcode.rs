@@ -103,6 +103,7 @@ pub enum Opcode {
     OpBitwiseOr,
     OpBitwiseXor,
 
+    OpIn,
     OpLessThan,
     OpGreaterThan,
     OpLessThanEqual,

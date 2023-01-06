@@ -489,6 +489,7 @@ impl<R, W> VirtualMachine<R, W> where
             OpBitwiseAnd => operator!(operator::binary_bitwise_and, a1, a2, "&"),
             OpBitwiseOr => operator!(operator::binary_bitwise_or, a1, a2, "|"),
             OpBitwiseXor => operator!(operator::binary_bitwise_xor, a1, a2, "^"),
+            OpIn => operator!(operator::binary_in, a1, a2, "in"),
             OpLessThan => operator_unchecked!(operator::binary_less_than, a1, a2, "<"),
             OpGreaterThan => operator_unchecked!(operator::binary_greater_than, a1, a2, ">"),
             OpLessThanEqual => operator_unchecked!(operator::binary_less_than_or_equal, a1, a2, "<="),
@@ -1033,6 +1034,10 @@ mod test {
     #[test] fn test_empty_dict() { run_str("dict() . print", "{}\n"); }
     #[test] fn test_empty_heap() { run_str("heap() . print", "[]\n"); }
     #[test] fn test_empty_vector() { run_str("vector() . print", "()\n"); }
+    #[test] fn test_str_in_str_yes() { run_str("'hello' in 'hey now, hello world' . print", "true\n"); }
+    #[test] fn test_str_in_str_no() { run_str("'hello' in 'hey now, \\'ello world' . print", "false\n"); }
+    #[test] fn test_int_in_list_yes() { run_str("13 in range(10, 15) . print", "true\n"); }
+    #[test] fn test_int_in_list_no() { run_str("3 in range(10, 15) . print", "false\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }

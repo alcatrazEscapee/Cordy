@@ -82,6 +82,7 @@ pub enum StdBinding {
     OperatorPow,
     OperatorMod,
     OperatorIs,
+    OperatorIn,
     OperatorAdd,
     OperatorSub, // Cannot be referenced as (- <expr>)
     OperatorLeftShift,
@@ -178,6 +179,7 @@ fn load_bindings() -> Vec<StdBindingInfo> {
         of!(Void, OperatorPow, "(**)"),
         of!(Void, OperatorMod, "(%)"),
         of!(Void, OperatorIs, "(is)"),
+        of!(Void, OperatorIn, "(in)"),
         of!(Void, OperatorAdd, "(+)"),
         of!(Void, OperatorSub, "(-)"), // Cannot be referenced as (- <expr>)
         of!(Void, OperatorLeftShift, "(<<)"),
@@ -445,6 +447,7 @@ pub fn invoke<VM>(bound: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult wher
         OperatorPow => dispatch!(a1, a2, operator::binary_pow(a2, a1)),
         OperatorMod => dispatch!(a1, a2, operator::binary_mod(a2, a1)),
         OperatorIs => dispatch!(a1, a2, operator::binary_is(a2, a1)),
+        OperatorIn => dispatch!(a1, a2, operator::binary_in(a2, a1)),
         OperatorAdd => dispatch!(a1, a2, operator::binary_add(a2, a1)),
         OperatorSub => dispatch!(a1, a2, operator::binary_sub(a2, a1)),
         OperatorLeftShift => dispatch!(a1, a2, operator::binary_left_shift(a2, a1)),

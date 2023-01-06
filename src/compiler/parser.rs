@@ -1673,6 +1673,7 @@ impl Parser {
                 Some(Mod) => Some(OpMod),
                 Some(Pow) => Some(OpPow),
                 Some(KeywordIs) => Some(OpIs),
+                Some(KeywordIn) => Some(OpIn),
                 _ => None
             };
             match maybe_op {

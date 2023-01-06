@@ -108,6 +108,18 @@ pub fn binary_is(a1: Value, a2: Value) -> ValueResult {
     }
 }
 
+pub fn binary_in(a1: Value, a2: Value) -> ValueResult {
+    match (a1, a2) {
+        (Value::Str(l), Value::Str(r)) => Ok(Value::Bool(r.contains(l.as_str()))),
+        (l, Value::List(it)) => Ok(Value::Bool(it.unbox().contains(&l))),
+        (l, Value::Set(it)) => Ok(Value::Bool(it.unbox().contains(&l))),
+        (l, Value::Dict(it)) => Ok(Value::Bool(it.unbox().contains_key(&l))),
+        (l, Value::Heap(it)) => Ok(Value::Bool(it.unbox().heap.iter().any(|v|v.0 == l))),
+        (l, Value::Vector(it)) => Ok(Value::Bool(it.unbox().contains(&l))),
+        (l, r) => TypeErrorBinaryOp(OpIn, l, r).err()
+    }
+}
+
 pub fn binary_add(a1: Value, a2: Value) -> ValueResult {
     match (a1, a2) {
         (Value::Int(i1), Value::Int(i2)) => Ok(Value::Int(i1 + i2)),
