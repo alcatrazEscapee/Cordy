@@ -5,6 +5,7 @@ use lazy_static::lazy_static;
 use crate::vm::{operator, VirtualInterface};
 use crate::vm::value::{Mut, Value};
 use crate::vm::error::RuntimeError;
+use crate::vm::opcode::Opcode;
 use crate::trace;
 
 use StdBinding::{*};
@@ -488,17 +489,30 @@ pub fn invoke<VM>(bound: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult wher
     }
 }
 
-pub fn list_get_index(list_ref: Mut<VecDeque<Value>>, index: i64) -> ValueResult {
-    lists::list_get_index(list_ref, index)
+
+pub fn get_index(a1: &Value, a2: &Value) -> ValueResult {
+    match (a1, a2) {
+        (Value::List(l), Value::Int(r)) => {
+            let l = l.unbox();
+            let index = lists::list_get_index(l.len(), *r)?;
+            Ok(l[index].clone())
+        },
+        (Value::Str(l), Value::Int(r)) => {
+            let index = lists::list_get_index(l.len(), *r)?;
+            Ok(Value::Str(Box::new(String::from(l.chars().nth(index).unwrap()))))
+        },
+        (l, r) => TypeErrorBinaryOp(Opcode::OpIndex, l.clone(), r.clone()).err()
+    }
+}
+
+pub fn get_slice(a1: Value, a2: Value, a3: Value, a4: Value) -> ValueResult {
+    lists::list_slice(a1, a2, a3, a4)
 }
 
 pub fn list_set_index(list_ref: Mut<VecDeque<Value>>, index: i64, value: Value) -> Result<(), Box<RuntimeError>> {
     lists::list_set_index(list_ref, index, value)
 }
 
-pub fn list_slice(a1: Value, a2: Value, a3: Value, a4: Value) -> ValueResult {
-    lists::list_slice(a1, a2, a3, a4)
-}
 
 
 /// Not unused - invoked via the dispatch!() macro above

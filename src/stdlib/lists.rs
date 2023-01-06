@@ -11,13 +11,12 @@ use Value::{*};
 type ValueResult = Result<Value, Box<RuntimeError>>;
 
 
-pub fn list_get_index(list_ref: Mut<VecDeque<Value>>, rhs: i64) -> ValueResult {
-    let list = list_ref.unbox();
-    let index: usize = to_index(list.len() as i64, rhs) as usize;
-    if index < list.len() {
-        Ok(list[index].clone())
+pub fn list_get_index(len: usize, rhs: i64) -> Result<usize, Box<RuntimeError>> {
+    let index: usize = to_index(len as i64, rhs) as usize;
+    if index < len {
+        Ok(index)
     } else {
-        ValueErrorIndexOutOfBounds(rhs, list.len()).err()
+        ValueErrorIndexOutOfBounds(rhs, len).err()
     }
 }
 
@@ -34,12 +33,8 @@ pub fn list_set_index(list_ref: Mut<VecDeque<Value>>, rhs: i64, value: Value) ->
 
 pub fn list_slice(a1: Value, a2: Value, a3: Value, a4: Value) -> ValueResult {
 
-    let list_ref= match a1 {
-        List(ls) => ls,
-        t => return TypeErrorCannotSlice(t).err(),
-    };
-    let list = list_ref.unbox();
-    let length: i64 = list.len() as i64;
+    let mut slice = a1.to_slice()?;
+    let length: i64 = slice.len() as i64;
 
     let step: i64 = a4.as_int_or(1)?;
     if step == 0 {
@@ -50,29 +45,28 @@ pub fn list_slice(a1: Value, a2: Value, a3: Value, a4: Value) -> ValueResult {
     let high: i64 = a3.as_int_or(if step > 0 { length } else { -length - 1 })?;
 
     let abs_start: i64 = to_index(length, low);
+    let abs_stop: i64 = to_index(length, high);
     let abs_step: usize = step.unsigned_abs() as usize;
 
-    return Ok(if step > 0 {
-        let abs_stop: i64 = to_index(length, high);
-
-        Value::iter_list((abs_start..abs_stop).step_by(abs_step)
-            .filter_map(|i| safe_get(&list, i))
-            .cloned())
+    if step > 0 {
+        for i in (abs_start..abs_stop).step_by(abs_step) {
+            slice.accept(i)
+        }
     } else {
-        let abs_stop: i64 = to_index(length, high);
+        for i in rev_range(abs_start, abs_stop).step_by(abs_step) {
+            slice.accept(i)
+        }
+    }
 
-        Value::iter_list(rev_range(abs_start, abs_stop).step_by(abs_step)
-            .filter_map(|i| safe_get(&list, i))
-            .cloned())
-    })
+    Ok(slice.to_value())
 }
 
 pub fn range_1(a1: Value) -> ValueResult {
-    range_3(Value::Int(0), a1, Value::Int(1))
+    range_3(Int(0), a1, Int(1))
 }
 
 pub fn range_2(a1: Value, a2: Value) -> ValueResult {
-    range_3(a1, a2, Value::Int(1))
+    range_3(a1, a2, Int(1))
 }
 
 pub fn range_3(a1: Value, a2: Value, a3: Value) -> ValueResult {
@@ -83,15 +77,15 @@ pub fn range_3(a1: Value, a2: Value, a3: Value) -> ValueResult {
     if step == 0 {
         ValueErrorStepCannotBeZero.err()
     } else if step > 0 {
-        Ok(Value::iter_list((low..high).step_by(step as usize).map(|i| Value::Int(i))))
+        Ok(Value::iter_list((low..high).step_by(step as usize).map(|i| Int(i))))
     } else {
-        Ok(Value::iter_list(rev_range(low, high).step_by(-step as usize).map(|i| Value::Int(i))))
+        Ok(Value::iter_list(rev_range(low, high).step_by(-step as usize).map(|i| Int(i))))
     }
 }
 
 pub fn enumerate(a1: Value) -> ValueResult {
     match a1.as_iter() {
-        Ok(it) => Ok(Value::iter_list((&it).into_iter().cloned().enumerate().map(|(i, v)| Value::list(vec![Value::Int(i as i64), v])))),
+        Ok(it) => Ok(Value::iter_list((&it).into_iter().cloned().enumerate().map(|(i, v)| Value::list(vec![Int(i as i64), v])))),
         Err(e) => Err(e)
     }
 }
@@ -103,15 +97,6 @@ fn to_index(len: i64, pos_or_neg: i64) -> i64 {
         pos_or_neg
     } else {
         len + pos_or_neg
-    }
-}
-
-#[inline(always)]
-fn safe_get(list: &VecDeque<Value>, index: i64) -> Option<&Value> {
-    if index < 0 {
-        None
-    } else {
-        list.get(index as usize)
     }
 }
 

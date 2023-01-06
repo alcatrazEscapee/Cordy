@@ -93,7 +93,6 @@ print(answer)
 - `continue` and `break` in `for` statements
 - Pattern matching / deconstruction
   - Support pattern variables in `for` statements
-  - Implement pattern variables in VM
 - Even MORE standard library functions
   - Sort by key/comparator
 - `vector` type: a list with overloaded operators
