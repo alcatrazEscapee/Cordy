@@ -1021,6 +1021,8 @@ mod test {
     #[test] fn test_slice_in_strings_start() { run_str("'hello'[1:] . print", "ello\n"); }
     #[test] fn test_slice_in_strings_stop() { run_str("'hello'[:3] . print", "hel\n"); }
     #[test] fn test_slice_in_strings_start_stop() { run_str("'hello'[1:3] . print", "el\n"); }
+    #[test] fn test_pattern_in_for_with_enumerate() { run_str("for i, x in 'hello' . enumerate { [i, x] . print }", "[0, 'h']\n[1, 'e']\n[2, 'l']\n[3, 'l']\n[4, 'o']\n")}
+    #[test] fn test_pattern_in_for_with_empty() { run_str("for _ in range(5) { 'hello' . print }", "hello\nhello\nhello\nhello\nhello\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }
