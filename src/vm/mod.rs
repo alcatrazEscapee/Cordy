@@ -955,8 +955,8 @@ mod test {
     #[test] fn test_range_8() { run_str("range(1, 1, 1) . print", "[]\n"); }
     #[test] fn test_range_9() { run_str("range(1, 1, 0) . print", "ValueError: 'step' argument cannot be zero\n    at: `range(1, 1, 0) . print` (line 1)\n    at: execution of script '<test>'\n"); }
     #[test] fn test_enumerate_1() { run_str("[] . enumerate . print", "[]\n"); }
-    #[test] fn test_enumerate_2() { run_str("[1, 2, 3] . enumerate . print", "[[0, 1], [1, 2], [2, 3]]\n"); }
-    #[test] fn test_enumerate_3() { run_str("'foobar' . enumerate . print", "[[0, 'f'], [1, 'o'], [2, 'o'], [3, 'b'], [4, 'a'], [5, 'r']]\n"); }
+    #[test] fn test_enumerate_2() { run_str("[1, 2, 3] . enumerate . print", "[(0, 1), (1, 2), (2, 3)]\n"); }
+    #[test] fn test_enumerate_3() { run_str("'foobar' . enumerate . print", "[(0, 'f'), (1, 'o'), (2, 'o'), (3, 'b'), (4, 'a'), (5, 'r')]\n"); }
     #[test] fn test_for_loop_no_intrinsic_with_list() { run_str("for x in ['a', 'b', 'c'] { x . print }", "a\nb\nc\n") }
     #[test] fn test_for_loop_no_intrinsic_with_set() { run_str("for x in 'foobar' . set { x . print }", "f\no\nb\na\nr\n") }
     #[test] fn test_for_loop_no_intrinsic_with_str() { run_str("for x in 'hello' { x . print }", "h\ne\nl\nl\no\n") }
@@ -1023,6 +1023,10 @@ mod test {
     #[test] fn test_slice_in_strings_start_stop() { run_str("'hello'[1:3] . print", "el\n"); }
     #[test] fn test_pattern_in_for_with_enumerate() { run_str("for i, x in 'hello' . enumerate { [i, x] . print }", "[0, 'h']\n[1, 'e']\n[2, 'l']\n[3, 'l']\n[4, 'o']\n")}
     #[test] fn test_pattern_in_for_with_empty() { run_str("for _ in range(5) { 'hello' . print }", "hello\nhello\nhello\nhello\nhello\n"); }
+    #[test] fn test_pattern_in_for_with_strings() { run_str("for a, *_, b in ['hello', 'world'] { print(a + b) }", "ho\nwd\n")}
+    #[test] fn test_construct_vector() { run_str("vector(1, 2, 3) . print", "(1, 2, 3)\n"); }
+    #[test] fn test_add_vectors() { run_str("vector(1, 2, 3) + vector(6, 3, 2) . print", "(7, 5, 5)\n"); }
+    #[test] fn test_add_vector_and_constant() { run_str("vector(1, 2, 3) + 3 . print", "(4, 5, 6)\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }

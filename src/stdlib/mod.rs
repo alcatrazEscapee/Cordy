@@ -5,7 +5,6 @@ use lazy_static::lazy_static;
 use crate::vm::{operator, VirtualInterface};
 use crate::vm::value::{Mut, Value};
 use crate::vm::error::RuntimeError;
-use crate::vm::opcode::Opcode;
 use crate::trace;
 
 use StdBinding::{*};
@@ -68,6 +67,7 @@ pub enum StdBinding {
     Set,
     Dict,
     Heap,
+    Vector,
     Function,
     Repr,
 
@@ -165,6 +165,7 @@ fn load_bindings() -> Vec<StdBindingInfo> {
         of!(Set, "set"),
         of!(Dict, "dict"),
         of!(Heap, "heap"),
+        of!(Vector, "vector"),
         of!(Function, "function"),
 
         of!(Void, OperatorUnarySub, "(-)"),
@@ -413,18 +414,10 @@ pub fn invoke<VM>(bound: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult wher
             _ => TypeErrorCannotConvertToInt(a1).err(),
         }),
         Str => dispatch!(a1, Ok(Value::Str(Box::new(a1.as_str())))),
-        List => dispatch!(a1, match a1.as_iter() {
-            Ok(it) => Ok(Value::iter_list(it.into_iter().cloned())),
-            Err(e) => Err(e),
-        }),
-        Set => dispatch!(a1, match a1.as_iter() {
-            Ok(it) => Ok(Value::iter_set(it.into_iter().cloned())),
-            Err(e) => Err(e),
-        }),
-        Heap => dispatch!(a1, match a1.as_iter() {
-            Ok(it) => Ok(Value::iter_heap(it.into_iter().cloned())),
-            Err(e) => Err(e)
-        }),
+        List => dispatch!(a1, Ok(Value::iter_list(a1.into_iter().cloned())), List),
+        Set => dispatch!(a1, Ok(Value::iter_set(a1.into_iter().cloned())), Set),
+        Heap => dispatch!(a1, Ok(Value::iter_heap(a1.into_iter().cloned())), Heap),
+        Vector => dispatch!(a1, Ok(Value::iter_vector(a1.into_iter().cloned())), Vector),
         Repr => dispatch!(a1, Ok(Value::Str(Box::new(a1.as_repr_str())))),
 
         // operator
@@ -491,18 +484,10 @@ pub fn invoke<VM>(bound: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult wher
 
 
 pub fn get_index(a1: &Value, a2: &Value) -> ValueResult {
-    match (a1, a2) {
-        (Value::List(l), Value::Int(r)) => {
-            let l = l.unbox();
-            let index = lists::list_get_index(l.len(), *r)?;
-            Ok(l[index].clone())
-        },
-        (Value::Str(l), Value::Int(r)) => {
-            let index = lists::list_get_index(l.len(), *r)?;
-            Ok(Value::Str(Box::new(String::from(l.chars().nth(index).unwrap()))))
-        },
-        (l, r) => TypeErrorBinaryOp(Opcode::OpIndex, l.clone(), r.clone()).err()
-    }
+    let indexable = a1.to_index()?;
+    let index: usize = lists::get_checked_index(a1.len()?, a2.as_int()?)?;
+
+    Ok(indexable.get_index(index))
 }
 
 pub fn get_slice(a1: Value, a2: Value, a3: Value, a4: Value) -> ValueResult {

@@ -11,7 +11,8 @@ use Value::{*};
 type ValueResult = Result<Value, Box<RuntimeError>>;
 
 
-pub fn list_get_index(len: usize, rhs: i64) -> Result<usize, Box<RuntimeError>> {
+/// Converts a `i64` index into a bounds-checked, `usize` index which can safely be used to index (via `Value.to_index().get_index()`) a `Value`
+pub fn get_checked_index(len: usize, rhs: i64) -> Result<usize, Box<RuntimeError>> {
     let index: usize = to_index(len as i64, rhs) as usize;
     if index < len {
         Ok(index)
@@ -85,7 +86,7 @@ pub fn range_3(a1: Value, a2: Value, a3: Value) -> ValueResult {
 
 pub fn enumerate(a1: Value) -> ValueResult {
     match a1.as_iter() {
-        Ok(it) => Ok(Value::iter_list((&it).into_iter().cloned().enumerate().map(|(i, v)| Value::list(vec![Int(i as i64), v])))),
+        Ok(it) => Ok(Value::iter_list((&it).into_iter().cloned().enumerate().map(|(i, v)| Value::vector(vec![Int(i as i64), v])))),
         Err(e) => Err(e)
     }
 }
@@ -145,7 +146,7 @@ pub fn min<'a>(args: impl Iterator<Item=&'a Value>) -> ValueResult {
 pub fn sorted<'a>(args: impl Iterator<Item=&'a Value>) -> ValueResult {
     let mut sorted: Vec<Value> = args.cloned().collect::<Vec<Value>>();
     sorted.sort_unstable();
-    Ok(Value::list(sorted))
+    Ok(Value::iter_list(sorted.into_iter()))
 }
 
 pub fn reversed<'a>(args: impl DoubleEndedIterator<Item=&'a Value>) -> ValueResult {
@@ -158,13 +159,13 @@ pub fn map<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : Virt
     match (a1, a2.as_iter()) {
         (l, Ok(rs)) => {
             let rs = (&rs).into_iter();
-            let mut acc: Vec<Value> = Vec::with_capacity(len);
+            let mut acc: VecDeque<Value> = VecDeque::with_capacity(len);
             for r in rs {
                 vm.push(l.clone());
                 vm.push(r.clone());
                 let f = vm.invoke_func_eval(1)?;
                 vm.run_after_invoke(f)?;
-                acc.push(vm.pop());
+                acc.push_back(vm.pop());
             }
             Ok(Value::list(acc))
         },
@@ -177,14 +178,14 @@ pub fn filter<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : V
     match (a1, a2.as_iter()) {
         (l, Ok(rs)) => {
             let rs = (&rs).into_iter();
-            let mut acc: Vec<Value> = Vec::with_capacity(len);
+            let mut acc: VecDeque<Value> = VecDeque::with_capacity(len);
             for r in rs {
                 vm.push(l.clone());
                 vm.push(r.clone());
                 let f = vm.invoke_func_eval(1)?;
                 vm.run_after_invoke(f)?;
                 if vm.pop().as_bool() {
-                    acc.push(r.clone());
+                    acc.push_back(r.clone());
                 }
             }
             Ok(Value::list(acc))
