@@ -30,11 +30,11 @@ pub enum RuntimeError {
     TypeErrorBinaryOp(Opcode, Value, Value),
     TypeErrorBinaryIs(Value, Value),
     TypeErrorCannotConvertToInt(Value),
-    TypeErrorCannotSlice(Value),
 
     TypeErrorArgMustBeInt(Value),
     TypeErrorArgMustBeStr(Value),
     TypeErrorArgMustBeIterable(Value),
+    TypeErrorArgMustBeSliceable(Value),
 
     // Deprecated - find a better generic way to do this
     TypeErrorFunc1(&'static str, Value),

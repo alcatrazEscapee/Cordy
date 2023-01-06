@@ -436,35 +436,23 @@ impl<R, W> VirtualMachine<R, W> where
                 trace::trace_interpreter!("op []");
                 let a2: Value = self.pop();
                 let a1: Value = self.pop();
-                match (a1, a2) {
-                    (Value::List(l), Value::Int(r)) => match stdlib::list_get_index(l, r) {
-                        Ok(v) => self.push(v),
-                        Err(e) => return Err(e),
-                    },
-                    (l, r) => return TypeErrorBinaryOp(OpIndex, l, r).err()
-                }
+                let ret = stdlib::get_index(&a1, &a2)?;
+                self.push(ret);
             },
             OpIndexPeek => {
                 trace::trace_interpreter!("op [] peek");
-                let a2: Value = self.peek(0).clone();
-                let a1: Value = self.peek(1).clone();
-                match (a1, a2) {
-                    (Value::List(l), Value::Int(r)) => match stdlib::list_get_index(l, r) {
-                        Ok(v) => self.push(v),
-                        Err(e) => return Err(e),
-                    },
-                    (l, r) => return TypeErrorBinaryOp(OpIndex, l, r).err()
-                }
+                let a2: &Value = self.peek(0);
+                let a1: &Value = self.peek(1);
+                let ret = stdlib::get_index(&a1, &a2)?;
+                self.push(ret);
             },
             OpSlice => {
                 trace::trace_interpreter!("op [:]");
                 let a3: Value = self.pop();
                 let a2: Value = self.pop();
                 let a1: Value = self.pop();
-                match stdlib::list_slice(a1, a2, a3, Value::Int(1)) {
-                    Ok(v) => self.push(v),
-                    Err(e) => return Err(e),
-                }
+                let ret = stdlib::get_slice(a1, a2, a3, Value::Int(1))?;
+                self.push(ret);
             },
             OpSliceWithStep => {
                 trace::trace_interpreter!("op [::]");
@@ -472,10 +460,8 @@ impl<R, W> VirtualMachine<R, W> where
                 let a3: Value = self.pop();
                 let a2: Value = self.pop();
                 let a1: Value = self.pop();
-                match stdlib::list_slice(a1, a2, a3, a4) {
-                    Ok(v) => self.push(v),
-                    Err(e) => return Err(e),
-                }
+                let ret = stdlib::get_slice(a1, a2, a3, a4)?;
+                self.push(ret);
             },
 
             // Unary Operators
@@ -1021,6 +1007,10 @@ mod test {
     #[test] fn test_pattern_in_let_with_complex_patterns_1() { run_str("let *_, (_, x, _), _ = [[1, 2, 3], [4, 5, 6], [7, 8, 9]] ; x . print", "5\n"); }
     #[test] fn test_pattern_in_let_with_complex_patterns_2() { run_str("let _, (_, (_, (_, (x, *_)))) = [1, [2, [3, [4, [5, [6, [7, [8, [9, nil]]]]]]]]] ; x . print", "5\n"); }
     #[test] fn test_pattern_in_let_with_complex_patterns_3() { run_str("let ((*x, _), (_, (*y, _), _), *_) = [[[1, 2, 3], [[1, 2, 3], [2, 3, 4], [3, 4, 5]], [[1], [2], [3]]]] ; [x, y] . print", "[[1, 2], [2, 3]]\n"); }
+    #[test] fn test_index_in_strings() { run_str("'hello'[1] . print", "e\n"); }
+    #[test] fn test_slice_in_strings_start() { run_str("'hello'[1:] . print", "ello\n"); }
+    #[test] fn test_slice_in_strings_stop() { run_str("'hello'[:3] . print", "hel\n"); }
+    #[test] fn test_slice_in_strings_start_stop() { run_str("'hello'[1:3] . print", "el\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }

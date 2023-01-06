@@ -12,7 +12,7 @@ use crate::stdlib::StdBinding;
 use crate::vm::error::RuntimeError;
 
 use Value::{*};
-use RuntimeError::{TypeErrorArgMustBeIterable, TypeErrorArgMustBeInt};
+use RuntimeError::{TypeErrorArgMustBeIterable, TypeErrorArgMustBeSliceable, TypeErrorArgMustBeInt};
 
 
 /// The runtime sum type used by the virtual machine
@@ -50,6 +50,7 @@ impl Value {
     pub fn iter_set(vec: impl Iterator<Item=Value>) -> Value { Set(Mut::new(vec.collect::<LinkedHashSet<Value>>())) }
     pub fn iter_heap(vec: impl Iterator<Item=Value>) -> Value { Heap(Mut::new(ValueHeap::new(vec.map(|t| Reverse(t)).collect::<BinaryHeap<Reverse<Value>>>()))) }
 
+    pub fn str(c: char) -> Value { Str(Box::new(String::from(c))) }
     pub fn list(vec: Vec<Value>) -> Value { List(Mut::new(vec.into_iter().collect::<VecDeque<Value>>())) }
     pub fn set(set: LinkedHashSet<Value>) -> Value { Set(Mut::new(set)) }
     pub fn dict(dict: LinkedHashMap<Value, Value>) -> Value { Dict(Mut::new(dict)) }
@@ -150,7 +151,7 @@ impl Value {
         match self {
             Str(s) => {
                 let chars: Vec<Value> = s.chars()
-                    .map(|c| Str(Box::new(String::from(c))))
+                    .map(|c| Value::str(c))
                     .collect::<Vec<Value>>();
                 Ok(ValueIntoIter::Str(chars))
             },
@@ -159,6 +160,15 @@ impl Value {
             Dict(d) => Ok(ValueIntoIter::Dict(d.unbox())),
             Heap(v) => Ok(ValueIntoIter::Heap(v.unbox())),
             _ => TypeErrorArgMustBeIterable(self.clone()).err(),
+        }
+    }
+
+    /// Converts this `Value` to a `ValueAsSlice`, which is a builder for slice-like structures, supported for `List` and `Str`
+    pub fn to_slice(self: &Self) -> Result<ValueAsSlice, Box<RuntimeError>> {
+        match self {
+            Str(it) => Ok(ValueAsSlice::Str(it, String::new())),
+            List(it) => Ok(ValueAsSlice::List(it.unbox(), VecDeque::new())),
+            _ => TypeErrorArgMustBeSliceable(self.clone()).err()
         }
     }
 
@@ -326,10 +336,6 @@ pub struct ClosureImpl {
     pub environment: Vec<Value>,
 }
 
-impl ClosureImpl {
-
-}
-
 impl Hash for ClosureImpl {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.func.hash(state)
@@ -421,6 +427,38 @@ impl<'b: 'a, 'a> IntoIterator for &'b ValueIntoIter<'a> {
             ValueIntoIter::Set(it) => ValueIter::Set(it.iter()),
             ValueIntoIter::Dict(it) => ValueIter::Dict(it.keys()),
             ValueIntoIter::Heap(it) => ValueIter::Heap(it.heap.iter()),
+        }
+    }
+}
+
+
+pub enum ValueAsSlice<'a> {
+    Str(&'a Box<String>, String),
+    List(Ref<'a, VecDeque<Value>>, VecDeque<Value>),
+}
+
+impl<'a> ValueAsSlice<'a> {
+    pub fn len(self: &Self) -> usize {
+        match self {
+            ValueAsSlice::Str(it, _) => it.len(),
+            ValueAsSlice::List(it, _) => it.len(),
+        }
+    }
+
+    pub fn accept(self: &mut Self, index: i64) {
+        if index >= 0 && index < self.len() as i64 {
+            let index = index as usize;
+            match self {
+                ValueAsSlice::Str(src, dest) => dest.push(src.chars().nth(index).unwrap()),
+                ValueAsSlice::List(src, dest) => dest.push_back((&src[index]).clone()),
+            }
+        }
+    }
+
+    pub fn to_value(self: Self) -> Value {
+        match self {
+            ValueAsSlice::Str(_, it) => Str(Box::new(it)),
+            ValueAsSlice::List(_, it) => List(Mut::new(it)),
         }
     }
 }
