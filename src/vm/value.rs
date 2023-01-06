@@ -12,7 +12,7 @@ use crate::stdlib::StdBinding;
 use crate::vm::error::RuntimeError;
 
 use Value::{*};
-use RuntimeError::{TypeErrorArgMustBeIterable, TypeErrorArgMustBeSliceable, TypeErrorArgMustBeInt};
+use RuntimeError::{TypeErrorArgMustBeIterable, TypeErrorArgMustBeIndexable, TypeErrorArgMustBeSliceable, TypeErrorArgMustBeInt};
 
 
 /// The runtime sum type used by the virtual machine
@@ -33,6 +33,7 @@ pub enum Value {
     Set(Mut<LinkedHashSet<Value>>),
     Dict(Mut<LinkedHashMap<Value, Value>>),
     Heap(Mut<ValueHeap>), // `List` functions as both Array + Deque, but that makes it un-viable for a heap. So, we have a dedicated heap structure
+    Vector(Mut<Vec<Value>>), // `Vector` is a fixed-size list (in theory, not in practice), that most operations will behave elementwise on
 
     // Functions
     Function(Rc<FunctionImpl>),
@@ -46,14 +47,16 @@ pub enum Value {
 impl Value {
 
     // Constructors
-    pub fn iter_list(vec: impl Iterator<Item=Value>) -> Value { List(Mut::new(vec.collect::<VecDeque<Value>>())) }
-    pub fn iter_set(vec: impl Iterator<Item=Value>) -> Value { Set(Mut::new(vec.collect::<LinkedHashSet<Value>>())) }
+    pub fn iter_list(vec: impl Iterator<Item=Value>) -> Value { Value::list(vec.collect()) }
+    pub fn iter_set(vec: impl Iterator<Item=Value>) -> Value { Value::set(vec.collect()) }
     pub fn iter_heap(vec: impl Iterator<Item=Value>) -> Value { Heap(Mut::new(ValueHeap::new(vec.map(|t| Reverse(t)).collect::<BinaryHeap<Reverse<Value>>>()))) }
+    pub fn iter_vector(vec: impl Iterator<Item=Value>) -> Value { Value::vector(vec.collect()) }
 
     pub fn str(c: char) -> Value { Str(Box::new(String::from(c))) }
-    pub fn list(vec: Vec<Value>) -> Value { List(Mut::new(vec.into_iter().collect::<VecDeque<Value>>())) }
+    pub fn list(vec: VecDeque<Value>) -> Value { List(Mut::new(vec.into_iter().collect::<VecDeque<Value>>())) }
     pub fn set(set: LinkedHashSet<Value>) -> Value { Set(Mut::new(set)) }
     pub fn dict(dict: LinkedHashMap<Value, Value>) -> Value { Dict(Mut::new(dict)) }
+    pub fn vector(vec: Vec<Value>) -> Value { Vector(Mut::new(vec)) }
 
     pub fn partial(func: Value, args: Vec<Value>) -> Value { PartialFunction(Box::new(PartialFunctionImpl { func, args: args.into_iter().map(|v| Box::new(v)).collect() }))}
 
@@ -85,6 +88,7 @@ impl Value {
             Set(v) => format!("{{{}}}", v.unbox().iter().map(|t| t.as_repr_str()).collect::<Vec<String>>().join(", ")),
             Dict(v) => format!("{{{}}}", v.unbox().iter().map(|(k, v)| format!("{}: {}", k.as_repr_str(), v.as_repr_str())).collect::<Vec<String>>().join(", ")),
             Heap(v) => format!("[{}]", v.unbox().heap.iter().map(|t| t.0.as_repr_str()).collect::<Vec<String>>().join(", ")),
+            Vector(v) => format!("({})", v.unbox().iter().map(|t| t.as_repr_str()).collect::<Vec<String>>().join(", ")),
             Function(f) => (*f).as_ref().borrow().as_str(),
             PartialFunction(f) => (*f).as_ref().borrow().func.as_str(),
             NativeFunction(b) => format!("fn {}()", stdlib::lookup_name(*b)),
@@ -104,6 +108,7 @@ impl Value {
             Set(_) => "set",
             Dict(_) => "dict",
             Heap(_) => "heap",
+            Vector(_) => "vector",
             Function(_) => "function",
             PartialFunction(_) => "partial function",
             NativeFunction(_) => "native function",
@@ -127,6 +132,7 @@ impl Value {
             Set(v) => !v.unbox().is_empty(),
             Dict(v) => !v.unbox().is_empty(),
             Heap(v) => !v.unbox().heap.is_empty(),
+            Vector(v) => v.unbox().is_empty(),
             Function(_) | PartialFunction(_) | NativeFunction(_) | PartialNativeFunction(_, _) | Closure(_) => true,
         }
     }
@@ -149,17 +155,28 @@ impl Value {
 
     pub fn as_iter(self: &Self) -> Result<ValueIntoIter, Box<RuntimeError>> {
         match self {
-            Str(s) => {
-                let chars: Vec<Value> = s.chars()
+            Str(it) => {
+                let chars: Vec<Value> = it.chars()
                     .map(|c| Value::str(c))
                     .collect::<Vec<Value>>();
                 Ok(ValueIntoIter::Str(chars))
-            },
-            List(l) => Ok(ValueIntoIter::List(l.unbox())),
-            Set(s) => Ok(ValueIntoIter::Set(s.unbox())),
-            Dict(d) => Ok(ValueIntoIter::Dict(d.unbox())),
-            Heap(v) => Ok(ValueIntoIter::Heap(v.unbox())),
+            }
+            List(it) => Ok(ValueIntoIter::List(it.unbox())),
+            Set(it) => Ok(ValueIntoIter::Set(it.unbox())),
+            Dict(it) => Ok(ValueIntoIter::Dict(it.unbox())),
+            Heap(it) => Ok(ValueIntoIter::Heap(it.unbox())),
+            Vector(it) => Ok(ValueIntoIter::Vector(it.unbox())),
             _ => TypeErrorArgMustBeIterable(self.clone()).err(),
+        }
+    }
+
+    /// Converts this `Value` to a `ValueAsIndex`, which is a index-able object, supported for `List`, `Vector`, and `Str`
+    pub fn to_index(self: &Self) -> Result<ValueAsIndex, Box<RuntimeError>> {
+        match self {
+            Str(it) => Ok(ValueAsIndex::Str(it)),
+            List(it) => Ok(ValueAsIndex::List(it.unbox())),
+            Vector(it) => Ok(ValueAsIndex::Vector(it.unbox())),
+            _ => TypeErrorArgMustBeIndexable(self.clone()).err()
         }
     }
 
@@ -168,6 +185,7 @@ impl Value {
         match self {
             Str(it) => Ok(ValueAsSlice::Str(it, String::new())),
             List(it) => Ok(ValueAsSlice::List(it.unbox(), VecDeque::new())),
+            Vector(it) => Ok(ValueAsSlice::Vector(it.unbox(), Vec::new())),
             _ => TypeErrorArgMustBeSliceable(self.clone()).err()
         }
     }
@@ -189,6 +207,7 @@ impl Value {
             Set(it) => Ok(it.unbox().len()),
             Dict(it) => Ok(it.unbox().len()),
             Heap(it) => Ok(it.unbox().heap.len()),
+            Vector(it) => Ok(it.unbox().len()),
             _ => TypeErrorArgMustBeIterable(self.clone()).err()
         }
     }
@@ -201,10 +220,11 @@ impl Value {
     pub fn is_list(self: &Self) -> bool { match self { List(_) => true, _ => false } }
     pub fn is_set(self: &Self) -> bool { match self { Set(_) => true, _ => false } }
     pub fn is_dict(self: &Self) -> bool { match self { Dict(_) => true, _ => false } }
+    pub fn is_vector(self: &Self) -> bool { match self { Vector(_) => true, _ => false }}
 
     pub fn is_iter(self: &Self) -> bool {
         match self {
-            Str(_) | List(_) | Set(_) | Dict(_) | Heap(_) => true,
+            Str(_) | List(_) | Set(_) | Dict(_) | Heap(_) | Vector(_) => true,
             _ => false
         }
     }
@@ -236,6 +256,11 @@ impl Ord for Value {
                 let rs = (*r).unbox();
                 ls.cmp(&rs)
             },
+            (Vector(l), Vector(r)) => {
+                let ls = (*l).unbox();
+                let rs = (*r).unbox();
+                ls.cmp(&rs)
+            }
             (Heap(l), Heap(r)) => {
                 let ls = (*l).unbox();
                 let rs = (*r).unbox();
@@ -317,10 +342,6 @@ pub struct PartialFunctionImpl {
     pub args: Vec<Box<Value>>,
 }
 
-impl PartialFunctionImpl {
-
-}
-
 impl Hash for PartialFunctionImpl {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.func.hash(state)
@@ -379,6 +400,7 @@ pub enum ValueIter<'a> {
     Set(hashlink::linked_hash_set::Iter<'a, Value>),
     Dict(hashlink::linked_hash_map::Keys<'a, Value, Value>),
     Heap(std::collections::binary_heap::Iter<'a, Reverse<Value>>),
+    Vector(std::slice::Iter<'a, Value>),
 }
 
 impl<'a> Iterator for ValueIter<'a> {
@@ -391,6 +413,7 @@ impl<'a> Iterator for ValueIter<'a> {
             ValueIter::Set(it) => it.next(),
             ValueIter::Dict(it) => it.next(),
             ValueIter::Heap(it) => it.next().map(|u| &u.0),
+            ValueIter::Vector(it) => it.next(),
         }
     }
 }
@@ -403,6 +426,7 @@ impl<'a> DoubleEndedIterator for ValueIter<'a> {
             ValueIter::Set(it) => it.next_back(),
             ValueIter::Dict(it) => it.next_back(),
             ValueIter::Heap(it) => it.next_back().map(|u| &u.0),
+            ValueIter::Vector(it) => it.next_back(),
         }
     }
 }
@@ -413,7 +437,8 @@ pub enum ValueIntoIter<'a> {
     List(Ref<'a, VecDeque<Value>>),
     Set(Ref<'a, LinkedHashSet<Value>>),
     Dict(Ref<'a, LinkedHashMap<Value, Value>>),
-    Heap(Ref<'a, ValueHeap>)
+    Heap(Ref<'a, ValueHeap>),
+    Vector(Ref<'a, Vec<Value>>),
 }
 
 impl<'b: 'a, 'a> IntoIterator for &'b ValueIntoIter<'a> {
@@ -427,6 +452,25 @@ impl<'b: 'a, 'a> IntoIterator for &'b ValueIntoIter<'a> {
             ValueIntoIter::Set(it) => ValueIter::Set(it.iter()),
             ValueIntoIter::Dict(it) => ValueIter::Dict(it.keys()),
             ValueIntoIter::Heap(it) => ValueIter::Heap(it.heap.iter()),
+            ValueIntoIter::Vector(it) => ValueIter::Vector(it.iter()),
+        }
+    }
+}
+
+
+pub enum ValueAsIndex<'a> {
+    Str(&'a Box<String>),
+    List(Ref<'a, VecDeque<Value>>),
+    Vector(Ref<'a, Vec<Value>>),
+}
+
+impl<'a> ValueAsIndex<'a> {
+
+    pub fn get_index(self: &Self, index: usize) -> Value {
+        match self {
+            ValueAsIndex::Str(it) => Value::str(it.chars().nth(index).unwrap()),
+            ValueAsIndex::List(it) => (&it[index]).clone(),
+            ValueAsIndex::Vector(it) => (&it[index]).clone(),
         }
     }
 }
@@ -435,6 +479,7 @@ impl<'b: 'a, 'a> IntoIterator for &'b ValueIntoIter<'a> {
 pub enum ValueAsSlice<'a> {
     Str(&'a Box<String>, String),
     List(Ref<'a, VecDeque<Value>>, VecDeque<Value>),
+    Vector(Ref<'a, Vec<Value>>, Vec<Value>),
 }
 
 impl<'a> ValueAsSlice<'a> {
@@ -442,6 +487,7 @@ impl<'a> ValueAsSlice<'a> {
         match self {
             ValueAsSlice::Str(it, _) => it.len(),
             ValueAsSlice::List(it, _) => it.len(),
+            ValueAsSlice::Vector(it, _) => it.len(),
         }
     }
 
@@ -451,6 +497,7 @@ impl<'a> ValueAsSlice<'a> {
             match self {
                 ValueAsSlice::Str(src, dest) => dest.push(src.chars().nth(index).unwrap()),
                 ValueAsSlice::List(src, dest) => dest.push_back((&src[index]).clone()),
+                ValueAsSlice::Vector(src, dest) => dest.push((&src[index]).clone()),
             }
         }
     }
@@ -459,6 +506,7 @@ impl<'a> ValueAsSlice<'a> {
         match self {
             ValueAsSlice::Str(_, it) => Str(Box::new(it)),
             ValueAsSlice::List(_, it) => List(Mut::new(it)),
+            ValueAsSlice::Vector(_, it) => Vector(Mut::new(it)),
         }
     }
 }
@@ -466,6 +514,7 @@ impl<'a> ValueAsSlice<'a> {
 
 #[cfg(test)]
 mod test {
+    use std::collections::VecDeque;
     use std::rc::Rc;
     use hashlink::{LinkedHashMap, LinkedHashSet};
     use crate::stdlib::StdBinding;
@@ -480,11 +529,29 @@ mod test {
         for v in all_values() {
             assert_eq!(v.is_iter(), v.as_iter().is_ok(), "is_iter() and as_iter() not consistent for {}", v.as_type_str());
             assert_eq!(v.is_iter(), v.len().is_ok(), "is_iter() and len() not consistent for {}", v.as_type_str());
+
+            if v.to_index().is_ok() {
+                assert!(v.len().is_ok(), "as_index() and len() not consistent for {}", v.as_type_str());
+            }
         }
     }
 
     fn all_values() -> Vec<Value> {
         let rc = Rc::new(FunctionImpl::new(0, String::new(), vec![]));
-        vec![Value::Nil, Value::Bool(true), Value::Int(1), Value::list(vec![]), Value::set(LinkedHashSet::new()), Value::dict(LinkedHashMap::new()), Value::iter_heap(std::iter::empty()), Value::Function(rc.clone()), Value::partial(Value::Function(rc.clone()), vec![]), Value::NativeFunction(StdBinding::Void), Value::PartialNativeFunction(StdBinding::Void, Box::new(vec![])), Value::closure(rc.clone())]
+        vec![
+            Value::Nil,
+            Value::Bool(true),
+            Value::Int(1),
+            Value::list(VecDeque::new()),
+            Value::set(LinkedHashSet::new()),
+            Value::dict(LinkedHashMap::new()),
+            Value::iter_heap(std::iter::empty()),
+            Value::vector(vec![]),
+            Value::Function(rc.clone()),
+            Value::partial(Value::Function(rc.clone()), vec![]),
+            Value::NativeFunction(StdBinding::Void),
+            Value::PartialNativeFunction(StdBinding::Void, Box::new(vec![])),
+            Value::closure(rc.clone())
+        ]
     }
 }

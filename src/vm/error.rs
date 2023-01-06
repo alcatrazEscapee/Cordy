@@ -34,6 +34,7 @@ pub enum RuntimeError {
     TypeErrorArgMustBeInt(Value),
     TypeErrorArgMustBeStr(Value),
     TypeErrorArgMustBeIterable(Value),
+    TypeErrorArgMustBeIndexable(Value),
     TypeErrorArgMustBeSliceable(Value),
 
     // Deprecated - find a better generic way to do this

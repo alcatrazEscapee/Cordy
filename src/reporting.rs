@@ -111,6 +111,7 @@ impl AsError for RuntimeError {
             RuntimeError::TypeErrorArgMustBeInt(v) => format!("TypeError: Expected {} to be a int", v.format_error()),
             RuntimeError::TypeErrorArgMustBeStr(v) => format!("TypeError: Expected {} to be a string", v.format_error()),
             RuntimeError::TypeErrorArgMustBeIterable(v) => format!("TypeError: Expected {} to be an iterable", v.format_error()),
+            RuntimeError::TypeErrorArgMustBeIndexable(ls) => format!("TypeError: Cannot index {}", ls.format_error()),
             RuntimeError::TypeErrorArgMustBeSliceable(ls) => format!("TypeError: Cannot slice {}", ls.format_error()),
             RuntimeError::TypeErrorFunc1(e, v1) => format!("TypeError: incorrect arguments for {}, got {} instead", e, v1.format_error()),
             RuntimeError::TypeErrorFunc2(e, v1, v2) => format!("TypeError: incorrect arguments for {}, got '{}, {} instead", e, v1.format_error(), v2.format_error()),
