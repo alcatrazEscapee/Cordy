@@ -162,10 +162,7 @@ pub fn map<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : Virt
             for r in rs {
                 vm.push(l.clone());
                 vm.push(r.clone());
-                let f = match vm.invoke_func_eval(1) {
-                    Err(e) => return e.err(),
-                    Ok(f) => f
-                };
+                let f = vm.invoke_func_eval(1)?;
                 vm.run_after_invoke(f)?;
                 acc.push(vm.pop());
             }
@@ -184,10 +181,7 @@ pub fn filter<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : V
             for r in rs {
                 vm.push(l.clone());
                 vm.push(r.clone());
-                let f = match vm.invoke_func_eval(1) {
-                    Err(e) => return e.err(),
-                    Ok(f) => f
-                };
+                let f = vm.invoke_func_eval(1)?;
                 vm.run_after_invoke(f)?;
                 if vm.pop().as_bool() {
                     acc.push(r.clone());
@@ -212,10 +206,7 @@ pub fn reduce<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : V
                 vm.push(l.clone()); // Function
                 vm.push(acc); // Accumulator (arg1)
                 vm.push(r); // Value (arg2)
-                let f = match vm.invoke_func_eval(2) {
-                    Err(e) => return e.err(),
-                    Ok(f) => f
-                };
+                let f = vm.invoke_func_eval(2)?;
                 vm.run_after_invoke(f)?;
                 acc = vm.pop();
             }
