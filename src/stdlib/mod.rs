@@ -60,7 +60,6 @@ pub enum StdBinding {
     Read,
     ReadText,
     WriteText,
-    Nil,
     Bool,
     Int,
     Str,
@@ -128,6 +127,7 @@ pub enum StdBinding {
     Insert, // Insert by key (or index)
     Remove, // Remove by key (or index)
     Merge, // Merges two collections (append right onto left)
+    Default, // For a `Dict`, sets the default value
 
     // lib_math
     Abs,
@@ -159,7 +159,6 @@ fn load_bindings() -> Vec<StdBindingInfo> {
         of!(ReadText, "read_text"),
         of!(WriteText, "write_text"),
 
-        of!(Nil, "nil"),
         of!(Bool, "bool"),
         of!(Int, "int"),
         of!(Str, "str"),
@@ -223,6 +222,7 @@ fn load_bindings() -> Vec<StdBindingInfo> {
         of!(Head, "head"),
         of!(Tail, "tail"),
         of!(Init, "init"),
+        of!(Default, "default"),
 
         of!(Abs, "abs"),
         of!(Sqrt, "sqrt"),
@@ -490,6 +490,7 @@ pub fn invoke<VM>(bound: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult wher
         Head => dispatch!(a1, collections::head(a1)),
         Init => dispatch!(a1, collections::init(a1)),
         Tail => dispatch!(a1, collections::tail(a1)),
+        Default => dispatch!(a1, a2, collections::dict_set_default(a1, a2)),
 
         // lib_math
         Abs => dispatch!(a1, math::abs(a1)),
@@ -503,6 +504,17 @@ pub fn invoke<VM>(bound: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult wher
 
 
 pub fn get_index(a1: &Value, a2: &Value) -> ValueResult {
+
+    // Dict objects have their own overload of indexing to mean key-value lookups, that doesn't fit with ValueAsIndex (as it doesn't take integer keys, always)
+    if let Value::Dict(it) = a1 {
+        let it = it.unbox();
+        return if let Some(v) = it.dict.get(&a2).or(it.default.as_ref()) {
+            Ok(v.clone())
+        } else {
+            ValueErrorKeyNotPresent(a2.clone()).err()
+        }
+    }
+
     let indexable = a1.to_index()?;
     let index: usize = collections::get_checked_index(a1.len()?, a2.as_int()?)?;
 
