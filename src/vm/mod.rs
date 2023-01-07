@@ -303,6 +303,9 @@ impl<R, W> VirtualMachine<R, W> where
                         Ok(_) => {}, // No push, as we left the previous value on top of the stack
                         Err(e) => return Err(e),
                     },
+                    (Value::Dict(l), r) => {
+                        l.unbox_mut().dict.insert(r, a3);
+                    },
                     (l, r) => return TypeErrorBinaryOp(OpIndex, l, r).err()
                 }
             },
@@ -1038,6 +1041,9 @@ mod test {
     #[test] fn test_str_in_str_no() { run_str("'hello' in 'hey now, \\'ello world' . print", "false\n"); }
     #[test] fn test_int_in_list_yes() { run_str("13 in range(10, 15) . print", "true\n"); }
     #[test] fn test_int_in_list_no() { run_str("3 in range(10, 15) . print", "false\n"); }
+    #[test] fn test_dict_get_and_set() { run_str("let d = dict() ; d['hi'] = 'yes' ; d['hi'] . print", "yes\n"); }
+    #[test] fn test_dict_get_when_not_present() { run_str("let d = dict() ; d['hello']", "ValueError: Key 'hello' of type 'str' not found in dictionary\n    at: `let d = dict() ; d['hello']` (line 1)\n    at: execution of script '<test>'\n"); }
+    #[test] fn test_dict_get_when_not_present_with_default() { run_str("let d = dict() . default('haha') ; d['hello'] . print", "haha\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }

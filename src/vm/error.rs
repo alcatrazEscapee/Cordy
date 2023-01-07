@@ -26,6 +26,7 @@ pub enum RuntimeError {
     ValueErrorCannotUnpackLengthMustBeGreaterThan(usize, usize, Value), // expected, actual
     ValueErrorCannotUnpackLengthMustBeEqual(usize, usize, Value), // expected, actual
     ValueErrorCannotCollectIntoDict(Value),
+    ValueErrorKeyNotPresent(Value),
 
     TypeErrorUnaryOp(Opcode, Value),
     TypeErrorBinaryOp(Opcode, Value, Value),
@@ -37,6 +38,7 @@ pub enum RuntimeError {
     TypeErrorArgMustBeIterable(Value),
     TypeErrorArgMustBeIndexable(Value),
     TypeErrorArgMustBeSliceable(Value),
+    TypeErrorArgMustBeDict(Value),
 
     // Deprecated - find a better generic way to do this
     TypeErrorFunc1(&'static str, Value),

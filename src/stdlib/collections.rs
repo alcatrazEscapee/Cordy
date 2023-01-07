@@ -222,7 +222,7 @@ pub fn pop(a1: Value) -> ValueResult {
     match match &a1 {
         List(v) => v.unbox_mut().pop_back(),
         Set(v) => v.unbox_mut().pop_back(),
-        Dict(v) => v.unbox_mut().pop_back().map(|(k, _)| k),
+        Dict(v) => v.unbox_mut().dict.pop_back().map(|(k, _)| k),
         Heap(v) => v.unbox_mut().heap.pop().map(|t| t.0),
         _ => return TypeErrorArgMustBeIterable(a1).err()
     } {
@@ -294,4 +294,13 @@ pub fn collect_into_dict(iter: impl Iterator<Item=Value>) -> ValueResult {
     }).collect::<Result<Vec<(Value, Value)>, Box<RuntimeError>>>()?
         .into_iter()
         .collect::<LinkedHashMap<Value, Value>>()))
+}
+
+pub fn dict_set_default(a1: Value, a2: Value) -> ValueResult {
+    if let Dict(it) = a2 {
+        it.unbox_mut().default = Some(a1);
+        Ok(Dict(it))
+    } else {
+        TypeErrorArgMustBeDict(a2).err()
+    }
 }

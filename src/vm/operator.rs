@@ -89,9 +89,9 @@ pub fn binary_pow(a1: Value, a2: Value) -> ValueResult {
 
 pub fn binary_is(a1: Value, a2: Value) -> ValueResult {
     match a2 {
+        Value::Nil => Ok(Value::Bool(a1.is_nil())),
         Value::NativeFunction(b) => {
             let ret: bool = match b {
-                StdBinding::Nil => a1.is_nil(),
                 StdBinding::Bool => a1.is_bool(),
                 StdBinding::Int => a1.is_int(),
                 StdBinding::Str => a1.is_str(),
@@ -103,7 +103,7 @@ pub fn binary_is(a1: Value, a2: Value) -> ValueResult {
                 _ => return TypeErrorBinaryIs(a1, Value::NativeFunction(b)).err()
             };
             Ok(Value::Bool(ret))
-        }
+        },
         _ => return TypeErrorBinaryIs(a1, a2).err()
     }
 }
@@ -113,7 +113,7 @@ pub fn binary_in(a1: Value, a2: Value) -> ValueResult {
         (Value::Str(l), Value::Str(r)) => Ok(Value::Bool(r.contains(l.as_str()))),
         (l, Value::List(it)) => Ok(Value::Bool(it.unbox().contains(&l))),
         (l, Value::Set(it)) => Ok(Value::Bool(it.unbox().contains(&l))),
-        (l, Value::Dict(it)) => Ok(Value::Bool(it.unbox().contains_key(&l))),
+        (l, Value::Dict(it)) => Ok(Value::Bool(it.unbox().dict.contains_key(&l))),
         (l, Value::Heap(it)) => Ok(Value::Bool(it.unbox().heap.iter().any(|v|v.0 == l))),
         (l, Value::Vector(it)) => Ok(Value::Bool(it.unbox().contains(&l))),
         (l, r) => TypeErrorBinaryOp(OpIn, l, r).err()

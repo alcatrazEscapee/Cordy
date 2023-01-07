@@ -31,8 +31,8 @@ pub enum Value {
     // But that comes at even more performance overhead because we'd need to still obey rust reference counting semantics.
     List(Mut<VecDeque<Value>>),
     Set(Mut<LinkedHashSet<Value>>),
-    Dict(Mut<LinkedHashMap<Value, Value>>),
-    Heap(Mut<ValueHeap>), // `List` functions as both Array + Deque, but that makes it un-viable for a heap. So, we have a dedicated heap structure
+    Dict(Mut<DictImpl>),
+    Heap(Mut<HeapImpl>), // `List` functions as both Array + Deque, but that makes it un-viable for a heap. So, we have a dedicated heap structure
     Vector(Mut<Vec<Value>>), // `Vector` is a fixed-size list (in theory, not in practice), that most operations will behave elementwise on
 
     // Functions
@@ -49,14 +49,14 @@ impl Value {
     // Constructors
     pub fn iter_list(vec: impl Iterator<Item=Value>) -> Value { Value::list(vec.collect()) }
     pub fn iter_set(vec: impl Iterator<Item=Value>) -> Value { Value::set(vec.collect()) }
-    pub fn iter_heap(vec: impl Iterator<Item=Value>) -> Value { Heap(Mut::new(ValueHeap::new(vec.map(|t| Reverse(t)).collect::<BinaryHeap<Reverse<Value>>>()))) }
+    pub fn iter_heap(vec: impl Iterator<Item=Value>) -> Value { Heap(Mut::new(HeapImpl::new(vec.map(|t| Reverse(t)).collect::<BinaryHeap<Reverse<Value>>>()))) }
     pub fn iter_vector(vec: impl Iterator<Item=Value>) -> Value { Value::vector(vec.collect()) }
 
     pub fn str(c: char) -> Value { Str(Box::new(String::from(c))) }
     pub fn list(vec: VecDeque<Value>) -> Value { List(Mut::new(vec.into_iter().collect::<VecDeque<Value>>())) }
     pub fn set(set: LinkedHashSet<Value>) -> Value { Set(Mut::new(set)) }
-    pub fn dict(dict: LinkedHashMap<Value, Value>) -> Value { Dict(Mut::new(dict)) }
-    pub fn heap(heap: BinaryHeap<Reverse<Value>>) -> Value { Heap(Mut::new(ValueHeap::new(heap))) }
+    pub fn dict(dict: LinkedHashMap<Value, Value>) -> Value { Dict(Mut::new(DictImpl::new(dict))) }
+    pub fn heap(heap: BinaryHeap<Reverse<Value>>) -> Value { Heap(Mut::new(HeapImpl::new(heap))) }
     pub fn vector(vec: Vec<Value>) -> Value { Vector(Mut::new(vec)) }
 
     pub fn partial(func: Value, args: Vec<Value>) -> Value { PartialFunction(Box::new(PartialFunctionImpl { func, args: args.into_iter().map(|v| Box::new(v)).collect() }))}
@@ -87,7 +87,7 @@ impl Value {
             },
             List(v) => format!("[{}]", v.unbox().iter().map(|t| t.as_repr_str()).collect::<Vec<String>>().join(", ")),
             Set(v) => format!("{{{}}}", v.unbox().iter().map(|t| t.as_repr_str()).collect::<Vec<String>>().join(", ")),
-            Dict(v) => format!("{{{}}}", v.unbox().iter().map(|(k, v)| format!("{}: {}", k.as_repr_str(), v.as_repr_str())).collect::<Vec<String>>().join(", ")),
+            Dict(v) => format!("{{{}}}", v.unbox().dict.iter().map(|(k, v)| format!("{}: {}", k.as_repr_str(), v.as_repr_str())).collect::<Vec<String>>().join(", ")),
             Heap(v) => format!("[{}]", v.unbox().heap.iter().map(|t| t.0.as_repr_str()).collect::<Vec<String>>().join(", ")),
             Vector(v) => format!("({})", v.unbox().iter().map(|t| t.as_repr_str()).collect::<Vec<String>>().join(", ")),
             Function(f) => (*f).as_ref().borrow().as_str(),
@@ -131,7 +131,7 @@ impl Value {
             Str(s) => !s.is_empty(),
             List(l) => !l.unbox().is_empty(),
             Set(v) => !v.unbox().is_empty(),
-            Dict(v) => !v.unbox().is_empty(),
+            Dict(v) => !v.unbox().dict.is_empty(),
             Heap(v) => !v.unbox().heap.is_empty(),
             Vector(v) => v.unbox().is_empty(),
             Function(_) | PartialFunction(_) | NativeFunction(_) | PartialNativeFunction(_, _) | Closure(_) => true,
@@ -206,7 +206,7 @@ impl Value {
             Str(it) => Ok(it.len()),
             List(it) => Ok(it.unbox().len()),
             Set(it) => Ok(it.unbox().len()),
-            Dict(it) => Ok(it.unbox().len()),
+            Dict(it) => Ok(it.unbox().dict.len()),
             Heap(it) => Ok(it.unbox().heap.len()),
             Vector(it) => Ok(it.unbox().len()),
             _ => TypeErrorArgMustBeIterable(self.clone()).err()
@@ -365,28 +365,40 @@ impl Hash for ClosureImpl {
 }
 
 
+/// Boxes a `LinkedHashMap<Value, Value>`, along with an optional default value
+#[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Clone, Hash)]
+pub struct DictImpl {
+    pub dict: LinkedHashMap<Value, Value>,
+    pub default: Option<Value>
+}
+
+impl DictImpl {
+    fn new(dict: LinkedHashMap<Value, Value>) -> DictImpl { DictImpl { dict, default: None }}
+}
+
+
 /// As `BinaryHeap` is missing `Eq`, `PartialEq`, and `Hash` implementations
 /// We also wrap values in `Reverse` as we want to expose a min-heap by default
 #[derive(Debug, Clone)]
-pub struct ValueHeap {
+pub struct HeapImpl {
     pub heap: BinaryHeap<Reverse<Value>>
 }
 
-impl ValueHeap {
-    pub fn new(heap: BinaryHeap<Reverse<Value>>) -> ValueHeap {
-        ValueHeap { heap }
+impl HeapImpl {
+    pub fn new(heap: BinaryHeap<Reverse<Value>>) -> HeapImpl {
+        HeapImpl { heap }
     }
 }
 
-impl PartialEq<Self> for ValueHeap {
+impl PartialEq<Self> for HeapImpl {
     fn eq(&self, other: &Self) -> bool {
         self.heap.len() == other.heap.len() && self.heap.iter().zip(other.heap.iter()).all(|(x, y)| x == y)
     }
 }
 
-impl Eq for ValueHeap {}
+impl Eq for HeapImpl {}
 
-impl Hash for ValueHeap {
+impl Hash for HeapImpl {
     fn hash<H: Hasher>(&self, state: &mut H) {
         for v in &self.heap {
             v.hash(state)
@@ -437,8 +449,8 @@ pub enum ValueIntoIter<'a> {
     Str(Vec<Value>),
     List(Ref<'a, VecDeque<Value>>),
     Set(Ref<'a, LinkedHashSet<Value>>),
-    Dict(Ref<'a, LinkedHashMap<Value, Value>>),
-    Heap(Ref<'a, ValueHeap>),
+    Dict(Ref<'a, DictImpl>),
+    Heap(Ref<'a, HeapImpl>),
     Vector(Ref<'a, Vec<Value>>),
 }
 
@@ -451,7 +463,7 @@ impl<'b: 'a, 'a> IntoIterator for &'b ValueIntoIter<'a> {
             ValueIntoIter::Str(it) => ValueIter::Str(it.into_iter()),
             ValueIntoIter::List(it) => ValueIter::List(it.iter()),
             ValueIntoIter::Set(it) => ValueIter::Set(it.iter()),
-            ValueIntoIter::Dict(it) => ValueIter::Dict(it.keys()),
+            ValueIntoIter::Dict(it) => ValueIter::Dict(it.dict.keys()),
             ValueIntoIter::Heap(it) => ValueIter::Heap(it.heap.iter()),
             ValueIntoIter::Vector(it) => ValueIter::Vector(it.iter()),
         }
