@@ -203,7 +203,7 @@ impl Value {
 
     pub fn len(self: &Self) -> Result<usize, Box<RuntimeError>> {
         match &self {
-            Str(it) => Ok(it.len()),
+            Str(it) => Ok(it.chars().count()),
             List(it) => Ok(it.unbox().len()),
             Set(it) => Ok(it.unbox().len()),
             Dict(it) => Ok(it.unbox().dict.len()),
