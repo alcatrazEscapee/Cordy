@@ -70,7 +70,7 @@ Below is a solution to [Advent of Code 2022 Day 1 Part 1](https://adventofcode.c
 Or the same solution, written in a different style, with the same language:
 
 ```java
-let inp = read_text('../aoc_inputs/2022_01_01.txt')
+let inp = read_text('input.txt')
 let answer = 0
 for group in inp.split('\n\n') {
     let elf = 0
@@ -82,6 +82,8 @@ for group in inp.split('\n\n') {
 print(answer)
 
 ```
+
+For a more comprehensive documentation, see the [language documentation](./docs/language.md) or the [standard library](./docs/stdlib.md).
 
 
 ### To-Do
