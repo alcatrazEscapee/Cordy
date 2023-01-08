@@ -916,6 +916,7 @@ mod test {
     #[test] fn test_builtin_reduce() { run_str("[1, 2, 3, 4, 5, 6] . reduce (*) . print", "720\n"); }
     #[test] fn test_builtin_reduce_lambda() { run_str("[1, 2, 3, 4, 5, 6] . reduce (fn(a, b) -> a * b) . print", "720\n"); }
     #[test] fn test_builtin_reduce_with_builtin() { run_str("[1, 2, 3, 4, 5, 6] . reduce (sum) . print", "21\n"); }
+    #[test] fn test_builtin_reduce_with_empty() { run_str("[] . reduce(+) . print", "ValueError: Expected value to be a non empty iterable\n    at: `[] . reduce(+) . print` (line 1)\n    at: execution of script '<test>'\n"); }
     #[test] fn test_builtin_sorted() { run_str("[6, 2, 3, 7, 2, 1] . sorted . print", "[1, 2, 2, 3, 6, 7]\n"); }
     #[test] fn test_builtin_reversed() { run_str("[8, 1, 2, 6, 3, 2, 3] . reversed . print", "[3, 2, 3, 6, 2, 1, 8]\n"); }
     #[test] fn test_bare_operator_eval() { run_str("(+)(1, 2) . print", "3\n"); }
