@@ -94,6 +94,5 @@ print(answer)
 - Even MORE standard library functions
   - Sort by key/comparator
   - Methods for interacting with dicts
-- `in` operator
 - Improved non-java-like-closures, that allow assignment to the target variable.
   - `ref` to make reference variables, which closure-captured variables promote to automatically? Basically a `Mut<Value>`

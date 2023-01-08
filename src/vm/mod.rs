@@ -1044,6 +1044,14 @@ mod test {
     #[test] fn test_dict_get_and_set() { run_str("let d = dict() ; d['hi'] = 'yes' ; d['hi'] . print", "yes\n"); }
     #[test] fn test_dict_get_when_not_present() { run_str("let d = dict() ; d['hello']", "ValueError: Key 'hello' of type 'str' not found in dictionary\n    at: `let d = dict() ; d['hello']` (line 1)\n    at: execution of script '<test>'\n"); }
     #[test] fn test_dict_get_when_not_present_with_default() { run_str("let d = dict() . default('haha') ; d['hello'] . print", "haha\n"); }
+    #[test] fn test_flat_map_identity() { run_str("['hi', 'bob'] . flat_map(fn(i) -> i) . print", "['h', 'i', 'b', 'o', 'b']\n"); }
+    #[test] fn test_flat_map_with_func() { run_str("['hello', 'bob'] . flat_map(fn(i) -> i[2:]) . print", "['l', 'l', 'o', 'b']\n"); }
+    #[test] fn test_concat() { run_str("[[], [1], [2, 3], [4, 5, 6], [7, 8, 9, 0]] . concat . print", "[1, 2, 3, 4, 5, 6, 7, 8, 9, 0]\n"); }
+    #[test] fn test_zip() { run_str("zip([1, 2, 3, 4, 5], 'hello') . print", "[(1, 'h'), (2, 'e'), (3, 'l'), (4, 'l'), (5, 'o')]\n"); }
+    #[test] fn test_zip_with_empty() { run_str("zip('hello', []) . print", "[]\n"); }
+    #[test] fn test_zip_with_longer_last() { run_str("zip('hi', 'hello', 'hello the world!') . print", "[('h', 'h', 'h'), ('i', 'e', 'e')]\n"); }
+    #[test] fn test_zip_with_longer_first() { run_str("zip('hello the world!', 'hello', 'hi') . print", "[('h', 'h', 'h'), ('e', 'e', 'i')]\n"); }
+    #[test] fn test_zip_of_list() { run_str("[[1, 2, 3], [4, 5, 6], [7, 8, 9]] . zip . print", "[(1, 4, 7), (2, 5, 8), (3, 6, 9)]\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }

@@ -114,6 +114,9 @@ pub enum StdBinding {
     Max,
     Map,
     Filter,
+    FlatMap,
+    Concat, // Native optimized version of flatMap(fn(x) -> x)
+    Zip,
     Reduce,
     Sorted,
     Reversed,
@@ -128,6 +131,8 @@ pub enum StdBinding {
     Remove, // Remove by key (or index)
     Merge, // Merges two collections (append right onto left)
     Default, // For a `Dict`, sets the default value
+    Keys, // `Dict.keys` -> returns a set of all keys
+    Values, // `Dict.values` -> returns a list of all values
 
     // lib_math
     Abs,
@@ -212,6 +217,9 @@ fn load_bindings() -> Vec<StdBindingInfo> {
         of!(Enumerate, "enumerate"),
         of!(Map, "map"),
         of!(Filter, "filter"),
+        of!(FlatMap, "flat_map"),
+        of!(Concat, "concat"),
+        of!(Zip, "zip"),
         of!(Reduce, "reduce"),
         of!(Sorted, "sorted"),
         of!(Reversed, "reversed"),
@@ -223,6 +231,8 @@ fn load_bindings() -> Vec<StdBindingInfo> {
         of!(Tail, "tail"),
         of!(Init, "init"),
         of!(Default, "default"),
+        of!(Keys, "keys"),
+        of!(Values, "values"),
 
         of!(Abs, "abs"),
         of!(Sqrt, "sqrt"),
@@ -480,6 +490,9 @@ pub fn invoke<VM>(bound: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult wher
         Min => dispatch!(an, collections::min(an.into_iter()), Min),
         Map => dispatch!(a1, a2, collections::map(vm, a1, a2)),
         Filter => dispatch!(a1, a2, collections::filter(vm, a1, a2)),
+        FlatMap => dispatch!(a1, a2, collections::flat_map(vm, Some(a1), a2)),
+        Concat => dispatch!(a1, collections::flat_map(vm, None, a1)),
+        Zip => dispatch!(an, collections::zip(an.into_iter()), Zip),
         Reduce => dispatch!(a1, a2, collections::reduce(vm, a1, a2)),
         Sorted => dispatch!(an, collections::sorted(an.into_iter()), Sorted),
         Reversed => dispatch!(an, collections::reversed(an.into_iter()), Reversed),

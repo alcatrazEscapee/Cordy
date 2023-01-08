@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use hashlink::LinkedHashMap;
 
 use crate::vm::error::RuntimeError;
-use crate::vm::value::{Mut, Value};
+use crate::vm::value::{Mut, Value, ValueIntoIter};
 use crate::vm::VirtualInterface;
 
 use RuntimeError::{*};
@@ -193,6 +193,68 @@ pub fn filter<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : V
         },
         (_, Err(e)) => Err(e),
     }
+}
+
+pub fn flat_map<VM>(vm: &mut VM, a1: Option<Value>, a2: Value) -> ValueResult where VM : VirtualInterface {
+    let len: usize = a2.len().unwrap_or(0);
+    match (a1, a2.as_iter()) {
+        (l, Ok(rs)) => {
+            let rs = (&rs).into_iter();
+            let mut acc: VecDeque<Value> = VecDeque::with_capacity(len);
+            for r in rs {
+                let elem = if let Some(l) = &l {
+                    vm.push(l.clone());
+                    vm.push(r.clone());
+                    let f = vm.invoke_func_eval(1)?;
+                    vm.run_after_invoke(f)?;
+                    vm.pop()
+                } else {
+                    r.clone()
+                };
+                for e in elem.as_iter()?.into_iter() {
+                    acc.push_back(e.clone());
+                }
+            }
+            Ok(Value::list(acc))
+        },
+        (_, Err(e)) => Err(e),
+    }
+}
+
+pub fn zip<'a>(a1: impl Iterator<Item=&'a Value>) -> ValueResult {
+    // This is convoluted due to rust borrow semantics
+    // We cannot zip a vector of iterators, rust doesn't support anything of the sort
+    // And due to `Value`'s annoying `into_iter()` only functioning for `&'b ValueIntoIter`, it does not work properly if we were to do something like the following
+    // https://play.rust-lang.org/?version=stable&mode=debug&edition=2021&gist=90c1cc7997177df305f549da39a9aaef
+    let iters = a1
+        .map(|v| v.as_iter())
+        .collect::<Result<Vec<ValueIntoIter>, Box<RuntimeError>>>()?;
+    let len: usize = iters.len();
+    let mut iters = iters.iter();
+    let mut acc: VecDeque<Vec<Value>> = iters.next()
+        .unwrap()
+        .into_iter()
+        .map(|u| {
+            let mut v = Vec::with_capacity(len);
+            v.push(u.clone());
+            v
+        })
+        .collect::<VecDeque<Vec<Value>>>();
+    let mut min_len: usize = acc.len();
+    for iter in iters {
+        let mut i: usize = 0;
+        for it in iter.into_iter() {
+            if i >= min_len {
+                break
+            }
+            acc[i].push(it.clone());
+            i += 1;
+        }
+        if i < min_len {
+            min_len = i;
+        }
+    }
+    Ok(Value::iter_list(acc.into_iter().take(min_len).map(|u| Value::vector(u))))
 }
 
 pub fn reduce<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : VirtualInterface {
