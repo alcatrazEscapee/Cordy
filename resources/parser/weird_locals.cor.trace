@@ -1,5 +1,5 @@
 L1: 0000 Pop
-L2: 0001 Int(0) -> 3
+L2: 0001 Int(2) -> 3
     0002 IncGlobalCount
 L4: 0003 PushGlobal(0, false) -> y
     0004 Pop

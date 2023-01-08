@@ -56,6 +56,8 @@ pub enum ParserErrorType {
     ExpectedExpressionTerminal(Option<ScanToken>),
     ExpectedCommaOrEndOfArguments(Option<ScanToken>),
     ExpectedCommaOrEndOfList(Option<ScanToken>),
+    ExpectedCommaOrEndOfDict(Option<ScanToken>),
+    ExpectedCommaOrEndOfSet(Option<ScanToken>),
     ExpectedColonOrEndOfSlice(Option<ScanToken>),
     ExpectedStatement(Option<ScanToken>),
     ExpectedVariableNameAfterLet(Option<ScanToken>),
@@ -402,6 +404,10 @@ impl Pattern {
 // ===== Main Parser Implementation ===== //
 
 
+const CONSTANT_0: u16 = 0;
+const CONSTANT_1: u16 = 1;
+
+
 impl Parser {
 
     fn new(tokens: Vec<ScanToken>) -> Parser {
@@ -426,8 +432,9 @@ impl Parser {
             scope_depth: 0,
             function_depth: 0,
 
-            strings: Vec::new(),
-            constants: Vec::new(),
+            // Programs always have constants for '', 0 and 1, as they're common and referenced a lot.
+            strings: vec![String::new()],
+            constants: vec![0, 1],
             functions: Vec::new(),
         }
     }
@@ -903,8 +910,7 @@ impl Parser {
         // Single argument `range()`, so we set push 0 for `local_x`, and then use simple increment (+1) and less than (< local_stop)
         // We need to swap the `stop` value and initial value for `local_x`, which will be the result of the expression
         self.advance(); // Consume `)`
-        let constant_0 = self.declare_constant(0);
-        self.push(Opcode::Int(constant_0)); // Initial value for `local_x`
+        self.push(Opcode::Int(CONSTANT_0)); // Initial value for `local_x`
         self.push(Swap);
 
         // Initialize the loop variable, as we're now in the main block and it can be referenced
@@ -922,9 +928,8 @@ impl Parser {
         self.push_delayed_pop();
 
         // Increment and jump to head
-        let constant_1 = self.declare_constant(1);
         self.push_load_local(local_x);
-        self.push(Opcode::Int(constant_1));
+        self.push(Opcode::Int(CONSTANT_1));
         self.push(OpAdd);
         self.push_store_local(local_x);
         self.push(Opcode::Pop);
@@ -957,9 +962,8 @@ impl Parser {
         self.push_delayed_pop();
 
         // Increment and jump to head
-        let constant_1 = self.declare_constant(1);
         self.push_load_local(local_x);
-        self.push(Opcode::Int(constant_1));
+        self.push(Opcode::Int(CONSTANT_1));
         self.push(OpAdd);
         self.push_store_local(local_x);
         self.push(Opcode::Pop);
@@ -980,11 +984,10 @@ impl Parser {
         // Two more locals
         let local_step = self.declare_synthetic_local();
         let local_step_is_positive = self.declare_synthetic_local();
-        let constant_0 = self.declare_constant(0);
 
         self.push(CheckNonZero); // Assert step is nonzero
         self.push(Dup);
-        self.push(Opcode::Int(constant_0));
+        self.push(Opcode::Int(CONSTANT_0));
         self.push(OpGreaterThan); // initialize local step_is_positive with (step > 0)
 
         // Initialize the loop variable, as we're now in the main block and it can be referenced
@@ -1045,8 +1048,7 @@ impl Parser {
         self.push(OpFuncEval(1));
 
         // Push the loop index
-        let constant_0 = self.declare_constant(0);
-        self.push(Opcode::Int(constant_0));
+        self.push(Opcode::Int(CONSTANT_0));
 
         // Bounds check and branch
         let jump: u16 = self.next_opcode();
@@ -1069,8 +1071,7 @@ impl Parser {
 
         // Increment and jump to head
         self.push_load_local(local_i);
-        let constant_1 = self.declare_constant(1);
-        self.push(Opcode::Int(constant_1));
+        self.push(Opcode::Int(CONSTANT_1));
         self.push(OpAdd);
         self.push_store_local(local_i);
         self.push(Opcode::Pop);
@@ -1395,34 +1396,10 @@ impl Parser {
                     self.expect(CloseParen);
                 }
             },
-            Some(OpenSquareBracket) => {
-                self.advance();
-                let mut length: i64 = 0;
-                loop {
-                    match self.peek() {
-                        Some(CloseSquareBracket) => break,
-                        Some(_) => {
-                            self.parse_expression();
-                            length += 1;
-                            match self.peek() {
-                                Some(Comma) => self.skip(), // Allow trailing commas, as this loops to the top again
-                                Some(CloseSquareBracket) => {}, // Skip
-                                _ => self.error_with(|t| ExpectedCommaOrEndOfList(t)),
-                            }
-                        },
-                        None => break,
-                    }
-                }
-                let length: u16 = self.declare_constant(length);
-                self.push(Opcode::List(length));
-                self.expect(CloseSquareBracket);
-            },
-            Some(KeywordFn) => {
-                self.parse_expression_function();
-            },
-            Some(KeywordIf) => {
-                self.parse_expr_1_inline_if_then_else();
-            }
+            Some(OpenSquareBracket) => self.parse_expr_1_list_literal(),
+            Some(OpenBrace) => self.parse_expr_1_dict_or_set_literal(),
+            Some(KeywordFn) => self.parse_expression_function(),
+            Some(KeywordIf) => self.parse_expr_1_inline_if_then_else(),
             _ => self.error_with(|t| ExpectedExpressionTerminal(t)),
         }
     }
@@ -1498,6 +1475,90 @@ impl Parser {
         } else {
             false
         }
+    }
+
+    fn parse_expr_1_list_literal(self: &mut Self) {
+        trace::trace_interpreter!("rule <expr-1-list-literal>");
+        self.advance(); // Consume `[`
+        let mut length: i64 = 0;
+        loop {
+            match self.peek() {
+                Some(CloseSquareBracket) => break,
+                Some(_) => {
+                    self.parse_expression();
+                    length += 1;
+                    match self.peek() {
+                        Some(Comma) => self.skip(), // Allow trailing commas, as this loops to the top again
+                        Some(CloseSquareBracket) => {}, // Skip
+                        _ => self.error_with(|t| ExpectedCommaOrEndOfList(t)),
+                    }
+                },
+                None => break,
+            }
+        }
+        let length: u16 = self.declare_constant(length);
+        self.push(Opcode::List(length));
+        self.expect(CloseSquareBracket);
+    }
+
+    fn parse_expr_1_dict_or_set_literal(self: &mut Self) {
+        trace::trace_interpreter!("rule <expr-1-dict-or-set-literal>");
+        self.advance(); // Consume `{`
+
+        // As dict and set literals both start the same, we initially parse empty `{}` as a empty dict, and use the first argument to determine if it is a dict or set
+        match self.peek() {
+            Some(CloseBrace) => {
+                // Just `{}` is a empty dict, not a set
+                self.advance();
+                self.push(Opcode::Dict(0));
+                return
+            },
+            _ => {}, // Otherwise, continue parsing to determine if it is a dict or set
+        }
+
+        self.parse_expression();
+        let is_dict: bool = match self.peek() {
+            Some(Colon) => {
+                // Found `{ <expr> `:`, so it must be a dict. Parse the first value, then continue as such
+                self.advance();
+                self.parse_expression();
+                true
+            },
+            _ => false,
+        };
+
+        match self.peek() {
+            Some(Comma) => self.skip(), // Skip a comma, so we're either at end or next value to get into the loop below
+            _ => {},
+        }
+
+        let mut length: i64 = 1;
+        loop {
+            match self.peek() {
+                Some(CloseBrace) => break,
+                Some(_) => {
+                    self.parse_expression();
+                    if is_dict {
+                        self.expect(Colon);
+                        self.parse_expression();
+                    }
+                    length += 1;
+                    match self.peek() {
+                        Some(Comma) => self.skip(), // Allow trailing commas, as this loops to the top again
+                        Some(CloseBrace) => {}, // Skip
+                        _ => if is_dict {
+                            self.error_with(|t| ExpectedCommaOrEndOfDict(t))
+                        } else {
+                            self.error_with(|t| ExpectedCommaOrEndOfSet(t))
+                        },
+                    }
+                },
+                None => break,
+            }
+        }
+        let length: u16 = self.declare_constant(length);
+        self.push(if is_dict { Opcode::Dict(length) } else { Opcode::Set(length) });
+        self.expect(CloseBrace);
     }
 
     fn parse_expr_1_inline_if_then_else(self: &mut Self) {
@@ -2422,7 +2483,7 @@ mod tests {
 
     #[test] fn test_empty_expr() { run_expr("", vec![]); }
     #[test] fn test_int() { run_expr("123", vec![Int(123)]); }
-    #[test] fn test_str() { run_expr("'abc'", vec![Str(0)]); }
+    #[test] fn test_str() { run_expr("'abc'", vec![Str(1)]); }
     #[test] fn test_unary_minus() { run_expr("-3", vec![Int(3), UnarySub]); }
     #[test] fn test_binary_mul() { run_expr("3 * 6", vec![Int(3), Int(6), OpMul]); }
     #[test] fn test_binary_div() { run_expr("20 / 4 / 5", vec![Int(20), Int(4), OpDiv, Int(5), OpDiv]); }
@@ -2450,7 +2511,7 @@ mod tests {
     #[test] fn test_function_call_binary_op_precedence() { run_expr("print ( 1 ) + ( 2 ( 3 ) )", vec![NativeFunction(Print), Int(1), OpFuncEval(1), Int(2), Int(3), OpFuncEval(1), OpAdd]); }
     #[test] fn test_function_call_parens_1() { run_expr("print . read (1 + 3) (5)", vec![NativeFunction(Print), NativeFunction(Read), Int(1), Int(3), OpAdd, OpFuncEval(1), Int(5), OpFuncEval(1), Swap, OpFuncEval(1)]); }
     #[test] fn test_function_call_parens_2() { run_expr("( print . read (1 + 3) ) (5)", vec![NativeFunction(Print), NativeFunction(Read), Int(1), Int(3), OpAdd, OpFuncEval(1), Swap, OpFuncEval(1), Int(5), OpFuncEval(1)]); }
-    #[test] fn test_function_composition_with_is() { run_expr("'123' . int is int . print", vec![Str(0), NativeFunction(StdBinding::Int), NativeFunction(StdBinding::Int), OpIs, Swap, OpFuncEval(1), NativeFunction(Print), Swap, OpFuncEval(1)]); }
+    #[test] fn test_function_composition_with_is() { run_expr("'123' . int is int . print", vec![Str(1), NativeFunction(StdBinding::Int), NativeFunction(StdBinding::Int), OpIs, Swap, OpFuncEval(1), NativeFunction(Print), Swap, OpFuncEval(1)]); }
     #[test] fn test_and() { run_expr("1 < 2 and 3 < 4", vec![Int(1), Int(2), OpLessThan, JumpIfFalse(8), Pop, Int(3), Int(4), OpLessThan]); }
     #[test] fn test_or() { run_expr("1 < 2 or 3 < 4", vec![Int(1), Int(2), OpLessThan, JumpIfTrue(8), Pop, Int(3), Int(4), OpLessThan]); }
     #[test] fn test_precedence_1() { run_expr("1 . 2 & 3 > 4", vec![Int(1), Int(2), Int(3), OpBitwiseAnd, Swap, OpFuncEval(1), Int(4), OpGreaterThan]); }

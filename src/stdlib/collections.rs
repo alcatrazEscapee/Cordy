@@ -1,6 +1,6 @@
 use std::cmp::Reverse;
 use std::collections::VecDeque;
-use hashlink::LinkedHashMap;
+use itertools::Itertools;
 
 use crate::vm::error::RuntimeError;
 use crate::vm::value::{Mut, Value, ValueIntoIter};
@@ -152,6 +152,22 @@ pub fn sorted<'a>(args: impl Iterator<Item=&'a Value>) -> ValueResult {
 
 pub fn reversed<'a>(args: impl DoubleEndedIterator<Item=&'a Value>) -> ValueResult {
     Ok(Value::iter_list(args.rev().cloned()))
+}
+
+pub fn permutations(a1: Value, a2: Value) -> ValueResult {
+    let n = a1.as_int()?;
+    if n <= 0 {
+        return ValueErrorValueMustBeNonNegative(n).err();
+    }
+    Ok(Value::iter_list(a2.as_iter()?.into_iter().cloned().permutations(n as usize).map(|u| Value::vector(u))))
+}
+
+pub fn combinations(a1: Value, a2: Value) -> ValueResult {
+    let n = a1.as_int()?;
+    if n <= 0 {
+        return ValueErrorValueMustBeNonNegative(n).err();
+    }
+    Ok(Value::iter_list(a2.as_iter()?.into_iter().cloned().combinations(n as usize).map(|u| Value::vector(u))))
 }
 
 
@@ -346,23 +362,36 @@ pub fn tail(a1: Value) -> ValueResult {
 }
 
 pub fn collect_into_dict(iter: impl Iterator<Item=Value>) -> ValueResult {
-    Ok(Value::dict(iter.map(|t| {
+    Ok(Value::iter_dict(iter.map(|t| {
         let index = t.to_index()?;
         if index.len() == 2 {
             Ok((index.get_index(0), index.get_index(1)))
         } else {
             ValueErrorCannotCollectIntoDict(t.clone()).err()
         }
-    }).collect::<Result<Vec<(Value, Value)>, Box<RuntimeError>>>()?
-        .into_iter()
-        .collect::<LinkedHashMap<Value, Value>>()))
+    }).collect::<Result<Vec<(Value, Value)>, Box<RuntimeError>>>()?.into_iter()))
 }
 
 pub fn dict_set_default(a1: Value, a2: Value) -> ValueResult {
-    if let Dict(it) = a2 {
-        it.unbox_mut().default = Some(a1);
-        Ok(Dict(it))
-    } else {
-        TypeErrorArgMustBeDict(a2).err()
+    match a2 {
+        Dict(it) => {
+            it.unbox_mut().default = Some(a1);
+            Ok(Dict(it))
+        },
+        a2 => TypeErrorArgMustBeDict(a2).err()
+    }
+}
+
+pub fn dict_keys(a1: Value) -> ValueResult {
+    match a1 {
+        Dict(it) => Ok(Value::iter_set(it.unbox().dict.keys().cloned())),
+        a1 => TypeErrorArgMustBeDict(a1).err()
+    }
+}
+
+pub fn dict_values(a1: Value) -> ValueResult {
+    match a1 {
+        Dict(it) => Ok(Value::iter_list(it.unbox().dict.values().cloned())),
+        a1 => TypeErrorArgMustBeDict(a1).err()
     }
 }

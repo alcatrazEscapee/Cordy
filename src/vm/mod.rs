@@ -1,5 +1,6 @@
 use std::io::{BufRead, Write};
 use std::rc::Rc;
+use itertools::Itertools;
 use error::{DetailRuntimeError, RuntimeError};
 
 use crate::{stdlib, trace};
@@ -390,15 +391,39 @@ impl<R, W> VirtualMachine<R, W> where
                 self.push(Value::NativeFunction(b));
             },
             List(cid) => {
-                trace::trace_interpreter!("push [n={}]", cid);
                 // List values are present on the stack in-order
                 // So we need to splice the last n values of the stack into it's own list
                 let cid: usize = cid as usize;
                 let length: usize = self.constants[cid] as usize;
+                trace::trace_interpreter!("push list n={}", length);
                 let start: usize = self.stack.len() - length;
                 let end: usize = self.stack.len();
-                trace::trace_interpreter_stack!("stack splice {}..{} into [...]", start, end);
+                trace::trace_interpreter_stack!("stack splice {}..{} into list", start, end);
                 let list: Value = Value::iter_list(self.stack.splice(start..end, std::iter::empty()));
+                self.push(list);
+            },
+            Set(cid) => {
+                // Set values are present on the stack in-order
+                // So we need to splice the last n values of the stack into it's own set
+                let cid: usize = cid as usize;
+                let length: usize = self.constants[cid] as usize;
+                trace::trace_interpreter!("push set n={}", length);
+                let start: usize = self.stack.len() - length;
+                let end: usize = self.stack.len();
+                trace::trace_interpreter_stack!("stack splice {}..{} into set", start, end);
+                let list: Value = Value::iter_set(self.stack.splice(start..end, std::iter::empty()));
+                self.push(list);
+            },
+            Dict(cid) => {
+                // Dict values are present on the stack in-order, in flat key-value order.
+                // So we need to splice the last n*2 values of the stack into it's own dict.
+                let cid: usize = cid as usize;
+                let length: usize = (self.constants[cid] as usize) * 2;
+                trace::trace_interpreter!("push set n={}", length);
+                let start: usize = self.stack.len() - length;
+                let end: usize = self.stack.len();
+                trace::trace_interpreter_stack!("stack splice {}..{} into dict", start, end);
+                let list: Value = Value::iter_dict(self.stack.splice(start..end, std::iter::empty()).tuples());
                 self.push(list);
             },
 
@@ -1053,6 +1078,19 @@ mod test {
     #[test] fn test_zip_with_longer_last() { run_str("zip('hi', 'hello', 'hello the world!') . print", "[('h', 'h', 'h'), ('i', 'e', 'e')]\n"); }
     #[test] fn test_zip_with_longer_first() { run_str("zip('hello the world!', 'hello', 'hi') . print", "[('h', 'h', 'h'), ('e', 'e', 'i')]\n"); }
     #[test] fn test_zip_of_list() { run_str("[[1, 2, 3], [4, 5, 6], [7, 8, 9]] . zip . print", "[(1, 4, 7), (2, 5, 8), (3, 6, 9)]\n"); }
+    #[test] fn test_dict_keys() { run_str("[[1, 'a'], [2, 'b'], [3, 'c']] . dict . keys . print", "{1, 2, 3}\n"); }
+    #[test] fn test_dict_values() { run_str("[[1, 'a'], [2, 'b'], [3, 'c']] . dict . values . print", "['a', 'b', 'c']\n"); }
+    #[test] fn test_empty_literal_is_dict() { run_str("let _ = {} is dict . print", "true\n"); }
+    #[test] fn test_dict_literal_singleton() { run_str("let _ = {'hello': 'world'} . print", "{'hello': 'world'}\n"); }
+    #[test] fn test_set_literal_singleton() { run_str("let _ = {'hello'} . print", "{'hello'}\n"); }
+    #[test] fn test_dict_literal_multiple() { run_str("let _ = {1: 'a', 2: 'b', 3: 'c'} . print", "{1: 'a', 2: 'b', 3: 'c'}\n"); }
+    #[test] fn test_set_literal_multiple() { run_str("let _ = {1, 2, 3, 4} . print", "{1, 2, 3, 4}\n"); }
+    #[test] fn test_permutations_empty() { run_str("[] . permutations(3) . print", "[]\n"); }
+    #[test] fn test_permutations_n_larger_than_size() { run_str("[1, 2, 3] . permutations(5) . print", "[]\n"); }
+    #[test] fn test_permutations() { run_str("[1, 2, 3] . permutations(2) . print", "[(1, 2), (1, 3), (2, 1), (2, 3), (3, 1), (3, 2)]\n"); }
+    #[test] fn test_combinations_empty() { run_str("[] . combinations(3) . print", "[]\n"); }
+    #[test] fn test_combinations_n_larger_than_size() { run_str("[1, 2, 3] . combinations(5) . print", "[]\n"); }
+    #[test] fn test_combinations() { run_str("[1, 2, 3] . combinations(2) . print", "[(1, 2), (1, 3), (2, 3)]\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }

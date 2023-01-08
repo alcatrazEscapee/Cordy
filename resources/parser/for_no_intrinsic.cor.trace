@@ -1,5 +1,5 @@
 L1: 0000 Nil
-    0001 Str(0) -> "abcdef"
+    0001 Str(1) -> "abcdef"
     0002 Dup
     0003 NativeFunction(List)
     0004 OpIs

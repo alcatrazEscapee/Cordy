@@ -6,12 +6,12 @@ L3: 0004 Nil
     0005 Nil
     0006 IncGlobalCount
     0007 IncGlobalCount
-L4: 0008 Int(0) -> 3
+L4: 0008 Int(2) -> 3
     0009 IncGlobalCount
 L5: 0010 Nil
     0011 IncGlobalCount
-L6: 0012 Int(1) -> 6
-    0013 Int(2) -> 5
+L6: 0012 Int(3) -> 6
+    0013 Int(4) -> 5
     0014 OpAdd
     0015 IncGlobalCount
 L7: 0016 Nil

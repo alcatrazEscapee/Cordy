@@ -1,7 +1,7 @@
 L1: 0000 IncGlobalCount
     0001 Function(0) -> FunctionImpl { head: 3, tail: 7, nargs: 3, name: "foo", args: ["a", "b", "c"] }
     0002 Jump(8)
-L2: 0003 Str(0) -> "world"
+L2: 0003 Str(1) -> "world"
     0004 NativeFunction(Print)
     0005 Swap
     0006 OpFuncEval(1)

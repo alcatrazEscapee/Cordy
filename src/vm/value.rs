@@ -47,10 +47,11 @@ pub enum Value {
 impl Value {
 
     // Constructors
-    pub fn iter_list(vec: impl Iterator<Item=Value>) -> Value { Value::list(vec.collect()) }
-    pub fn iter_set(vec: impl Iterator<Item=Value>) -> Value { Value::set(vec.collect()) }
-    pub fn iter_heap(vec: impl Iterator<Item=Value>) -> Value { Heap(Mut::new(HeapImpl::new(vec.map(|t| Reverse(t)).collect::<BinaryHeap<Reverse<Value>>>()))) }
-    pub fn iter_vector(vec: impl Iterator<Item=Value>) -> Value { Value::vector(vec.collect()) }
+    pub fn iter_list(iter: impl Iterator<Item=Value>) -> Value { Value::list(iter.collect()) }
+    pub fn iter_set(iter: impl Iterator<Item=Value>) -> Value { Value::set(iter.collect()) }
+    pub fn iter_dict(iter: impl Iterator<Item=(Value, Value)>) -> Value { Value::dict(iter.collect()) }
+    pub fn iter_heap(iter: impl Iterator<Item=Value>) -> Value { Heap(Mut::new(HeapImpl::new(iter.map(|t| Reverse(t)).collect::<BinaryHeap<Reverse<Value>>>()))) }
+    pub fn iter_vector(iter: impl Iterator<Item=Value>) -> Value { Value::vector(iter.collect()) }
 
     pub fn str(c: char) -> Value { Str(Box::new(String::from(c))) }
     pub fn list(vec: VecDeque<Value>) -> Value { List(Mut::new(vec.into_iter().collect::<VecDeque<Value>>())) }

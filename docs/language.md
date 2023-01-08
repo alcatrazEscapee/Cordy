@@ -57,7 +57,7 @@ All operators are left associative (except `=` for assigning variables). Their p
 
 ### Variables
 
-Variables must be declared with `let`. They can optionally be 
+Variables must be declared with `let`. They can optionally be followed by a initialization.
 
 ```
 // A variable declaration, it is initialized to `nil`
@@ -244,7 +244,7 @@ In addition to primitive types, Cordy supports a number of mutable collection ty
   - List literals can be declared with `[` square `]` brackets.
   - Lists can be accessed using array syntax, i.e. `my_list[1]`
   - Negative indexes wrap to the end of the list, i.e. `my_list[-1]` is the last element in the list
-  - Lists (and strings) can also be sliced via `list[start:stop:step], using Python-like slicing mechanics, i.e. `my_list[2:]` takes everything after the first two elements.
+  - Lists (and strings) can also be sliced via `list[start:stop:step]`, using Python-like slicing mechanics, i.e. `my_list[2:]` takes everything after the first two elements.
 
 ```
 let my_list = [1, 2, 3, 4]

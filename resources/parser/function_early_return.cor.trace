@@ -19,7 +19,7 @@ L07: 0015 Nil
 L08: 0018 Pop
      0019 Nil
      0020 JumpIfFalsePop(25)
-L09: 0021 Int(0) -> 123
+L09: 0021 Int(2) -> 123
      0022 Return
 L10: 0023 Nil
      0024 Jump(26)

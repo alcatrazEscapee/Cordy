@@ -1,9 +1,9 @@
-L1: 0000 Int(0) -> 1
-    0001 Int(1) -> 10
-    0002 Int(2) -> 3
+L1: 0000 Int(1) -> 1
+    0001 Int(2) -> 10
+    0002 Int(3) -> 3
     0003 CheckNonZero
     0004 Dup
-    0005 Int(3) -> 0
+    0005 Int(0) -> 0
     0006 OpGreaterThan
     0007 PushGlobal(0, true) -> i
     0008 PushGlobal(1, true) -> $0
