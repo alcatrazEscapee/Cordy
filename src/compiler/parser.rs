@@ -113,12 +113,6 @@ struct Parser {
     strings: Vec<String>,
     constants: Vec<i64>,
     functions: Vec<FunctionImpl>,
-
-    /// Loop stack
-    /// Each frame represents a single loop, which `break` and `continue` statements refer to
-    /// `continue` jumps back to the beginning of the loop, aka the first `usize` (loop start)
-    /// `break` statements jump back to the end of the loop, which needs to be patched later. The values to be patched record themselves in the stack at the current loop level
-    loops: Vec<Loop>,
 }
 
 #[derive(Debug)]
@@ -128,11 +122,16 @@ struct Locals {
     locals: Vec<Local>,
     /// An array of captured upvalues for this function, either due to an inner function requiring them, or this function needing to capture locals from it's enclosing function
     upvalues: Vec<UpValue>,
+    /// Loop stack
+    /// Each frame represents a single loop, which `break` and `continue` statements refer to
+    /// `continue` jumps back to the beginning of the loop, aka the first `usize` (loop start)
+    /// `break` statements jump back to the end of the loop, which needs to be patched later. The values to be patched record themselves in the stack at the current loop level
+    loops: Vec<Loop>,
 }
 
 impl Locals {
     fn new() -> Locals {
-        Locals { locals: Vec::new(), upvalues: Vec::new() }
+        Locals { locals: Vec::new(), upvalues: Vec::new(), loops: Vec::new() }
     }
 }
 
@@ -243,7 +242,7 @@ impl VariableBinding {
     fn push_local_default_values(self: &Self, parser: &mut Parser) {
         match self {
             VariableBinding::Pattern(it) => it.emit_local_default_values(parser),
-            VariableBinding::Named(_) => parser.push(Opcode::Nil),
+            VariableBinding::Named(_) => parser.push(Nil),
             VariableBinding::Empty => {},
         }
     }
@@ -276,7 +275,7 @@ impl Pattern {
     fn emit_local_default_values(self: &Self, parser: &mut Parser) {
         match self {
             Pattern::TermEmpty | Pattern::TermVarEmpty => {},
-            Pattern::Term(_) | Pattern::TermVar(_) => parser.push(Opcode::Nil),
+            Pattern::Term(_) | Pattern::TermVar(_) => parser.push(Nil),
             Pattern::Terms(terms) => {
                 for term in terms {
                     term.emit_local_default_values(parser);
@@ -349,7 +348,7 @@ impl Pattern {
 
                     parser.push(Dup); // [it, it, ...]
                     parser.push(Opcode::Int(constant_low)); // [low, it, it, ...]
-                    parser.push(if index == 0 { Opcode::Nil } else { Opcode::Int(constant_high) }); // [high, low, it, it, ...]
+                    parser.push(if index == 0 { Nil } else { Opcode::Int(constant_high) }); // [high, low, it, it, ...]
                     parser.push(OpSlice); // [it[low:high], it, ...]
                     parser.push_store_local(*local); // stores it[low:high]
                     parser.push(Opcode::Pop); // [it, ...]
@@ -430,8 +429,6 @@ impl Parser {
             strings: Vec::new(),
             constants: Vec::new(),
             functions: Vec::new(),
-
-            loops: Vec::new(),
         }
     }
 
@@ -621,7 +618,7 @@ impl Parser {
                 self.parse_statements(); // So parse statements
                 if !self.delay_pop_from_expression_statement {
                     // If we haven't delayed a `Pop` (and there is a return value already on the stack), we need to push one
-                    self.push(Opcode::Nil);
+                    self.push(Nil);
                 }
                 true
             },
@@ -683,10 +680,10 @@ impl Parser {
         self.advance(); // Consume `return`
         match self.peek() {
             Some(CloseBrace) => { // Allow a bare return, but only when followed by a `}` or `;`, which we can recognize and discard properly.
-                 self.push(Opcode::Nil);
+                 self.push(Nil);
             },
             Some(Semicolon) => {
-                self.push(Opcode::Nil);
+                self.push(Nil);
                 self.advance();
             },
             _ => {
@@ -724,7 +721,7 @@ impl Parser {
         // But, if we didn't delay a `Pop`, we need to push a fake `Nil` onto the stack to maintain the stack size
         if !self.delay_pop_from_expression_statement {
             self.delay_pop_from_expression_statement = true;
-            self.push(Opcode::Nil);
+            self.push(Nil);
         }
 
         // `elif` can be de-sugared to else { if <expr> { ... } else { ... } }
@@ -751,7 +748,7 @@ impl Parser {
                 self.parse_block_statement();
                 if !self.delay_pop_from_expression_statement {
                     self.delay_pop_from_expression_statement = true;
-                    self.push(Opcode::Nil);
+                    self.push(Nil);
                 }
                 let after_else: u16 = self.next_opcode();
                 self.output[jump] = Jump(after_else);
@@ -761,7 +758,7 @@ impl Parser {
                 let jump = self.reserve();
                 let after_if: u16 = self.next_opcode();
                 self.output[jump_if_false as usize] = JumpIfFalsePop(after_if);
-                self.push(Opcode::Nil);
+                self.push(Nil);
                 let after_else: u16 = self.next_opcode();
                 self.output[jump] = Jump(after_else);
             },
@@ -783,7 +780,8 @@ impl Parser {
         self.advance();
 
         let loop_start: u16 = self.next_opcode(); // Top of the loop, push onto the loop stack
-        self.loops.push(Loop::new(loop_start, self.scope_depth));
+        let loop_depth: u16 = self.scope_depth;
+        self.current_locals_mut().loops.push(Loop::new(loop_start, loop_depth));
 
         self.parse_expression(); // While condition
         let jump_if_false = self.reserve(); // Jump to the end
@@ -791,7 +789,7 @@ impl Parser {
         self.push(Jump(loop_start));
 
         let loop_end: u16 = self.next_opcode(); // After the jump, the next opcode is 'end of loop'. Repair all break statements
-        let break_opcodes: Vec<u16> = self.loops.pop().unwrap().break_statements;
+        let break_opcodes: Vec<u16> = self.current_locals_mut().loops.pop().unwrap().break_statements;
         for break_opcode in break_opcodes {
             self.output[break_opcode as usize] = Jump(loop_end);
         }
@@ -814,14 +812,15 @@ impl Parser {
         self.advance();
 
         let loop_start: u16 = self.next_opcode(); // Top of the loop, push onto the loop stack
-        self.loops.push(Loop::new(loop_start, self.scope_depth));
+        let loop_depth: u16 = self.scope_depth;
+        self.current_locals_mut().loops.push(Loop::new(loop_start, loop_depth));
 
         self.parse_block_statement(); // Inner loop statements, and jump back to front
         self.push_delayed_pop(); // Loops can't return a value
         self.push(Jump(loop_start));
 
         let loop_end: u16 = self.next_opcode(); // After the jump, the next opcode is 'end of loop'. Repair all break statements
-        let break_opcodes: Vec<u16> = self.loops.pop().unwrap().break_statements;
+        let break_opcodes: Vec<u16> = self.current_locals_mut().loops.pop().unwrap().break_statements;
         for break_opcode in break_opcodes {
             self.output[break_opcode as usize] = Jump(loop_end);
         }
@@ -1086,11 +1085,11 @@ impl Parser {
         trace::trace_parser!("rule <break-statement>");
         self.push_delayed_pop();
         self.advance();
-        match self.loops.last() {
+        match self.current_locals().loops.last() {
             Some(_) => {
                 self.pop_locals_in_current_loop();
                 let jump = self.reserve();
-                self.loops.last_mut().unwrap().break_statements.push(jump as u16);
+                self.current_locals_mut().loops.last_mut().unwrap().break_statements.push(jump as u16);
             },
             None => self.semantic_error(BreakOutsideOfLoop),
         }
@@ -1100,7 +1099,7 @@ impl Parser {
         trace::trace_parser!("rule <continue-statement>");
         self.push_delayed_pop();
         self.advance();
-        match self.loops.last() {
+        match self.current_locals().loops.last() {
             Some(loop_stmt) => {
                 let jump_to: u16 = loop_stmt.start_index;
                 self.pop_locals_in_current_loop();
@@ -1144,14 +1143,14 @@ impl Parser {
                             // If the pattern is a simple pattern (just `x, y, z, ...`), then this is actually legal - and we need to push the respective amount of `Nil`, which we assumed was a pattern instead of a sequence of `let` declarations.
                             if let Some(n) = pattern.is_simple() {
                                 for _ in 0..n {
-                                    self.push(Opcode::Nil)
+                                    self.push(Nil)
                                 }
                             } else {
                                 self.semantic_error(LetWithPatternBindingNoExpression);
                             }
                         },
                         _ => {
-                            self.push(Opcode::Nil); // Initialize to 'nil'
+                            self.push(Nil); // Initialize to 'nil'
                         }
                     }
                     false
@@ -1361,7 +1360,7 @@ impl Parser {
     fn parse_expr_1_terminal(self: &mut Self) {
         trace::trace_parser!("rule <expr-1>");
         match self.peek() {
-            Some(KeywordNil) => self.advance_push(Opcode::Nil),
+            Some(KeywordNil) => self.advance_push(Nil),
             Some(KeywordTrue) => self.advance_push(True),
             Some(KeywordFalse) => self.advance_push(False),
             Some(ScanToken::Int(_)) => {
@@ -1586,7 +1585,7 @@ impl Parser {
                     // Consumed `[` so far
                     match self.peek() {
                         Some(Colon) => { // No first argument, so push zero. Don't consume the colon as it's the seperator
-                            self.push(Opcode::Nil);
+                            self.push(Nil);
                         },
                         _ => self.parse_expression(), // Otherwise we require a first expression
                     }
@@ -1610,10 +1609,10 @@ impl Parser {
                     // Consumed `[` <expression> `:` so far
                     match self.peek() {
                         Some(Colon) => { // No second argument, but we have a third argument, so push -1. Don't consume the colon as it's the seperator
-                            self.push(Opcode::Nil);
+                            self.push(Nil);
                         },
                         Some(CloseSquareBracket) => { // No second argument, so push -1 and then exit
-                            self.push(Opcode::Nil);
+                            self.push(Nil);
                             self.advance();
                             self.push(OpSlice);
                             continue
@@ -1641,7 +1640,7 @@ impl Parser {
                     // Consumed `[` <expression> `:` <expression> `:` so far
                     match self.peek() {
                         Some(CloseSquareBracket) => { // Three arguments + default value for slice
-                            self.push(Opcode::Nil);
+                            self.push(Nil);
                         },
                         _ => self.parse_expression(),
                     }
@@ -1991,7 +1990,7 @@ impl Parser {
     /// Pops all locals that are within the most recent loop, and outputs the relevant `Pop` / `PopN` opcodes
     /// It **does not** modify the local variable stack, and only outputs these tokens for the purposes of a jump across scopes.
     fn pop_locals_in_current_loop(self: &mut Self) {
-        let loop_stmt: &Loop = self.loops.last().unwrap();
+        let loop_stmt: &Loop = self.current_locals().loops.last().unwrap();
         let mut count: u16 = 0;
 
         for local in self.current_locals().locals.iter().rev() {
@@ -2510,6 +2509,7 @@ mod tests {
     #[test] fn test_multiple_undeclared_variables() { run("multiple_undeclared_variables"); }
     #[test] fn test_weird_expression_statements() { run("weird_expression_statements"); }
     #[test] fn test_weird_locals() { run("weird_locals"); }
+    #[test] fn test_weird_loop_nesting_in_functions() { run("weird_loop_nesting_in_functions"); }
     #[test] fn test_while_1() { run("while_1"); }
     #[test] fn test_while_2() { run("while_2"); }
     #[test] fn test_while_3() { run("while_3"); }

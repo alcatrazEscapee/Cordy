@@ -1,0 +1,33 @@
+L01: 0000 IncGlobalCount
+     0001 Function(0) -> FunctionImpl { head: 3, tail: 22, nargs: 0, name: "foo", args: [] }
+     0002 Jump(23)
+L02: 0003 Int(0) -> 0
+L03: 0004 Function(1) -> FunctionImpl { head: 6, tail: 17, nargs: 0, name: "bar", args: [] }
+     0005 Jump(18)
+L05: 0006 Function(2) -> FunctionImpl { head: 8, tail: 9, nargs: 0, name: "_", args: [] }
+     0007 Jump(10)
+     0008 Nil
+     0009 Return
+     0010 OpFuncEval(0)
+L06: 0011 Pop
+     0012 Jump(6)
+L07: 0013 PushUpValue(0, true)
+     0014 NativeFunction(Print)
+     0015 Swap
+     0016 OpFuncEval(1)
+L08: 0017 Return
+     0018 Closure
+     0019 CloseLocal(0)
+L09: 0020 PushLocal(1) -> bar
+     0021 OpFuncEval(0)
+L10: 0022 Return
+L11: 0023 PushGlobal(0, false) -> foo
+     0024 OpFuncEval(0)
+     0025 Pop
+     0026 Pop
+     0027 Exit
+Invalid 'break' statement outside of an enclosing loop
+  at: line 5 (weird_loop_nesting_in_functions.cor)
+  at:
+
+            (fn() { break })()
