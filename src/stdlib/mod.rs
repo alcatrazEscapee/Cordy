@@ -270,7 +270,6 @@ pub fn invoke<VM>(binding: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult wh
     //
     // dispatch_varargs!() handles the following signatures:
     //
-    // a1 <expr> an <expr>                : f(a1), f(an, ...) NOT YET
     // <expr> a1 <expr> an <expr>         : f(), f(a1), f(an, ...)
     //
     // an <expr>                          : f(an), f(an, ...)  *single argument is expanded as iterable
@@ -334,22 +333,6 @@ pub fn invoke<VM>(binding: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult wh
                 _ => IncorrectNumberOfArguments(binding, nargs, 1).err()
             }
         };
-        /*($a1:ident, $ret1:expr, $a2:ident, $ret2:expr) => { //
-            match nargs {
-                1 => {
-                    let $a1: Value = vm.pop();
-                    let ret = $ret1;
-                    ret
-                },
-                2 => {
-                    let $a2: Value = vm.pop();
-                    let $a1: Value = vm.pop();
-                    let ret = $ret2;
-                    ret
-                },
-                _ => IncorrectNumberOfArguments(bound.clone(), nargs, 1).err()
-            }
-        };*/
         ($a1:ident, $ret1:expr, $a2:ident, $ret2:expr, $a3:ident, $ret3:expr) => { // f(a1), f(a1, a2), f(a1, a2, a3)
             match nargs {
                 1 => {
