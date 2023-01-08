@@ -11,3 +11,5 @@
 !/resources/**/*.cor.trace
 
 !/src/**/*.rs
+
+!/docs/**/*.md
