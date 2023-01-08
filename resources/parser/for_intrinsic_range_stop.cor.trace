@@ -1,5 +1,5 @@
-L1: 0000 Int(0) -> 10
-    0001 Int(1) -> 0
+L1: 0000 Int(2) -> 10
+    0001 Int(0) -> 0
     0002 Swap
     0003 PushGlobal(0, true) -> i
     0004 PushGlobal(1, true) -> $0
@@ -11,7 +11,7 @@ L2: 0007 PushGlobal(0, true) -> i
     0010 OpFuncEval(1)
 L3: 0011 Pop
     0012 PushGlobal(0, true) -> i
-    0013 Int(2) -> 1
+    0013 Int(1) -> 1
     0014 OpAdd
     0015 StoreGlobal(0, true) -> i
     0016 Pop

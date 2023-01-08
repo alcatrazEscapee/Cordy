@@ -90,12 +90,12 @@ For a more comprehensive documentation, see the [language documentation](./docs/
 
 - Non expression based REPL with history
 - Implement `->` operator, basic named tuple types (structs), or binding resolution on macros
-- Set / Map literals
 - Format strings (just normal strings with the python `%` operator, but with rust formatting? does that even work?)
 - Regex (some sort of impl)
 - `continue` and `break` in `for` statements
+- `else` on `while` and `for` statements, like Python
 - Even MORE standard library functions
   - Sort by key/comparator
-  - Methods for interacting with dicts
 - Improved non-java-like-closures, that allow assignment to the target variable.
   - `ref` to make reference variables, which closure-captured variables promote to automatically? Basically a `Mut<Value>`
+- Make dict/set literals take priority over bare block statements (prevent bare block statements entirely?)

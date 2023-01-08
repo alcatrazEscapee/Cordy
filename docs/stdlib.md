@@ -17,7 +17,7 @@ The below type signatures are entirely for documentation purposes, as Cordy does
 ---
 
 
-### Print: `print(any, ...)`
+### Print `print(any, ...)`
 
 Prints each argument, space seperated and with a single `\n` suffix, to standard output. Non-string types will have `str()` called on them before printing.
 
@@ -25,13 +25,13 @@ When called with no arguments, prints a single `\n` character.
 
 Returns `nil`
 
-### Bool: `bool(x: any) -> bool`
+### Bool `bool(x: any) -> bool`
 
 Returns the argument as a boolean. `nil`, `0`, `false`, `''`, and empty collections, will return `false`, everything else will return `true`.
 
 The keyword `bool` can also be used in an `is` expression, to check if a value is of the type `bool`.
 
-### Int: `int(x: any) -> int`
+### Int `int(x: any) -> int`
 
 Returns the argument as an integer. `nil` and `false` evaluate to `0`, where strings will be parsed as an integer or raise an error.
 
@@ -48,14 +48,14 @@ true
 false
 ```
 
-### Str: `str(x: any) -> str`
+### Str `str(x: any) -> str`
 
 Returns the argument as a string. See also `repr`.
 
 The keyword `str` can also be used in an `is` expression, to check if a value is of the type `str`.
 
 
-### List: `list(...) -> list`
+### List `list(...) -> list`
 
 Possible signatures:
 
@@ -78,7 +78,7 @@ The keyword `list` can also be used in an `is` expression, to check if a value i
 [1, 2, 3, 4]
 ```
 
-### Set: `set(...) -> set`
+### Set `set(...) -> set`
 
 Possible signatures:
 
@@ -101,7 +101,7 @@ The keyword `set` can also be used in an `is` expression, to check if a value is
 {1, 2, 3, 4}
 ```
 
-### Dict: `dict(...) -> dict`
+### Dict `dict(...) -> dict`
 
 Possible signatures:
 
@@ -113,7 +113,7 @@ With no arguments, creates an empty dictionary. With one argument, treats the ar
 
 The keyword `dict` can also be used in an `is` expression, to check if a value is of the type `dict`.
 
-### Heap: `heap(...) -> heap`
+### Heap `heap(...) -> heap`
 
 Possible signatures:
 
@@ -127,7 +127,7 @@ With no arguments, creates an empty heap. With one argument, treats the argument
 
 The keyword `heap` can also be used in an `is` expression, to check if a value is of the type `heap`.
 
-### Vector: `vector(...) -> vector`
+### Vector `vector(...) -> vector`
 
 Possible signatures:
 
@@ -139,7 +139,7 @@ With no arguments, creates an empty vector. With one argument, treats the argume
 
 The keyword `vector` can also be used in an `is` expression, to check if a value is of the type `vector`.
 
-### Function: `function`
+### Function `function`
 
 The keyword `function` can be used in an `is` expression, to check if a value is of the type `function`.
 
@@ -152,7 +152,7 @@ true
 false
 ```
 
-### Repr: `repr(x: any) -> str`
+### Repr `repr(x: any) -> str`
 
 Returns the full representation of `x`, as a string. Strings are wrapped in single quotes, unlike `str`, although is functionally similar in other respects.
 
@@ -161,11 +161,11 @@ Returns the full representation of `x`, as a string. Strings are wrapped in sing
 'hello'
 ```
 
-### Len: `len(x: iterable) -> int`
+### Len `len(x: iterable) -> int`
 
 Returns the length of `x`. For strings, this returns the number of Unicode Scalar Values. It is `O(1)` except for `str`, which is `O(n)`.
 
-### Range: `range(...) -> list<int>`
+### Range `range(...) -> list<int>`
 
 Possible signatures:
 
@@ -177,7 +177,7 @@ Returns a list of `int`, from `start` inclusive, to `stop` exclusive, counting b
 
 **Note:** When used in `for x in range()` loop, this function elides creating a `list<int>` and instead lazily populates `x`.
 
-### Enumerate: `<T> enumerate(x: iterable<A>) -> list<vector<int, A>>`
+### Enumerate `<T> enumerate(x: iterable<A>) -> list<vector<int, A>>`
 
 Returns a `list` of pairs, of index and value of each element in the iterable `x`.
 
@@ -188,7 +188,7 @@ Returns a `list` of pairs, of index and value of each element in the iterable `x
 [(0, 'h'), (1, 'e'), (2, 'y')]
 ```
 
-### Sum: `sum(...) -> int`
+### Sum `sum(...) -> int`
 
 Possible signatures:
 
@@ -197,7 +197,7 @@ Possible signatures:
 
 With one argument, returns the sum of each value in the iterable. With more than one argument, returns the sum of all the arguments. Raises an error when invoked with no arguments.
 
-### Min: `min(...) -> int`
+### Min `min(...) -> int`
 
 Possible signatures:
 
@@ -206,7 +206,7 @@ Possible signatures:
 
 With one argument, returns the minimum of each value in the iterable. With more than one argument, returns the minimum of all the arguments. Raises an error when invoked with no arguments.
 
-### Max: `max(...) -> int`
+### Max `max(...) -> int`
 
 Possible signatures:
 
@@ -215,7 +215,7 @@ Possible signatures:
 
 With one argument, returns the maximum of each value in the iterable. With more than one argument, returns the maximum of all the arguments. Raises an error when invoked with no arguments.
 
-### Map: `<A, B> map(f: fn(A) -> B, it: iterable<A>) -> list<B>`
+### Map `<A, B> map(f: fn(A) -> B, it: iterable<A>) -> list<B>`
 
 Applies the function `f` to each value in the iterable `it`, and returns the list of each result.
 
@@ -226,7 +226,7 @@ Applies the function `f` to each value in the iterable `it`, and returns the lis
 [2, 4, 6]
 ```
 
-### Filter: `<A> filter(f: fn(A) -> any, it: iterable<A>) -> list<A>`
+### Filter `<A> filter(f: fn(A) -> any, it: iterable<A>) -> list<A>`
 
 Applies the function `f` to each value in the iterable `it`, and retains that value if it returns a truthy value. Returns a list of all elements which returned a truthy value.
 
@@ -237,7 +237,7 @@ Applies the function `f` to each value in the iterable `it`, and retains that va
 [4, 2]
 ```
 
-### Flat Map: `<A, B> flat_map(f: fn(A) -> iterable<B>, it: iterable<A>) -> list<B>`
+### Flat Map `<A, B> flat_map(f: fn(A) -> iterable<B>, it: iterable<A>) -> list<B>`
 
 Applies the function `f` to each element in `it`, and then concatenates the results. This is equivalent to `. map(f) . concat`.
 
@@ -248,7 +248,7 @@ Applies the function `f` to each element in `it`, and then concatenates the resu
 [0, 0, 1, 0, 1, 2, 0, 1, 2, 3]
 ```
 
-### Concat: `<A> concat(it: iterable<iterable<A>>) -> list<A>`
+### Concat `<A> concat(it: iterable<iterable<A>>) -> list<A>`
 
 Concatenates the iterables in the input into one list. This is equivalent to `flat_map(fn(x) -> x)`, but should be preferred over that due to performance.
 
@@ -259,7 +259,7 @@ Concatenates the iterables in the input into one list. This is equivalent to `fl
 [1, 2, 3, 4, 5, 6, 7, 8, 9]
 ```
 
-### Zip: `<A> zip(...) -> list<A>`
+### Zip `<A> zip(...) -> list<A>`
 
 Possible signatures:
 
@@ -277,7 +277,7 @@ When invoked with a single argument, treats the argument as an iterable and each
 [('h', 't', 'w'), ('e', 'h', 'o'), ('e', 'e', 'r')]
 ```
 
-### Reduce: `<A> reduce(f: fn(A, A) -> A, it: iterable<A>) -> A`
+### Reduce `<A> reduce(f: fn(A, A) -> A, it: iterable<A>) -> A`
 
 Reduces an iterable to a single value by successively applying `f` on the first two elements in the iterable, until only one remains. Raises an error if the argument was an empty iterable
 
@@ -290,7 +290,7 @@ Reduces an iterable to a single value by successively applying `f` on the first 
 'hello the world'
 ```
 
-### Sorted: `<A> sorted(it: iterable<A>) -> list<A>`
+### Sorted `<A> sorted(it: iterable<A>) -> list<A>`
 
 Returns a list of the elements in `it`, sorted in ascending order. Note that if `it` contains multiple different types the returned order is unspecified as different types will compare as equal.
 
@@ -301,7 +301,7 @@ Returns a list of the elements in `it`, sorted in ascending order. Note that if 
 [1, 2, 3, 4, 5]
 ```
 
-### Reversed: `<A> reversed(it: iterable<A>) -> list<A>`
+### Reversed `<A> reversed(it: iterable<A>) -> list<A>`
 
 Returns a list of the elements in `it`, in reverse order.
 
@@ -310,6 +310,28 @@ Returns a list of the elements in `it`, in reverse order.
 ```
 >>> [1, 3, 5, 7] . reversed
 [7, 5, 3, 1]
+```
+
+### Permutations `<A> permutations(n: int, it: iterable<A>) -> list<vector<A>>`
+
+Returns a list of all permutations of `n` elements from `it`. If `n` is larger than the length of `it`, nothing will be returned. Raises an error if `n` is negative.
+
+**Example**
+
+```
+>>> [1, 2, 3] . permutations(2)
+[(1, 2), (1, 3), (2, 1), (2, 3), (3, 1), (3, 2)]
+```
+
+### Combinations `<A> combinations(n: int, it: iterable<A>) -> list<vector<A>>`
+
+Returns a list of all combinations of `n` elements from `it`. If `n` is larger than the length of `it`, nothing will be returned. Raises an error if `n` is negative.
+
+**Example**
+
+```
+>>> [1, 2, 3] . combinations(2)
+[(1, 2), (1, 3), (2, 3)]
 ```
 
 ### Pop `<A> pop(it: list<A> | set<A> | heap<A> | dict<A, ?>) -> A`
@@ -387,3 +409,11 @@ d['hello'] // will raise an error
 d . default('nope')
 d['hello'] // returns 'nope'
 ```
+
+### (Dict) Keys `<K, V> keys(it: dict<K, V>) -> set<K>`
+
+Returns a set of all keys in `it`, maintaining insertion order.
+
+### (Dict) Values `<K, V> values(it: dict<K, V>) -> list<V>`
+
+Returns a list of all values in `it`, maintaining insertion order.

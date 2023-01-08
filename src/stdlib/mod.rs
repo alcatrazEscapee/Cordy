@@ -120,6 +120,8 @@ pub enum StdBinding {
     Reduce,
     Sorted,
     Reversed,
+    Permutations,
+    Combinations,
 
     Pop, // Remove last, or at index
     Push, // Inverse of `pop` (alias)
@@ -223,6 +225,8 @@ fn load_bindings() -> Vec<StdBindingInfo> {
         of!(Reduce, "reduce"),
         of!(Sorted, "sorted"),
         of!(Reversed, "reversed"),
+        of!(Permutations, "permutations"),
+        of!(Combinations, "combinations"),
 
         of!(Pop, "pop"),
         of!(Push, "push"),
@@ -245,47 +249,67 @@ fn load_bindings() -> Vec<StdBindingInfo> {
 /// `allow` usages here are due to macro expansion of the `dispatch!()` cases.
 #[allow(unused_mut)]
 #[allow(unused_variables)]
-pub fn invoke<VM>(bound: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult where VM : VirtualInterface
+pub fn invoke<VM>(binding: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult where VM : VirtualInterface
 {
-    trace::trace_interpreter!("stdlib::invoke() func={}, nargs={}", lookup_name(bound), nargs);
+    trace::trace_interpreter!("stdlib::invoke() func={}, nargs={}", lookup_name(binding), nargs);
 
     // Dispatch macros for 0, 1, 2, 3 and variadic functions.
     // Most of these will support partial evaluation where the function allows it.
+    //
+    // dispatch!() handles the following signatures:
+    //
+    // <expr>                             : f()
+    // a1, <expr>                         : f(a1)
+    // a1, a2, <expr>                     : f(a1, a2)
+    // a1, a2, a3, <expr>                 : f(a1, a2, a3)
+    //
+    // <expr>, a1, <expr>                 : f(), f(a1)
+    // <expr>, a1, <expr>, a2, <expr>     : f(), f(a1), f(a1, a2)
+    //
+    // a1, <expr>, a2, <expr>, a3, <expr> : f(a1), f(a1, a2), f(a1, a2, a3)
+    //
+    // dispatch_varargs!() handles the following signatures:
+    //
+    // a1 <expr> an <expr>                : f(a1), f(an, ...) NOT YET
+    // <expr> a1 <expr> an <expr>         : f(), f(a1), f(an, ...)
+    //
+    // an <expr>                          : f(an), f(an, ...)  *single argument is expanded as iterable
+    // <expr> an <expr>                   : f(), f(an), f(an, ...)  * single argument is expanded as iterable
     macro_rules! dispatch {
-        ($ret:expr) => { // f() -> T
+        ($ret:expr) => { // f()
             match nargs {
                 0 => {
                     let ret = $ret;
                     ret
                 },
-                _ => IncorrectNumberOfArguments(bound.clone(), nargs, 0).err()
+                _ => IncorrectNumberOfArguments(binding, nargs, 0).err()
             }
         };
-        ($a1:ident, $ret:expr) => { // f(T1) -> T
+        ($a1:ident, $ret:expr) => { // f(a1)
             match nargs {
                 1 => {
                     let $a1: Value = vm.pop();
                     let ret = $ret;
                     ret
                 },
-                _ => IncorrectNumberOfArguments(bound.clone(), nargs, 1).err()
+                _ => IncorrectNumberOfArguments(binding, nargs, 1).err()
             }
         };
-        ($a1:ident, $a2:ident, $ret:expr) => { // f(T1, T2) -> T
+        ($a1:ident, $a2:ident, $ret:expr) => { // f(a1, a2)
             match nargs {
-                1 => Ok(wrap_as_partial(bound, nargs, vm)),
+                1 => Ok(wrap_as_partial(binding, nargs, vm)),
                 2 => {
                     let $a2: Value = vm.pop();
                     let $a1: Value = vm.pop();
                     let ret = $ret;
                     ret
                 },
-                _ => IncorrectNumberOfArguments(bound.clone(), nargs, 2).err()
+                _ => IncorrectNumberOfArguments(binding, nargs, 2).err()
             }
         };
-        ($a1:ident, $a2:ident, $a3:ident, $ret:expr) => { // f(T1, T2, T3) -> T
+        ($a1:ident, $a2:ident, $a3:ident, $ret:expr) => { // f(a1, a2, a3)
             match nargs {
-                1 | 2 => Ok(wrap_as_partial(bound, nargs, vm)),
+                1 | 2 => Ok(wrap_as_partial(binding, nargs, vm)),
                 3 => {
                     let $a3: Value = vm.pop();
                     let $a2: Value = vm.pop();
@@ -293,10 +317,10 @@ pub fn invoke<VM>(bound: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult wher
                     let ret = $ret;
                     ret
                 },
-                _ => IncorrectNumberOfArguments(bound.clone(), nargs, 3).err()
+                _ => IncorrectNumberOfArguments(binding, nargs, 3).err()
             }
         };
-        ($ret0:expr, $a1:ident, $ret1:expr) => { // f(), f(T1) -> T
+        ($ret0:expr, $a1:ident, $ret1:expr) => { // f(), f(a1)
             match nargs {
                 0 => {
                     let ret = $ret0;
@@ -307,10 +331,10 @@ pub fn invoke<VM>(bound: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult wher
                     let ret = $ret1;
                     ret
                 },
-                _ => IncorrectNumberOfArguments(bound.clone(), nargs, 1).err()
+                _ => IncorrectNumberOfArguments(binding, nargs, 1).err()
             }
         };
-        ($a1:ident, $ret1:expr, $a2:ident, $ret2:expr) => { // f(T1), f(T1, T2) -> T
+        /*($a1:ident, $ret1:expr, $a2:ident, $ret2:expr) => { //
             match nargs {
                 1 => {
                     let $a1: Value = vm.pop();
@@ -325,8 +349,8 @@ pub fn invoke<VM>(bound: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult wher
                 },
                 _ => IncorrectNumberOfArguments(bound.clone(), nargs, 1).err()
             }
-        };
-        ($a1:ident, $ret1:expr, $a2:ident, $ret2:expr, $a3:ident, $ret3:expr) => { // f(T1), f(T1, T2), f(T1, T2, T3) -> T
+        };*/
+        ($a1:ident, $ret1:expr, $a2:ident, $ret2:expr, $a3:ident, $ret3:expr) => { // f(a1), f(a1, a2), f(a1, a2, a3)
             match nargs {
                 1 => {
                     let $a1: Value = vm.pop();
@@ -346,38 +370,12 @@ pub fn invoke<VM>(bound: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult wher
                     let ret = $ret3;
                     ret
                 }
-                _ => IncorrectNumberOfArguments(bound.clone(), nargs, 1).err()
+                _ => IncorrectNumberOfArguments(binding, nargs, 1).err()
             }
         };
-        ($a_var:ident, $ret_var:expr, $op:expr) => { // f(... >0) -> T
-            match nargs {
-                0 => IncorrectNumberOfArgumentsVariadicAtLeastOne($op).err(),
-                1 => match vm.pop().as_iter() {
-                    Ok($a_var) => $ret_var,
-                    Err(e) => Err(e),
-                },
-                _ => {
-                    let varargs = vm.popn(nargs as usize);
-                    let mut $a_var = varargs.iter();
-                    $ret_var
-                },
-            }
-        };
-        ($ret0:expr, $a_var:ident, $ret_var:expr, $op:expr) => { // f(... >= 0) -> T
-            match nargs {
-                0 => $ret0,
-                1 => match vm.pop().as_iter() {
-                    Ok($a_var) => $ret_var,
-                    Err(e) => Err(e),
-                },
-                _ => {
-                    let varargs = vm.popn(nargs as usize);
-                    let mut $a_var = varargs.iter();
-                    $ret_var
-                },
-            }
-        };
-        ($ret0:expr, $a1:ident, $ret1:expr, $a_var:ident, $ret_var:expr) => { // f(), f(T1), f(...) -> T
+    }
+    macro_rules! dispatch_varargs {
+        ($ret0:expr, $a1:ident, $ret1:expr, $an:ident, $ret_n:expr) => { // f(), f(a1), f(an, ...)
             match nargs {
                 0 => {
                     let ret = $ret0;
@@ -390,17 +388,45 @@ pub fn invoke<VM>(bound: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult wher
                 },
                 _ => {
                     let varargs = vm.popn(nargs as usize);
-                    let mut $a_var = varargs.iter();
-                    let ret = $ret_var;
+                    let mut $an = varargs.iter();
+                    let ret = $ret_n;
                     ret
                 }
             }
         };
+        ($an:ident, $ret_n:expr) => { // f(an), f(an, ...)  *single argument is expanded as iterable
+            match nargs {
+                0 => IncorrectNumberOfArgumentsVariadicAtLeastOne(binding).err(),
+                1 => match vm.pop().as_iter() {
+                    Ok($an) => $ret_n,
+                    Err(e) => Err(e),
+                },
+                _ => {
+                    let varargs = vm.popn(nargs as usize);
+                    let mut $an = varargs.iter();
+                    $ret_n
+                },
+            }
+        };
+        ($ret0:expr, $an:ident, $ret_n:expr) => { // f(), f(an), f(an, ...)  *single argument is expanded as iterable
+            match nargs {
+                0 => $ret0,
+                1 => match vm.pop().as_iter() {
+                    Ok($an) => $ret_n,
+                    Err(e) => Err(e),
+                },
+                _ => {
+                    let varargs = vm.popn(nargs as usize);
+                    let mut $an = varargs.iter();
+                    $ret_n
+                },
+            }
+        };
     }
 
-    match bound {
+    match binding {
         Print => {
-            dispatch!(vm.println0(), a1, vm.println(a1.as_str()), an, {
+            dispatch_varargs!(vm.println0(), a1, vm.println(a1.as_str()), an, {
                 vm.print(an.next().unwrap().as_str());
                 for ai in an {
                     vm.print(format!(" {}", ai.as_str()));
@@ -441,11 +467,11 @@ pub fn invoke<VM>(bound: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult wher
             _ => TypeErrorCannotConvertToInt(a1).err(),
         }),
         Str => dispatch!(Ok(Value::Str(Box::new(String::new()))), a1, Ok(Value::Str(Box::new(a1.as_str())))),
-        List => dispatch!(Ok(Value::list(VecDeque::new())), a1, Ok(Value::iter_list(a1.into_iter().cloned())), List),
-        Set => dispatch!(Ok(Value::set(LinkedHashSet::new())), a1, Ok(Value::iter_set(a1.into_iter().cloned())), Set),
-        Dict => dispatch!(Ok(Value::dict(LinkedHashMap::new())), a1, collections::collect_into_dict(a1.into_iter().cloned()), Dict),
-        Heap => dispatch!(Ok(Value::heap(BinaryHeap::new())), a1, Ok(Value::iter_heap(a1.into_iter().cloned())), Heap),
-        Vector => dispatch!(Ok(Value::vector(vec![])), a1, Ok(Value::iter_vector(a1.into_iter().cloned())), Vector),
+        List => dispatch_varargs!(Ok(Value::list(VecDeque::new())), an, Ok(Value::iter_list(an.into_iter().cloned()))),
+        Set => dispatch_varargs!(Ok(Value::set(LinkedHashSet::new())), an, Ok(Value::iter_set(an.into_iter().cloned()))),
+        Dict => dispatch_varargs!(Ok(Value::dict(LinkedHashMap::new())), an, collections::collect_into_dict(an.into_iter().cloned())),
+        Heap => dispatch_varargs!(Ok(Value::heap(BinaryHeap::new())), an, Ok(Value::iter_heap(an.into_iter().cloned()))),
+        Vector => dispatch_varargs!(Ok(Value::vector(vec![])), an, Ok(Value::iter_vector(an.into_iter().cloned()))),
         Repr => dispatch!(a1, Ok(Value::Str(Box::new(a1.as_repr_str())))),
 
         // operator
@@ -485,17 +511,19 @@ pub fn invoke<VM>(bound: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult wher
         Len => dispatch!(a1, a1.len().map(|u| Value::Int(u as i64))),
         Range => dispatch!(a1, collections::range_1(a1), a2, collections::range_2(a1, a2), a3, collections::range_3(a1, a2, a3)),
         Enumerate => dispatch!(a1, collections::enumerate(a1)),
-        Sum => dispatch!(an, collections::sum(an.into_iter()), Sum),
-        Max => dispatch!(an, collections::max(an.into_iter()), Max),
-        Min => dispatch!(an, collections::min(an.into_iter()), Min),
+        Sum => dispatch_varargs!(an, collections::sum(an.into_iter())),
+        Max => dispatch_varargs!(an, collections::max(an.into_iter())),
+        Min => dispatch_varargs!(an, collections::min(an.into_iter())),
         Map => dispatch!(a1, a2, collections::map(vm, a1, a2)),
         Filter => dispatch!(a1, a2, collections::filter(vm, a1, a2)),
         FlatMap => dispatch!(a1, a2, collections::flat_map(vm, Some(a1), a2)),
         Concat => dispatch!(a1, collections::flat_map(vm, None, a1)),
-        Zip => dispatch!(an, collections::zip(an.into_iter()), Zip),
+        Zip => dispatch_varargs!(an, collections::zip(an.into_iter())),
         Reduce => dispatch!(a1, a2, collections::reduce(vm, a1, a2)),
-        Sorted => dispatch!(an, collections::sorted(an.into_iter()), Sorted),
-        Reversed => dispatch!(an, collections::reversed(an.into_iter()), Reversed),
+        Sorted => dispatch_varargs!(an, collections::sorted(an.into_iter())),
+        Reversed => dispatch_varargs!(an, collections::reversed(an.into_iter())),
+        Permutations => dispatch!(a1, a2, collections::permutations(a1, a2)),
+        Combinations => dispatch!(a1, a2, collections::combinations(a1, a2)),
 
         Pop => dispatch!(a1, collections::pop(a1)),
         Push => dispatch!(a1, a2, collections::push(a1, a2)),
@@ -504,14 +532,16 @@ pub fn invoke<VM>(bound: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult wher
         Init => dispatch!(a1, collections::init(a1)),
         Tail => dispatch!(a1, collections::tail(a1)),
         Default => dispatch!(a1, a2, collections::dict_set_default(a1, a2)),
+        Keys => dispatch!(a1, collections::dict_keys(a1)),
+        Values => dispatch!(a1, collections::dict_values(a1)),
 
         // lib_math
         Abs => dispatch!(a1, math::abs(a1)),
         Sqrt => dispatch!(a1, math::sqrt(a1)),
-        Gcd => dispatch!(a1, math::gcd(a1.into_iter()), Gcd),
-        Lcm => dispatch!(a1, math::lcm(a1.into_iter()), Lcm),
+        Gcd => dispatch_varargs!(an, math::gcd(an.into_iter())),
+        Lcm => dispatch_varargs!(an, math::lcm(an.into_iter())),
 
-        _ => BindingIsNotFunctionEvaluable(bound.clone()).err(),
+        _ => BindingIsNotFunctionEvaluable(binding.clone()).err(),
     }
 }
 
@@ -545,12 +575,12 @@ pub fn list_set_index(list_ref: Mut<VecDeque<Value>>, index: i64, value: Value) 
 
 
 /// Not unused - invoked via the dispatch!() macro above
-fn wrap_as_partial<VM>(bound: StdBinding, nargs: u8, vm: &mut VM) -> Value where VM : VirtualInterface {
+fn wrap_as_partial<VM>(binding: StdBinding, nargs: u8, vm: &mut VM) -> Value where VM : VirtualInterface {
     // vm stack will contain [..., arg1, arg2, ... argN]
     // popping in order will populate the vector with [argN, argN-1, ... arg1]
     let mut args: Vec<Box<Value>> = Vec::with_capacity(nargs as usize);
     for _ in 0..nargs {
         args.push(Box::new(vm.pop().clone()));
     }
-    Value::PartialNativeFunction(bound, Box::new(args))
+    Value::PartialNativeFunction(binding, Box::new(args))
 }

@@ -52,6 +52,8 @@ pub enum Opcode {
     Function(u16),
     NativeFunction(StdBinding),
     List(u16),
+    Set(u16),
+    Dict(u16),
 
     // Runtime specific type checks
 
