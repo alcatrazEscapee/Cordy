@@ -422,7 +422,7 @@ pub fn find_count<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM
     let iter = a2.as_iter()?;
     if a1.is_function() {
         let mut n: i64 = 0;
-        for (i, v) in iter.into_iter().rev().enumerate() {
+        for v in iter.into_iter() {
             let ret = vm.invoke_func1(a1.clone(), v.clone())?;
             if ret.as_bool() {
                 n += 1
