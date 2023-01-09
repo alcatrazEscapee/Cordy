@@ -92,7 +92,6 @@ impl AsError for RuntimeError {
         match self {
             RuntimeError::RuntimeExit => panic!("Not a real error"),
             RuntimeError::ValueIsNotFunctionEvaluable(v) => format!("Tried to evaluate {} but it is not a function.", v.format_error()),
-            RuntimeError::BindingIsNotFunctionEvaluable(b) => format!("Tried to evaluate '{}' but it is not an evaluable function.", b.format_error()),
             RuntimeError::IncorrectNumberOfFunctionArguments(f, a) => format!("Function {} requires {} parameters but {} were present.", f.format_error(), f.nargs, a),
             RuntimeError::IncorrectNumberOfArguments(b, e, a) => format!("Function '{}' requires {} parameters but {} were present.", b.format_error(), e, a),
             RuntimeError::IncorrectNumberOfArgumentsVariadicAtLeastOne(b) => format!("Function '{}' requires at least 1 parameter but none were present.", b.format_error()),

@@ -96,16 +96,14 @@ pub enum StdBinding {
     OperatorEqual,
     OperatorNotEqual,
 
-    // lib_str
+    // strings
     ToLower,
     ToUpper,
     Replace,
     Trim,
-    IndexOf,
-    CountOf,
     Split,
 
-    // lib_list
+    // collections
     Len,
     Range,
     Enumerate,
@@ -129,14 +127,14 @@ pub enum StdBinding {
     Head, // Just first element
     Tail, // Compliment of `head`
     Init, // Compliment of `last`
-    Insert, // Insert by key (or index)
-    Remove, // Remove by key (or index)
-    Merge, // Merges two collections (append right onto left)
     Default, // For a `Dict`, sets the default value
     Keys, // `Dict.keys` -> returns a set of all keys
     Values, // `Dict.values` -> returns a list of all values
+    Find, // Find index of first occurrence matching a value. Value can be a function (which will be checked for equality), or a target value
+    RightFind, // Find index of last occurrence matching a value
+    FindCount, // Find the count of elements
 
-    // lib_math
+    // math
     Abs,
     Sqrt,
     Gcd,
@@ -206,8 +204,6 @@ fn load_bindings() -> Vec<StdBindingInfo> {
         of!(ToUpper, "to_upper"),
         of!(Replace, "replace"),
         of!(Trim, "trim"),
-        of!(IndexOf, "index_of"),
-        of!(CountOf, "count_of"),
         of!(Split, "split"),
 
         of!(Sum, "sum"),
@@ -237,6 +233,9 @@ fn load_bindings() -> Vec<StdBindingInfo> {
         of!(Default, "default"),
         of!(Keys, "keys"),
         of!(Values, "values"),
+        of!(Find, "find"),
+        of!(RightFind, "rfind"),
+        of!(FindCount, "findn"),
 
         of!(Abs, "abs"),
         of!(Sqrt, "sqrt"),
@@ -486,8 +485,6 @@ pub fn invoke<VM>(binding: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult wh
         ToUpper => dispatch!(a1, strings::to_upper(a1)),
         Replace => dispatch!(a1, a2, a3, strings::replace(a1, a2, a3)),
         Trim => dispatch!(a1, strings::trim(a1)),
-        IndexOf => dispatch!(a1, a2, strings::index_of(a1, a2)),
-        CountOf => dispatch!(a1, a2, strings::count_of(a1, a2)),
         Split => dispatch!(a1, a2, strings::split(a1, a2)),
 
         // lib_list
@@ -517,6 +514,9 @@ pub fn invoke<VM>(binding: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult wh
         Default => dispatch!(a1, a2, collections::dict_set_default(a1, a2)),
         Keys => dispatch!(a1, collections::dict_keys(a1)),
         Values => dispatch!(a1, collections::dict_values(a1)),
+        Find => dispatch!(a1, a2, collections::left_find(vm, a1, a2)),
+        RightFind => dispatch!(a1, a2, collections::right_find(vm, a1, a2)),
+        FindCount => dispatch!(a1, a2, collections::find_count(vm, a1, a2)),
 
         // lib_math
         Abs => dispatch!(a1, math::abs(a1)),
@@ -524,7 +524,7 @@ pub fn invoke<VM>(binding: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult wh
         Gcd => dispatch_varargs!(an, math::gcd(an.into_iter())),
         Lcm => dispatch_varargs!(an, math::lcm(an.into_iter())),
 
-        _ => BindingIsNotFunctionEvaluable(binding.clone()).err(),
+        _ => ValueIsNotFunctionEvaluable(Value::NativeFunction(binding)).err(),
     }
 }
 

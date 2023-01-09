@@ -13,6 +13,7 @@ use crate::vm::value::{FunctionImpl, PartialFunctionImpl};
 use Opcode::{*};
 use RuntimeError::{*};
 
+type ValueResult = Result<Value, Box<RuntimeError>>;
 type AnyResult = Result<(), Box<RuntimeError>>;
 
 pub mod value;
@@ -47,17 +48,8 @@ pub enum FunctionType {
 pub trait VirtualInterface {
     // Invoking Functions
 
-    /// Invokes the action of an `OpFuncEval(nargs)` opcode.
-    ///
-    /// The stack must be setup as `[..., f, arg1, arg2, ... argN ]`, where `f` is the function to be invoked with arguments `arg1, arg2, ... argN`.
-    /// The arguments and function will be popped and the return value will be left on the top of the stack.
-    ///
-    /// Returns a `Result` which may contain an error which occurred during function evaluation.
-    fn invoke_func_eval(self: &mut Self, nargs: u8) -> Result<FunctionType, Box<RuntimeError>>;
-
-    /// Breaks back into the VM main loop and starts executing until the current call frame is dropped.
-    /// Used after native code invokes either of the above two functions, to start a runtime loop for user functions.
-    fn run_after_invoke(self: &mut Self, function_type: FunctionType) -> AnyResult;
+    fn invoke_func1(self: &mut Self, f: Value, a1: Value) -> ValueResult;
+    fn invoke_func2(self: &mut Self, f: Value, a1: Value, a2: Value) -> ValueResult;
 
     // Wrapped IO
     fn println0(self: &mut Self);
@@ -550,38 +542,20 @@ impl<R, W> VirtualMachine<R, W> where
         op
     }
 
-    /// Calls a user function by building a `CallFrame` and jumping to the function's `head` IP
-    fn call_function(self: &mut Self, head: usize, nargs: u8) {
-        let frame = CallFrame {
-            return_ip: self.ip,
-            frame_pointer: self.stack.len() - (nargs as usize),
-        };
-        self.ip = head;
-        self.call_stack.push(frame);
-        trace::trace_interpreter!("call stack = {}", self.debug_call_stack());
+    fn invoke_func_and_spin(self: &mut Self, nargs: u8) -> ValueResult {
+        match self.invoke_func_eval(nargs)? {
+            FunctionType::Native => {},
+            FunctionType::User => self.run_until_frame()?
+        }
+        Ok(self.pop())
     }
 
-
-    // ===== Debug Methods ===== //
-
-    #[cfg(trace_interpreter_stack = "on")]
-    fn debug_stack(self: &Self) -> String {
-        format!(": [{}]", self.stack.iter().rev().map(|t| t.as_debug_str()).collect::<Vec<String>>().join(", "))
-    }
-
-    #[cfg(trace_interpreter = "on")]
-    fn debug_call_stack(self: &Self) -> String {
-        format!(": [{}]", self.call_stack.iter().rev().map(|t| format!("{{fp: {}, ret: {}}}", t.frame_pointer, t.return_ip)).collect::<Vec<String>>().join(", "))
-    }
-}
-
-
-impl <R, W> VirtualInterface for VirtualMachine<R, W> where
-    R : BufRead,
-    W : Write
-{
-    // ===== Calling Functions External Interface ===== //
-
+    /// Invokes the action of an `OpFuncEval(nargs)` opcode.
+    ///
+    /// The stack must be setup as `[..., f, arg1, arg2, ... argN ]`, where `f` is the function to be invoked with arguments `arg1, arg2, ... argN`.
+    /// The arguments and function will be popped and the return value will be left on the top of the stack.
+    ///
+    /// Returns a `Result` which may contain an error which occurred during function evaluation.
     fn invoke_func_eval(self: &mut Self, nargs: u8) -> Result<FunctionType, Box<RuntimeError>> {
         let f: &Value = self.peek(nargs as usize);
         match f {
@@ -684,11 +658,49 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
         }
     }
 
-    fn run_after_invoke(self: &mut Self, function_type: FunctionType) -> AnyResult {
-        match function_type {
-            FunctionType::Native => Ok(()),
-            FunctionType::User => self.run_until_frame()
-        }
+    /// Calls a user function by building a `CallFrame` and jumping to the function's `head` IP
+    fn call_function(self: &mut Self, head: usize, nargs: u8) {
+        let frame = CallFrame {
+            return_ip: self.ip,
+            frame_pointer: self.stack.len() - (nargs as usize),
+        };
+        self.ip = head;
+        self.call_stack.push(frame);
+        trace::trace_interpreter!("call stack = {}", self.debug_call_stack());
+    }
+
+
+    // ===== Debug Methods ===== //
+
+    #[cfg(trace_interpreter_stack = "on")]
+    fn debug_stack(self: &Self) -> String {
+        format!(": [{}]", self.stack.iter().rev().map(|t| t.as_debug_str()).collect::<Vec<String>>().join(", "))
+    }
+
+    #[cfg(trace_interpreter = "on")]
+    fn debug_call_stack(self: &Self) -> String {
+        format!(": [{}]", self.call_stack.iter().rev().map(|t| format!("{{fp: {}, ret: {}}}", t.frame_pointer, t.return_ip)).collect::<Vec<String>>().join(", "))
+    }
+}
+
+
+impl <R, W> VirtualInterface for VirtualMachine<R, W> where
+    R : BufRead,
+    W : Write
+{
+    // ===== Calling Functions External Interface ===== //
+
+    fn invoke_func1(self: &mut Self, f: Value, a1: Value) -> Result<Value, Box<RuntimeError>> {
+        self.push(f);
+        self.push(a1);
+        self.invoke_func_and_spin(1)
+    }
+
+    fn invoke_func2(self: &mut Self, f: Value, a1: Value, a2: Value) -> Result<Value, Box<RuntimeError>> {
+        self.push(f);
+        self.push(a1);
+        self.push(a2);
+        self.invoke_func_and_spin(2)
     }
 
     // ===== IO Methods ===== //
@@ -1091,6 +1103,30 @@ mod test {
     #[test] fn test_combinations_empty() { run_str("[] . combinations(3) . print", "[]\n"); }
     #[test] fn test_combinations_n_larger_than_size() { run_str("[1, 2, 3] . combinations(5) . print", "[]\n"); }
     #[test] fn test_combinations() { run_str("[1, 2, 3] . combinations(2) . print", "[(1, 2), (1, 3), (2, 3)]\n"); }
+    #[test] fn test_find_value_empty() { run_str("[] . find(1) . print", "-1\n"); }
+    #[test] fn test_find_func_empty() { run_str("[] . find(==3) . print", "-1\n"); }
+    #[test] fn test_find_value_not_found() { run_str("[1, 3, 5, 7] . find(6) . print", "-1\n"); }
+    #[test] fn test_find_func_not_found() { run_str("[1, 3, 5, 7] . find(fn(i) -> i % 2 == 0) . print", "-1\n"); }
+    #[test] fn test_find_value_found() { run_str("[1, 3, 5, 7] . find(5) . print", "2\n"); }
+    #[test] fn test_find_func_found() { run_str("[1, 3, 5, 7] . find(>3) . print", "2\n"); }
+    #[test] fn test_find_value_found_multiple() { run_str("[1, 3, 5, 5, 7, 5] . find(5) . print", "2\n"); }
+    #[test] fn test_find_func_found_multiple() { run_str("[1, 3, 5, 5, 7, 5] . find(>3) . print", "2\n"); }
+    #[test] fn test_rfind_value_empty() { run_str("[] . rfind(1) . print", "-1\n"); }
+    #[test] fn test_rfind_func_empty() { run_str("[] . rfind(==3) . print", "-1\n"); }
+    #[test] fn test_rfind_value_not_found() { run_str("[1, 3, 5, 7] . rfind(6) . print", "-1\n"); }
+    #[test] fn test_rfind_func_not_found() { run_str("[1, 3, 5, 7] . rfind(fn(i) -> i % 2 == 0) . print", "-1\n"); }
+    #[test] fn test_rfind_value_found() { run_str("[1, 3, 5, 7] . rfind(5) . print", "2\n"); }
+    #[test] fn test_rfind_func_found() { run_str("[1, 3, 5, 7] . rfind(>3) . print", "3\n"); }
+    #[test] fn test_rfind_value_found_multiple() { run_str("[1, 3, 5, 5, 7, 5, 3, 1] . rfind(5) . print", "5\n"); }
+    #[test] fn test_rfind_func_found_multiple() { run_str("[1, 3, 5, 5, 7, 5, 3, 1] . rfind(>3) . print", "5\n"); }
+    #[test] fn test_findn_value_empty() { run_str("[] . findn(1) . print", "0\n"); }
+    #[test] fn test_findn_func_empty() { run_str("[] . findn(==3) . print", "0\n"); }
+    #[test] fn test_findn_value_not_found() { run_str("[1, 3, 5, 7] . findn(6) . print", "0\n"); }
+    #[test] fn test_findn_func_not_found() { run_str("[1, 3, 5, 7] . findn(fn(i) -> i % 2 == 0) . print", "0\n"); }
+    #[test] fn test_findn_value_found() { run_str("[1, 3, 5, 7] . findn(5) . print", "1\n"); }
+    #[test] fn test_findn_func_found() { run_str("[1, 3, 5, 7] . findn(>3) . print", "2\n"); }
+    #[test] fn test_findn_value_found_multiple() { run_str("[1, 3, 5, 5, 7, 5] . findn(5) . print", "3\n"); }
+    #[test] fn test_findn_func_found_multiple() { run_str("[1, 3, 5, 5, 7, 5] . findn(>3) . print", "4\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }
