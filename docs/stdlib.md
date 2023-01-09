@@ -417,3 +417,43 @@ Returns a set of all keys in `it`, maintaining insertion order.
 ### (Dict) Values `<K, V> values(it: dict<K, V>) -> list<V>`
 
 Returns a list of all values in `it`, maintaining insertion order.
+
+### Find `<A> find(x: A | fn(A) -> bool, it: iterable<A>) -> int`
+
+If `x` is a function, this will find the first index from the left in `it` where a value returns `true` to the function. If `x` is a value, it will return the first index from the left in `it` where a value is equal to `x`.
+
+`find(x)` is equivalent `find(==x)` if `x` is not a function.
+
+Returns `-1` if the value was not found.
+
+**Example**
+
+```
+>>> [1, 2, 3, 4, 5] . find(4)
+3
+>>> [1, 2, 3, 4, 5] . find(fn(i) -> i % 3 == 0)
+2
+```
+
+### Right Find `<A> rfind(x: A | fn(A) -> bool, it: iterable<A>) -> int`
+
+If `x` is a function, this will find the first index from the right in `it` where a value returns `true` to the function. If `x` is a value, it will return the first index from the right in `it` where a value is equal to `x`.
+
+`rfind(x)` is equivalent `rfind(==x)` if `x` is not a function.
+
+Returns `-1` if the value was not found.
+
+**Example**
+
+```
+>>> [1, 2, 3, 4, 5] . rfind(4)
+3
+>>> [1, 2, 3, 4, 5] . rfind(fn(i) -> i % 3 == 0)
+2
+```
+
+### Find Count `<A> findn(x: A | fn(A) -> bool, it: iterable<A>) -> int`
+
+If `x` is a function, this will count the number of occurrences in `it` where `x` returns `true`. If `x` is a value, it will return the number of instances of `x` in `it`.
+
+`. findn(f)` is equivalent to `. filter(f) . len` or `. filter(==f) . len`, depending on if `f` is a function.

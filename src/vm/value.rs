@@ -455,6 +455,19 @@ pub enum ValueIntoIter<'a> {
     Vector(Ref<'a, Vec<Value>>),
 }
 
+impl<'a> ValueIntoIter<'a> {
+    pub fn len(self: &Self) -> usize {
+        match self {
+            ValueIntoIter::Str(it) => it.len(),
+            ValueIntoIter::List(it) => it.len(),
+            ValueIntoIter::Set(it) => it.len(),
+            ValueIntoIter::Dict(it) => it.dict.len(),
+            ValueIntoIter::Heap(it) => it.heap.len(),
+            ValueIntoIter::Vector(it) => it.len(),
+        }
+    }
+}
+
 impl<'b: 'a, 'a> IntoIterator for &'b ValueIntoIter<'a> {
     type Item = &'a Value;
     type IntoIter = ValueIter<'a>;

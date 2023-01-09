@@ -178,11 +178,7 @@ pub fn map<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : Virt
             let rs = (&rs).into_iter();
             let mut acc: VecDeque<Value> = VecDeque::with_capacity(len);
             for r in rs {
-                vm.push(l.clone());
-                vm.push(r.clone());
-                let f = vm.invoke_func_eval(1)?;
-                vm.run_after_invoke(f)?;
-                acc.push_back(vm.pop());
+                acc.push_back(vm.invoke_func1(l.clone(), r.clone())?);
             }
             Ok(Value::list(acc))
         },
@@ -197,11 +193,8 @@ pub fn filter<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : V
             let rs = (&rs).into_iter();
             let mut acc: VecDeque<Value> = VecDeque::with_capacity(len);
             for r in rs {
-                vm.push(l.clone());
-                vm.push(r.clone());
-                let f = vm.invoke_func_eval(1)?;
-                vm.run_after_invoke(f)?;
-                if vm.pop().as_bool() {
+                let ret = vm.invoke_func1(l.clone(), r.clone())?;
+                if ret.as_bool() {
                     acc.push_back(r.clone());
                 }
             }
@@ -218,14 +211,9 @@ pub fn flat_map<VM>(vm: &mut VM, a1: Option<Value>, a2: Value) -> ValueResult wh
             let rs = (&rs).into_iter();
             let mut acc: VecDeque<Value> = VecDeque::with_capacity(len);
             for r in rs {
-                let elem = if let Some(l) = &l {
-                    vm.push(l.clone());
-                    vm.push(r.clone());
-                    let f = vm.invoke_func_eval(1)?;
-                    vm.run_after_invoke(f)?;
-                    vm.pop()
-                } else {
-                    r.clone()
+                let elem = match &l {
+                    Some(l) => vm.invoke_func1(l.clone(), r.clone())?,
+                    None => r.clone()
                 };
                 for e in elem.as_iter()?.into_iter() {
                     acc.push_back(e.clone());
@@ -283,12 +271,7 @@ pub fn reduce<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : V
             };
 
             for r in iter {
-                vm.push(l.clone()); // Function
-                vm.push(acc); // Accumulator (arg1)
-                vm.push(r); // Value (arg2)
-                let f = vm.invoke_func_eval(2)?;
-                vm.run_after_invoke(f)?;
-                acc = vm.pop();
+                acc = vm.invoke_func2(l.clone(), acc, r)?;
             }
             Ok(acc)
         },
@@ -395,3 +378,59 @@ pub fn dict_values(a1: Value) -> ValueResult {
         a1 => TypeErrorArgMustBeDict(a1).err()
     }
 }
+
+pub fn left_find<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : VirtualInterface {
+    let iter = a2.as_iter()?;
+    if a1.is_function() {
+        for (i, v) in iter.into_iter().enumerate() {
+            let ret = vm.invoke_func1(a1.clone(), v.clone())?;
+            if ret.as_bool() {
+                return Ok(Int(i as i64))
+            }
+        }
+        Ok(Int(-1))
+    } else {
+        Ok(Int(match iter.into_iter().position(|v| v == &a1) {
+            Some(i) => i as i64,
+            None => -1
+        }))
+    }
+}
+
+pub fn right_find<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : VirtualInterface {
+    // Identical to the above except we use `.rev()`, and subtract the index from `len`
+    let iter = a2.as_iter()?;
+    let len = iter.len();
+    if a1.is_function() {
+        for (i, v) in iter.into_iter().rev().enumerate() {
+            let ret = vm.invoke_func1(a1.clone(), v.clone())?;
+            if ret.as_bool() {
+                return Ok(Int((len - 1 - i) as i64))
+            }
+        }
+        Ok(Int(-1))
+    } else {
+        Ok(Int(match iter.into_iter().rev().position(|v| v == &a1) {
+            Some(i) => (len - 1 - i) as i64,
+            None => -1
+        }))
+    }
+}
+
+pub fn find_count<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : VirtualInterface {
+    // Similar to `left_find()` and `right_find()` except with `count` instead of `position`
+    let iter = a2.as_iter()?;
+    if a1.is_function() {
+        let mut n: i64 = 0;
+        for (i, v) in iter.into_iter().rev().enumerate() {
+            let ret = vm.invoke_func1(a1.clone(), v.clone())?;
+            if ret.as_bool() {
+                n += 1
+            }
+        }
+        Ok(Int(n))
+    } else {
+        Ok(Int(iter.into_iter().filter(|v| v == &&a1).count() as i64))
+    }
+}
+

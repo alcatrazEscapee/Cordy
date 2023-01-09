@@ -12,7 +12,6 @@ pub enum RuntimeError {
     RuntimeExit,
 
     ValueIsNotFunctionEvaluable(Value),
-    BindingIsNotFunctionEvaluable(StdBinding),
 
     IncorrectNumberOfFunctionArguments(FunctionImpl, u8),
     IncorrectNumberOfArguments(StdBinding, u8, u8),

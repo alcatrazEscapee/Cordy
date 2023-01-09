@@ -30,20 +30,6 @@ pub fn replace(v0: Value, v1: Value, v2: Value) -> ValueResult {
     }
 }
 
-pub fn index_of(v0: Value, v1: Value) -> ValueResult {
-    match (&v0, &v1) {
-        (Str(a0), Str(a1)) => Ok(Int(a1.find(a0.as_ref()).map(|i| i as i64).unwrap_or(-1))),
-        _ => TypeErrorFunc2("index_of(str, str): int", v0, v1).err()
-    }
-}
-
-pub fn count_of(v0: Value, v1: Value) -> ValueResult {
-    match (&v0, &v1) {
-        (Str(a0), Str(a1)) => Ok(Int(a1.matches(a0.as_ref()).count() as i64)),
-        _ => TypeErrorFunc2("count_of(str, str): int", v0, v1).err()
-    }
-}
-
 pub fn split(v0: Value, v1: Value) -> ValueResult {
     match (&v0, &v1) {
         (Str(a0), Str(a1)) => Ok(Value::iter_list(a1.split(a0.as_ref()).map(|v| Str(Box::new(String::from(v)))))),
