@@ -1127,6 +1127,8 @@ mod test {
     #[test] fn test_findn_func_found() { run_str("[1, 3, 5, 7] . findn(>3) . print", "2\n"); }
     #[test] fn test_findn_value_found_multiple() { run_str("[1, 3, 5, 5, 7, 5] . findn(5) . print", "3\n"); }
     #[test] fn test_findn_func_found_multiple() { run_str("[1, 3, 5, 5, 7, 5] . findn(>3) . print", "4\n"); }
+    #[test] fn test_not_in_yes() { run_str("3 not in [1, 2, 3] . print", "false\n"); }
+    #[test] fn test_not_in_no() { run_str("3 not in [1, 5, 8] . print", "true\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }

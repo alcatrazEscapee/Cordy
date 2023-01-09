@@ -1730,9 +1730,20 @@ impl Parser {
                 Some(Pow) => Some(OpPow),
                 Some(KeywordIs) => Some(OpIs),
                 Some(KeywordIn) => Some(OpIn),
+                Some(KeywordNot) => match self.peek2() {
+                    Some(KeywordIn) => Some(UnaryLogicalNot), // Special flag for `not in`, which desugars to `!(x in y)
+                    _ => None,
+                }
                 _ => None
             };
             match maybe_op {
+                Some(UnaryLogicalNot) => {
+                    self.advance();
+                    self.advance();
+                    self.parse_expr_2_unary();
+                    self.push(OpIn);
+                    self.push(UnaryLogicalNot)
+                }
                 Some(op) => {
                     self.advance();
                     self.parse_expr_2_unary();

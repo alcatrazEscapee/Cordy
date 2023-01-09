@@ -35,7 +35,7 @@ Expressions in Cordy are similar to C style languages. Cordy has a number of mat
 - `if condition then value_if_true else value_if_false` is a short-circuiting ternary operator.
   - Note that all boolean comparisons will take the truthy value of it's argument. `nil`, `0`, `false`, `''`, and empty collections are the only falsey values, everything else is truthy.
 - `is` is an operator used to check the type of a value.
-- `in` is a special operator used for checking membership in collections, or substrings.
+- `in` (along with `not in`) is a special operator used for checking membership in collections, or substrings.
 
 
 All the above binary operators come in operator-equals variants: `+=`, `-=`, `*=`, `/=`, etc.
@@ -46,7 +46,7 @@ All operators are left associative (except `=` for assigning variables). Their p
 |------------|--------------------------------------------------------------------------|----------------------------------------------------------------------------------------|
 | 1          | `[]`, `()`, `if then else`                                               | Array Access, Function Evaluation, Ternary `if`                                        |
 | 2          | `-`, `!`, `~`                                                            | Unary Negation, Logical Not, and Bitwise Not                                           |
-| 3          | `*`, `/`, `%`, `**`, `is`, `in`                                          | Multiplication, Division, Modulo, Power, Is, and In                                    |
+| 3          | `*`, `/`, `%`, `**`, `is`, `in`, `not in`                                | Multiplication, Division, Modulo, Power, Is In, Not In                                 |
 | 4          | `+`, `-`                                                                 | Addition, Subtraction                                                                  |
 | 5          | `<<`, `>>`                                                               | Left Shift, Right Shift                                                                |
 | 6          | `&`, `∣`, `^`                                                            | Bitwise AND, Bitwise OR, Bitwise XOR                                                   |
@@ -119,6 +119,13 @@ Cordy has a number of [Native Functions](./stdlib.md), which can be used as norm
 let addition = (+)
 ```
 
+Note in some cases the additional parenthesis can be omitted, for instance if passing an operator to a function:
+
+```
+>>> print(+)
+(+)
+```
+
 One such important native function is `print`, which prints all arguments, space seperated, to standard out, followed by a newline:
 
 ```
@@ -155,6 +162,13 @@ let partial_foo = foo(1, 2)
 
 // ...which only needs the third argument
 partial_foo(3)
+```
+
+Operators can also be partially evaluated, and like above, the parenthesis can be omitted around the operator:
+
+```
+let add3 = (+3)
+add3(4) // returns 7
 ```
 
 Note that function evaluation with `()` is high precedence, whereas function evaluation with `.` is low precedence. This can be used alongside partial functions to great effect:
