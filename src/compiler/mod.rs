@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use crate::compiler::parser::ParserError;
 use crate::compiler::scanner::ScanResult;
 use crate::reporting::{ErrorReporter, ProvidesLineNumber};
@@ -44,7 +46,7 @@ pub struct CompileResult {
 
     pub strings: Vec<String>,
     pub constants: Vec<i64>,
-    pub functions: Vec<FunctionImpl>,
+    pub functions: Vec<Rc<FunctionImpl>>,
 
     pub line_numbers: Vec<u16>,
     pub locals: Vec<String>,

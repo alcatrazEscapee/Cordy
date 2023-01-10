@@ -144,7 +144,7 @@ pub fn min_by<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : V
     match a1.as_function_args() {
         Some(Some(2)) => {
             let mut err: Option<Box<RuntimeError>> = None;
-            let mut ret = iter.into_iter()
+            let ret = iter.into_iter()
                 .min_by(|a, b| misc::yield_result(&mut err, || {
                     let cmp = vm.invoke_func2(a1.clone(), (*a).clone(), (*b).clone())?.as_int()?;
                     cmp_to_ord(cmp)
@@ -154,7 +154,7 @@ pub fn min_by<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : V
         },
         Some(Some(1)) => {
             let mut err = None;
-            let mut ret = iter.into_iter()
+            let ret = iter.into_iter()
                 .min_by_key(|u| misc::yield_result(&mut err, || vm.invoke_func1(a1.clone(), (*u).clone()), Nil));
 
             non_empty(misc::join_result(ret, err)?)
@@ -173,7 +173,7 @@ pub fn max_by<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : V
     match a1.as_function_args() {
         Some(Some(2)) => {
             let mut err: Option<Box<RuntimeError>> = None;
-            let mut ret = iter.into_iter()
+            let ret = iter.into_iter()
                 .max_by(|a, b| misc::yield_result(&mut err, || {
                     let cmp = vm.invoke_func2(a1.clone(), (*a).clone(), (*b).clone())?.as_int()?;
                     cmp_to_ord(cmp)
@@ -183,7 +183,7 @@ pub fn max_by<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : V
         },
         Some(Some(1)) => {
             let mut err = None;
-            let mut ret = iter.into_iter()
+            let ret = iter.into_iter()
                 .max_by_key(|u| misc::yield_result(&mut err, || vm.invoke_func1(a1.clone(), (*u).clone()), Nil));
 
             non_empty(misc::join_result(ret, err)?)

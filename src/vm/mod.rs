@@ -92,7 +92,7 @@ impl<R, W> VirtualMachine<R, W> where
             strings: result.strings,
             globals: result.globals,
             constants: result.constants,
-            functions: result.functions.into_iter().map(|f| Rc::new(f)).collect(),
+            functions: result.functions,
             line_numbers: result.line_numbers,
             read,
             write,

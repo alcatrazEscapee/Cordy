@@ -1,3 +1,4 @@
+use std::rc::Rc;
 
 
 pub fn strip_line_ending(buffer: &mut String) {
@@ -41,5 +42,39 @@ pub fn join_result<T, E>(result: T, err: Option<E>) -> Result<T, E> {
     match err {
         Some(e) => Err(e),
         None => Ok(result)
+    }
+}
+
+
+pub enum MaybeRc<T> where T : Sized {
+    Rc(Rc<T>),
+    Raw(T)
+}
+
+impl<T> MaybeRc<T> {
+
+    pub fn new(t : T) -> MaybeRc<T> {
+        MaybeRc::Raw(t)
+    }
+
+    pub fn unbox(self: &Self) -> &T {
+        match self {
+            MaybeRc::Rc(_) => panic!("Unboxing Rc"),
+            MaybeRc::Raw(t) => t
+        }
+    }
+
+    pub fn unbox_mut(self: &mut Self) -> &mut T {
+        match self {
+            MaybeRc::Rc(_) => panic!("Unboxing Rc"),
+            MaybeRc::Raw(t) => t
+        }
+    }
+
+    pub fn into_rc(self) -> Rc<T> {
+        match self {
+            MaybeRc::Rc(rc) => rc,
+            MaybeRc::Raw(t) => Rc::new(t),
+        }
     }
 }
