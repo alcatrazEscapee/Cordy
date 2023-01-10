@@ -14,8 +14,13 @@ use ParserErrorType::{*};
 use Opcode::{*};
 use StdBinding::{*};
 
+pub const RULE_INCREMENTAL: ParseRule = |mut parser| parser.parse_incremental();
+pub const RULE_EXPRESSION: ParseRule = |mut parser| parser.parse_expression();
 
-/// Create a default empty `CompileResult`. This is semantically equivilant to parsing an empty program, but will output nothing.
+pub type ParseRule = fn(Parser) -> ();
+
+
+/// Create a default empty `CompileResult`. This is semantically equivalent to parsing an empty program, but will output nothing.
 pub fn default() -> CompileResult {
     parse_rule(vec![], |_| ())
 }
@@ -26,27 +31,8 @@ pub fn parse(scan_result: ScanResult) -> CompileResult {
     parse_rule(scan_result.tokens, |mut parser| parser.parse())
 }
 
-/// Incrementally parse from the given inputs, and `ScanResult`
-///
-/// The top level rule is `<root>`, and the code will be appended to the end of output.
-/// This is the API used by the REPL incremental compiler.
-pub fn parse_incremental(scan_result: ScanResult, code: &mut Vec<Opcode>, locals: &mut Vec<Locals>, strings: &mut Vec<String>, constants: &mut Vec<i64>, functions: &mut Vec<Rc<FunctionImpl>>, line_numbers: &mut Vec<u16>, globals: &mut Vec<String>) -> Vec<ParserError> {
-    parse_rule_incremental(scan_result, code, locals, strings, constants, functions, line_numbers, globals, |mut parser| parser.parse_incremental())
-}
 
-/// Incrementally parse from the given inputs, and `ScanResult`
-///
-/// The top level rule is `<expression>`, and the code will be appended to the end of the output.
-/// Note that this does not insert a terminal `Pop` or `Exit`, unlike calls to `parse_incremental()` or `parse()`.
-///
-/// This is the API used to run an `eval()` statement.
-pub fn parse_incremental_expression(scan_result: ScanResult, code: &mut Vec<Opcode>, strings: &mut Vec<String>, constants: &mut Vec<i64>, functions: &mut Vec<Rc<FunctionImpl>>, line_numbers: &mut Vec<u16>, globals: &mut Vec<String>) -> Vec<ParserError> {
-    let mut locals: Vec<Locals> = vec![Locals::new()]; // No locals are present for a `eval`
-    parse_rule_incremental(scan_result, code, &mut locals, strings, constants, functions, line_numbers, globals, |mut parser| parser.parse_expression())
-}
-
-
-fn parse_rule_incremental(scan_result: ScanResult, code: &mut Vec<Opcode>, locals: &mut Vec<Locals>, strings: &mut Vec<String>, constants: &mut Vec<i64>, functions: &mut Vec<Rc<FunctionImpl>>, line_numbers: &mut Vec<u16>, globals: &mut Vec<String>, rule: fn(Parser) -> ()) -> Vec<ParserError> {
+pub fn parse_incremental(scan_result: ScanResult, code: &mut Vec<Opcode>, locals: &mut Vec<Locals>, strings: &mut Vec<String>, constants: &mut Vec<i64>, functions: &mut Vec<Rc<FunctionImpl>>, line_numbers: &mut Vec<u16>, globals: &mut Vec<String>, rule: fn(Parser) -> ()) -> Vec<ParserError> {
 
     let mut errors: Vec<ParserError> = Vec::new();
     let mut maybe_functions: Vec<MaybeRc<FunctionImpl>> = functions.iter().map(|u| MaybeRc::Rc(u.clone())).collect();
@@ -152,7 +138,7 @@ pub enum ParserErrorType {
 }
 
 
-struct Parser<'a> {
+pub struct Parser<'a> {
     input: VecDeque<ScanToken>,
     output: &'a mut Vec<Opcode>,
     errors: &'a mut Vec<ParserError>,
@@ -202,12 +188,16 @@ pub struct Locals {
 }
 
 impl Locals {
-    pub fn new() -> Locals {
-        Locals { locals: Vec::new(), upvalues: Vec::new(), loops: Vec::new() }
+    pub fn empty() -> Vec<Locals> {
+        vec![Locals::new()]
     }
 
     pub fn len(self: &Self) -> usize {
         self.locals.len()
+    }
+
+    fn new() -> Locals {
+        Locals { locals: Vec::new(), upvalues: Vec::new(), loops: Vec::new() }
     }
 }
 
@@ -2628,6 +2618,8 @@ mod tests {
     #[test] fn test_slice_12() { run_expr("1 [2:3]", vec![Int(1), Int(2), Int(3), OpSlice]); }
     #[test] fn test_binary_ops() { run_expr("(*) * (+) + (/)", vec![NativeFunction(OperatorMul), NativeFunction(OperatorAdd), OpMul, NativeFunction(OperatorDiv), OpAdd]); }
     #[test] fn test_if_then_else() { run_expr("(if true then 1 else 2)", vec![True, JumpIfFalsePop(4), Int(1), Jump(5), Int(2)]); }
+    #[test] fn test_zero_equals_zero() { run_expr("0 == 0 ", vec![Int(0), Int(0), OpEqual]); }
+    #[test] fn test_zero_equals_zero_no_spaces() { run_expr("0==0", vec![Int(0), Int(0), OpEqual]); }
 
     #[test] fn test_let_eof() { run_err("let", "Expected a variable binding, either a name, or '_', or pattern (i.e. 'x, (_, y), *z'), got end of input instead\n  at: line 1 (<test>)\n  at:\n\nlet\n"); }
     #[test] fn test_let_no_identifier() { run_err("let =", "Expected a variable binding, either a name, or '_', or pattern (i.e. 'x, (_, y), *z'), got '=' token instead\n  at: line 1 (<test>)\n  at:\n\nlet =\n"); }

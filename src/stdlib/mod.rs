@@ -70,6 +70,7 @@ pub enum StdBinding {
     Vector,
     Function,
     Repr,
+    Eval,
 
     // Native Operators
     OperatorUnarySub,
@@ -215,6 +216,7 @@ fn load_bindings() -> Vec<StdBindingInfo> {
         of!(Void, OperatorNotEqual, "(!=)"),
 
         of!(Repr, "repr"),
+        of!(Eval, "eval"),
 
         of!(ToLower, "to_lower"),
         of!(ToUpper, "to_upper"),
@@ -429,10 +431,10 @@ pub fn invoke<VM>(binding: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult wh
 
     match binding {
         Print => {
-            dispatch_varargs!(vm.println0(), a1, vm.println(a1.as_str()), an, {
-                vm.print(an.next().unwrap().as_str());
+            dispatch_varargs!(vm.println0(), a1, vm.println(a1.to_str()), an, {
+                vm.print(an.next().unwrap().to_str());
                 for ai in an {
-                    vm.print(format!(" {}", ai.as_str()));
+                    vm.print(format!(" {}", ai.to_str()));
                 }
                 vm.println0()
             });
@@ -469,13 +471,14 @@ pub fn invoke<VM>(binding: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult wh
             },
             _ => TypeErrorCannotConvertToInt(a1).err(),
         }),
-        Str => dispatch!(Ok(Value::Str(Box::new(String::new()))), a1, Ok(Value::Str(Box::new(a1.as_str())))),
+        Str => dispatch!(Ok(Value::Str(Box::new(String::new()))), a1, Ok(Value::Str(Box::new(a1.to_str())))),
         List => dispatch_varargs!(Ok(Value::list(VecDeque::new())), an, Ok(Value::iter_list(an.into_iter().cloned()))),
         Set => dispatch_varargs!(Ok(Value::set(LinkedHashSet::new())), an, Ok(Value::iter_set(an.into_iter().cloned()))),
         Dict => dispatch_varargs!(Ok(Value::dict(LinkedHashMap::new())), an, collections::collect_into_dict(an.into_iter().cloned())),
         Heap => dispatch_varargs!(Ok(Value::heap(BinaryHeap::new())), an, Ok(Value::iter_heap(an.into_iter().cloned()))),
         Vector => dispatch_varargs!(Ok(Value::vector(vec![])), an, Ok(Value::iter_vector(an.into_iter().cloned()))),
-        Repr => dispatch!(a1, Ok(Value::Str(Box::new(a1.as_repr_str())))),
+        Repr => dispatch!(a1, Ok(Value::Str(Box::new(a1.to_repr_str())))),
+        Eval => dispatch!(a1, vm.invoke_eval(a1.into_str()?)),
 
         // operator
         OperatorUnarySub => dispatch!(a1, operator::unary_sub(a1)),

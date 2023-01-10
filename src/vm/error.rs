@@ -12,6 +12,8 @@ pub enum RuntimeError {
     RuntimeExit,
     RuntimeYield,
 
+    RuntimeCompilationError(Vec<String>),
+
     ValueIsNotFunctionEvaluable(Value),
 
     IncorrectNumberOfFunctionArguments(FunctionImpl, u8),

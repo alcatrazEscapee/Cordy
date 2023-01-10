@@ -12,7 +12,7 @@ use crate::stdlib::StdBinding;
 use crate::vm::error::RuntimeError;
 
 use Value::{*};
-use RuntimeError::{TypeErrorArgMustBeIterable, TypeErrorArgMustBeIndexable, TypeErrorArgMustBeSliceable, TypeErrorArgMustBeInt};
+use RuntimeError::{TypeErrorArgMustBeIterable, TypeErrorArgMustBeIndexable, TypeErrorArgMustBeSliceable, TypeErrorArgMustBeInt, TypeErrorArgMustBeStr};
 
 
 /// The runtime sum type used by the virtual machine
@@ -65,19 +65,19 @@ impl Value {
     pub fn closure(func: Rc<FunctionImpl>) -> Value { Closure(Box::new(ClosureImpl { func, environment: Vec::new() })) }
 
     /// Converts the `Value` to a `String`. This is equivalent to the stdlib function `str()`
-    pub fn as_str(self: &Self) -> String {
+    pub fn to_str(self: &Self) -> String {
         match self {
             Str(s) => *s.clone(),
             Function(f) => f.name.clone(),
-            PartialFunction(f) => f.func.as_str(),
+            PartialFunction(f) => f.func.to_str(),
             NativeFunction(b) => String::from(stdlib::lookup_name(*b)),
             PartialNativeFunction(b, _) => String::from(stdlib::lookup_name(*b)),
-            _ => self.as_repr_str(),
+            _ => self.to_repr_str(),
         }
     }
 
     /// Converts the `Value` to a representative `String. This is equivalent to the stdlib function `repr()`, and meant to be an inverse of `eval()`
-    pub fn as_repr_str(self: &Self) -> String {
+    pub fn to_repr_str(self: &Self) -> String {
         match self {
             Nil => String::from("nil"),
             Bool(b) => b.to_string(),
@@ -86,13 +86,13 @@ impl Value {
                 let escaped = format!("{:?}", s);
                 format!("'{}'", &escaped[1..escaped.len() - 1])
             },
-            List(v) => format!("[{}]", v.unbox().iter().map(|t| t.as_repr_str()).collect::<Vec<String>>().join(", ")),
-            Set(v) => format!("{{{}}}", v.unbox().iter().map(|t| t.as_repr_str()).collect::<Vec<String>>().join(", ")),
-            Dict(v) => format!("{{{}}}", v.unbox().dict.iter().map(|(k, v)| format!("{}: {}", k.as_repr_str(), v.as_repr_str())).collect::<Vec<String>>().join(", ")),
-            Heap(v) => format!("[{}]", v.unbox().heap.iter().map(|t| t.0.as_repr_str()).collect::<Vec<String>>().join(", ")),
-            Vector(v) => format!("({})", v.unbox().iter().map(|t| t.as_repr_str()).collect::<Vec<String>>().join(", ")),
+            List(v) => format!("[{}]", v.unbox().iter().map(|t| t.to_repr_str()).collect::<Vec<String>>().join(", ")),
+            Set(v) => format!("{{{}}}", v.unbox().iter().map(|t| t.to_repr_str()).collect::<Vec<String>>().join(", ")),
+            Dict(v) => format!("{{{}}}", v.unbox().dict.iter().map(|(k, v)| format!("{}: {}", k.to_repr_str(), v.to_repr_str())).collect::<Vec<String>>().join(", ")),
+            Heap(v) => format!("[{}]", v.unbox().heap.iter().map(|t| t.0.to_repr_str()).collect::<Vec<String>>().join(", ")),
+            Vector(v) => format!("({})", v.unbox().iter().map(|t| t.to_repr_str()).collect::<Vec<String>>().join(", ")),
             Function(f) => (*f).as_ref().borrow().as_str(),
-            PartialFunction(f) => (*f).as_ref().borrow().func.as_str(),
+            PartialFunction(f) => (*f).as_ref().borrow().func.to_str(),
             NativeFunction(b) => format!("fn {}()", stdlib::lookup_name(*b)),
             PartialNativeFunction(b, _) => format!("fn {}()", stdlib::lookup_name(*b)),
             Closure(c) => (*c).func.as_ref().borrow().as_str(),
@@ -120,7 +120,7 @@ impl Value {
     }
 
     pub fn as_debug_str(self: &Self) -> String {
-        format!("{}: {}", self.as_repr_str(), self.as_type_str())
+        format!("{}: {}", self.to_repr_str(), self.as_type_str())
     }
 
     pub fn as_bool(self: &Self) -> bool {
@@ -153,6 +153,13 @@ impl Value {
             Int(i) => Ok(*i),
             Bool(b) => Ok(if *b { 1 } else { 0 }),
             _ => TypeErrorArgMustBeInt(self.clone()).err(),
+        }
+    }
+
+    pub fn into_str(self: Self) -> Result<String, Box<RuntimeError>> {
+        match self {
+            Str(it) => Ok(*it),
+            v => TypeErrorArgMustBeStr(v.clone()).err()
         }
     }
 

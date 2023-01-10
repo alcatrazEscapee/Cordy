@@ -156,9 +156,22 @@ false
 
 Returns the full representation of `x`, as a string. Strings are wrapped in single quotes, unlike `str`, although is functionally similar in other respects.
 
+**Example**
+
 ```
 >>> repr('hello')
 'hello'
+```
+
+### Eval `eval(x: str) -> any`
+
+Compiles and evaluates the Cordy expression represented by the string `x`. This is the inverse operation of `repr`. Note that `eval` cannot reference any variables and cannot define any (unless inside an anonymous function). Raises an error if the string `x` is not valid and evaluable Cordy code.
+
+**Example**
+
+```
+>>> '1 + 2' . eval
+3
 ```
 
 ### Len `len(x: iterable) -> int`

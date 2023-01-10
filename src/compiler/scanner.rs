@@ -23,6 +23,7 @@ pub fn scan(text: &String) -> ScanResult {
 }
 
 
+#[derive(Debug, Clone)]
 pub struct ScanResult {
     pub tokens: Vec<ScanToken>,
     pub errors: Vec<ScanError>
@@ -198,8 +199,12 @@ impl<'a> Scanner<'a> {
                                 Some(_) => {
                                     // Don't consume, as this isn't part of the number, just a '0' literal followed by some other syntax
                                     self.push(Int(0));
-                                }
-                                _ => {}
+                                },
+                                None => {
+                                    // The last element in the input is `0`, so still emit `Int(0)`
+                                    self.advance();
+                                    self.push(Int(0));
+                                },
                             }
                        }
                        '1'..='9' => {
