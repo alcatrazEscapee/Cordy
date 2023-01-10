@@ -562,7 +562,7 @@ impl<R, W> VirtualMachine<R, W> where
             f @ (Value::Function(_) | Value::Closure(_)) => {
                 trace::trace_interpreter!("invoke_func_eval -> {}, nargs = {}", f.as_debug_str(), nargs);
 
-                let func = f.as_function();
+                let func = f.function_impl();
                 if func.nargs == nargs {
                     // Evaluate directly
                     self.call_function(func.head, func.nargs);
@@ -585,7 +585,7 @@ impl<R, W> VirtualMachine<R, W> where
                     Value::PartialFunction(x) => *x,
                     _ => panic!("Stack corruption")
                 };
-                let func = partial.func.as_function();
+                let func = partial.func.function_impl();
                 let total_nargs: u8 = partial.args.len() as u8 + nargs;
                 if func.nargs > total_nargs {
                     // Not enough arguments, so pop the argument and push a new partial function
@@ -954,8 +954,8 @@ mod test {
     #[test] fn test_builtin_reduce_lambda() { run_str("[1, 2, 3, 4, 5, 6] . reduce (fn(a, b) -> a * b) . print", "720\n"); }
     #[test] fn test_builtin_reduce_with_builtin() { run_str("[1, 2, 3, 4, 5, 6] . reduce (sum) . print", "21\n"); }
     #[test] fn test_builtin_reduce_with_empty() { run_str("[] . reduce(+) . print", "ValueError: Expected value to be a non empty iterable\n    at: `[] . reduce(+) . print` (line 1)\n    at: execution of script '<test>'\n"); }
-    #[test] fn test_builtin_sorted() { run_str("[6, 2, 3, 7, 2, 1] . sorted . print", "[1, 2, 2, 3, 6, 7]\n"); }
-    #[test] fn test_builtin_reversed() { run_str("[8, 1, 2, 6, 3, 2, 3] . reversed . print", "[3, 2, 3, 6, 2, 1, 8]\n"); }
+    #[test] fn test_builtin_sorted() { run_str("[6, 2, 3, 7, 2, 1] . sort . print", "[1, 2, 2, 3, 6, 7]\n"); }
+    #[test] fn test_builtin_reversed() { run_str("[8, 1, 2, 6, 3, 2, 3] . reverse . print", "[3, 2, 3, 6, 2, 1, 8]\n"); }
     #[test] fn test_bare_operator_eval() { run_str("(+)(1, 2) . print", "3\n"); }
     #[test] fn test_bare_operator_partial_eval() { run_str("(+)(1)(2) . print", "3\n"); }
     #[test] fn test_bare_operator_compose_and_eval() { run_str("2 . (+)(1) . print", "3\n"); }
@@ -964,7 +964,7 @@ mod test {
     #[test] fn test_reduce_list_2() { run_str("[1, 2, 3] . reduce (-) . print", "Function '(-)' requires 2 parameters but 1 were present.\n    at: `[1, 2, 3] . reduce (-) . print` (line 1)\n    at: execution of script '<test>'\n"); }
     #[test] fn test_str_to_list() { run_str("'funny beans' . list . print", "['f', 'u', 'n', 'n', 'y', ' ', 'b', 'e', 'a', 'n', 's']\n"); }
     #[test] fn test_str_to_set() { run_str("'funny beans' . set . print", "{'f', 'u', 'y', ' ', 'b', 'e', 'a', 'n', 's'}\n"); }
-    #[test] fn test_str_to_set_to_sorted() { run_str("'funny' . set . sorted . print", "['f', 'n', 'u', 'y']\n"); }
+    #[test] fn test_str_to_set_to_sorted() { run_str("'funny' . set . sort . print", "['f', 'n', 'u', 'y']\n"); }
     #[test] fn test_chained_assignments() { run_str("let a, b, c; a = b = c = 3; [a, b, c] . print", "[3, 3, 3]\n"); }
     #[test] fn test_array_assignment_1() { run_str("let a = [1, 2, 3]; a[0] = 3; a . print", "[3, 2, 3]\n"); }
     #[test] fn test_array_assignment_2() { run_str("let a = [1, 2, 3]; a[2] = 1; a . print", "[1, 2, 1]\n"); }
@@ -1129,6 +1129,17 @@ mod test {
     #[test] fn test_findn_func_found_multiple() { run_str("[1, 3, 5, 5, 7, 5] . findn(>3) . print", "4\n"); }
     #[test] fn test_not_in_yes() { run_str("3 not in [1, 2, 3] . print", "false\n"); }
     #[test] fn test_not_in_no() { run_str("3 not in [1, 5, 8] . print", "true\n"); }
+    #[test] fn test_min_by_key() { run_str("[[1, 5], [2, 3], [6, 4]] . min_by(fn(i) -> i[1]) . print", "[2, 3]\n"); }
+    #[test] fn test_min_by_cmp() { run_str("[[1, 5], [2, 3], [6, 4]] . min_by(fn(a, b) -> a[1] - b[1]) . print", "[2, 3]\n"); }
+    #[test] fn test_min_by_wrong_fn() { run_str("[[1, 5], [2, 3], [6, 4]] . min_by(fn() -> 1) . print", "TypeError: Expected '_' of type 'function' to be a '<A, B> fn key(A) -> B' or '<A> cmp(A, A) -> int' function\n    at: `[[1, 5], [2, 3], [6, 4]] . min_by(fn() -> 1) . print` (line 1)\n    at: execution of script '<test>'\n"); }
+    #[test] fn test_max_by_key() { run_str("[[1, 5], [2, 3], [6, 4]] . max_by(fn(i) -> i[1]) . print", "[1, 5]\n"); }
+    #[test] fn test_max_by_cmp() { run_str("[[1, 5], [2, 3], [6, 4]] . max_by(fn(a, b) -> a[1] - b[1]) . print", "[1, 5]\n"); }
+    #[test] fn test_max_by_wrong_fn() { run_str("[[1, 5], [2, 3], [6, 4]] . max_by(fn() -> 1) . print", "TypeError: Expected '_' of type 'function' to be a '<A, B> fn key(A) -> B' or '<A> cmp(A, A) -> int' function\n    at: `[[1, 5], [2, 3], [6, 4]] . max_by(fn() -> 1) . print` (line 1)\n    at: execution of script '<test>'\n"); }
+    #[test] fn test_sort_by_key() { run_str("[[1, 5], [2, 3], [6, 4]] . sort_by(fn(i) -> i[1]) . print", "[[2, 3], [6, 4], [1, 5]]\n"); }
+    #[test] fn test_sort_by_cmp() { run_str("[[1, 5], [2, 3], [6, 4]] . sort_by(fn(a, b) -> a[1] - b[1]) . print", "[[2, 3], [6, 4], [1, 5]]\n"); }
+    #[test] fn test_sort_by_wrong_fn() { run_str("[[1, 5], [2, 3], [6, 4]] . sort_by(fn() -> 1) . print", "TypeError: Expected '_' of type 'function' to be a '<A, B> fn key(A) -> B' or '<A> cmp(A, A) -> int' function\n    at: `[[1, 5], [2, 3], [6, 4]] . sort_by(fn() -> 1) . print` (line 1)\n    at: execution of script '<test>'\n"); }
+    #[test] fn test_ord() { run_str("'a' . ord . print", "97\n"); }
+    #[test] fn test_char() { run_str("97 . char . repr . print", "'a'\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }

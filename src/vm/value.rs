@@ -142,6 +142,7 @@ impl Value {
     pub fn as_int(self: &Self) -> Result<i64, Box<RuntimeError>> {
         match self {
             Int(i) => Ok(*i),
+            Bool(b) => Ok(if *b { 1 } else { 0 }),
             _ => TypeErrorArgMustBeInt(self.clone()).err(),
         }
     }
@@ -151,6 +152,7 @@ impl Value {
         match self {
             Nil => Ok(def),
             Int(i) => Ok(*i),
+            Bool(b) => Ok(if *b { 1 } else { 0 }),
             _ => TypeErrorArgMustBeInt(self.clone()).err(),
         }
     }
@@ -193,12 +195,26 @@ impl Value {
     }
 
     /// Returns the internal `FunctionImpl` of this value.
-    /// Must only be called on a `Function` or `Closure`, will panic otherwise
-    pub fn as_function(self: &Self) -> &Rc<FunctionImpl> {
+    /// Must only be called on a `Function` or `Closure`, will panic otherwise.
+    pub fn function_impl(self: &Self) -> &Rc<FunctionImpl> {
         match self {
             Function(f) => f,
             Closure(c) => &c.func,
             _ => panic!("Tried to unwrap a {:?} as a function", self),
+        }
+    }
+
+    /// Returns `None` if this value is not a function
+    /// Returns `Some(None)` if this value is a function with an unknown number of arguments
+    /// Returns `Some(Some(nargs))` if this value is a function with a known number of arguments
+    pub fn as_function_args(self: &Self) -> Option<Option<u8>> {
+        match self {
+            Function(it) => Some(Some(it.nargs)),
+            PartialFunction(it) => Some(Some(it.func.function_impl().nargs - it.args.len() as u8)),
+            NativeFunction(it) => Some(it.nargs()),
+            PartialNativeFunction(it, args) => Some(it.nargs().map(|u| u - args.len() as u8)),
+            Closure(it) => Some(Some(it.func.nargs)),
+            _ => None,
         }
     }
 
@@ -565,6 +581,7 @@ mod test {
         for v in all_values() {
             assert_eq!(v.is_iter(), v.as_iter().is_ok(), "is_iter() and as_iter() not consistent for {}", v.as_type_str());
             assert_eq!(v.is_iter(), v.len().is_ok(), "is_iter() and len() not consistent for {}", v.as_type_str());
+            assert_eq!(v.is_function(), v.as_function_args().is_some(), "is_function() and as_function_args() not consistent for {}", v.as_type_str());
 
             if v.to_index().is_ok() {
                 assert!(v.len().is_ok(), "as_index() and len() not consistent for {}", v.as_type_str());
