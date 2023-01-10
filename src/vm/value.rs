@@ -119,7 +119,6 @@ impl Value {
         })
     }
 
-    #[cfg(any(trace_interpreter = "on", trace_interpreter_stack = "on"))]
     pub fn as_debug_str(self: &Self) -> String {
         format!("{}: {}", self.as_repr_str(), self.as_type_str())
     }
