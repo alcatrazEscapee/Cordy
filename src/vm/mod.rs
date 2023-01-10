@@ -1179,7 +1179,16 @@ mod test {
     #[test] fn test_eval_nil() { run_str("'nil' . eval . print", "nil\n"); }
     #[test] fn test_eval_bool() { run_str("'true' . eval . print", "true\n"); }
     #[test] fn test_eval_int_expression() { run_str("'3 + 4' . eval . print", "7\n"); }
-    #[test] fn test_eval_zero_equals_zero() { run_str("'0==0' . eval . print", "true\n")}
+    #[test] fn test_eval_zero_equals_zero() { run_str("'0==0' . eval . print", "true\n"); }
+    #[test] fn test_operator_in_expr() { run_str("(1 < 2) . print", "true\n"); }
+    #[test] fn test_operator_partial_right() { run_str("((<2)(1)) . print", "true\n"); }
+    #[test] fn test_operator_partial_left() { run_str("((1<)(2)) . print", "true\n"); }
+    #[test] fn test_operator_partial_twice() { run_str("((<)(1)(2)) . print", "true\n"); }
+    #[test] fn test_operator_as_prefix() { run_str("((<)(1, 2)) . print", "true\n"); }
+    #[test] fn test_operator_partial_right_with_composition() { run_str("(1 . (<2)) . print", "true\n"); }
+    #[test] fn test_operator_partial_left_with_composition() { run_str("(2 . (1<)) . print", "true\n"); }
+    #[test] fn test_int_to_hex() { run_str("1234 . hex . print", "4d2\n"); }
+    #[test] fn test_int_to_bin() { run_str("1234 . bin . print", "10011010010\n")}
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }

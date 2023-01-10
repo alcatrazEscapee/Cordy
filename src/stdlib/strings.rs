@@ -55,4 +55,12 @@ pub fn to_ord(a1: Value) -> ValueResult {
     }
 }
 
+pub fn to_hex(a1: Value) -> ValueResult {
+    Ok(Str(Box::new(format!("{:x}", a1.as_int()?))))
+}
+
+pub fn to_bin(a1: Value) -> ValueResult {
+    Ok(Str(Box::new(format!("{:b}", a1.as_int()?))))
+}
+
 

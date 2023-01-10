@@ -1471,9 +1471,11 @@ impl Parser<'_> {
             },
             Some(OpenParen) => {
                 self.advance(); // Consume the `(`
-                if !self.parse_expr_1_partial_operator() {
+                if !self.parse_expr_1_partial_operator_left() {
                     self.parse_expression();
-                    self.expect(CloseParen);
+                    if !self.parse_expr_1_partial_operator_right() {
+                        self.expect(CloseParen);
+                    }
                 }
             },
             Some(OpenSquareBracket) => self.parse_expr_1_list_literal(),
@@ -1484,8 +1486,8 @@ impl Parser<'_> {
         }
     }
 
-    fn parse_expr_1_partial_operator(self: &mut Self) -> bool {
-        trace::trace_parser!("rule <expr-1-partial-operator>");
+    fn parse_expr_1_partial_operator_left(self: &mut Self) -> bool {
+        trace::trace_parser!("rule <expr-1-partial-operator-left>");
         // Open `(` usually resolves precedence, so it begins parsing an expression from the top again
         // However it *also* can be used to wrap around a partial evaluation of a literal operator, for example
         // (-) => OperatorUnarySub
@@ -1543,10 +1545,24 @@ impl Parser<'_> {
                     self.advance();
                 },
                 _ => {
-                    // Anything else, and we try and parse an expression and partially evaluate
+                    // Anything else, and we try and parse an expression and partially evaluate.
+                    // Note that this is *right* partial evaluation, i.e. `(< 3)` -> we evaluate the *second* argument of `<`
+                    // This actually means we need to transform the operator if it is asymmetric, to one which looks identical, but is actually the operator in reverse.
+                    let op = match op {
+                        OperatorDiv => OperatorDivSwap,
+                        OperatorPow => OperatorPowSwap,
+                        OperatorMod => OperatorModSwap,
+                        OperatorIs => OperatorIsSwap,
+                        OperatorLeftShift => OperatorLeftShiftSwap,
+                        OperatorRightShift => OperatorRightShiftSwap,
+                        OperatorLessThan => OperatorLessThanSwap,
+                        OperatorLessThanEqual => OperatorLessThanEqualSwap,
+                        OperatorGreaterThan => OperatorGreaterThanSwap,
+                        OperatorGreaterThanEqual => OperatorGreaterThanEqualSwap,
+                        op => op,
+                    };
+                    self.push(NativeFunction(op)); // Push the operator
                     self.parse_expression(); // Parse the expression following a binary prefix operator
-                    self.push(NativeFunction(op)); // Push the binding
-                    self.push(Swap);
                     self.push(OpFuncEval(1)); // And partially evaluate it
                     self.expect(CloseParen);
                 }
@@ -1557,8 +1573,48 @@ impl Parser<'_> {
         }
     }
 
+    fn parse_expr_1_partial_operator_right(self: &mut Self) -> bool {
+        trace::trace_parser!("rule <expr-1-partial-operator-right");
+        // If we see the pattern of BinaryOp `)`, then we recognize this as a partial operator, but evaluated from the left hand side instead.
+        // For non-symmetric operators, this means we use the normal operator as we partial evaluate the left hand argument (by having the operator on the right)
+        let op = match self.peek() {
+            Some(Mul) => Some(OperatorMul),
+            Some(Div) => Some(OperatorDiv),
+            Some(Pow) => Some(OperatorPow),
+            Some(Mod) => Some(OperatorMod),
+            Some(KeywordIs) => Some(OperatorIs),
+            Some(Plus) => Some(OperatorAdd),
+            // `-` cannot be a binary operator as it's ambiguous from a unary expression
+            Some(LeftShift) => Some(OperatorLeftShift),
+            Some(RightShift) => Some(OperatorRightShift),
+            Some(BitwiseAnd) => Some(OperatorBitwiseAnd),
+            Some(BitwiseOr) => Some(OperatorBitwiseOr),
+            Some(BitwiseXor) => Some(OperatorBitwiseXor),
+            Some(LessThan) => Some(OperatorLessThan),
+            Some(LessThanEquals) => Some(OperatorLessThanEqual),
+            Some(GreaterThan) => Some(OperatorGreaterThan),
+            Some(GreaterThanEquals) => Some(OperatorGreaterThanEqual),
+            Some(DoubleEquals) => Some(OperatorEqual),
+            Some(NotEquals) => Some(OperatorNotEqual),
+
+            _ => None,
+        };
+
+        match (op, self.peek2()) {
+            (Some(op), Some(CloseParen)) => {
+                self.advance(); // The operator
+                self.push(NativeFunction(op)); // Push the operator
+                self.push(Swap);
+                self.push(OpFuncEval(1)); // And partially evaluate it
+                self.expect(CloseParen);
+                true
+            },
+            _ => false,
+        }
+    }
+
     fn parse_expr_1_list_literal(self: &mut Self) {
-        trace::trace_interpreter!("rule <expr-1-list-literal>");
+        trace::trace_parser!("rule <expr-1-list-literal>");
         self.advance(); // Consume `[`
         let mut length: i64 = 0;
         loop {
@@ -1694,7 +1750,7 @@ impl Parser<'_> {
                             // Special case: if we can parse a partially-evaluated operator expression, we do so
                             // This means we can write `map (+3)` instead of `map ((+3))`
                             // If we parse something here, this will have consumed everything, otherwise we parse an expression as per usual
-                            if self.parse_expr_1_partial_operator() {
+                            if self.parse_expr_1_partial_operator_left() {
                                 // We still need to treat this as a function evaluation, however, because we pretended we didn't need to see the outer parenthesis
                                 self.push(OpFuncEval(1));
                             } else {
@@ -1816,6 +1872,9 @@ impl Parser<'_> {
                 }
                 _ => None
             };
+            if maybe_op.is_some() && self.peek2() == Some(&CloseParen) {
+                break
+            }
             match maybe_op {
                 Some(UnaryLogicalNot) => {
                     self.advance();
@@ -1843,6 +1902,9 @@ impl Parser<'_> {
                 Some(Minus) => Some(OpSub),
                 _ => None
             };
+            if maybe_op.is_some() && self.peek2() == Some(&CloseParen) {
+                break
+            }
             match maybe_op {
                 Some(op) => {
                     self.advance();
@@ -1863,6 +1925,9 @@ impl Parser<'_> {
                 Some(RightShift) => Some(OpRightShift),
                 _ => None
             };
+            if maybe_op.is_some() && self.peek2() == Some(&CloseParen) {
+                break
+            }
             match maybe_op {
                 Some(op) => {
                     self.advance();
@@ -1884,6 +1949,9 @@ impl Parser<'_> {
                 Some(BitwiseXor) => Some(OpBitwiseXor),
                 _ => None
             };
+            if maybe_op.is_some() && self.peek2() == Some(&CloseParen) {
+                break
+            }
             match maybe_op {
                 Some(op) => {
                     self.advance();
@@ -1924,6 +1992,9 @@ impl Parser<'_> {
                 Some(NotEquals) => Some(OpNotEqual),
                 _ => None
             };
+            if maybe_op.is_some() && self.peek2() == Some(&CloseParen) {
+                break
+            }
             match maybe_op {
                 Some(op) => {
                     self.advance();
@@ -1939,8 +2010,16 @@ impl Parser<'_> {
         trace::trace_parser!("rule <expr-9>");
         self.parse_expr_8();
         loop {
-            match self.peek() {
-                Some(LogicalAnd) => {
+            let maybe_op: Option<Opcode> = match self.peek() {
+                Some(LogicalAnd) => Some(OpBitwiseAnd), // Just markers
+                Some(LogicalOr) => Some(OpBitwiseOr),
+                _ => None,
+            };
+            if maybe_op.is_some() && self.peek2() == Some(&CloseParen) {
+                break
+            }
+            match maybe_op {
+                Some(OpBitwiseAnd) => {
                     self.advance();
                     let jump_if_false = self.reserve();
                     self.push(Opcode::Pop);
@@ -1948,7 +2027,7 @@ impl Parser<'_> {
                     let jump_to: u16 = self.next_opcode();
                     self.output[jump_if_false] = JumpIfFalse(jump_to);
                 },
-                Some(LogicalOr) => {
+                Some(OpBitwiseOr) => {
                     self.advance();
                     let jump_if_true = self.reserve();
                     self.push(Opcode::Pop);
@@ -2618,7 +2697,7 @@ mod tests {
     #[test] fn test_slice_12() { run_expr("1 [2:3]", vec![Int(1), Int(2), Int(3), OpSlice]); }
     #[test] fn test_binary_ops() { run_expr("(*) * (+) + (/)", vec![NativeFunction(OperatorMul), NativeFunction(OperatorAdd), OpMul, NativeFunction(OperatorDiv), OpAdd]); }
     #[test] fn test_if_then_else() { run_expr("(if true then 1 else 2)", vec![True, JumpIfFalsePop(4), Int(1), Jump(5), Int(2)]); }
-    #[test] fn test_zero_equals_zero() { run_expr("0 == 0 ", vec![Int(0), Int(0), OpEqual]); }
+    #[test] fn test_zero_equals_zero() { run_expr("0 == 0", vec![Int(0), Int(0), OpEqual]); }
     #[test] fn test_zero_equals_zero_no_spaces() { run_expr("0==0", vec![Int(0), Int(0), OpEqual]); }
 
     #[test] fn test_let_eof() { run_err("let", "Expected a variable binding, either a name, or '_', or pattern (i.e. 'x, (_, y), *z'), got end of input instead\n  at: line 1 (<test>)\n  at:\n\nlet\n"); }
