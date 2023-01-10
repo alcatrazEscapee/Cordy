@@ -1,4 +1,4 @@
-use std::cmp::Reverse;
+use std::cmp::{Ordering, Reverse};
 use std::collections::VecDeque;
 use itertools::Itertools;
 
@@ -8,6 +8,7 @@ use crate::vm::VirtualInterface;
 
 use RuntimeError::{*};
 use Value::{*};
+use crate::misc;
 
 type ValueResult = Result<Value, Box<RuntimeError>>;
 
@@ -119,6 +120,7 @@ fn rev_range(start_high_inclusive: i64, stop_low_exclusive: i64) -> impl Iterato
 
 // ===== Library Functions ===== //
 
+
 pub fn sum<'a>(args: impl Iterator<Item=&'a Value>) -> ValueResult {
     let mut sum: i64 = 0;
     for v in args {
@@ -130,13 +132,6 @@ pub fn sum<'a>(args: impl Iterator<Item=&'a Value>) -> ValueResult {
     Ok(Int(sum))
 }
 
-pub fn max<'a>(args: impl Iterator<Item=&'a Value>) -> ValueResult {
-    match args.max() {
-        Some(v) => Ok(v.clone()),
-        None => ValueErrorValueMustBeNonEmpty.err()
-    }
-}
-
 pub fn min<'a>(args: impl Iterator<Item=&'a Value>) -> ValueResult {
     match args.min() {
         Some(v) => Ok(v.clone()),
@@ -144,13 +139,109 @@ pub fn min<'a>(args: impl Iterator<Item=&'a Value>) -> ValueResult {
     }
 }
 
-pub fn sorted<'a>(args: impl Iterator<Item=&'a Value>) -> ValueResult {
+pub fn min_by<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : VirtualInterface {
+    let iter = a2.as_iter()?;
+    match a1.as_function_args() {
+        Some(Some(2)) => {
+            let mut err: Option<Box<RuntimeError>> = None;
+            let mut ret = iter.into_iter()
+                .min_by(|a, b| misc::yield_result(&mut err, || {
+                    let cmp = vm.invoke_func2(a1.clone(), (*a).clone(), (*b).clone())?.as_int()?;
+                    cmp_to_ord(cmp)
+                }, Ordering::Equal));
+
+            non_empty(misc::join_result(ret, err)?)
+        },
+        Some(Some(1)) => {
+            let mut err = None;
+            let mut ret = iter.into_iter()
+                .min_by_key(|u| misc::yield_result(&mut err, || vm.invoke_func1(a1.clone(), (*u).clone()), Nil));
+
+            non_empty(misc::join_result(ret, err)?)
+        },
+        Some(_) => TypeErrorArgMustBeCmpOrKeyFunction(a1).err(),
+        None => TypeErrorArgMustBeFunction(a1).err(),
+    }
+}
+
+pub fn max<'a>(args: impl Iterator<Item=&'a Value>) -> ValueResult {
+    non_empty(args.max())
+}
+
+pub fn max_by<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : VirtualInterface {
+    let iter = a2.as_iter()?;
+    match a1.as_function_args() {
+        Some(Some(2)) => {
+            let mut err: Option<Box<RuntimeError>> = None;
+            let mut ret = iter.into_iter()
+                .max_by(|a, b| misc::yield_result(&mut err, || {
+                    let cmp = vm.invoke_func2(a1.clone(), (*a).clone(), (*b).clone())?.as_int()?;
+                    cmp_to_ord(cmp)
+                }, Ordering::Equal));
+
+            non_empty(misc::join_result(ret, err)?)
+        },
+        Some(Some(1)) => {
+            let mut err = None;
+            let mut ret = iter.into_iter()
+                .max_by_key(|u| misc::yield_result(&mut err, || vm.invoke_func1(a1.clone(), (*u).clone()), Nil));
+
+            non_empty(misc::join_result(ret, err)?)
+        },
+        Some(_) => TypeErrorArgMustBeCmpOrKeyFunction(a1).err(),
+        None => TypeErrorArgMustBeFunction(a1).err(),
+    }
+}
+
+#[inline(always)]
+fn non_empty(it: Option<&Value>) -> ValueResult {
+    match it {
+        Some(v) => Ok(v.clone()),
+        None => ValueErrorValueMustBeNonEmpty.err()
+    }
+}
+
+#[inline(always)]
+fn cmp_to_ord<E>(i: i64) -> Result<Ordering, E> {
+    Ok(if i == 0 {
+        Ordering::Equal
+    } else if i > 0 {
+        Ordering::Greater
+    } else {
+        Ordering::Less
+    })
+}
+
+
+pub fn sort<'a>(args: impl Iterator<Item=&'a Value>) -> ValueResult {
     let mut sorted: Vec<Value> = args.cloned().collect::<Vec<Value>>();
     sorted.sort_unstable();
     Ok(Value::iter_list(sorted.into_iter()))
 }
 
-pub fn reversed<'a>(args: impl DoubleEndedIterator<Item=&'a Value>) -> ValueResult {
+pub fn sort_by<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : VirtualInterface {
+    let mut sorted: Vec<Value> = a2.as_iter()?.into_iter().cloned().collect::<Vec<Value>>();
+    match a1.as_function_args() {
+        Some(Some(2)) => {
+            let mut err: Option<Box<RuntimeError>> = None;
+            sorted.sort_unstable_by(|a, b| misc::yield_result(&mut err, || {
+                let cmp = vm.invoke_func2(a1.clone(), a.clone(), b.clone())?.as_int()?;
+                cmp_to_ord(cmp)
+            }, Ordering::Equal));
+            misc::join_result((), err)?
+        },
+        Some(Some(1)) => {
+            let mut err: Option<Box<RuntimeError>> = None;
+            sorted.sort_unstable_by_key(|a| misc::yield_result(&mut err, || vm.invoke_func1(a1.clone(), a.clone()), Nil));
+            misc::join_result((), err)?
+        },
+        Some(_) => return TypeErrorArgMustBeCmpOrKeyFunction(a1).err(),
+        None => return TypeErrorArgMustBeFunction(a1).err(),
+    }
+    Ok(Value::iter_list(sorted.into_iter()))
+}
+
+pub fn reverse<'a>(args: impl DoubleEndedIterator<Item=&'a Value>) -> ValueResult {
     Ok(Value::iter_list(args.rev().cloned()))
 }
 
@@ -433,4 +524,3 @@ pub fn find_count<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM
         Ok(Int(iter.into_iter().filter(|v| v == &&a1).count() as i64))
     }
 }
-

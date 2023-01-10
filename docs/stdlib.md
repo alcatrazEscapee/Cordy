@@ -206,6 +206,15 @@ Possible signatures:
 
 With one argument, returns the minimum of each value in the iterable. With more than one argument, returns the minimum of all the arguments. Raises an error when invoked with no arguments.
 
+### Min By `min_by(...) -> int`
+
+Possible signatures:
+
+- `<A, B> min_by(key: fn(A) -> B, it: iterable<A>)`
+- `<A> min_by(cmp: fn(A, A) -> int, it: iterable<A>)`
+
+Returns either a minimum of `it` by the key `key`, or a minimum by the comparator function `cmp`, depending on the number of arguments required by `key` / `cmp`. Raises an error when `it` is an empty iterable.
+
 ### Max `max(...) -> int`
 
 Possible signatures:
@@ -214,6 +223,15 @@ Possible signatures:
 - `max(int, ...) -> int`
 
 With one argument, returns the maximum of each value in the iterable. With more than one argument, returns the maximum of all the arguments. Raises an error when invoked with no arguments.
+
+### Max By `max_by(...) -> int`
+
+Possible signatures:
+
+- `<A, B> max_by(key: fn(A) -> B, it: iterable<A>)`
+- `<A> max_by(cmp: fn(A, A) -> int, it: iterable<A>)`
+
+Returns either a maximum of `it` by the key function `key`, or a minimum by the comparator function `cmp`, depending on the number of arguments required by `key` / `cmp`. Raises an error when `it` is an empty iterable.
 
 ### Map `<A, B> map(f: fn(A) -> B, it: iterable<A>) -> list<B>`
 
@@ -290,25 +308,34 @@ Reduces an iterable to a single value by successively applying `f` on the first 
 'hello the world'
 ```
 
-### Sorted `<A> sorted(it: iterable<A>) -> list<A>`
+### Sort `<A> sort(it: iterable<A>) -> list<A>`
 
 Returns a list of the elements in `it`, sorted in ascending order. Note that if `it` contains multiple different types the returned order is unspecified as different types will compare as equal.
 
 **Example**
 
 ```
->>> [1, 5, 3, 2, 4] . sorted
+>>> [1, 5, 3, 2, 4] . sort
 [1, 2, 3, 4, 5]
 ```
 
-### Reversed `<A> reversed(it: iterable<A>) -> list<A>`
+### Sort By `<A> sort_by(...) -> list<A>`
+
+Possible signatures:
+
+- `<A, B> sort_by(key: fn(A) -> B, it: iterable<A>) -> list<A>`
+- `<A> sort_by(cmp: fn(A, A) -> int, it: iterable<A>) -> list<A>`
+
+Returns the elements from `it` in a sorted ascending order, either by the key function `key`, or by the comparator function `cmp`, depending on the number of arguments required by `key` / `cmp`.
+
+### Reverse `<A> reverse(it: iterable<A>) -> list<A>`
 
 Returns a list of the elements in `it`, in reverse order.
 
 **Example**
 
 ```
->>> [1, 3, 5, 7] . reversed
+>>> [1, 3, 5, 7] . reverse
 [7, 5, 3, 1]
 ```
 
@@ -395,6 +422,17 @@ Splits `string` on the delimiter `delim` and returns a `list` of all split eleme
 ['hello', 'the', 'world']
 ```
 
+### (Str) Replace `replace(search: str, with: str, self: str) -> str`
+
+Replaces all occurrences of `search` with `with` in `self`
+
+**Example**
+
+```
+>>> 'bob and alice' . replace('and', 'or')
+'bob or alice'
+```
+
 ### (Dict) Default `<K, V> default(x: V, it: dict<K, V>) -> dict<K, V>`
 
 Sets the default value of `it` to `x`, and then returns `it`. This means that any future queries into `it` via the index syntax, if the key is not in the dictionary, will return `x`.
@@ -422,7 +460,7 @@ Returns a list of all values in `it`, maintaining insertion order.
 
 If `x` is a function, this will find the first index from the left in `it` where a value returns `true` to the function. If `x` is a value, it will return the first index from the left in `it` where a value is equal to `x`.
 
-`find(x)` is equivalent `find(==x)` if `x` is not a function.
+`find(x)` is equivalent to `find(==x)` if `x` is not a function.
 
 Returns `-1` if the value was not found.
 
@@ -439,7 +477,7 @@ Returns `-1` if the value was not found.
 
 If `x` is a function, this will find the first index from the right in `it` where a value returns `true` to the function. If `x` is a value, it will return the first index from the right in `it` where a value is equal to `x`.
 
-`rfind(x)` is equivalent `rfind(==x)` if `x` is not a function.
+`rfind(x)` is equivalent to `rfind(==x)` if `x` is not a function.
 
 Returns `-1` if the value was not found.
 

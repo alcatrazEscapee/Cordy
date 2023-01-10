@@ -102,6 +102,8 @@ pub enum StdBinding {
     Replace,
     Trim,
     Split,
+    Char,
+    Ord,
 
     // collections
     Len,
@@ -110,14 +112,17 @@ pub enum StdBinding {
     Sum,
     Min,
     Max,
+    MinBy,
+    MaxBy,
     Map,
     Filter,
     FlatMap,
     Concat, // Native optimized version of flatMap(fn(x) -> x)
     Zip,
     Reduce,
-    Sorted,
-    Reversed,
+    Sort,
+    SortBy,
+    Reverse,
     Permutations,
     Combinations,
 
@@ -139,6 +144,17 @@ pub enum StdBinding {
     Sqrt,
     Gcd,
     Lcm,
+}
+
+impl StdBinding {
+    pub fn nargs(self: &Self) -> Option<u8> {
+        match self {
+            ReadText | Bool | Int | Str | Repr | OperatorUnarySub | OperatorUnaryLogicalNot | OperatorUnaryBitwiseNot | ToLower | ToUpper | Trim | Len | Enumerate | Concat | Pop | Last | Head | Tail | Init | Keys | Values | Abs | Sqrt => Some(1),
+            WriteText | OperatorMul | OperatorDiv | OperatorPow | OperatorMod | OperatorIs | OperatorIn | OperatorAdd | OperatorSub | OperatorLeftShift | OperatorRightShift | OperatorBitwiseAnd | OperatorBitwiseOr | OperatorBitwiseXor | OperatorLessThan | OperatorLessThanEqual | OperatorGreaterThan | OperatorGreaterThanEqual | OperatorEqual | OperatorNotEqual | Split | MinBy | MaxBy | Map | Filter | Reduce | SortBy | Permutations | Combinations | Push | Default | Find | RightFind | FindCount => Some(2),
+            Replace => Some(3),
+            _ => None,
+        }
+    }
 }
 
 impl StdBindingInfo {
@@ -205,10 +221,14 @@ fn load_bindings() -> Vec<StdBindingInfo> {
         of!(Replace, "replace"),
         of!(Trim, "trim"),
         of!(Split, "split"),
+        of!(Char, "char"),
+        of!(Ord, "ord"),
 
         of!(Sum, "sum"),
-        of!(Max, "max"),
         of!(Min, "min"),
+        of!(MinBy, "min_by"),
+        of!(Max, "max"),
+        of!(MaxBy, "max_by"),
 
         of!(Len, "len"),
         of!(Range, "range"),
@@ -219,8 +239,9 @@ fn load_bindings() -> Vec<StdBindingInfo> {
         of!(Concat, "concat"),
         of!(Zip, "zip"),
         of!(Reduce, "reduce"),
-        of!(Sorted, "sorted"),
-        of!(Reversed, "reversed"),
+        of!(Sort, "sort"),
+        of!(SortBy, "sort_by"),
+        of!(Reverse, "reverse"),
         of!(Permutations, "permutations"),
         of!(Combinations, "combinations"),
 
@@ -480,28 +501,33 @@ pub fn invoke<VM>(binding: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult wh
         OperatorEqual => dispatch!(a1, a2, Ok(operator::binary_equals(a2, a1))),
         OperatorNotEqual => dispatch!(a1, a2, Ok(operator::binary_not_equals(a2, a1))),
 
-        // lib_str
+        // strings
         ToLower => dispatch!(a1, strings::to_lower(a1)),
         ToUpper => dispatch!(a1, strings::to_upper(a1)),
         Replace => dispatch!(a1, a2, a3, strings::replace(a1, a2, a3)),
         Trim => dispatch!(a1, strings::trim(a1)),
         Split => dispatch!(a1, a2, strings::split(a1, a2)),
+        Char => dispatch!(a1, strings::to_char(a1)),
+        Ord => dispatch!(a1, strings::to_ord(a1)),
 
-        // lib_list
+        // collections
         Len => dispatch!(a1, a1.len().map(|u| Value::Int(u as i64))),
         Range => dispatch!(a1, collections::range_1(a1), a2, collections::range_2(a1, a2), a3, collections::range_3(a1, a2, a3)),
         Enumerate => dispatch!(a1, collections::enumerate(a1)),
         Sum => dispatch_varargs!(an, collections::sum(an.into_iter())),
-        Max => dispatch_varargs!(an, collections::max(an.into_iter())),
         Min => dispatch_varargs!(an, collections::min(an.into_iter())),
+        MinBy => dispatch!(a1, a2, collections::min_by(vm, a1, a2)),
+        Max => dispatch_varargs!(an, collections::max(an.into_iter())),
+        MaxBy => dispatch!(a1, a2, collections::max_by(vm, a1, a2)),
         Map => dispatch!(a1, a2, collections::map(vm, a1, a2)),
         Filter => dispatch!(a1, a2, collections::filter(vm, a1, a2)),
         FlatMap => dispatch!(a1, a2, collections::flat_map(vm, Some(a1), a2)),
         Concat => dispatch!(a1, collections::flat_map(vm, None, a1)),
         Zip => dispatch_varargs!(an, collections::zip(an.into_iter())),
         Reduce => dispatch!(a1, a2, collections::reduce(vm, a1, a2)),
-        Sorted => dispatch_varargs!(an, collections::sorted(an.into_iter())),
-        Reversed => dispatch_varargs!(an, collections::reversed(an.into_iter())),
+        Sort => dispatch_varargs!(an, collections::sort(an.into_iter())),
+        SortBy => dispatch!(a1, a2, collections::sort_by(vm, a1, a2)),
+        Reverse => dispatch_varargs!(an, collections::reverse(an.into_iter())),
         Permutations => dispatch!(a1, a2, collections::permutations(a1, a2)),
         Combinations => dispatch!(a1, a2, collections::combinations(a1, a2)),
 

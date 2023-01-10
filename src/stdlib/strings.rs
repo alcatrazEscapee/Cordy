@@ -37,3 +37,22 @@ pub fn split(v0: Value, v1: Value) -> ValueResult {
     }
 }
 
+pub fn to_char(a1: Value) -> ValueResult {
+    match &a1 {
+        Int(i) if i > &0 => match char::from_u32(*i as u32) {
+            Some(c) => Ok(Value::str(c)),
+            None => ValueErrorInvalidCharacterOrdinal(*i).err()
+        },
+        Int(i) => ValueErrorInvalidCharacterOrdinal(*i).err(),
+        _ => TypeErrorArgMustBeInt(a1).err()
+    }
+}
+
+pub fn to_ord(a1: Value) -> ValueResult {
+    match &a1 {
+        Str(s) if s.len() == 1 => Ok(Int(s.chars().next().unwrap() as u32 as i64)),
+        _ => TypeErrorArgMustBeChar(a1).err()
+    }
+}
+
+
