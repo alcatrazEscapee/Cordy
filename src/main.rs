@@ -30,7 +30,7 @@ fn main() {
         let mut continuation: bool = false;
 
         // Retain local variables through the entire lifetime of the REPL
-        let mut locals = vec![Locals::new()];
+        let mut locals = Locals::empty();
         let mut vm = VirtualMachine::new(compiler::default(), &b""[..], io::stdout());
 
         loop {

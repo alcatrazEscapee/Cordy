@@ -91,6 +91,7 @@ impl AsError for RuntimeError {
     fn format_error(self: &Self) -> String {
         match self {
             RuntimeError::RuntimeExit | RuntimeError::RuntimeYield => panic!("Not a real error"),
+            RuntimeError::RuntimeCompilationError(vec) => format!("Encountered compilation error(s) within 'eval':\n\n{}", vec.join("\n")),
             RuntimeError::ValueIsNotFunctionEvaluable(v) => format!("Tried to evaluate {} but it is not a function.", v.format_error()),
             RuntimeError::IncorrectNumberOfFunctionArguments(f, a) => format!("Function {} requires {} parameters but {} were present.", f.format_error(), f.nargs, a),
             RuntimeError::IncorrectNumberOfArguments(b, e, a) => format!("Function '{}' requires {} parameters but {} were present.", b.format_error(), e, a),
@@ -129,7 +130,7 @@ impl AsError for RuntimeError {
 
 impl AsError for Value {
     fn format_error(self: &Self) -> String {
-        format!("'{}' of type '{}'", self.as_str(), self.as_type_str())
+        format!("'{}' of type '{}'", self.to_str(), self.as_type_str())
     }
 }
 

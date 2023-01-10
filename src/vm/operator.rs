@@ -131,8 +131,8 @@ pub fn binary_add(a1: Value, a2: Value) -> ValueResult {
             list3.extend(list2.iter().cloned());
             Ok(Value::list(list3))
         },
-        (Value::Str(s1), r) => Ok(Value::Str(Box::new(format!("{}{}", s1, r.as_str())))),
-        (l, Value::Str(s2)) => Ok(Value::Str(Box::new(format!("{}{}", l.as_str(), s2)))),
+        (Value::Str(s1), r) => Ok(Value::Str(Box::new(format!("{}{}", s1, r.to_str())))),
+        (l, Value::Str(s2)) => Ok(Value::Str(Box::new(format!("{}{}", l.to_str(), s2)))),
         (Value::Vector(l), Value::Vector(r)) => apply_vector_binary(l, r, binary_add),
         (Value::Vector(l), r) => apply_vector_binary_scalar_rhs(l, r, binary_add),
         (l, Value::Vector(r)) => apply_vector_binary_scalar_lhs(l, r, binary_add),

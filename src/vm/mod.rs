@@ -50,12 +50,23 @@ pub enum ExitType {
     Exit, Yield, Error(DetailRuntimeError)
 }
 
+impl ExitType {
+    pub fn is_err(self: &Self) -> bool {
+        match self {
+            ExitType::Error(_) => true,
+            _ => false,
+        }
+    }
+}
+
 
 pub trait VirtualInterface {
     // Invoking Functions
 
     fn invoke_func1(self: &mut Self, f: Value, a1: Value) -> ValueResult;
     fn invoke_func2(self: &mut Self, f: Value, a1: Value, a2: Value) -> ValueResult;
+
+    fn invoke_eval(self: &mut Self, s: String) -> ValueResult;
 
     // Wrapped IO
     fn println0(self: &mut Self);
@@ -105,8 +116,14 @@ impl<R, W> VirtualMachine<R, W> where
         }
     }
 
+    /// Bridge method to `compiler::incremental_compile`
     pub fn incremental_compile(self: &mut Self, source: &String, text: &String, locals: &mut Vec<Locals>) -> IncrementalCompileResult {
         compiler::incremental_compile(source, text, &mut self.code, locals, &mut self.strings, &mut self.constants, &mut self.functions, &mut self.line_numbers, &mut self.globals)
+    }
+
+    /// Bridge method to `compiler::eval_compile`
+    pub fn eval_compile(self: &mut Self, text: &String) -> AnyResult {
+        compiler::eval_compile(text, &mut self.code, &mut self.strings, &mut self.constants, &mut self.functions, &mut self.line_numbers, &mut self.globals)
     }
 
     pub fn run_until_completion(self: &mut Self) -> ExitType {
@@ -698,17 +715,28 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
 {
     // ===== Calling Functions External Interface ===== //
 
-    fn invoke_func1(self: &mut Self, f: Value, a1: Value) -> Result<Value, Box<RuntimeError>> {
+    fn invoke_func1(self: &mut Self, f: Value, a1: Value) -> ValueResult {
         self.push(f);
         self.push(a1);
         self.invoke_func_and_spin(1)
     }
 
-    fn invoke_func2(self: &mut Self, f: Value, a1: Value, a2: Value) -> Result<Value, Box<RuntimeError>> {
+    fn invoke_func2(self: &mut Self, f: Value, a1: Value, a2: Value) -> ValueResult {
         self.push(f);
         self.push(a1);
         self.push(a2);
         self.invoke_func_and_spin(2)
+    }
+
+    fn invoke_eval(self: &mut Self, text: String) -> ValueResult {
+        let eval_head: usize = self.code.len();
+
+        self.eval_compile(&text)?;
+        self.call_function(eval_head, 0);
+        self.run_frame()?;
+        let ret = self.pop();
+        self.push(Value::Nil); // `eval` executes as a user function but is called like a native function, this prevents stack fuckery
+        Ok(ret)
     }
 
     // ===== IO Methods ===== //
@@ -758,7 +786,7 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
 mod test {
     use std::path::PathBuf;
     use crate::{compiler, ErrorReporter, reporting, trace, VirtualMachine};
-    use crate::vm::error::DetailRuntimeError;
+    use crate::vm::ExitType;
 
     #[test] fn test_str_empty() { run_str("", ""); }
     #[test] fn test_str_hello_world() { run_str("print('hello world!')", "hello world!\n"); }
@@ -788,9 +816,9 @@ mod test {
     #[test] fn test_str_if_05() { run_str("if 0 { print('yes') }", ""); }
     #[test] fn test_str_if_06() { run_str("if 1 { print('yes') }", "yes\n"); }
     #[test] fn test_str_if_07() { run_str("if 'string' { print('yes') }", "yes\n"); }
-    #[test] fn test_str_if_08() { run_str("if 1 < 0 { print('yes') } elif 1 { print('hi') } else { print('hehe')", "hi\n"); }
-    #[test] fn test_str_if_09() { run_str("if 1 < 0 { print('yes') } elif 2 < 0 { print('hi') } else { print('hehe')", "hehe\n"); }
-    #[test] fn test_str_if_10() { run_str("if 1 { print('yes') } elif true { print('hi') } else { print('hehe')", "yes\n"); }
+    #[test] fn test_str_if_08() { run_str("if 1 < 0 { print('yes') } elif 1 { print('hi') } else { print('hehe') }", "hi\n"); }
+    #[test] fn test_str_if_09() { run_str("if 1 < 0 { print('yes') } elif 2 < 0 { print('hi') } else { print('hehe') }", "hehe\n"); }
+    #[test] fn test_str_if_10() { run_str("if 1 { print('yes') } elif true { print('hi') } else { print('hehe') }", "yes\n"); }
     #[test] fn test_str_short_circuiting_1() { run_str("if true and print('yes') { print('no') }", "yes\n"); }
     #[test] fn test_str_short_circuiting_2() { run_str("if false and print('also no') { print('no') }", ""); }
     #[test] fn test_str_short_circuiting_3() { run_str("if true and (print('yes') or true) { print('also yes') }", "yes\nalso yes\n"); }
@@ -889,7 +917,7 @@ mod test {
     #[test] fn test_functions_10() { run_str("let x = 'hello' ; fn foo(x) { x . print } foo(x)", "hello\n"); }
     #[test] fn test_functions_11() { run_str("{ let x = 'hello' ; fn foo(x) { x . print } foo(x) }", "hello\n"); }
     #[test] fn test_functions_12() { run_str("{ let x = 'hello' ; { fn foo(x) { x . print } foo(x) } }", "hello\n"); }
-    #[test] fn test_functions_13() { run_str("let x = 'hello' ; { fn foo() { x . print } foo()", "hello\n"); }
+    #[test] fn test_functions_13() { run_str("let x = 'hello' ; { fn foo() { x . print } foo() }", "hello\n"); }
     #[test] fn test_functions_14() { run_str("fn foo(x) { 'hello ' + x . print } 'world' . foo", "hello world\n"); }
     #[test] fn test_function_implicit_return_01() { run_str("fn foo() { } foo() . print", "nil\n"); }
     #[test] fn test_function_implicit_return_02() { run_str("fn foo() { 'hello' } foo() . print", "hello\n"); }
@@ -911,8 +939,8 @@ mod test {
     #[test] fn test_closures_03() { run_str("{ fn foo() { 'hello' . print } ; { fn bar() { foo() } bar() } }", "hello\n"); }
     #[test] fn test_closures_04() { run_str("{ fn foo() { 'hello' . print } ; fn bar(a) { foo() } bar(1) }", "hello\n"); }
     #[test] fn test_closures_05() { run_str("{ fn foo() { 'hello' . print } ; { fn bar(a) { foo() } bar(1) } }", "hello\n"); }
-    #[test] fn test_closures_06() { run_str("{ let x = 'hello' ; { fn foo() { x . print } foo() }", "hello\n"); }
-    #[test] fn test_closures_07() { run_str("{ let x = 'hello' ; { { fn foo() { x . print } foo() } }", "hello\n"); }
+    #[test] fn test_closures_06() { run_str("{ let x = 'hello' ; { fn foo() { x . print } foo() } }", "hello\n"); }
+    #[test] fn test_closures_07() { run_str("{ let x = 'hello' ; { { fn foo() { x . print } foo() } } }", "hello\n"); }
     #[test] fn test_function_return_1() { run_str("fn foo() { return 3 } foo() . print", "3\n"); }
     #[test] fn test_function_return_2() { run_str("fn foo() { let x = 3; return x } foo() . print", "3\n"); }
     #[test] fn test_function_return_3() { run_str("fn foo() { let x = 3; { return x } } foo() . print", "3\n"); }
@@ -1148,6 +1176,10 @@ mod test {
     #[test] fn test_sort_by_wrong_fn() { run_str("[[1, 5], [2, 3], [6, 4]] . sort_by(fn() -> 1) . print", "TypeError: Expected '_' of type 'function' to be a '<A, B> fn key(A) -> B' or '<A> cmp(A, A) -> int' function\n    at: `[[1, 5], [2, 3], [6, 4]] . sort_by(fn() -> 1) . print` (line 1)\n    at: execution of script '<test>'\n"); }
     #[test] fn test_ord() { run_str("'a' . ord . print", "97\n"); }
     #[test] fn test_char() { run_str("97 . char . repr . print", "'a'\n"); }
+    #[test] fn test_eval_nil() { run_str("'nil' . eval . print", "nil\n"); }
+    #[test] fn test_eval_bool() { run_str("'true' . eval . print", "true\n"); }
+    #[test] fn test_eval_int_expression() { run_str("'3 + 4' . eval . print", "7\n"); }
+    #[test] fn test_eval_zero_equals_zero() { run_str("'0==0' . eval . print", "true\n")}
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }
@@ -1178,14 +1210,13 @@ mod test {
         let mut buf: Vec<u8> = Vec::new();
         let mut vm = VirtualMachine::new(compile.ok().unwrap(), &b""[..], &mut buf);
 
-        let result: Result<(), DetailRuntimeError> = vm.run_until_completion();
+        let result: ExitType = vm.run_until_completion();
         assert!(vm.stack.is_empty() || result.is_err());
 
         let mut output: String = String::from_utf8(buf).unwrap();
 
-        match result {
-            Ok(_) => {},
-            Err(err) => output.push_str(ErrorReporter::new(text, source).format_runtime_error(err).as_str()),
+        if let ExitType::Error(err) = result {
+            output.push_str(ErrorReporter::new(text, source).format_runtime_error(err).as_str());
         }
 
         assert_eq!(output.as_str(), expected);
@@ -1207,12 +1238,12 @@ mod test {
         let mut buf: Vec<u8> = Vec::new();
         let mut vm = VirtualMachine::new(compile, &b""[..], &mut buf);
 
-        let result: Result<(), DetailRuntimeError> = vm.run_until_completion();
+        let result: ExitType = vm.run_until_completion();
         assert!(vm.stack.is_empty() || result.is_err());
 
         let mut output: String = String::from_utf8(buf).unwrap();
 
-        if let Err(e) = result {
+        if let ExitType::Error(e) = result {
             output.push_str(reporting::format_runtime_error(&text.split("\n").collect(), source, e).as_str());
         }
 

@@ -1,10 +1,11 @@
 use std::rc::Rc;
 
-use crate::compiler::parser::{Locals, ParserError};
+use crate::compiler::parser::{Locals, ParserError, ParseRule};
 use crate::compiler::scanner::ScanResult;
 use crate::reporting::{ErrorReporter, ProvidesLineNumber};
 use crate::vm::opcode::Opcode;
 use crate::vm::value::FunctionImpl;
+use crate::vm::error::RuntimeError;
 
 use Opcode::{*};
 
@@ -42,14 +43,16 @@ pub fn compile(source: &String, text: &String) -> Result<CompileResult, Vec<Stri
     Ok(compile_result)
 }
 
-/// Performs an incremental compile, given the following input
+/// Performs an incremental compile, given the following input parameters.
+///
+/// This is used for incremental REPL structure. The result will have a `Print` instead of a delayed pop (if needed), and end with a `Yield` instruction instead of `Exit`.
 pub fn incremental_compile(source: &String, text: &String, code: &mut Vec<Opcode>, locals: &mut Vec<Locals>, strings: &mut Vec<String>, constants: &mut Vec<i64>, functions: &mut Vec<Rc<FunctionImpl>>, line_numbers: &mut Vec<u16>, globals: &mut Vec<String>) -> IncrementalCompileResult {
     // Stage changes, so an error or aborted compile doesn't overwrite the current valid compile state
     // Doing this for code and line numbers (since those are 1-1 ordering) is sufficient
     let code_len: usize = code.len();
     let line_numbers_len: usize = line_numbers.len();
 
-    let ret: IncrementalCompileResult = try_incremental_compile(source, text, code, locals, strings, constants, functions, line_numbers, globals);
+    let ret: IncrementalCompileResult = try_incremental_compile(source, text, code, locals, strings, constants, functions, line_numbers, globals, parser::RULE_INCREMENTAL, true);
 
     if ret.is_success() {
         // Replace the final `Exit` with `Yield`, to yield control back to the REPL loop
@@ -64,7 +67,29 @@ pub fn incremental_compile(source: &String, text: &String, code: &mut Vec<Opcode
     ret
 }
 
-fn try_incremental_compile(source: &String, text: &String, code: &mut Vec<Opcode>, locals: &mut Vec<Locals>, strings: &mut Vec<String>, constants: &mut Vec<i64>, functions: &mut Vec<Rc<FunctionImpl>>, line_numbers: &mut Vec<u16>, globals: &mut Vec<String>) -> IncrementalCompileResult {
+/// Performs an incremental compile, given the following input parameters.
+///
+/// The top level rule is `<expression>`, and the code will be appended to the end of the output.
+/// Note that this does not insert a terminal `Pop` or `Exit`, and instead pushes a `Return` which exits `eval`'s special call frame.
+///
+/// This is the API used to run an `eval()` statement.
+pub fn eval_compile(text: &String, code: &mut Vec<Opcode>, strings: &mut Vec<String>, constants: &mut Vec<i64>, functions: &mut Vec<Rc<FunctionImpl>>, line_numbers: &mut Vec<u16>, globals: &mut Vec<String>) -> Result<(), Box<RuntimeError>> {
+
+    let mut locals: Vec<Locals> = Locals::empty();
+    let ret: IncrementalCompileResult = try_incremental_compile(&String::from("<eval>"), text, code, &mut locals, strings, constants, functions, line_numbers, globals, parser::RULE_EXPRESSION, false);
+
+    if ret.is_success() {
+        // Insert a `Return` at the end, to return out of `eval`'s frame
+        code.push(Return);
+        Ok(())
+    } else {
+        RuntimeError::RuntimeCompilationError(ret.errors()).err()
+    }
+}
+
+
+
+fn try_incremental_compile(source: &String, text: &String, code: &mut Vec<Opcode>, locals: &mut Vec<Locals>, strings: &mut Vec<String>, constants: &mut Vec<i64>, functions: &mut Vec<Rc<FunctionImpl>>, line_numbers: &mut Vec<u16>, globals: &mut Vec<String>, rule: ParseRule, abort_in_eof: bool) -> IncrementalCompileResult {
     let mut errors: Vec<String> = Vec::new();
 
     // Scan
@@ -72,7 +97,7 @@ fn try_incremental_compile(source: &String, text: &String, code: &mut Vec<Opcode
     if !scan_result.errors.is_empty() {
         let rpt: ErrorReporter = ErrorReporter::new(text, source);
         for error in &scan_result.errors {
-            if error.is_eof() {
+            if error.is_eof() && abort_in_eof {
                 return IncrementalCompileResult::Aborted;
             }
             errors.push(rpt.format_scan_error(&error));
@@ -81,11 +106,11 @@ fn try_incremental_compile(source: &String, text: &String, code: &mut Vec<Opcode
     }
 
     // Parse
-    let parse_errors: Vec<ParserError> = parser::parse_incremental(scan_result, code, locals, strings, constants, functions, line_numbers, globals);
+    let parse_errors: Vec<ParserError> = parser::parse_incremental(scan_result, code, locals, strings, constants, functions, line_numbers, globals, rule);
     if !parse_errors.is_empty() {
         let rpt: ErrorReporter = ErrorReporter::new(text, source);
         for error in &parse_errors {
-            if error.is_eof() {
+            if error.is_eof() && abort_in_eof {
                 return IncrementalCompileResult::Aborted;
             }
             errors.push(rpt.format_parse_error(&error));
@@ -164,6 +189,13 @@ impl IncrementalCompileResult {
         match self {
             IncrementalCompileResult::Success => true,
             _ => false
+        }
+    }
+
+    fn errors(self: Self) -> Vec<String> {
+        match self {
+            IncrementalCompileResult::Errors(e) => e,
+            _ => panic!("Tried to unwrap {:?}", self),
         }
     }
 }
