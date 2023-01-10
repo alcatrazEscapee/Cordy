@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::rc::Rc;
 
 use crate::compiler::scanner::{ScanResult, ScanToken};
 use crate::compiler::CompileResult;
@@ -6,6 +7,7 @@ use crate::stdlib::StdBinding;
 use crate::vm::opcode::Opcode;
 use crate::vm::value::FunctionImpl;
 use crate::{stdlib, trace};
+use crate::misc::MaybeRc;
 
 use ScanToken::{*};
 use ParserErrorType::{*};
@@ -13,21 +15,75 @@ use Opcode::{*};
 use StdBinding::{*};
 
 
-/// Top level API - parses a `ScanResult`, does semantic analysis, and returns a fully compiled program.
+
+/// Parse a complete `CompileResult` from the given `ScanResult`
 pub fn parse(scan_result: ScanResult) -> CompileResult {
-    let mut parser: Parser = Parser::new(scan_result.tokens);
-    parser.parse();
+    parse_rule(scan_result, |mut parser| parser.parse())
+}
+
+/// Incrementally parse from the given inputs, and `ScanResult`
+///
+/// The top level rule is `<root>`, and the code will be appended to the end of output.
+/// This is the API used by the REPL incremental compiler.
+pub fn parse_incremental(scan_result: ScanResult, code: &mut Vec<Opcode>, strings: &mut Vec<String>, constants: &mut Vec<i64>, functions: &mut Vec<Rc<FunctionImpl>>, line_numbers: &mut Vec<u16>, globals: &mut Vec<String>) -> Vec<ParserError> {
+    parse_rule_incremental(scan_result, code, strings, constants, functions, line_numbers, globals, |mut parser| parser.parse())
+}
+
+/// Incrementally parse from the given inputs, and `ScanResult`
+///
+/// The top level rule is `<expression>`, and the code will be appended to the end of the output.
+/// Note that this does not insert a terminal `Pop` or `Exit`, unlike calls to `parse_incremental()` or `parse()`.
+///
+/// This is the API used to run an `eval()` statement.
+pub fn parse_incremental_expression(scan_result: ScanResult, code: &mut Vec<Opcode>, strings: &mut Vec<String>, constants: &mut Vec<i64>, functions: &mut Vec<Rc<FunctionImpl>>, line_numbers: &mut Vec<u16>, globals: &mut Vec<String>) -> Vec<ParserError> {
+    parse_rule_incremental(scan_result, code, strings, constants, functions, line_numbers, globals, |mut parser| parser.parse_expression())
+}
+
+
+fn parse_rule_incremental(scan_result: ScanResult, code: &mut Vec<Opcode>, strings: &mut Vec<String>, constants: &mut Vec<i64>, functions: &mut Vec<Rc<FunctionImpl>>, line_numbers: &mut Vec<u16>, globals: &mut Vec<String>, rule: fn(Parser) -> ()) -> Vec<ParserError> {
+
+    let mut errors: Vec<ParserError> = Vec::new();
+    let mut maybe_functions: Vec<MaybeRc<FunctionImpl>> = functions.iter().map(|u| MaybeRc::Rc(u.clone())).collect();
+
+    rule(Parser::new(scan_result.tokens, code, &mut errors, strings, constants, &mut maybe_functions, line_numbers, &mut Vec::new(), globals));
+
+    for maybe in maybe_functions {
+        match maybe {
+            MaybeRc::Raw(func) => functions.push(Rc::new(func)),
+            _ => {}
+        }
+    }
+
+    errors
+}
+
+
+fn parse_rule(scan_result: ScanResult, rule: fn(Parser) -> ()) -> CompileResult {
+
+    let mut code: Vec<Opcode> = Vec::new();
+    let mut errors: Vec<ParserError> = Vec::new();
+
+    let mut strings: Vec<String> = vec![String::new()];
+    let mut constants: Vec<i64> = vec![0, 1];
+    let mut functions: Vec<MaybeRc<FunctionImpl>> = Vec::new();
+
+    let mut line_numbers: Vec<u16> = Vec::new();
+    let mut globals: Vec<String> = Vec::new();
+    let mut locals: Vec<String> = Vec::new();
+
+    rule(Parser::new(scan_result.tokens, &mut code, &mut errors, &mut strings, &mut constants, &mut functions, &mut line_numbers, &mut locals, &mut globals));
+
     CompileResult {
-        code: parser.output,
-        errors: parser.errors,
+        code,
+        errors,
 
-        strings: parser.strings,
-        constants: parser.constants,
-        functions: parser.functions,
+        strings,
+        constants,
+        functions: functions.into_iter().map(|u| u.into_rc()).collect::<Vec<Rc<FunctionImpl>>>(),
 
-        line_numbers: parser.line_numbers,
-        locals: parser.locals_reference,
-        globals: parser.globals_reference,
+        line_numbers,
+        locals,
+        globals,
     }
 }
 
@@ -82,16 +138,16 @@ pub enum ParserErrorType {
 }
 
 
-struct Parser {
+struct Parser<'a> {
     input: VecDeque<ScanToken>,
-    output: Vec<Opcode>,
-    errors: Vec<ParserError>,
+    output: &'a mut Vec<Opcode>,
+    errors: &'a mut Vec<ParserError>,
 
     lineno: u16,
-    line_numbers: Vec<u16>,
+    line_numbers: &'a mut Vec<u16>,
 
-    locals_reference: Vec<String>, // A reference for local names on a per-instruction basis, used for disassembly
-    globals_reference: Vec<String>, // A reference for global names, in stack order, used for runtime errors due to invalid late bound globals
+    locals_reference: &'a mut Vec<String>, // A reference for local names on a per-instruction basis, used for disassembly
+    globals_reference: &'a mut Vec<String>, // A reference for global names, in stack order, used for runtime errors due to invalid late bound globals
 
     /// If we are in error recover mode, this flag is set
     error_recovery: bool,
@@ -112,9 +168,9 @@ struct Parser {
     scope_depth: u16, // Current scope depth
     function_depth: u16,
 
-    strings: Vec<String>,
-    constants: Vec<i64>,
-    functions: Vec<FunctionImpl>,
+    strings: &'a mut Vec<String>,
+    constants: &'a mut Vec<i64>,
+    functions: &'a mut Vec<MaybeRc<FunctionImpl>>,
 }
 
 #[derive(Debug)]
@@ -408,18 +464,18 @@ const CONSTANT_0: u16 = 0;
 const CONSTANT_1: u16 = 1;
 
 
-impl Parser {
+impl Parser<'_> {
 
-    fn new(tokens: Vec<ScanToken>) -> Parser {
+    fn new<'a, 'b : 'a>(tokens: Vec<ScanToken>, output: &'b mut Vec<Opcode>, errors: &'b mut Vec<ParserError>, strings: &'b mut Vec<String>, constants: &'b mut Vec<i64>, functions: &'b mut Vec<MaybeRc<FunctionImpl>>, line_numbers: &'b mut Vec<u16>, locals_reference: &'b mut Vec<String>, globals_reference: &'b mut Vec<String>) -> Parser<'a> {
         Parser {
             input: tokens.into_iter().collect::<VecDeque<ScanToken>>(),
-            output: Vec::new(),
-            errors: Vec::new(),
+            output,
+            errors,
 
             lineno: 0,
-            line_numbers: Vec::new(),
-            locals_reference: Vec::new(),
-            globals_reference: Vec::new(),
+            line_numbers,
+            locals_reference,
+            globals_reference,
 
             error_recovery: false,
             prevent_expression_statement: false,
@@ -432,10 +488,9 @@ impl Parser {
             scope_depth: 0,
             function_depth: 0,
 
-            // Programs always have constants for '', 0 and 1, as they're common and referenced a lot.
-            strings: vec![String::new()],
-            constants: vec![0, 1],
-            functions: Vec::new(),
+            strings,
+            constants,
+            functions
         }
     }
 
@@ -647,7 +702,7 @@ impl Parser {
         // Update the function, if present, with the tail of the function
         // This makes tracking ownership in containing functions easier during error reporting
         if let Some(func_id) = func_id {
-            self.functions[func_id as usize].tail = self.next_opcode() as usize;
+            self.functions[func_id as usize].unbox_mut().tail = self.next_opcode() as usize;
         }
 
         self.push(Return); // Returns the last expression in the function
@@ -1985,7 +2040,7 @@ impl Parser {
     }
 
     fn declare_function(self: &mut Self, head: usize, name: String, args: Vec<String>) -> u16 {
-        self.functions.push(FunctionImpl::new(head, name, args));
+        self.functions.push(MaybeRc::new(FunctionImpl::new(head, name, args)));
         (self.functions.len() - 1) as u16
     }
 
@@ -2482,7 +2537,6 @@ mod tests {
     use std::path::PathBuf;
     use crate::compiler::{parser, CompileResult, scanner};
     use crate::compiler::scanner::ScanResult;
-    use crate::compiler::parser::Parser;
     use crate::reporting;
     use crate::stdlib::StdBinding;
     use crate::vm::opcode::Opcode;
@@ -2492,7 +2546,6 @@ mod tests {
     use Opcode::{*};
 
 
-    #[test] fn test_empty_expr() { run_expr("", vec![]); }
     #[test] fn test_int() { run_expr("123", vec![Int(123)]); }
     #[test] fn test_str() { run_expr("'abc'", vec![Str(1)]); }
     #[test] fn test_unary_minus() { run_expr("-3", vec![Int(3), UnarySub]); }
@@ -2539,7 +2592,7 @@ mod tests {
     #[test] fn test_slice_11() { run_expr("1 [:3]", vec![Int(1), Nil, Int(3), OpSlice]); }
     #[test] fn test_slice_12() { run_expr("1 [2:3]", vec![Int(1), Int(2), Int(3), OpSlice]); }
     #[test] fn test_binary_ops() { run_expr("(*) * (+) + (/)", vec![NativeFunction(OperatorMul), NativeFunction(OperatorAdd), OpMul, NativeFunction(OperatorDiv), OpAdd]); }
-    #[test] fn test_if_then_else() { run_expr("if true then 1 else 2", vec![True, JumpIfFalsePop(4), Int(1), Jump(5), Int(2)]); }
+    #[test] fn test_if_then_else() { run_expr("(if true then 1 else 2)", vec![True, JumpIfFalsePop(4), Int(1), Jump(5), Int(2)]); }
 
     #[test] fn test_let_eof() { run_err("let", "Expected a variable binding, either a name, or '_', or pattern (i.e. 'x, (_, y), *z'), got end of input instead\n  at: line 1 (<test>)\n  at:\n\nlet\n"); }
     #[test] fn test_let_no_identifier() { run_err("let =", "Expected a variable binding, either a name, or '_', or pattern (i.e. 'x, (_, y), *z'), got '=' token instead\n  at: line 1 (<test>)\n  at:\n\nlet =\n"); }
@@ -2588,44 +2641,46 @@ mod tests {
     #[test] fn test_while_4() { run("while_4"); }
 
 
-    fn run_expr(text: &'static str, tokens: Vec<Opcode>) {
+    fn run_expr(text: &'static str, expected: Vec<Opcode>) {
         let result: ScanResult = scanner::scan(&String::from(text));
         assert!(result.errors.is_empty());
 
-        let mut parser: Parser = Parser::new(result.tokens);
-        parser.parse_expression();
-        assert_eq!(None, parser.peek());
+        let compile = parser::parse(result);
+        assert!(compile.errors.is_empty(), "Found parser errors: {:?}", compile.errors);
 
         // Tokens will contain int values as exact values, as it's easier to read as a test DSL
         // However, the parser will give us constant IDs
         // So, index each one to produce what it looks like
-        let constants: Vec<i64> = parser.constants;
-        let output: Vec<Opcode> = parser.output.into_iter()
+        // We also want to also trim the trailing `Pop`, `Exit`, as the parser will insert that
+        let constants: Vec<i64> = compile.constants;
+        let mut actual: Vec<Opcode> = compile.code.into_iter()
             .map(|t| match t {
                 Int(i) => Int(constants[i as usize] as u16),
                 t => t
             })
             .collect::<Vec<Opcode>>();
 
-        assert_eq!(output, tokens);
+        assert_eq!(actual.pop(), Some(Exit));
+        assert_eq!(actual.pop(), Some(Pop));
+        assert_eq!(actual, expected);
     }
 
-    fn run_err(text: &'static str, output: &'static str) {
+    fn run_err(text: &'static str, expected: &'static str) {
         let text: &String = &String::from(text);
         let text_lines: Vec<&str> = text.split("\n").collect();
 
         let scan_result: ScanResult = scanner::scan(&text);
         assert!(scan_result.errors.is_empty());
 
-        let parse_result: CompileResult = parser::parse(scan_result);
-        let mut lines: Vec<String> = Vec::new();
-        assert!(!parse_result.errors.is_empty());
+        let compile: CompileResult = parser::parse(scan_result);
+        let mut actual: Vec<String> = Vec::new();
+        assert!(!compile.errors.is_empty());
 
-        for error in &parse_result.errors {
-            lines.push(reporting::format_parse_error(&text_lines, &String::from("<test>"), error));
+        for error in &compile.errors {
+            actual.push(reporting::format_parse_error(&text_lines, &String::from("<test>"), error));
         }
 
-        assert_eq!(lines.join("\n"), output);
+        assert_eq!(actual.join("\n"), expected);
     }
 
     fn run(path: &'static str) {

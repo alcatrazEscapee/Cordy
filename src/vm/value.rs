@@ -326,6 +326,7 @@ pub struct FunctionImpl {
     pub head: usize, // Pointer to the first opcode of the function's execution
     pub tail: usize, // Pointer to the final `Return` opcode.
     pub nargs: u8, // The number of arguments the function takes
+
     name: String, // The name of the function, useful to show in stack traces
     args: Vec<String>, // Names of the arguments
 }
