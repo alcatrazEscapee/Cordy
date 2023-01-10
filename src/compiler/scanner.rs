@@ -35,6 +35,15 @@ pub struct ScanError {
     pub lineno: usize,
 }
 
+impl ScanError {
+    pub fn is_eof(self: &Self) -> bool {
+        match &self.error {
+            UnterminatedStringLiteral => true,
+            _ => false
+        }
+    }
+}
+
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub enum ScanErrorType {
     InvalidNumericPrefix(char),

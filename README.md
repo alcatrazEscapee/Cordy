@@ -88,7 +88,6 @@ For a more comprehensive documentation, see the [language documentation](./docs/
 
 ### To-Do
 
-- Non expression based REPL with history
 - Implement `->` operator, basic named tuple types.
 - Format strings (just normal strings with the python `%` operator, but with rust formatting? does that even work?)
 - Regex (some sort of impl)

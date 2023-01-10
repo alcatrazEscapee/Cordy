@@ -3,8 +3,8 @@ use std::rc::Rc;
 use itertools::Itertools;
 use error::{DetailRuntimeError, RuntimeError};
 
-use crate::{stdlib, trace};
-use crate::compiler::CompileResult;
+use crate::{compiler, stdlib, trace};
+use crate::compiler::{CompileResult, IncrementalCompileResult};
 use crate::stdlib::StdBinding;
 use crate::vm::opcode::Opcode;
 use crate::vm::value::Value;
@@ -12,6 +12,7 @@ use crate::vm::value::{FunctionImpl, PartialFunctionImpl};
 
 use Opcode::{*};
 use RuntimeError::{*};
+use crate::compiler::parser::Locals;
 
 type ValueResult = Result<Value, Box<RuntimeError>>;
 type AnyResult = Result<(), Box<RuntimeError>>;
@@ -25,8 +26,8 @@ pub mod operator;
 pub struct VirtualMachine<R, W> {
     ip: usize,
     code: Vec<Opcode>,
-    stack: Vec<Value>,
-    call_stack: Vec<CallFrame>,
+    pub stack: Vec<Value>,
+    pub call_stack: Vec<CallFrame>,
     global_count: usize,
 
     strings: Vec<String>,
@@ -42,6 +43,11 @@ pub struct VirtualMachine<R, W> {
 #[derive(Eq, PartialEq, Debug, Copy, Clone)]
 pub enum FunctionType {
     Native, User
+}
+
+#[derive(Debug, Clone)]
+pub enum ExitType {
+    Exit, Yield, Error(DetailRuntimeError)
 }
 
 
@@ -87,7 +93,7 @@ impl<R, W> VirtualMachine<R, W> where
             ip: 0,
             code: result.code,
             stack: Vec::with_capacity(256), // Just guesses, not hard limits
-            call_stack: Vec::with_capacity(32),
+            call_stack: vec![CallFrame { return_ip: 0, frame_pointer: 0 }],
             global_count: 0,
             strings: result.strings,
             globals: result.globals,
@@ -99,20 +105,27 @@ impl<R, W> VirtualMachine<R, W> where
         }
     }
 
-    pub fn run_until_completion(self: &mut Self) -> Result<(), DetailRuntimeError> {
-        if let Err(e) = self.run() {
-            match *e {
-                RuntimeExit => {},
-                _ => {
-                    return Err(error::detail_runtime_error(*e, self.ip - 1, &self.call_stack, &self.functions, &self.line_numbers))
-                }
-            }
-        }
-        trace::trace_interpreter_stack!("final {}", self.debug_stack());
-        Ok(())
+    pub fn incremental_compile(self: &mut Self, source: &String, text: &String, locals: &mut Vec<Locals>) -> IncrementalCompileResult {
+        compiler::incremental_compile(source, text, &mut self.code, locals, &mut self.strings, &mut self.constants, &mut self.functions, &mut self.line_numbers, &mut self.globals)
     }
 
-    fn run_until_frame(self: &mut Self) -> AnyResult {
+    pub fn run_until_completion(self: &mut Self) -> ExitType {
+        match *self.run().err().unwrap() {
+            RuntimeExit => ExitType::Exit,
+            RuntimeYield => ExitType::Yield,
+            e => ExitType::Error(error::detail_runtime_error(e, self.ip - 1, &self.call_stack, &self.functions, &self.line_numbers)),
+        }
+    }
+
+    /// Recovers the VM into an operational state, in case previous instructions terminated in an error or in the middle of a function
+    pub fn run_recovery(self: &mut Self, locals: usize) {
+        self.call_stack.truncate(1);
+        self.stack.truncate(locals);
+        self.ip = self.code.len();
+    }
+
+    /// Runs until the current call frame is dropped. Used to invoke a user function from native code.
+    fn run_frame(self: &mut Self) -> AnyResult {
         let drop_frame: usize = self.call_stack.len() - 1;
         loop {
             let op: Opcode = self.next_op();
@@ -124,17 +137,13 @@ impl<R, W> VirtualMachine<R, W> where
     }
 
     fn run(self: &mut Self) -> AnyResult {
-        self.call_stack.push(CallFrame {
-            return_ip: 0,
-            frame_pointer: 0
-        });
-
         loop {
-            let op = self.next_op();
+            let op: Opcode = self.next_op();
             self.run_instruction(op)?;
         }
     }
 
+    /// Executes a single instruction
     fn run_instruction(self: &mut Self, op: Opcode) -> AnyResult {
         macro_rules! operator {
             ($op:expr, $a1:ident, $tr:expr) => {{
@@ -518,6 +527,7 @@ impl<R, W> VirtualMachine<R, W> where
             OpNotEqual => operator_unchecked!(operator::binary_not_equals, a1, a2, "!="),
 
             Exit => return RuntimeExit.err(),
+            Yield => return RuntimeYield.err(),
         }
         Ok(())
     }
@@ -545,7 +555,7 @@ impl<R, W> VirtualMachine<R, W> where
     fn invoke_func_and_spin(self: &mut Self, nargs: u8) -> ValueResult {
         match self.invoke_func_eval(nargs)? {
             FunctionType::Native => {},
-            FunctionType::User => self.run_until_frame()?
+            FunctionType::User => self.run_frame()?
         }
         Ok(self.pop())
     }
@@ -672,13 +682,11 @@ impl<R, W> VirtualMachine<R, W> where
 
     // ===== Debug Methods ===== //
 
-    #[cfg(trace_interpreter_stack = "on")]
-    fn debug_stack(self: &Self) -> String {
+    pub fn debug_stack(self: &Self) -> String {
         format!(": [{}]", self.stack.iter().rev().map(|t| t.as_debug_str()).collect::<Vec<String>>().join(", "))
     }
 
-    #[cfg(trace_interpreter = "on")]
-    fn debug_call_stack(self: &Self) -> String {
+    pub fn debug_call_stack(self: &Self) -> String {
         format!(": [{}]", self.call_stack.iter().rev().map(|t| format!("{{fp: {}, ret: {}}}", t.frame_pointer, t.return_ip)).collect::<Vec<String>>().join(", "))
     }
 }

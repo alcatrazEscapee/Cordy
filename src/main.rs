@@ -4,7 +4,9 @@ use rustyline::Editor;
 use rustyline::error::ReadlineError;
 
 use crate::reporting::ErrorReporter;
-use crate::vm::VirtualMachine;
+use crate::compiler::{IncrementalCompileResult};
+use crate::compiler::parser::Locals;
+use crate::vm::{ExitType, VirtualMachine};
 
 pub mod compiler;
 pub mod stdlib;
@@ -27,66 +29,63 @@ fn main() {
         let mut buffer: String = String::new();
         let mut continuation: bool = false;
 
+        // Retain local variables through the entire lifetime of the REPL
+        let mut locals = vec![Locals::new()];
+        let mut vm = VirtualMachine::new(compiler::default(), &b""[..], io::stdout());
+
         loop {
-            {
-                io::stdout().flush().unwrap();
-                let line: String = match editor.readline(if continuation { ". " } else { "> " }) {
-                    Ok(line) => {
-                        editor.add_history_entry(line.as_str());
-                        line
-                    },
-                    Err(ReadlineError::Interrupted) | Err(ReadlineError::Eof) => break,
-                    Err(e) => {
-                        println!("Error: {}", e);
-                        break
-                    }
-                };
-
-                if line == "" {
-                    continue
-                }
-
-                continuation = false;
-                buffer.push_str(line.as_str());
-                misc::strip_line_ending(&mut buffer);
-                if buffer.ends_with("\\") {
-                    continuation = true;
-                    continue
-                }
-                if buffer.ends_with("exit") {
+            io::stdout().flush().unwrap();
+            let line: String = match editor.readline(if continuation { "... " } else { ">>> " }) {
+                Ok(line) => {
+                    editor.add_history_entry(line.as_str());
+                    line
+                },
+                Err(ReadlineError::Interrupted) | Err(ReadlineError::Eof) => break,
+                Err(e) => {
+                    eprintln!("Error: {}", e);
                     break
                 }
+            };
+
+            match line.as_str() {
+                "" => continue,
+                "#stack" => {
+                    println!("{}", vm.debug_stack());
+                    continue
+                },
+                "#call-stack" => {
+                    println!("{}", vm.debug_call_stack());
+                    continue
+                },
+                _ => {},
             }
 
-            // This is the hackiest REPL you have ever seen
-            buffer = format!("({}) . print", buffer);
-
-            let compiled = match compiler::compile(&source, &buffer) {
-                Ok(c) => c,
-                Err(errors) => {
+            buffer.push_str(line.as_str());
+            buffer.push('\n');
+            continuation = false;
+            match vm.incremental_compile(&source, &buffer, &mut locals) {
+                IncrementalCompileResult::Success => {},
+                IncrementalCompileResult::Errors(errors) => {
                     for e in errors {
                         println!("{}", e);
                     }
                     buffer.clear();
                     continue
-                }
-            };
-
-            let result = {
-                let stdin = io::stdin().lock();
-                let stdout = io::stdout();
-                let mut vm = VirtualMachine::new(compiled, stdin, stdout);
-                vm.run_until_completion()
-            };
-            match result {
-                Err(e) => {
-                    println!("{}", ErrorReporter::new(&buffer, source).format_runtime_error(e))
                 },
-                Ok(_) => {}
+                IncrementalCompileResult::Aborted => {
+                    continuation = true;
+                    continue
+                }
+            }
+
+            match vm.run_until_completion() {
+                ExitType::Exit => return,
+                ExitType::Yield => {},
+                ExitType::Error(e) => println!("{}", ErrorReporter::new(&buffer, source).format_runtime_error(e)),
             }
 
             buffer.clear();
-            io::stdout().flush().unwrap();
+            vm.run_recovery(locals[0].len());
         }
     } else {
         // CLI Mode
@@ -159,10 +158,8 @@ fn main() {
             vm.run_until_completion()
         };
         match result {
-            Err(e) => {
-                eprintln!("{}", ErrorReporter::new(&text, file_ref).format_runtime_error(e))
-            },
-            Ok(_) => {}
+            ExitType::Error(e) => eprintln!("{}", ErrorReporter::new(&text, file_ref).format_runtime_error(e)),
+            _ => {}
         }
     }
 }

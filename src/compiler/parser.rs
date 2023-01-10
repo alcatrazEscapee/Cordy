@@ -15,18 +15,23 @@ use Opcode::{*};
 use StdBinding::{*};
 
 
+/// Create a default empty `CompileResult`. This is semantically equivilant to parsing an empty program, but will output nothing.
+pub fn default() -> CompileResult {
+    parse_rule(vec![], |_| ())
+}
+
 
 /// Parse a complete `CompileResult` from the given `ScanResult`
 pub fn parse(scan_result: ScanResult) -> CompileResult {
-    parse_rule(scan_result, |mut parser| parser.parse())
+    parse_rule(scan_result.tokens, |mut parser| parser.parse())
 }
 
 /// Incrementally parse from the given inputs, and `ScanResult`
 ///
 /// The top level rule is `<root>`, and the code will be appended to the end of output.
 /// This is the API used by the REPL incremental compiler.
-pub fn parse_incremental(scan_result: ScanResult, code: &mut Vec<Opcode>, strings: &mut Vec<String>, constants: &mut Vec<i64>, functions: &mut Vec<Rc<FunctionImpl>>, line_numbers: &mut Vec<u16>, globals: &mut Vec<String>) -> Vec<ParserError> {
-    parse_rule_incremental(scan_result, code, strings, constants, functions, line_numbers, globals, |mut parser| parser.parse())
+pub fn parse_incremental(scan_result: ScanResult, code: &mut Vec<Opcode>, locals: &mut Vec<Locals>, strings: &mut Vec<String>, constants: &mut Vec<i64>, functions: &mut Vec<Rc<FunctionImpl>>, line_numbers: &mut Vec<u16>, globals: &mut Vec<String>) -> Vec<ParserError> {
+    parse_rule_incremental(scan_result, code, locals, strings, constants, functions, line_numbers, globals, |mut parser| parser.parse_incremental())
 }
 
 /// Incrementally parse from the given inputs, and `ScanResult`
@@ -36,16 +41,17 @@ pub fn parse_incremental(scan_result: ScanResult, code: &mut Vec<Opcode>, string
 ///
 /// This is the API used to run an `eval()` statement.
 pub fn parse_incremental_expression(scan_result: ScanResult, code: &mut Vec<Opcode>, strings: &mut Vec<String>, constants: &mut Vec<i64>, functions: &mut Vec<Rc<FunctionImpl>>, line_numbers: &mut Vec<u16>, globals: &mut Vec<String>) -> Vec<ParserError> {
-    parse_rule_incremental(scan_result, code, strings, constants, functions, line_numbers, globals, |mut parser| parser.parse_expression())
+    let mut locals: Vec<Locals> = vec![Locals::new()]; // No locals are present for a `eval`
+    parse_rule_incremental(scan_result, code, &mut locals, strings, constants, functions, line_numbers, globals, |mut parser| parser.parse_expression())
 }
 
 
-fn parse_rule_incremental(scan_result: ScanResult, code: &mut Vec<Opcode>, strings: &mut Vec<String>, constants: &mut Vec<i64>, functions: &mut Vec<Rc<FunctionImpl>>, line_numbers: &mut Vec<u16>, globals: &mut Vec<String>, rule: fn(Parser) -> ()) -> Vec<ParserError> {
+fn parse_rule_incremental(scan_result: ScanResult, code: &mut Vec<Opcode>, locals: &mut Vec<Locals>, strings: &mut Vec<String>, constants: &mut Vec<i64>, functions: &mut Vec<Rc<FunctionImpl>>, line_numbers: &mut Vec<u16>, globals: &mut Vec<String>, rule: fn(Parser) -> ()) -> Vec<ParserError> {
 
     let mut errors: Vec<ParserError> = Vec::new();
     let mut maybe_functions: Vec<MaybeRc<FunctionImpl>> = functions.iter().map(|u| MaybeRc::Rc(u.clone())).collect();
 
-    rule(Parser::new(scan_result.tokens, code, &mut errors, strings, constants, &mut maybe_functions, line_numbers, &mut Vec::new(), globals));
+    rule(Parser::new(scan_result.tokens, code, locals, &mut errors, strings, constants, &mut maybe_functions, line_numbers, &mut Vec::new(), globals));
 
     for maybe in maybe_functions {
         match maybe {
@@ -58,7 +64,7 @@ fn parse_rule_incremental(scan_result: ScanResult, code: &mut Vec<Opcode>, strin
 }
 
 
-fn parse_rule(scan_result: ScanResult, rule: fn(Parser) -> ()) -> CompileResult {
+fn parse_rule(tokens: Vec<ScanToken>, rule: fn(Parser) -> ()) -> CompileResult {
 
     let mut code: Vec<Opcode> = Vec::new();
     let mut errors: Vec<ParserError> = Vec::new();
@@ -71,7 +77,7 @@ fn parse_rule(scan_result: ScanResult, rule: fn(Parser) -> ()) -> CompileResult 
     let mut globals: Vec<String> = Vec::new();
     let mut locals: Vec<String> = Vec::new();
 
-    rule(Parser::new(scan_result.tokens, &mut code, &mut errors, &mut strings, &mut constants, &mut functions, &mut line_numbers, &mut locals, &mut globals));
+    rule(Parser::new(tokens, &mut code, &mut vec![Locals::new()], &mut errors, &mut strings, &mut constants, &mut functions, &mut line_numbers, &mut locals, &mut globals));
 
     CompileResult {
         code,
@@ -100,6 +106,14 @@ pub struct ParserError {
 impl ParserError {
     fn new(error: ParserErrorType, lineno: usize) -> ParserError {
         ParserError { error, lineno }
+    }
+
+    pub fn is_eof(self: &Self) -> bool {
+        match &self.error {
+            ExpectedToken(_, it) => it.is_none(),
+            ExpectedExpressionTerminal(it) | ExpectedCommaOrEndOfArguments(it) | ExpectedCommaOrEndOfList(it) | ExpectedCommaOrEndOfDict(it) | ExpectedCommaOrEndOfSet(it) | ExpectedColonOrEndOfSlice(it) | ExpectedStatement(it) | ExpectedVariableNameAfterLet(it) | ExpectedVariableNameAfterFor(it) | ExpectedFunctionNameAfterFn(it) | ExpectedFunctionBlockOrArrowAfterFn(it) | ExpectedParameterOrEndOfList(it) | ExpectedCommaOrEndOfParameters(it) | ExpectedPatternTerm(it) | ExpectedUnderscoreOrVariableNameAfterVariadicInPattern(it) | ExpectedUnderscoreOrVariableNameOrPattern(it) => it.is_none(),
+            UnexpectedTokenAfterEoF(_) | LocalVariableConflict(_) | LocalVariableConflictWithNativeFunction(_) | UndeclaredIdentifier(_) | InvalidAssignmentTarget | MultipleVariadicTermsInPattern | LetWithPatternBindingNoExpression | BreakOutsideOfLoop | ContinueOutsideOfLoop => false,
+        }
     }
 }
 
@@ -161,7 +175,7 @@ struct Parser<'a> {
 
     /// A stack of nested functions, each of which have their own table of locals.
     /// While this mirrors the call stack it may not be representative. The only thing we can assume is that when a function is declared, all locals in the enclosing function are accessible.
-    locals: Vec<Locals>,
+    locals: &'a mut Vec<Locals>,
 
     late_bound_globals: Vec<LateBoundGlobal>, // Table of all late bound globals, as they occur.
     synthetic_local_index: usize, // A counter for unique synthetic local variables (`$1`, `$2`, etc.)
@@ -174,7 +188,7 @@ struct Parser<'a> {
 }
 
 #[derive(Debug)]
-struct Locals {
+pub struct Locals {
     /// The local variables in the current function.
     /// Top level local variables are considered global, even though they still might be block scoped ('true global' are top level function in no block scope, as they can never go out of scope).
     locals: Vec<Local>,
@@ -188,8 +202,12 @@ struct Locals {
 }
 
 impl Locals {
-    fn new() -> Locals {
+    pub fn new() -> Locals {
         Locals { locals: Vec::new(), upvalues: Vec::new(), loops: Vec::new() }
+    }
+
+    pub fn len(self: &Self) -> usize {
+        self.locals.len()
     }
 }
 
@@ -466,7 +484,7 @@ const CONSTANT_1: u16 = 1;
 
 impl Parser<'_> {
 
-    fn new<'a, 'b : 'a>(tokens: Vec<ScanToken>, output: &'b mut Vec<Opcode>, errors: &'b mut Vec<ParserError>, strings: &'b mut Vec<String>, constants: &'b mut Vec<i64>, functions: &'b mut Vec<MaybeRc<FunctionImpl>>, line_numbers: &'b mut Vec<u16>, locals_reference: &'b mut Vec<String>, globals_reference: &'b mut Vec<String>) -> Parser<'a> {
+    fn new<'a, 'b : 'a>(tokens: Vec<ScanToken>, output: &'b mut Vec<Opcode>, locals: &'b mut Vec<Locals>, errors: &'b mut Vec<ParserError>, strings: &'b mut Vec<String>, constants: &'b mut Vec<i64>, functions: &'b mut Vec<MaybeRc<FunctionImpl>>, line_numbers: &'b mut Vec<u16>, locals_reference: &'b mut Vec<String>, globals_reference: &'b mut Vec<String>) -> Parser<'a> {
         Parser {
             input: tokens.into_iter().collect::<VecDeque<ScanToken>>(),
             output,
@@ -481,7 +499,7 @@ impl Parser<'_> {
             prevent_expression_statement: false,
             delay_pop_from_expression_statement: false,
 
-            locals: vec![Locals::new()],
+            locals,
             late_bound_globals: Vec::new(),
 
             synthetic_local_index: 0,
@@ -499,6 +517,23 @@ impl Parser<'_> {
         self.parse_statements();
         self.push_delayed_pop();
         self.pop_locals_in_current_scope_depth(true); // Pop top level 'local' variables
+        self.teardown();
+    }
+
+    fn parse_incremental(self: &mut Self) {
+        trace::trace_parser!("rule <root-incremental>");
+        self.parse_statements();
+        if self.delay_pop_from_expression_statement {
+            self.push(NativeFunction(Print));
+            self.push(Swap);
+            self.push(OpFuncEval(1));
+            self.push(Opcode::Pop);
+        }
+        // Don't pop locals
+        self.teardown();
+    }
+
+    fn teardown(self: &mut Self) {
         if let Some(t) = self.peek() {
             let token: ScanToken = t.clone();
             self.error(UnexpectedTokenAfterEoF(token));
@@ -2292,8 +2327,8 @@ impl Parser<'_> {
                     self.advance();
                 },
                 None => {
-                    // Error recovery failed, so we need to reset it
-                    self.error_recovery = true;
+                    // Error recovery failed - we reached end of input
+                    self.error(ExpectedToken(token, None));
                     break
                 }
             }

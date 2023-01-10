@@ -115,6 +115,7 @@ pub enum Opcode {
 
     // Special
     Exit,
+    Yield,
 }
 
 

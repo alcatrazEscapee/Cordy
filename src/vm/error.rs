@@ -10,6 +10,7 @@ use crate::vm::value::{FunctionImpl, Value};
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub enum RuntimeError {
     RuntimeExit,
+    RuntimeYield,
 
     ValueIsNotFunctionEvaluable(Value),
 
