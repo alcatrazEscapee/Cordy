@@ -2112,6 +2112,22 @@ impl Parser<'_> {
                 Some(RightShiftEquals) => Some(OpRightShift),
                 Some(ModEquals) => Some(OpMod),
                 Some(PowEquals) => Some(OpPow),
+                // Special assignment operators, use their own version of a binary operator
+                // Also need to consume the extra token
+                Some(Identifier(it)) if it == "max" => match self.peek2() {
+                    Some(Equals) => {
+                        self.advance();
+                        Some(OpMax)
+                    },
+                    _ => None,
+                },
+                Some(Identifier(it)) if it == "min" => match self.peek2() {
+                    Some(Equals) => {
+                        self.advance();
+                        Some(OpMin)
+                    },
+                    _ => None,
+                },
                 _ => None
             };
 
@@ -2128,19 +2144,18 @@ impl Parser<'_> {
             // **Note**: Assignments are right-associative, so call <expr-10> recursively instead of <expr-9>
             if let Some(OpEqual) = maybe_op { // // Direct assignment statement
                 self.advance();
-                let last: usize = self.last();
-                match self.output[last] {
-                    PushLocal(id) => {
+                match self.last() {
+                    Some(PushLocal(id)) => {
                         self.pop();
                         self.parse_expr_10();
                         self.push(StoreLocal(id));
                     },
-                    PushGlobal(id, local) => {
+                    Some(PushGlobal(id, local)) => {
                         self.pop();
                         self.parse_expr_10();
                         self.push(StoreGlobal(id, local));
                     },
-                    OpIndex => {
+                    Some(OpIndex) => {
                         self.pop();
                         self.parse_expr_10();
                         self.push(StoreArray);
@@ -2148,21 +2163,20 @@ impl Parser<'_> {
                     // todo: property access
                     _ => self.error(InvalidAssignmentTarget),
                 }
-            } else if let Some(op) = maybe_op {  // Assignment Expression
+            } else if let Some(op) = maybe_op {
                 self.advance();
-                let last: usize = self.last();
-                match self.output[last] {
-                    PushLocal(id) => {
+                match self.last() {
+                    Some(PushLocal(id)) => {
                         self.parse_expr_10();
                         self.push(op);
                         self.push(StoreLocal(id));
                     },
-                    PushGlobal(id, is_local) => {
+                    Some(PushGlobal(id, is_local)) => {
                         self.parse_expr_10();
                         self.push(op);
                         self.push(StoreGlobal(id, is_local));
                     },
-                    OpIndex => {
+                    Some(OpIndex) => {
                         self.pop();
                         self.push(OpIndexPeek);
                         self.parse_expr_10();
@@ -2651,8 +2665,8 @@ impl Parser<'_> {
     }
 
     /// Returns the index of the last token that was just pushed.
-    fn last(self: &Self) -> usize {
-        self.output.len() - 1
+    fn last(self: &Self) -> Option<Opcode> {
+        self.output.last().copied()
     }
 
     /// A specialization of `error()` which provides the last token (the result of `peek()`) to the provided error function

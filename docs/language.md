@@ -36,24 +36,25 @@ Expressions in Cordy are similar to C style languages. Cordy has a number of mat
   - Note that all boolean comparisons will take the truthy value of it's argument. `nil`, `0`, `false`, `''`, and empty collections are the only falsey values, everything else is truthy.
 - `is` is an operator used to check the type of a value.
 - `in` (along with `not in`) is a special operator used for checking membership in collections, or substrings.
+- `max=` and `min=` are special cases of the builtin functions `max` and `min`, expressed as an assignment operator. `a max= b` is semantically equivalent to `a = if b > a then b else a`, similar for `min=`.
 
 
 All the above binary operators come in operator-equals variants: `+=`, `-=`, `*=`, `/=`, etc.
 
 All operators are left associative (except `=` for assigning variables). Their precedence is noted as below, where higher entries are higher precedence:
 
-| Precedence | Operators                                                                | Description                                                                            |
-|------------|--------------------------------------------------------------------------|----------------------------------------------------------------------------------------|
-| 1          | `[]`, `()`, `if then else`                                               | Array Access, Function Evaluation, Ternary `if`                                        |
-| 2          | `-`, `!`, `~`                                                            | Unary Negation, Logical Not, and Bitwise Not                                           |
-| 3          | `*`, `/`, `%`, `**`, `is`, `in`, `not in`                                | Multiplication, Division, Modulo, Power, Is In, Not In                                 |
-| 4          | `+`, `-`                                                                 | Addition, Subtraction                                                                  |
-| 5          | `<<`, `>>`                                                               | Left Shift, Right Shift                                                                |
-| 6          | `&`, `∣`, `^`                                                            | Bitwise AND, Bitwise OR, Bitwise XOR                                                   |
-| 7          | `.`                                                                      | [Function Composition](#function-evaluation)                                           |
-| 8          | `<`, `<=`, `>`, `>=`, `==`, `!=`                                         | Less Than, Less Than or Equal, Greater Than, Greater Than or Equal, Equals, Not Equals |
-| 9          | `and`, `or`                                                              | Logical And, Logical Or                                                                |
-| 10         | `=`, `+=`, `-=`, `*=`, `/=`, `&=`, `∣=`, `^=`, `<<=`, `>>=`, `%=`, `**=` | Assignment, and Operator Assignment                                                    |
+| Precedence | Operators                                                                               | Description                                                                            |
+|------------|-----------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------|
+| 1          | `[]`, `()`, `if then else`                                                              | Array Access, Function Evaluation, Ternary `if`                                        |
+| 2          | `-`, `!`, `~`                                                                           | Unary Negation, Logical Not, and Bitwise Not                                           |
+| 3          | `*`, `/`, `%`, `**`, `is`, `in`, `not in`                                               | Multiplication, Division, Modulo, Power, Is In, Not In                                 |
+| 4          | `+`, `-`                                                                                | Addition, Subtraction                                                                  |
+| 5          | `<<`, `>>`                                                                              | Left Shift, Right Shift                                                                |
+| 6          | `&`, `∣`, `^`                                                                           | Bitwise AND, Bitwise OR, Bitwise XOR                                                   |
+| 7          | `.`                                                                                     | [Function Composition](#function-evaluation)                                           |
+| 8          | `<`, `<=`, `>`, `>=`, `==`, `!=`                                                        | Less Than, Less Than or Equal, Greater Than, Greater Than or Equal, Equals, Not Equals |
+| 9          | `and`, `or`                                                                             | Logical And, Logical Or                                                                |
+| 10         | `=`, `+=`, `-=`, `*=`, `/=`, `&=`, `∣=`, `^=`, `<<=`, `>>=`, `%=`, `**=`, `max=`, `min=` | Assignment, and Operator Assignment                                                    |
 
 ### Variables
 

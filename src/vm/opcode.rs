@@ -117,6 +117,9 @@ pub enum Opcode {
     OpEqual,
     OpNotEqual,
 
+    OpMax,
+    OpMin,
+
     // Special
     Exit,
     Yield,

@@ -143,6 +143,11 @@ pub fn binary_add(a1: Value, a2: Value) -> ValueResult {
 pub fn binary_sub(a1: Value, a2: Value) -> ValueResult {
     match (a1, a2) {
         (Value::Int(i1), Value::Int(i2)) => Ok(Value::Int(i1 - i2)),
+        (Value::Set(s1), Value::Set(s2)) => {
+            let s1 = s1.unbox();
+            let s2 = s2.unbox();
+            Ok(Value::iter_set(s1.difference(&*s2).cloned()))
+        },
         (Value::Vector(l), Value::Vector(r)) => apply_vector_binary(l, r, binary_sub),
         (Value::Vector(l), r) => apply_vector_binary_scalar_rhs(l, r, binary_sub),
         (l, Value::Vector(r)) => apply_vector_binary_scalar_lhs(l, r, binary_sub),
@@ -187,6 +192,11 @@ pub fn binary_not_equals(a1: Value, a2: Value) -> Value { Value::Bool(a1 != a2) 
 pub fn binary_bitwise_and(a1: Value, a2: Value) -> ValueResult {
     match (a1, a2) {
         (Value::Int(i1), Value::Int(i2)) => Ok(Value::Int(i1 & i2)),
+        (Value::Set(s1), Value::Set(s2)) => {
+            let s1 = s1.unbox();
+            let s2 = s2.unbox();
+            Ok(Value::iter_set(s1.intersection(&*s2).cloned()))
+        },
         (Value::Vector(l), Value::Vector(r)) => apply_vector_binary(l, r, binary_bitwise_and),
         (Value::Vector(l), r) => apply_vector_binary_scalar_rhs(l, r, binary_bitwise_and),
         (l, Value::Vector(r)) => apply_vector_binary_scalar_lhs(l, r, binary_bitwise_and),
@@ -197,6 +207,11 @@ pub fn binary_bitwise_and(a1: Value, a2: Value) -> ValueResult {
 pub fn binary_bitwise_or(a1: Value, a2: Value) -> ValueResult {
     match (a1, a2) {
         (Value::Int(i1), Value::Int(i2)) => Ok(Value::Int(i1 | i2)),
+        (Value::Set(s1), Value::Set(s2)) => {
+            let s1 = s1.unbox();
+            let s2 = s2.unbox();
+            Ok(Value::iter_set(s1.union(&*s2).cloned()))
+        },
         (Value::Vector(l), Value::Vector(r)) => apply_vector_binary(l, r, binary_bitwise_or),
         (Value::Vector(l), r) => apply_vector_binary_scalar_rhs(l, r, binary_bitwise_or),
         (l, Value::Vector(r)) => apply_vector_binary_scalar_lhs(l, r, binary_bitwise_or),
@@ -207,6 +222,11 @@ pub fn binary_bitwise_or(a1: Value, a2: Value) -> ValueResult {
 pub fn binary_bitwise_xor(a1: Value, a2: Value) -> ValueResult {
     match (a1, a2) {
         (Value::Int(i1), Value::Int(i2)) => Ok(Value::Int(i1 ^ i2)),
+        (Value::Set(s1), Value::Set(s2)) => {
+            let s1 = s1.unbox();
+            let s2 = s2.unbox();
+            Ok(Value::iter_set(s1.symmetric_difference(&*s2).cloned()))
+        },
         (Value::Vector(l), Value::Vector(r)) => apply_vector_binary(l, r, binary_bitwise_xor),
         (Value::Vector(l), r) => apply_vector_binary_scalar_rhs(l, r, binary_bitwise_xor),
         (l, Value::Vector(r)) => apply_vector_binary_scalar_lhs(l, r, binary_bitwise_xor),
