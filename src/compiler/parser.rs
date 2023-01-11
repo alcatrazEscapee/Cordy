@@ -874,6 +874,7 @@ impl Parser<'_> {
         self.parse_expression(); // While condition
         let jump_if_false = self.reserve(); // Jump to the end
         self.parse_block_statement(); // Inner loop statements, and jump back to front
+        self.push_delayed_pop(); // Inner loop expressions cannot yield out of the loop
         self.push(Jump(loop_start));
 
         let loop_end: u16 = self.next_opcode(); // After the jump, the next opcode is 'end of loop'. Repair all break statements
@@ -2799,6 +2800,7 @@ mod tests {
     #[test] fn test_while_2() { run("while_2"); }
     #[test] fn test_while_3() { run("while_3"); }
     #[test] fn test_while_4() { run("while_4"); }
+    #[test] fn test_while_false_if_false() { run("while_false_if_false"); }
 
 
     fn run_expr(text: &'static str, expected: Vec<Opcode>) {
