@@ -93,6 +93,7 @@ For a more comprehensive documentation, see the [language documentation](./docs/
 - Regex (some sort of impl)
 - `continue` and `break` in `for` statements
 - `else` on `while` and `for` statements, like Python
+- `any`, `all`
 - some kind of `switch` expression statement?
 - Even MORE standard library functions
   - `push_front` for `List` (or `Queue`), `insert` (by index) for `List`

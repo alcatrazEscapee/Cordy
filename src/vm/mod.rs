@@ -550,6 +550,8 @@ impl<R, W> VirtualMachine<R, W> where
             OpGreaterThanEqual => operator_unchecked!(operator::binary_greater_than_or_equal, a1, a2, ">="),
             OpEqual => operator_unchecked!(operator::binary_equals, a1, a2, "=="),
             OpNotEqual => operator_unchecked!(operator::binary_not_equals, a1, a2, "!="),
+            OpMax => operator_unchecked!(std::cmp::max, a1, a2, "max"),
+            OpMin => operator_unchecked!(std::cmp::min, a1, a2, "min"),
 
             Exit => return RuntimeExit.err(),
             Yield => return RuntimeYield.err(),
@@ -1201,6 +1203,10 @@ mod test {
     #[test] fn test_multi_element_vector() { run_str("(1,2,3) . print", "(1, 2, 3)\n"); }
     #[test] fn test_multi_element_vector_trailing_comma() { run_str("(1,2,3,) . print", "(1, 2, 3)\n"); }
     #[test] fn test_while_false_if_false() { run_str("while false { if false { } }", ""); }
+    #[test] fn test_binary_max_yes() { run_str("let a = 3 ; a max= 6; a . print", "6\n"); }
+    #[test] fn test_binary_max_no() { run_str("let a = 3 ; a max= 2; a . print", "3\n"); }
+    #[test] fn test_binary_min_yes() { run_str("let a = 3 ; a min= 1; a . print", "1\n"); }
+    #[test] fn test_binary_min_no() { run_str("let a = 3 ; a min= 5; a . print", "3\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }
