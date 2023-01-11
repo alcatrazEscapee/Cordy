@@ -200,7 +200,7 @@ pub fn binary_bitwise_or(a1: Value, a2: Value) -> ValueResult {
         (Value::Vector(l), Value::Vector(r)) => apply_vector_binary(l, r, binary_bitwise_or),
         (Value::Vector(l), r) => apply_vector_binary_scalar_rhs(l, r, binary_bitwise_or),
         (l, Value::Vector(r)) => apply_vector_binary_scalar_lhs(l, r, binary_bitwise_or),
-        (l, r) => return TypeErrorBinaryOp(OpBitwiseAnd, l, r).err()
+        (l, r) => return TypeErrorBinaryOp(OpBitwiseOr, l, r).err()
     }
 }
 
@@ -210,7 +210,7 @@ pub fn binary_bitwise_xor(a1: Value, a2: Value) -> ValueResult {
         (Value::Vector(l), Value::Vector(r)) => apply_vector_binary(l, r, binary_bitwise_xor),
         (Value::Vector(l), r) => apply_vector_binary_scalar_rhs(l, r, binary_bitwise_xor),
         (l, Value::Vector(r)) => apply_vector_binary_scalar_lhs(l, r, binary_bitwise_xor),
-        (l, r) => TypeErrorBinaryOp(OpBitwiseAnd, l, r).err()
+        (l, r) => TypeErrorBinaryOp(OpBitwiseXor, l, r).err()
     }
 }
 
