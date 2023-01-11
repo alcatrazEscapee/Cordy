@@ -1200,6 +1200,7 @@ mod test {
     #[test] fn test_single_element_vector() { run_str("(1,) . print", "(1)\n"); }
     #[test] fn test_multi_element_vector() { run_str("(1,2,3) . print", "(1, 2, 3)\n"); }
     #[test] fn test_multi_element_vector_trailing_comma() { run_str("(1,2,3,) . print", "(1, 2, 3)\n"); }
+    #[test] fn test_while_false_if_false() { run_str("while false { if false { } }", ""); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }

@@ -1,0 +1,10 @@
+L1: 0000 False
+    0001 JumpIfFalsePop(9)
+L2: 0002 False
+    0003 JumpIfFalsePop(6)
+L3: 0004 Str(1) -> "hello"
+L4: 0005 Jump(7)
+    0006 Nil
+L5: 0007 Pop
+    0008 Jump(0)
+    0009 Exit

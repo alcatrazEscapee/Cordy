@@ -1,0 +1,5 @@
+while false {
+    if false {
+        'hello'
+    }
+}
