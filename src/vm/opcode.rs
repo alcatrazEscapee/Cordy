@@ -51,7 +51,11 @@ pub enum Opcode {
     Str(u16),
     Function(u16),
     NativeFunction(StdBinding),
+    // Note that `List`, `Vector`, `Set`, `Dict`, are different from invoking native functions
+    // 1. They don't require a function evaluation and resolution (efficient)
+    // 2. They allow zero and one element cases to be handled exactly as usual (i.e. `list('no')` is `['no'], not ['n', 'o'])
     List(u16),
+    Vector(u16),
     Set(u16),
     Dict(u16),
 

@@ -97,7 +97,7 @@ impl ParserError {
     pub fn is_eof(self: &Self) -> bool {
         match &self.error {
             ExpectedToken(_, it) => it.is_none(),
-            ExpectedExpressionTerminal(it) | ExpectedCommaOrEndOfArguments(it) | ExpectedCommaOrEndOfList(it) | ExpectedCommaOrEndOfDict(it) | ExpectedCommaOrEndOfSet(it) | ExpectedColonOrEndOfSlice(it) | ExpectedStatement(it) | ExpectedVariableNameAfterLet(it) | ExpectedVariableNameAfterFor(it) | ExpectedFunctionNameAfterFn(it) | ExpectedFunctionBlockOrArrowAfterFn(it) | ExpectedParameterOrEndOfList(it) | ExpectedCommaOrEndOfParameters(it) | ExpectedPatternTerm(it) | ExpectedUnderscoreOrVariableNameAfterVariadicInPattern(it) | ExpectedUnderscoreOrVariableNameOrPattern(it) => it.is_none(),
+            ExpectedExpressionTerminal(it) | ExpectedCommaOrEndOfArguments(it) | ExpectedCommaOrEndOfList(it)  | ExpectedCommaOrEndOfVector(it) | ExpectedCommaOrEndOfDict(it) | ExpectedCommaOrEndOfSet(it) | ExpectedColonOrEndOfSlice(it) | ExpectedStatement(it) | ExpectedVariableNameAfterLet(it) | ExpectedVariableNameAfterFor(it) | ExpectedFunctionNameAfterFn(it) | ExpectedFunctionBlockOrArrowAfterFn(it) | ExpectedParameterOrEndOfList(it) | ExpectedCommaOrEndOfParameters(it) | ExpectedPatternTerm(it) | ExpectedUnderscoreOrVariableNameAfterVariadicInPattern(it) | ExpectedUnderscoreOrVariableNameOrPattern(it) => it.is_none(),
             UnexpectedTokenAfterEoF(_) | LocalVariableConflict(_) | LocalVariableConflictWithNativeFunction(_) | UndeclaredIdentifier(_) | InvalidAssignmentTarget | MultipleVariadicTermsInPattern | LetWithPatternBindingNoExpression | BreakOutsideOfLoop | ContinueOutsideOfLoop => false,
         }
     }
@@ -112,6 +112,7 @@ pub enum ParserErrorType {
     ExpectedExpressionTerminal(Option<ScanToken>),
     ExpectedCommaOrEndOfArguments(Option<ScanToken>),
     ExpectedCommaOrEndOfList(Option<ScanToken>),
+    ExpectedCommaOrEndOfVector(Option<ScanToken>),
     ExpectedCommaOrEndOfDict(Option<ScanToken>),
     ExpectedCommaOrEndOfSet(Option<ScanToken>),
     ExpectedColonOrEndOfSlice(Option<ScanToken>),
@@ -1471,11 +1472,16 @@ impl Parser<'_> {
             },
             Some(OpenParen) => {
                 self.advance(); // Consume the `(`
-                if !self.parse_expr_1_partial_operator_left() {
-                    self.parse_expression();
-                    if !self.parse_expr_1_partial_operator_right() {
-                        self.expect(CloseParen);
-                    }
+                if self.parse_expr_1_partial_operator_left() {
+                    return // Looks ahead, and parses <op> <expr> `)`
+                }
+                self.parse_expression(); // Parse <expr>
+                if self.parse_expr_1_partial_operator_right() {
+                    return // Looks ahead and parses <op> `)`
+                }
+                match self.peek() {
+                    Some(Comma) => self.parse_expr_1_vector_literal(),
+                    _ => self.expect(CloseParen), // Simple expression
                 }
             },
             Some(OpenSquareBracket) => self.parse_expr_1_list_literal(),
@@ -1574,7 +1580,7 @@ impl Parser<'_> {
     }
 
     fn parse_expr_1_partial_operator_right(self: &mut Self) -> bool {
-        trace::trace_parser!("rule <expr-1-partial-operator-right");
+        trace::trace_parser!("rule <expr-1-partial-operator-right>");
         // If we see the pattern of BinaryOp `)`, then we recognize this as a partial operator, but evaluated from the left hand side instead.
         // For non-symmetric operators, this means we use the normal operator as we partial evaluate the left hand argument (by having the operator on the right)
         let op = match self.peek() {
@@ -1610,6 +1616,54 @@ impl Parser<'_> {
                 true
             },
             _ => false,
+        }
+    }
+
+    fn parse_expr_1_vector_literal(self: &mut Self) {
+        trace::trace_parser!("rule <expr-1-vector-literal>");
+
+        // Vector literal `(` <expr> `,` [ <expr> [ `,` <expr> ] * ] ? `)`
+        // Note that this might be a single element vector literal, which includes a trailing comma
+        self.advance(); // Consume `,`
+        match self.peek() {
+            Some(CloseParen) => {
+                self.advance(); // Consume `)`
+                self.push(Opcode::Vector(1));
+                return
+            },
+            _ => {},
+        }
+
+        // Otherwise, it must be > 1
+        let mut length = 1;
+        loop {
+            self.parse_expression();
+            length += 1;
+            match self.peek() {
+                Some(CloseParen) => {
+                    // Exit
+                    self.advance(); // Consume `)`
+                    let constant_len = self.declare_constant(length);
+                    self.push(Opcode::Vector(constant_len));
+                    break
+                }
+                Some(Comma) => {
+                    self.advance();
+                    match self.peek() { // Check again, to allow trailing comma
+                        Some(CloseParen) => {
+                            self.advance();
+                            let constant_len = self.declare_constant(length);
+                            self.push(Opcode::Vector(constant_len));
+                            break
+                        },
+                        _ => {},
+                    }
+                },
+                _ => {
+                    self.error_with(|t| ExpectedCommaOrEndOfVector(t));
+                    break
+                }
+            }
         }
     }
 

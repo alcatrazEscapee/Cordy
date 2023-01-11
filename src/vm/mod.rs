@@ -411,8 +411,7 @@ impl<R, W> VirtualMachine<R, W> where
             List(cid) => {
                 // List values are present on the stack in-order
                 // So we need to splice the last n values of the stack into it's own list
-                let cid: usize = cid as usize;
-                let length: usize = self.constants[cid] as usize;
+                let length: usize = self.constants[cid as usize] as usize;
                 trace::trace_interpreter!("push list n={}", length);
                 let start: usize = self.stack.len() - length;
                 let end: usize = self.stack.len();
@@ -420,29 +419,38 @@ impl<R, W> VirtualMachine<R, W> where
                 let list: Value = Value::iter_list(self.stack.splice(start..end, std::iter::empty()));
                 self.push(list);
             },
+            Vector(cid) => {
+                // Vector values are present on the stack in-order
+                // So we need to splice the last n values of the stack into it's own vector
+                let length: usize = self.constants[cid as usize] as usize;
+                trace::trace_interpreter!("push vector n={}", length);
+                let start: usize = self.stack.len() - length;
+                let end: usize = self.stack.len();
+                trace::trace_interpreter_stack!("stack splice {}..{} into list", start, end);
+                let vector: Value = Value::iter_vector(self.stack.splice(start..end, std::iter::empty()));
+                self.push(vector);
+            },
             Set(cid) => {
                 // Set values are present on the stack in-order
                 // So we need to splice the last n values of the stack into it's own set
-                let cid: usize = cid as usize;
-                let length: usize = self.constants[cid] as usize;
+                let length: usize = self.constants[cid as usize] as usize;
                 trace::trace_interpreter!("push set n={}", length);
                 let start: usize = self.stack.len() - length;
                 let end: usize = self.stack.len();
                 trace::trace_interpreter_stack!("stack splice {}..{} into set", start, end);
-                let list: Value = Value::iter_set(self.stack.splice(start..end, std::iter::empty()));
-                self.push(list);
+                let set: Value = Value::iter_set(self.stack.splice(start..end, std::iter::empty()));
+                self.push(set);
             },
             Dict(cid) => {
                 // Dict values are present on the stack in-order, in flat key-value order.
                 // So we need to splice the last n*2 values of the stack into it's own dict.
-                let cid: usize = cid as usize;
-                let length: usize = (self.constants[cid] as usize) * 2;
+                let length: usize = (self.constants[cid as usize] as usize) * 2;
                 trace::trace_interpreter!("push set n={}", length);
                 let start: usize = self.stack.len() - length;
                 let end: usize = self.stack.len();
                 trace::trace_interpreter_stack!("stack splice {}..{} into dict", start, end);
-                let list: Value = Value::iter_dict(self.stack.splice(start..end, std::iter::empty()).tuples());
-                self.push(list);
+                let dict: Value = Value::iter_dict(self.stack.splice(start..end, std::iter::empty()).tuples());
+                self.push(dict);
             },
 
             OpFuncEval(nargs) => {
@@ -1188,7 +1196,10 @@ mod test {
     #[test] fn test_operator_partial_right_with_composition() { run_str("(1 . (<2)) . print", "true\n"); }
     #[test] fn test_operator_partial_left_with_composition() { run_str("(2 . (1<)) . print", "true\n"); }
     #[test] fn test_int_to_hex() { run_str("1234 . hex . print", "4d2\n"); }
-    #[test] fn test_int_to_bin() { run_str("1234 . bin . print", "10011010010\n")}
+    #[test] fn test_int_to_bin() { run_str("1234 . bin . print", "10011010010\n"); }
+    #[test] fn test_single_element_vector() { run_str("(1,) . print", "(1)\n"); }
+    #[test] fn test_multi_element_vector() { run_str("(1,2,3) . print", "(1, 2, 3)\n"); }
+    #[test] fn test_multi_element_vector_trailing_comma() { run_str("(1,2,3,) . print", "(1, 2, 3)\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }

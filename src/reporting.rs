@@ -189,6 +189,7 @@ impl AsError for ParserError {
             ParserErrorType::ExpectedExpressionTerminal(e) => format!("Expected an expression terminal, got {} instead", e.format_error()),
             ParserErrorType::ExpectedCommaOrEndOfArguments(e) => format!("Expected a ',' or ')' after function invocation, got {} instead", e.format_error()),
             ParserErrorType::ExpectedCommaOrEndOfList(e) => format!("Expected a ',' or ']' after list literal, got {} instead", e.format_error()),
+            ParserErrorType::ExpectedCommaOrEndOfVector(e) => format!("Expected a ',' or ')' after vector literal, got {} instead", e.format_error()),
             ParserErrorType::ExpectedCommaOrEndOfDict(e) => format!("Expected a ',' or '}}' after dict literal, got {} instead", e.format_error()),
             ParserErrorType::ExpectedCommaOrEndOfSet(e) => format!("Expected a ',' or '}}' after set literal, got {} instead", e.format_error()),
             ParserErrorType::ExpectedColonOrEndOfSlice(e) => format!("Expected a ':' or ']' in slice, got {} instead", e.format_error()),

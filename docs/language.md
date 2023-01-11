@@ -277,11 +277,17 @@ my_dict['hello'] . print
 - `heap`: A min-heap, implemented as a binary heap, with O(log n) access to the minimum element.
 - `vector`: A `list` like data type, but with a fixed length, and where all operations behave in an elementwise fashion.
   - Operating on a vector and a constant will apply the constant to each element of the vector:
+  - Vectors can be declared in literals like lists, but with `(` parenthesis `)`.
+  - Single argument vectors require a trailing comma (i.e. `(1,)`, not `(1)`)
 
 ```
->>> vector(1, 2, 3) * vector(2, 4, 6)
+>>> (1,)
+(1)
+>>> (1, 2, 3)
+(1, 2, 3)
+>>> (1, 2, 3) * (2, 4, 6)
 (2, 8, 18)
->>> vector(1, 2, 3) * 3
+>>> (1, 2, 3) * 3
 (3, 6, 9)
 ```
 
