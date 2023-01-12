@@ -66,7 +66,7 @@ pub trait VirtualInterface {
     fn invoke_func1(self: &mut Self, f: Value, a1: Value) -> ValueResult;
     fn invoke_func2(self: &mut Self, f: Value, a1: Value, a2: Value) -> ValueResult;
 
-    fn invoke_eval(self: &mut Self, s: String) -> ValueResult;
+    fn invoke_eval(self: &mut Self, s: &String) -> ValueResult;
 
     // Wrapped IO
     fn println0(self: &mut Self);
@@ -738,10 +738,10 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
         self.invoke_func_and_spin(2)
     }
 
-    fn invoke_eval(self: &mut Self, text: String) -> ValueResult {
+    fn invoke_eval(self: &mut Self, text: &String) -> ValueResult {
         let eval_head: usize = self.code.len();
 
-        self.eval_compile(&text)?;
+        self.eval_compile(text)?;
         self.call_function(eval_head, 0);
         self.run_frame()?;
         let ret = self.pop();
@@ -1213,6 +1213,27 @@ mod test {
     #[test] fn test_any_yes_all() { run_str("[1, 3, 4, 5] . any(>0) . print", "true\n"); }
     #[test] fn test_any_yes_some() { run_str("[1, 3, 4, 5] . any(>3) . print", "true\n"); }
     #[test] fn test_any_yes_none() { run_str("[1, 3, 4, 5] . any(<0) . print", "false\n"); }
+    #[test] fn test_format_with_percent_no_args() { run_str("'100 %%' % vector() . print", "100 %\n"); }
+    #[test] fn test_format_with_one_int_arg() { run_str("'an int: %d' % (123,) . print", "an int: 123\n"); }
+    #[test] fn test_format_with_one_neg_int_arg() { run_str("'an int: %d' % (-123,) . print", "an int: -123\n"); }
+    #[test] fn test_format_with_one_zero_pad_int_arg() { run_str("'an int: %05d' % (123,) . print", "an int: 00123\n"); }
+    #[test] fn test_format_with_one_zero_pad_neg_int_arg() { run_str("'an int: %05d' % (-123,) . print", "an int: -0123\n"); }
+    #[test] fn test_format_with_one_space_pad_int_arg() { run_str("'an int: %5d' % (123,) . print", "an int:   123\n"); }
+    #[test] fn test_format_with_one_space_pad_neg_int_arg() { run_str("'an int: %5d' % (-123,) . print", "an int:  -123\n"); }
+    #[test] fn test_format_with_one_hex_arg() { run_str("'an int: %x' % (123,) . print", "an int: 7b\n"); }
+    #[test] fn test_format_with_one_zero_pad_hex_arg() { run_str("'an int: %04x' % (123,) . print", "an int: 007b\n"); }
+    #[test] fn test_format_with_one_space_pad_hex_arg() { run_str("'an int: %4x' % (123,) . print", "an int:   7b\n"); }
+    #[test] fn test_format_with_one_bin_arg() { run_str("'an int: %b' % (123,) . print", "an int: 1111011\n"); }
+    #[test] fn test_format_with_one_zero_pad_bin_arg() { run_str("'an int: %012b' % (123,) . print", "an int: 000001111011\n"); }
+    #[test] fn test_format_with_one_space_pad_bin_arg() { run_str("'an int: %12b' % (123,) . print", "an int:      1111011\n"); }
+    #[test] fn test_format_with_many_args() { run_str("'%d %s %x %b ALL THE THINGS %%!' % (10, 'fifteen', 0xff, 0b10101) . print", "10 fifteen ff 10101 ALL THE THINGS %!\n"); }
+    #[test] fn test_format_nested_0() { run_str("'%s w%sld %s' % ('hello', 'or', '!') . print", "hello world !\n"); }
+    #[test] fn test_format_nested_1() { run_str("'%%%s%%s%s %%s' % ('s w', 'ld') % ('hello', 'or', '!') . print", "hello world !\n"); }
+    #[test] fn test_format_nested_2() { run_str("'%ss%%%%s%s%s%ss' % ('%'*3, '%s', ' ', '%'*2) % ('s w', 'ld') % ('hello', 'or', '!') . print", "hello world !\n"); }
+    #[test] fn test_format_too_many_args() { run_str("'%d %d %d' % (1, 2)", "ValueError: Not enough arguments for format string\n    at: `'%d %d %d' % (1, 2)` (line 1)\n    at: execution of script '<test>'\n"); }
+    #[test] fn test_format_too_few_args() { run_str("'%d %d %d' % (1, 2, 3, 4)", "ValueError: Not all arguments consumed in format string, next: '4' of type 'int'\n    at: `'%d %d %d' % (1, 2, 3, 4)` (line 1)\n    at: execution of script '<test>'\n"); }
+    #[test] fn test_format_incorrect_character() { run_str("'%g' % (1,)", "ValueError: Invalid format character 'g' in format string\n    at: `'%g' % (1,)` (line 1)\n    at: execution of script '<test>'\n"); }
+    #[test] fn test_format_incorrect_width() { run_str("'%00' % (1,)", "ValueError: Invalid format character '0' in format string\n    at: `'%00' % (1,)` (line 1)\n    at: execution of script '<test>'\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }
