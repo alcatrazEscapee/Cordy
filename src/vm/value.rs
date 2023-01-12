@@ -138,6 +138,7 @@ impl Value {
         }
     }
 
+    /// Unwraps the value as an `int`, or raises a type error
     pub fn as_int(self: &Self) -> Result<i64, Box<RuntimeError>> {
         match self {
             Int(i) => Ok(*i),
@@ -146,7 +147,7 @@ impl Value {
         }
     }
 
-    /// Like `as_int()` but converts `Nil` to the provided default value
+    /// Like `as_int()` but converts `nil` to the provided default value
     pub fn as_int_or(self: &Self, def: i64) -> Result<i64, Box<RuntimeError>> {
         match self {
             Nil => Ok(def),
@@ -156,6 +157,7 @@ impl Value {
         }
     }
 
+    /// Unwraps the value as a `str`, or raises a type error
     pub fn as_str(self: &Self) -> Result<&String, Box<RuntimeError>> {
         match self {
             Str(it) => Ok(it),
@@ -163,6 +165,7 @@ impl Value {
         }
     }
 
+    /// Unwraps the value as an `iterable`, or raises a type error
     pub fn as_iter(self: &Self) -> Result<ValueIntoIter, Box<RuntimeError>> {
         match self {
             Str(it) => {
@@ -180,8 +183,21 @@ impl Value {
         }
     }
 
+    /// Unwraps the value as an `iterable`, or if it is not, yields an iterable of the single element
+    /// Note that this takes a `str` to be a non-iterable primitive type, unlike `is_iter()` and `as_iter()`
+    pub fn as_iter_or_unit(self: &Self) -> ValueIntoIter {
+        match self {
+            List(it) => ValueIntoIter::List(it.unbox()),
+            Set(it) => ValueIntoIter::Set(it.unbox()),
+            Dict(it) => ValueIntoIter::Dict(it.unbox()),
+            Heap(it) => ValueIntoIter::Heap(it.unbox()),
+            Vector(it) => ValueIntoIter::Vector(it.unbox()),
+            it => ValueIntoIter::Unit(it),
+        }
+    }
+
     /// Converts this `Value` to a `ValueAsIndex`, which is a index-able object, supported for `List`, `Vector`, and `Str`
-    pub fn to_index(self: &Self) -> Result<ValueAsIndex, Box<RuntimeError>> {
+    pub fn as_index(self: &Self) -> Result<ValueAsIndex, Box<RuntimeError>> {
         match self {
             Str(it) => Ok(ValueAsIndex::Str(it)),
             List(it) => Ok(ValueAsIndex::List(it.unbox())),
@@ -191,7 +207,7 @@ impl Value {
     }
 
     /// Converts this `Value` to a `ValueAsSlice`, which is a builder for slice-like structures, supported for `List` and `Str`
-    pub fn to_slice(self: &Self) -> Result<ValueAsSlice, Box<RuntimeError>> {
+    pub fn as_slice(self: &Self) -> Result<ValueAsSlice, Box<RuntimeError>> {
         match self {
             Str(it) => Ok(ValueAsSlice::Str(it, String::new())),
             List(it) => Ok(ValueAsSlice::List(it.unbox(), VecDeque::new())),
@@ -202,7 +218,7 @@ impl Value {
 
     /// Returns the internal `FunctionImpl` of this value.
     /// Must only be called on a `Function` or `Closure`, will panic otherwise.
-    pub fn function_impl(self: &Self) -> &Rc<FunctionImpl> {
+    pub fn unbox_func(self: &Self) -> &Rc<FunctionImpl> {
         match self {
             Function(f) => f,
             Closure(c) => &c.func,
@@ -213,10 +229,10 @@ impl Value {
     /// Returns `None` if this value is not a function
     /// Returns `Some(None)` if this value is a function with an unknown number of arguments
     /// Returns `Some(Some(nargs))` if this value is a function with a known number of arguments
-    pub fn as_function_args(self: &Self) -> Option<Option<u8>> {
+    pub fn unbox_func_args(self: &Self) -> Option<Option<u8>> {
         match self {
             Function(it) => Some(Some(it.nargs)),
-            PartialFunction(it) => Some(Some(it.func.function_impl().nargs - it.args.len() as u8)),
+            PartialFunction(it) => Some(Some(it.func.unbox_func().nargs - it.args.len() as u8)),
             NativeFunction(it) => Some(it.nargs()),
             PartialNativeFunction(it, args) => Some(it.nargs().map(|u| u - args.len() as u8)),
             Closure(it) => Some(Some(it.func.nargs)),
@@ -224,6 +240,7 @@ impl Value {
         }
     }
 
+    /// Returns the length of this `Value`. Equivalent to the native function `len`. Raises a type error if the value does not have a lenth.
     pub fn len(self: &Self) -> Result<usize, Box<RuntimeError>> {
         match &self {
             Str(it) => Ok(it.chars().count()),
@@ -244,7 +261,7 @@ impl Value {
     pub fn is_list(self: &Self) -> bool { match self { List(_) => true, _ => false } }
     pub fn is_set(self: &Self) -> bool { match self { Set(_) => true, _ => false } }
     pub fn is_dict(self: &Self) -> bool { match self { Dict(_) => true, _ => false } }
-    pub fn is_vector(self: &Self) -> bool { match self { Vector(_) => true, _ => false }}
+    pub fn is_vector(self: &Self) -> bool { match self { Vector(_) => true, _ => false } }
 
     pub fn is_iter(self: &Self) -> bool {
         match self {
@@ -432,6 +449,7 @@ impl Hash for HeapImpl {
 
 // Escapes iterators all having different concrete types
 pub enum ValueIter<'a> {
+    Unit(std::iter::Once<&'a Value>),
     Str(std::slice::Iter<'a, Value>),
     List(std::collections::vec_deque::Iter<'a, Value>),
     Set(hashlink::linked_hash_set::Iter<'a, Value>),
@@ -445,6 +463,7 @@ impl<'a> Iterator for ValueIter<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         match self {
+            ValueIter::Unit(it) => it.next(),
             ValueIter::Str(it) => it.next(),
             ValueIter::List(it) => it.next(),
             ValueIter::Set(it) => it.next(),
@@ -458,6 +477,7 @@ impl<'a> Iterator for ValueIter<'a> {
 impl<'a> DoubleEndedIterator for ValueIter<'a> {
     fn next_back(&mut self) -> Option<Self::Item> {
         match self {
+            ValueIter::Unit(it) => it.next_back(),
             ValueIter::Str(it) => it.next_back(),
             ValueIter::List(it) => it.next_back(),
             ValueIter::Set(it) => it.next_back(),
@@ -470,6 +490,7 @@ impl<'a> DoubleEndedIterator for ValueIter<'a> {
 
 // Escapes the interior mutability pattern
 pub enum ValueIntoIter<'a> {
+    Unit(&'a Value),
     Str(Vec<Value>),
     List(Ref<'a, VecDeque<Value>>),
     Set(Ref<'a, LinkedHashSet<Value>>),
@@ -481,6 +502,7 @@ pub enum ValueIntoIter<'a> {
 impl<'a> ValueIntoIter<'a> {
     pub fn len(self: &Self) -> usize {
         match self {
+            ValueIntoIter::Unit(_) => 1,
             ValueIntoIter::Str(it) => it.len(),
             ValueIntoIter::List(it) => it.len(),
             ValueIntoIter::Set(it) => it.len(),
@@ -497,6 +519,7 @@ impl<'b: 'a, 'a> IntoIterator for &'b ValueIntoIter<'a> {
 
     fn into_iter(self) -> ValueIter<'a> {
         match self {
+            ValueIntoIter::Unit(it) => ValueIter::Unit(std::iter::once(it)),
             ValueIntoIter::Str(it) => ValueIter::Str(it.into_iter()),
             ValueIntoIter::List(it) => ValueIter::List(it.iter()),
             ValueIntoIter::Set(it) => ValueIter::Set(it.iter()),
@@ -588,9 +611,9 @@ mod test {
         for v in all_values() {
             assert_eq!(v.is_iter(), v.as_iter().is_ok(), "is_iter() and as_iter() not consistent for {}", v.as_type_str());
             assert_eq!(v.is_iter(), v.len().is_ok(), "is_iter() and len() not consistent for {}", v.as_type_str());
-            assert_eq!(v.is_function(), v.as_function_args().is_some(), "is_function() and as_function_args() not consistent for {}", v.as_type_str());
+            assert_eq!(v.is_function(), v.unbox_func_args().is_some(), "is_function() and as_function_args() not consistent for {}", v.as_type_str());
 
-            if v.to_index().is_ok() {
+            if v.as_index().is_ok() {
                 assert!(v.len().is_ok(), "as_index() and len() not consistent for {}", v.as_type_str());
             }
         }

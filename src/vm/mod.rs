@@ -599,7 +599,7 @@ impl<R, W> VirtualMachine<R, W> where
             f @ (Value::Function(_) | Value::Closure(_)) => {
                 trace::trace_interpreter!("invoke_func_eval -> {}, nargs = {}", f.as_debug_str(), nargs);
 
-                let func = f.function_impl();
+                let func = f.unbox_func();
                 if func.nargs == nargs {
                     // Evaluate directly
                     self.call_function(func.head, func.nargs);
@@ -622,7 +622,7 @@ impl<R, W> VirtualMachine<R, W> where
                     Value::PartialFunction(x) => *x,
                     _ => panic!("Stack corruption")
                 };
-                let func = partial.func.function_impl();
+                let func = partial.func.unbox_func();
                 let total_nargs: u8 = partial.args.len() as u8 + nargs;
                 if func.nargs > total_nargs {
                     // Not enough arguments, so pop the argument and push a new partial function
@@ -1227,6 +1227,9 @@ mod test {
     #[test] fn test_format_with_one_zero_pad_bin_arg() { run_str("'an int: %012b' % (123,) . print", "an int: 000001111011\n"); }
     #[test] fn test_format_with_one_space_pad_bin_arg() { run_str("'an int: %12b' % (123,) . print", "an int:      1111011\n"); }
     #[test] fn test_format_with_many_args() { run_str("'%d %s %x %b ALL THE THINGS %%!' % (10, 'fifteen', 0xff, 0b10101) . print", "10 fifteen ff 10101 ALL THE THINGS %!\n"); }
+    #[test] fn test_format_with_solo_arg_nil() { run_str("'hello %s' % nil . print", "hello nil\n"); }
+    #[test] fn test_format_with_solo_arg_int() { run_str("'hello %s' % 123 . print", "hello 123\n"); }
+    #[test] fn test_format_with_solo_arg_str() { run_str("'hello %s' % 'world' . print", "hello world\n"); }
     #[test] fn test_format_nested_0() { run_str("'%s w%sld %s' % ('hello', 'or', '!') . print", "hello world !\n"); }
     #[test] fn test_format_nested_1() { run_str("'%%%s%%s%s %%s' % ('s w', 'ld') % ('hello', 'or', '!') . print", "hello world !\n"); }
     #[test] fn test_format_nested_2() { run_str("'%ss%%%%s%s%s%ss' % ('%'*3, '%s', ' ', '%'*2) % ('s w', 'ld') % ('hello', 'or', '!') . print", "hello world !\n"); }
