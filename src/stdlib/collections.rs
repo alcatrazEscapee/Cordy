@@ -261,6 +261,36 @@ pub fn combinations(a1: Value, a2: Value) -> ValueResult {
     Ok(Value::iter_list(a2.as_iter()?.into_iter().cloned().combinations(n as usize).map(|u| Value::vector(u))))
 }
 
+pub fn any<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : VirtualInterface {
+    match (a1, a2.as_iter()) {
+        (l, Ok(rs)) => {
+            let rs = (&rs).into_iter();
+            for r in rs {
+                if vm.invoke_func1(l.clone(), r.clone())?.as_bool() {
+                    return Ok(Bool(true))
+                }
+            }
+            Ok(Bool(false))
+        },
+        (_, Err(e)) => return Err(e),
+    }
+}
+
+pub fn all<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : VirtualInterface {
+    match (a1, a2.as_iter()) {
+        (l, Ok(rs)) => {
+            let rs = (&rs).into_iter();
+            for r in rs {
+                if !vm.invoke_func1(l.clone(), r.clone())?.as_bool() {
+                    return Ok(Bool(false))
+                }
+            }
+            Ok(Bool(true))
+        },
+        (_, Err(e)) => return Err(e),
+    }
+}
+
 
 pub fn map<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : VirtualInterface {
     let len: usize = a2.len().unwrap_or(0);
