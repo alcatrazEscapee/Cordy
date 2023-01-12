@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use crate::stdlib;
 use crate::stdlib::StdBinding;
 use crate::vm::error::RuntimeError;
 use crate::vm::value::{Mut, Value};
@@ -70,6 +71,7 @@ pub fn binary_div(a1: Value, a2: Value) -> ValueResult {
 pub fn binary_mod(a1: Value, a2: Value) -> ValueResult {
     match (a1, a2) {
         (Value::Int(i1), Value::Int(i2)) if i2 > 0 => Ok(Value::Int(i1.rem_euclid(i2))),
+        (Value::Str(l), r) => stdlib::format_string(&*l, r),
         (Value::Vector(l), Value::Vector(r)) => apply_vector_binary(l, r, binary_mod),
         (Value::Vector(l), r) => apply_vector_binary_scalar_rhs(l, r, binary_mod),
         (l, Value::Vector(r)) => apply_vector_binary_scalar_lhs(l, r, binary_mod),

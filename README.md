@@ -93,10 +93,13 @@ For a more comprehensive documentation, see the [language documentation](./docs/
 - Regex (some sort of impl)
 - `continue` and `break` in `for` statements
 - `else` on `while` and `for` statements, like Python
-- `any`, `all`
+- Let top level `if`-`then`-`else` get parsed in `parse_if_statement()`
 - some kind of `switch` expression statement?
 - Even MORE standard library functions
   - `push_front` for `List` (or `Queue`), `insert` (by index) for `List`
+  - `remove` (by value)
+  - `pad`, `padr` for string padding
+  - `peek` which is `map(fn(x) { peek(x) ; x }`
 - Improved non-java-like-closures, that allow assignment to the target variable.
   - `ref` to make reference variables, which closure-captured variables promote to automatically? Basically a `Mut<Value>`
 - Make dict/set literals take priority over bare block statements (prevent bare block statements entirely?)

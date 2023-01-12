@@ -30,6 +30,9 @@ pub enum RuntimeError {
     ValueErrorCannotCollectIntoDict(Value),
     ValueErrorKeyNotPresent(Value),
     ValueErrorInvalidCharacterOrdinal(i64),
+    ValueErrorInvalidFormatCharacter(Option<char>),
+    ValueErrorNotAllArgumentsUsedInStringFormatting(Value),
+    ValueErrorMissingRequiredArgumentInStringFormatting,
 
     TypeErrorUnaryOp(Opcode, Value),
     TypeErrorBinaryOp(Opcode, Value, Value),

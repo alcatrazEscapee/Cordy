@@ -156,9 +156,9 @@ impl Value {
         }
     }
 
-    pub fn into_str(self: Self) -> Result<String, Box<RuntimeError>> {
+    pub fn as_str(self: &Self) -> Result<&String, Box<RuntimeError>> {
         match self {
-            Str(it) => Ok(*it),
+            Str(it) => Ok(it),
             v => TypeErrorArgMustBeStr(v.clone()).err()
         }
     }

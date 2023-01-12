@@ -508,7 +508,7 @@ pub fn invoke<VM>(binding: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult wh
         Heap => dispatch_varargs!(Ok(Value::heap(BinaryHeap::new())), an, Ok(Value::iter_heap(an.into_iter().cloned()))),
         Vector => dispatch_varargs!(Ok(Value::vector(vec![])), an, Ok(Value::iter_vector(an.into_iter().cloned()))),
         Repr => dispatch!(a1, Ok(Value::Str(Box::new(a1.to_repr_str())))),
-        Eval => dispatch!(a1, vm.invoke_eval(a1.into_str()?)),
+        Eval => dispatch!(a1, vm.invoke_eval(a1.as_str()?)),
 
         // operator
         OperatorUnarySub => dispatch!(a1, operator::unary_sub(a1)),
@@ -627,6 +627,10 @@ pub fn get_slice(a1: Value, a2: Value, a3: Value, a4: Value) -> ValueResult {
 
 pub fn list_set_index(list_ref: Mut<VecDeque<Value>>, index: i64, value: Value) -> Result<(), Box<RuntimeError>> {
     collections::list_set_index(list_ref, index, value)
+}
+
+pub fn format_string(string: &String, args: Value) -> ValueResult {
+    strings::format_string(string, args)
 }
 
 

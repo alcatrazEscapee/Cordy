@@ -106,6 +106,9 @@ impl AsError for RuntimeError {
             RuntimeError::ValueErrorCannotCollectIntoDict(v) => format!("ValueError: Cannot collect key-value pair {} into a dict", v.format_error()),
             RuntimeError::ValueErrorKeyNotPresent(v) => format!("ValueError: Key {} not found in dictionary", v.format_error()),
             RuntimeError::ValueErrorInvalidCharacterOrdinal(i) => format!("ValueError: Cannot convert int {} to a character", i),
+            RuntimeError::ValueErrorInvalidFormatCharacter(c) => format!("ValueError: Invalid format character '{}' in format string", c.format_error()),
+            RuntimeError::ValueErrorNotAllArgumentsUsedInStringFormatting(v) => format!("ValueError: Not all arguments consumed in format string, next: {}", v.format_error()),
+            RuntimeError::ValueErrorMissingRequiredArgumentInStringFormatting => format!("ValueError: Not enough arguments for format string"),
 
             RuntimeError::TypeErrorUnaryOp(op, v) => format!("TypeError: Argument to unary '{}' must be an int, got {}", op.format_error(), v.format_error()),
             RuntimeError::TypeErrorBinaryOp(op, l, r) => format!("TypeError: Cannot {} {} and {}", op.format_error(), l.format_error(), r.format_error()),
@@ -124,6 +127,15 @@ impl AsError for RuntimeError {
             RuntimeError::TypeErrorFunc1(e, v1) => format!("TypeError: incorrect arguments for {}, got {} instead", e, v1.format_error()),
             RuntimeError::TypeErrorFunc2(e, v1, v2) => format!("TypeError: incorrect arguments for {}, got '{}, {} instead", e, v1.format_error(), v2.format_error()),
             RuntimeError::TypeErrorFunc3(e, v1, v2, v3) => format!("TypeError: incorrect arguments for {}, got {}, {}, {} instead", e, v1.format_error(), v2.format_error(), v3.format_error()),
+        }
+    }
+}
+
+impl AsError for Option<char> {
+    fn format_error(self: &Self) -> String {
+        match self {
+            None => String::from("end of format string"),
+            Some(c) => String::from(*c),
         }
     }
 }
