@@ -9,34 +9,24 @@ use RuntimeError::{*};
 type ValueResult = Result<Value, Box<RuntimeError>>;
 
 
-macro_rules! fn_str_to_str {
-    ($func:ident, $s:ident, $expr:expr) => {
-        pub fn $func(v: Value) -> ValueResult {
-            match &v {
-                Str($s) => Ok($expr),
-                _ => TypeErrorFunc1(concat!(stringify!($ident), "(str): str"), v).err()
-            }
-        }
-    };
+pub fn to_lower(a0: Value) -> ValueResult {
+    Ok(Str(Box::new(a0.as_str()?.to_lowercase())))
 }
 
-
-fn_str_to_str!(to_lower, s, Str(Box::new(s.to_lowercase())));
-fn_str_to_str!(to_upper, s, Str(Box::new(s.to_uppercase())));
-fn_str_to_str!(trim, s, Str(Box::new(String::from(s.trim()))));
-
-pub fn replace(v0: Value, v1: Value, v2: Value) -> ValueResult {
-    match (&v0, &v1, &v2) {
-        (Str(a0), Str(a1), Str(a2)) => Ok(Str(Box::new(a2.replace(a0.as_ref(), a1.as_str())))),
-        _ => TypeErrorFunc3("replace(str, str, str): str", v0, v1, v2).err()
-    }
+pub fn to_upper(a0: Value) -> ValueResult {
+    Ok(Str(Box::new(a0.as_str()?.to_uppercase())))
 }
 
-pub fn split(v0: Value, v1: Value) -> ValueResult {
-    match (&v0, &v1) {
-        (Str(a0), Str(a1)) => Ok(Value::iter_list(a1.split(a0.as_ref()).map(|v| Str(Box::new(String::from(v)))))),
-        _ => TypeErrorFunc2("split(str, str): [str]", v0, v1).err()
-    }
+pub fn trim(a0: Value) -> ValueResult {
+    Ok(Str(Box::new(String::from(a0.as_str()?.trim()))))
+}
+
+pub fn replace(a0: Value, a1: Value, a2: Value) -> ValueResult {
+    Ok(Str(Box::new(a2.as_str()?.replace(a0.as_str()?, a1.as_str()?.as_str()))))
+}
+
+pub fn split(a0: Value, a1: Value) -> ValueResult {
+    Ok(Value::iter_list(a1.as_str()?.split(a0.as_str()?).map(|u| Str(Box::new(String::from(u))))))
 }
 
 pub fn to_char(a1: Value) -> ValueResult {
@@ -79,7 +69,7 @@ struct StringFormatter<'a> {
 impl<'a> StringFormatter<'a> {
 
     fn format(literal: &String, args: Value) -> ValueResult {
-        let args = args.as_iter()?;
+        let args = args.as_iter_or_unit();
         let len = literal.len();
 
         let formatter = StringFormatter {

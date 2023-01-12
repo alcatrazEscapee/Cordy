@@ -36,7 +36,7 @@ pub fn list_set_index(list_ref: Mut<VecDeque<Value>>, rhs: i64, value: Value) ->
 
 pub fn list_slice(a1: Value, a2: Value, a3: Value, a4: Value) -> ValueResult {
 
-    let mut slice = a1.to_slice()?;
+    let mut slice = a1.as_slice()?;
     let length: i64 = slice.len() as i64;
 
     let step: i64 = a4.as_int_or(1)?;
@@ -141,7 +141,7 @@ pub fn min<'a>(args: impl Iterator<Item=&'a Value>) -> ValueResult {
 
 pub fn min_by<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : VirtualInterface {
     let iter = a2.as_iter()?;
-    match a1.as_function_args() {
+    match a1.unbox_func_args() {
         Some(Some(2)) => {
             let mut err: Option<Box<RuntimeError>> = None;
             let ret = iter.into_iter()
@@ -170,7 +170,7 @@ pub fn max<'a>(args: impl Iterator<Item=&'a Value>) -> ValueResult {
 
 pub fn max_by<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : VirtualInterface {
     let iter = a2.as_iter()?;
-    match a1.as_function_args() {
+    match a1.unbox_func_args() {
         Some(Some(2)) => {
             let mut err: Option<Box<RuntimeError>> = None;
             let ret = iter.into_iter()
@@ -221,7 +221,7 @@ pub fn sort<'a>(args: impl Iterator<Item=&'a Value>) -> ValueResult {
 
 pub fn sort_by<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : VirtualInterface {
     let mut sorted: Vec<Value> = a2.as_iter()?.into_iter().cloned().collect::<Vec<Value>>();
-    match a1.as_function_args() {
+    match a1.unbox_func_args() {
         Some(Some(2)) => {
             let mut err: Option<Box<RuntimeError>> = None;
             sorted.sort_unstable_by(|a, b| misc::yield_result(&mut err, || {
@@ -467,7 +467,7 @@ pub fn tail(a1: Value) -> ValueResult {
 
 pub fn collect_into_dict(iter: impl Iterator<Item=Value>) -> ValueResult {
     Ok(Value::iter_dict(iter.map(|t| {
-        let index = t.to_index()?;
+        let index = t.as_index()?;
         if index.len() == 2 {
             Ok((index.get_index(0), index.get_index(1)))
         } else {

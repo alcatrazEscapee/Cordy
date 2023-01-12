@@ -60,7 +60,7 @@ This language is inspired by parts from Python, Rust, Haskell, Java, and JavaScr
 
 Below is a solution to [Advent of Code 2022 Day 1 Part 1](https://adventofcode.com/2022/day/1), written in a functional style:
 
-```java
+```rust
 'input.txt' . read_text . split ('\n\n')
     . map(fn(g) -> g . split('\n') . map(int) . sum )
     . max
@@ -69,7 +69,7 @@ Below is a solution to [Advent of Code 2022 Day 1 Part 1](https://adventofcode.c
 
 Or the same solution, written in a different style, with the same language:
 
-```java
+```rust
 let inp = read_text('input.txt')
 let answer = 0
 for group in inp.split('\n\n') {
@@ -77,7 +77,7 @@ for group in inp.split('\n\n') {
     for weight in group.split('\n') {
         elf += int(weight)
     }
-    answer = max(answer, elf)
+    answer max= elf
 }
 print(answer)
 
@@ -89,19 +89,22 @@ For a more comprehensive documentation, see the [language documentation](./docs/
 ### To-Do
 
 - Implement `->` operator, basic named tuple types.
-- Format strings (just normal strings with the python `%` operator, but with rust formatting? does that even work? or `.format()`?)
-- Regex (some sort of impl)
 - `continue` and `break` in `for` statements
 - `else` on `while` and `for` statements, like Python
 - Let top level `if`-`then`-`else` get parsed in `parse_if_statement()`
 - some kind of `switch` expression statement?
+- sensible comparison operator chaining like Python? `a < b < c` -> `a < b and b < c`
+  - this requires hacky parsing, hacky non-stack-semantics VM, and is in general a pain to recognize
+- `assert` statement?
+- Allow `exit` in expressions as a terminal?
+- `iterable` as a type, so `is iterable` works
+  - Now that `any` is a function, figure out what to do about the `any` type
 - Even MORE standard library functions
   - `push_front` for `List` (or `Queue`), `insert` (by index) for `List`
   - `remove` (by value)
-  - `pad`, `padr` for string padding
-  - `peek` which is `map(fn(x) { peek(x) ; x }`
+  - regex match, find, and replace -> just on normal strings. Make `\` less required for escaping (only escape if needed)
 - Improved non-java-like-closures, that allow assignment to the target variable.
-  - `ref` to make reference variables, which closure-captured variables promote to automatically? Basically a `Mut<Value>`
+  - `ref` to make reference variables, which closure-captured variables promote to automatically? Basically a `Mut<Value>` -> this is bad because then everything that unboxes needs to do so within a reference. Cannot do this in general. Rust bad:tm:
 - Make dict/set literals take priority over bare block statements (prevent bare block statements entirely?)
 - Investigate making a separate `Queue` type and making `List` a `Vec`? Benchmarks...
 - Fix `dict.default` to, if given a function, invoke and insert on getting a default value. goal is making `d[x].push(y)` work, while `d[x]` does not insert in general (i.e. if default is `0`).

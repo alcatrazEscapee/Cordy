@@ -615,7 +615,7 @@ pub fn get_index(a1: &Value, a2: &Value) -> ValueResult {
         }
     }
 
-    let indexable = a1.to_index()?;
+    let indexable = a1.as_index()?;
     let index: usize = collections::get_checked_index(a1.len()?, a2.as_int()?)?;
 
     Ok(indexable.get_index(index))
