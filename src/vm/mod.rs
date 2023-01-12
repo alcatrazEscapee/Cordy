@@ -5,6 +5,7 @@ use error::{DetailRuntimeError, RuntimeError};
 
 use crate::{compiler, stdlib, trace};
 use crate::compiler::{CompileResult, IncrementalCompileResult};
+use crate::compiler::parser::Locals;
 use crate::stdlib::StdBinding;
 use crate::vm::opcode::Opcode;
 use crate::vm::value::Value;
@@ -12,7 +13,6 @@ use crate::vm::value::{FunctionImpl, PartialFunctionImpl};
 
 use Opcode::{*};
 use RuntimeError::{*};
-use crate::compiler::parser::Locals;
 
 type ValueResult = Result<Value, Box<RuntimeError>>;
 type AnyResult = Result<(), Box<RuntimeError>>;
@@ -1207,6 +1207,12 @@ mod test {
     #[test] fn test_binary_max_no() { run_str("let a = 3 ; a max= 2; a . print", "3\n"); }
     #[test] fn test_binary_min_yes() { run_str("let a = 3 ; a min= 1; a . print", "1\n"); }
     #[test] fn test_binary_min_no() { run_str("let a = 3 ; a min= 5; a . print", "3\n"); }
+    #[test] fn test_all_yes_all() { run_str("[1, 3, 4, 5] . all(>0) . print", "true\n"); }
+    #[test] fn test_all_yes_some() { run_str("[1, 3, 4, 5] . all(>3) . print", "false\n"); }
+    #[test] fn test_all_yes_none() { run_str("[1, 3, 4, 5] . all(<0) . print", "false\n"); }
+    #[test] fn test_any_yes_all() { run_str("[1, 3, 4, 5] . any(>0) . print", "true\n"); }
+    #[test] fn test_any_yes_some() { run_str("[1, 3, 4, 5] . any(>3) . print", "true\n"); }
+    #[test] fn test_any_yes_none() { run_str("[1, 3, 4, 5] . any(<0) . print", "false\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }

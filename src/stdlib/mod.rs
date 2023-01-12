@@ -139,6 +139,8 @@ pub enum StdBinding {
     Reverse,
     Permutations,
     Combinations,
+    Any,
+    All,
 
     Pop, // Remove last, or at index
     Push, // Inverse of `pop` (alias)
@@ -272,6 +274,8 @@ fn load_bindings() -> Vec<StdBindingInfo> {
         of!(Reverse, "reverse"),
         of!(Permutations, "permutations"),
         of!(Combinations, "combinations"),
+        of!(Any, "any"),
+        of!(All, "all"),
 
         of!(Pop, "pop"),
         of!(Push, "push"),
@@ -572,6 +576,8 @@ pub fn invoke<VM>(binding: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult wh
         Reverse => dispatch_varargs!(an, collections::reverse(an.into_iter())),
         Permutations => dispatch!(a1, a2, collections::permutations(a1, a2)),
         Combinations => dispatch!(a1, a2, collections::combinations(a1, a2)),
+        Any => dispatch!(a1, a2, collections::any(vm, a1, a2)),
+        All => dispatch!(a1, a2, collections::all(vm, a1, a2)),
 
         Pop => dispatch!(a1, collections::pop(a1)),
         Push => dispatch!(a1, a2, collections::push(a1, a2)),
