@@ -935,6 +935,9 @@ impl Parser<'_> {
         // Based on what we see next, and what type of variable binding we have, we might use an intrinsic
         if let VariableBinding::Named(local_x) = local_x {
             self.parse_for_statement_intrinsic_range(local_x);
+        } else if let VariableBinding::Empty = local_x {
+            let local_i = self.declare_synthetic_local();
+            self.parse_for_statement_intrinsic_range(local_i)
         } else {
             self.parse_for_statement_no_intrinsic(local_x);
         }
@@ -2782,8 +2785,11 @@ mod tests {
     #[test] fn test_empty() { run("empty"); }
     #[test] fn test_expressions() { run("expressions"); }
     #[test] fn test_for_intrinsic_range_start_stop() { run("for_intrinsic_range_start_stop"); }
+    #[test] fn test_for_intrinsic_range_start_stop_no_var() { run("for_intrinsic_range_start_stop_no_var"); }
     #[test] fn test_for_intrinsic_range_start_stop_step() { run("for_intrinsic_range_start_stop_step"); }
+    #[test] fn test_for_intrinsic_range_start_stop_step_no_var() { run("for_intrinsic_range_start_stop_step_no_var"); }
     #[test] fn test_for_intrinsic_range_stop() { run("for_intrinsic_range_stop"); }
+    #[test] fn test_for_intrinsic_range_stop_no_var() { run("for_intrinsic_range_stop_no_var"); }
     #[test] fn test_for_no_intrinsic() { run("for_no_intrinsic"); }
     #[test] fn test_function() { run("function"); }
     #[test] fn test_function_call_after_newline() { run("function_call_after_newline"); }
