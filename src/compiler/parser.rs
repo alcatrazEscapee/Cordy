@@ -2378,10 +2378,10 @@ impl Parser<'_> {
 
         // Capture the local at index `local_index` in the function at `local_depth`
         // If it already exists (is `is_local` and has the same `index` as the target), just grab the upvalue index, otherwise add it and bubble up
-        let mut maybe_index: Option<u16> = None;
-        for upvalue in &self.locals[local_depth as usize].upvalues {
+        let mut maybe_index: Option<usize> = None;
+        for (i, upvalue) in self.locals[local_depth as usize].upvalues.iter().enumerate() {
             if upvalue.index == local_index && upvalue.is_local {
-                maybe_index = Some(upvalue.index);
+                maybe_index = Some(i);
                 break
             }
         }
@@ -2389,7 +2389,7 @@ impl Parser<'_> {
         // If we did not find it, then capture the local - add this as an upvalue to the function at this depth
         let mut is_local = true;
         let mut index = if let Some(index) = maybe_index {
-            index
+            index as u16
         } else {
             self.locals[local_depth as usize].upvalues.push(UpValue::new(true, local_index));
             (self.locals[local_depth as usize].upvalues.len() - 1) as u16
@@ -2810,6 +2810,8 @@ mod tests {
     #[test] fn test_weird_expression_statements() { run("weird_expression_statements"); }
     #[test] fn test_weird_locals() { run("weird_locals"); }
     #[test] fn test_weird_loop_nesting_in_functions() { run("weird_loop_nesting_in_functions"); }
+    #[test] fn test_weird_upvalue_index() { run("weird_upvalue_index"); }
+    #[test] fn test_weird_upvalue_index_with_parameter() { run("weird_upvalue_index_with_parameter"); }
     #[test] fn test_while_1() { run("while_1"); }
     #[test] fn test_while_2() { run("while_2"); }
     #[test] fn test_while_3() { run("while_3"); }
