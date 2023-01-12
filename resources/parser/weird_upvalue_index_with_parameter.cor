@@ -1,0 +1,6 @@
+fn problem(param) {
+    let bomb = nil
+    (fn() -> bomb)
+    (fn() -> bomb)()
+}
+problem(nil)
