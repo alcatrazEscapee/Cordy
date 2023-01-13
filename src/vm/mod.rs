@@ -316,7 +316,7 @@ impl<R, W> VirtualMachine<R, W> where
                 trace::trace_interpreter!("store array array = {}, index = {}, value = {}", self.stack[self.stack.len() - 3].as_debug_str(), self.stack[self.stack.len() - 2].as_debug_str(), self.stack.last().unwrap().as_debug_str());
                 let a3: Value = self.pop();
                 let a2: Value = self.pop();
-                let a1: Value = self.peek(0).clone(); // Leave this on the stack when done
+                let a1: &Value = self.peek(0); // Leave this on the stack when done
                 match (a1, a2) {
                     (Value::List(l), Value::Int(r)) => match stdlib::list_set_index(l, r, a3) {
                         Ok(_) => {}, // No push, as we left the previous value on top of the stack
@@ -325,7 +325,7 @@ impl<R, W> VirtualMachine<R, W> where
                     (Value::Dict(l), r) => {
                         l.unbox_mut().dict.insert(r, a3);
                     },
-                    (l, r) => return TypeErrorBinaryOp(OpIndex, l, r).err()
+                    (l, r) => return TypeErrorBinaryOp(OpIndex, l.clone(), r).err()
                 }
             },
 

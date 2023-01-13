@@ -625,7 +625,7 @@ pub fn get_slice(a1: Value, a2: Value, a3: Value, a4: Value) -> ValueResult {
     collections::list_slice(a1, a2, a3, a4)
 }
 
-pub fn list_set_index(list_ref: Mut<VecDeque<Value>>, index: i64, value: Value) -> Result<(), Box<RuntimeError>> {
+pub fn list_set_index(list_ref: &Mut<VecDeque<Value>>, index: i64, value: Value) -> Result<(), Box<RuntimeError>> {
     collections::list_set_index(list_ref, index, value)
 }
 
