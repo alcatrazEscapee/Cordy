@@ -23,7 +23,7 @@ pub fn get_checked_index(len: usize, rhs: i64) -> Result<usize, Box<RuntimeError
     }
 }
 
-pub fn list_set_index(list_ref: Mut<VecDeque<Value>>, rhs: i64, value: Value) -> Result<(), Box<RuntimeError>> {
+pub fn list_set_index(list_ref: &Mut<VecDeque<Value>>, rhs: i64, value: Value) -> Result<(), Box<RuntimeError>> {
     let mut list = list_ref.unbox_mut();
     let index: usize = to_index(list.len() as i64, rhs) as usize;
     if index < list.len() {
