@@ -43,6 +43,8 @@ pub enum Opcode {
     CloseLocal(u16),
     CloseUpValue(u16),
 
+    Increment(u16),
+
     // Push
     Nil,
     True,

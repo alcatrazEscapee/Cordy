@@ -1013,11 +1013,7 @@ impl Parser<'_> {
         self.push_delayed_pop();
 
         // Increment and jump to head
-        self.push_load_local(local_x);
-        self.push(Opcode::Int(CONSTANT_1));
-        self.push(OpAdd);
-        self.push_store_local(local_x);
-        self.push(Opcode::Pop);
+        self.push(Increment(local_x as u16));
         self.push(Jump(jump));
 
         // Fix the jump
@@ -1047,11 +1043,7 @@ impl Parser<'_> {
         self.push_delayed_pop();
 
         // Increment and jump to head
-        self.push_load_local(local_x);
-        self.push(Opcode::Int(CONSTANT_1));
-        self.push(OpAdd);
-        self.push_store_local(local_x);
-        self.push(Opcode::Pop);
+        self.push(Increment(local_x as u16));
         self.push(Jump(jump));
 
         // Fix the jump
@@ -1155,11 +1147,7 @@ impl Parser<'_> {
         self.push_delayed_pop();
 
         // Increment and jump to head
-        self.push_load_local(local_i);
-        self.push(Opcode::Int(CONSTANT_1));
-        self.push(OpAdd);
-        self.push_store_local(local_i);
-        self.push(Opcode::Pop);
+        self.push(Increment(local_i as u16));
         self.push(Jump(jump));
 
         // Fix the jump

@@ -13,7 +13,7 @@ L1: 0000 Nil
     0012 PushGlobal(1, true) -> $0
     0013 OpFuncEval(1)
     0014 OpLessThan
-    0015 JumpIfFalsePop(32)
+    0015 JumpIfFalsePop(28)
     0016 PushGlobal(1, true) -> $0
     0017 PushGlobal(2, true) -> $1
     0018 OpIndex
@@ -24,11 +24,7 @@ L2: 0021 PushGlobal(0, true) -> letter
     0023 Swap
     0024 OpFuncEval(1)
 L3: 0025 Pop
-    0026 PushGlobal(2, true) -> $1
-    0027 Int(1) -> 1
-    0028 OpAdd
-    0029 StoreGlobal(2, true) -> $1
-    0030 Pop
-    0031 Jump(10)
-    0032 PopN(3)
-    0033 Exit
+    0026 Increment(2)
+    0027 Jump(10)
+    0028 PopN(3)
+    0029 Exit
