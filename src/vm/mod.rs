@@ -373,6 +373,15 @@ impl<R, W> VirtualMachine<R, W> where
                 }
             },
 
+            Increment(local) => {
+                let local = self.frame_pointer() + local as usize;
+                trace::trace_interpreter!("increment {} : {}", local, self.stack[local].as_debug_str());
+                match &mut self.stack[local] {
+                    Value::Int(n) => *n += 1,
+                    _ => panic!("Stack corruption")
+                }
+            }
+
             // Push Operations
             Nil => {
                 trace::trace_interpreter!("push nil");
@@ -795,8 +804,9 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
 #[cfg(test)]
 mod test {
     use std::path::PathBuf;
-    use crate::{compiler, ErrorReporter, reporting, trace, VirtualMachine};
-    use crate::vm::ExitType;
+    use crate::{compiler, reporting, trace};
+    use crate::reporting::ErrorReporter;
+    use crate::vm::{ExitType, VirtualMachine};
 
     #[test] fn test_str_empty() { run_str("", ""); }
     #[test] fn test_str_hello_world() { run_str("print('hello world!')", "hello world!\n"); }
