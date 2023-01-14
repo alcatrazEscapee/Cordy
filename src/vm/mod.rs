@@ -1257,10 +1257,15 @@ mod test {
     #[test] fn test_closure_without_stack_semantics() { run("closure_without_stack_semantics"); }
     #[test] fn test_closures_are_poor_mans_classes() { run("closures_are_poor_mans_classes"); }
     #[test] fn test_fibonacci() { run("fibonacci"); }
+    #[test] fn test_for_loop_modify_loop_variable() { run("for_loop_modify_loop_variable"); }
+    #[test] fn test_for_loop_range_map() { run("for_loop_range_map"); }
+    #[test] fn test_for_loop_with_multiple_references() { run("for_loop_with_multiple_references"); }
     #[test] fn test_function_capture_from_inner_scope() { run("function_capture_from_inner_scope"); }
     #[test] fn test_function_capture_from_outer_scope() { run("function_capture_from_outer_scope"); }
     #[test] fn test_late_bound_global() { run("late_bound_global"); }
     #[test] fn test_late_bound_global_invalid() { run("late_bound_global_invalid"); }
+    #[test] fn test_map_loop_with_multiple_references() { run("map_loop_with_multiple_references"); }
+    #[test] fn test_range_used_twice() { run("range_used_twice"); }
     #[test] fn test_runtime_error_with_trace() { run("runtime_error_with_trace"); }
 
 
