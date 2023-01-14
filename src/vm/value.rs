@@ -108,7 +108,7 @@ impl Value {
             Heap(v) => format!("[{}]", v.unbox().heap.iter().map(|t| t.0.to_repr_str()).collect::<Vec<String>>().join(", ")),
             Vector(v) => format!("({})", v.unbox().iter().map(|t| t.to_repr_str()).collect::<Vec<String>>().join(", ")),
 
-            Range(r) => format!("range({}, {}, {})", r.start, r.stop, r.step),
+            Range(r) => if r.step == 0 { String::from("range(empty)") } else { format!("range({}, {}, {})", r.start, r.stop, r.step) },
             Enumerate(v) => format!("enumerate({})", v.to_repr_str()),
 
             Iter(_) => format!("iterator"),
@@ -453,7 +453,7 @@ pub struct SetImpl {
 }
 
 impl SetImpl {
-    fn new(set: IndexSet<Value>) -> SetImpl { SetImpl { set }}
+    fn new(set: IndexSet<Value>) -> SetImpl { SetImpl { set } }
 }
 
 impl PartialOrd for SetImpl {
@@ -555,8 +555,6 @@ impl Hash for HeapImpl {
 /// This is the internal lazy type used by the native function `range(...)`. For non-empty ranges, `step` must be non-zero.
 /// For an empty range, this will store the `step` as `0` - in this case the `start` and `stop` values should be ignored
 /// Note that depending on the relation of `start`, `stop` and the sign of `step`, this may represent an empty range.
-///
-/// When iterating over a `Range`, this will create a new `IteratorIndexable::Range`, which
 #[derive(Eq, PartialEq, Debug, Clone, Hash)]
 pub struct RangeImpl {
     start: i64,
@@ -587,6 +585,18 @@ impl RangeImpl {
             value >= self.start && value < self.stop && (value - self.start) % self.step == 0
         } else {
             value <= self.start && value > self.stop && (self.start - value) % self.step == 0
+        }
+    }
+
+    /// Reverses the range, so that iteration advances from the end to the start
+    /// Note this is not as simple as just swapping `start` and `stop`, due to non-unit step sizes.
+    pub fn reverse(self) -> RangeImpl {
+        if self.step == 0 {
+            self
+        } else if self.step > 0 {
+            RangeImpl { start: self.start + self.len() as i64 * self.step, stop: self.start + 1, step: -self.step }
+        } else {
+            RangeImpl { start: self.start + self.len() as i64 * self.step, stop: self.start - 1, step: -self.step }
         }
     }
 
@@ -675,9 +685,10 @@ pub enum Iterable {
 impl Iterable {
     fn str(string: String) -> Iterable {
         let chars: Chars<'static> = unsafe { mem::transmute(string.chars()) };
-        Iterable::Str(string, chars )
+        Iterable::Str(string, chars)
     }
 
+    /// Returns the original length of the iterable - not the amount of elements remaining.
     pub fn len(&self) -> usize {
         match &self {
             Iterable::Str(it, _) => it.chars().count(),
@@ -690,7 +701,10 @@ impl Iterable {
 
     pub fn reverse(self) -> IterableRev {
         match self {
-            // todo: reverse a range once, here
+            Iterable::Range(_, it) => {
+                let range = it.reverse();
+                IterableRev(Iterable::Range(range.start, range))
+            },
             Iterable::Enumerate(_, it) => IterableRev(Iterable::Enumerate(0, Box::new(it.reverse().0))),
             it => IterableRev(it)
         }

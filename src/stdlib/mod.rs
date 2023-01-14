@@ -57,7 +57,6 @@ pub enum StdBinding {
     Void, // A dummy binding that parents itself. Any children of this binding cannot be referenced in the parser
 
     Print,
-    Read,
     ReadText,
     WriteText,
     Bool,
@@ -192,7 +191,6 @@ fn load_bindings() -> Vec<StdBindingInfo> {
         of!(Void, ""),
 
         of!(Print, "print"),
-        of!(Read, "read"),
         of!(ReadText, "read_text"),
         of!(WriteText, "write_text"),
 
@@ -470,9 +468,6 @@ pub fn invoke<VM>(binding: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult wh
             });
             Ok(Value::Nil)
         },
-        Read => dispatch!({
-            panic!("Not Implemented");
-        }),
         ReadText => dispatch!(a1, match a1 {
             Value::Str(s1) => Ok(Value::Str(Box::new(fs::read_to_string(s1.as_ref()).unwrap().replace("\r", "")))), // todo: error handling?
             _ => TypeErrorArgMustBeStr(a1).err(),
