@@ -43,7 +43,14 @@ pub enum Opcode {
     CloseLocal(u16),
     CloseUpValue(u16),
 
-    Increment(u16),
+    /// Converts the top of the stack to an `Value::Iter()`.
+    InitIterable,
+
+    /// Expects the top of the stack to contain a `Value::Iter()`. Tests if this has reached the end of the iterable.
+    /// If yes, it will push `false`, and do nothing else.
+    /// If no, it will push the next value in the iterable, followed by `true`.
+    /// This is intended to be followed by a `JumpIfFalsePop(end of loop)`
+    TestIterable,
 
     // Push
     Nil,

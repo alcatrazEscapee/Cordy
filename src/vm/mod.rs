@@ -373,14 +373,28 @@ impl<R, W> VirtualMachine<R, W> where
                 }
             },
 
-            Increment(local) => {
-                let local = self.frame_pointer() + local as usize;
-                trace::trace_interpreter!("increment {} : {}", local, self.stack[local].as_debug_str());
-                match &mut self.stack[local] {
-                    Value::Int(n) => *n += 1,
-                    _ => panic!("Stack corruption")
+            InitIterable => {
+                trace::trace_interpreter!("init iterable {}", self.stack.last().unwrap().as_debug_str());
+                let iter = self.pop().as_iter()?;
+                self.push(Value::Iter(Box::new(iter)));
+            },
+            TestIterable => {
+                trace::trace_interpreter!("test iterable {}", self.stack.last().unwrap().as_debug_str());
+                let top: usize = self.stack.len() - 1;
+                let iter = &mut self.stack[top];
+                match iter {
+                    Value::Iter(it) => match it.next() {
+                        Some(value) => {
+                            self.push(value);
+                            self.push(Value::Bool(true));
+                        },
+                        None => {
+                            self.push(Value::Bool(false));
+                        }
+                    },
+                    _ => panic!("Malformed bytecode"),
                 }
-            }
+            },
 
             // Push Operations
             Nil => {
@@ -1019,7 +1033,7 @@ mod test {
     #[test] fn test_reduce_list_1() { run_str("[1, 2, 3] . reduce (+) . print", "6\n"); }
     #[test] fn test_reduce_list_2() { run_str("[1, 2, 3] . reduce (-) . print", "Function '(-)' requires 2 parameters but 1 were present.\n    at: `[1, 2, 3] . reduce (-) . print` (line 1)\n    at: execution of script '<test>'\n"); }
     #[test] fn test_str_to_list() { run_str("'funny beans' . list . print", "['f', 'u', 'n', 'n', 'y', ' ', 'b', 'e', 'a', 'n', 's']\n"); }
-    #[test] fn test_str_to_set() { run_str("'funny beans' . set . print", "{'f', 'u', 'y', ' ', 'b', 'e', 'a', 'n', 's'}\n"); }
+    #[test] fn test_str_to_set() { run_str("'funny beans' . set . print", "{'f', 'u', 'n', 'y', ' ', 'b', 'e', 'a', 's'}\n"); }
     #[test] fn test_str_to_set_to_sorted() { run_str("'funny' . set . sort . print", "['f', 'n', 'u', 'y']\n"); }
     #[test] fn test_chained_assignments() { run_str("let a, b, c; a = b = c = 3; [a, b, c] . print", "[3, 3, 3]\n"); }
     #[test] fn test_array_assignment_1() { run_str("let a = [1, 2, 3]; a[0] = 3; a . print", "[3, 2, 3]\n"); }
@@ -1043,26 +1057,26 @@ mod test {
     #[test] fn test_heap_from_list() { run_str("let h = [1, 7, 3, 2, 7, 6] . heap; h . print", "[1, 2, 3, 7, 7, 6]\n"); }
     #[test] fn test_heap_pop() { run_str("let h = [1, 7, 3, 2, 7, 6] . heap; [h.pop, h.pop, h.pop] . print", "[1, 2, 3]\n"); }
     #[test] fn test_heap_push() { run_str("let h = [1, 7, 3, 2, 7, 6] . heap; h.push(3); h.push(-1); h.push(16); h . print", "[-1, 1, 3, 2, 7, 6, 3, 7, 16]\n"); }
-    #[test] fn test_range_1() { run_str("range(3) . print", "[0, 1, 2]\n"); }
-    #[test] fn test_range_2() { run_str("range(3, 7) . print", "[3, 4, 5, 6]\n"); }
-    #[test] fn test_range_3() { run_str("range(1, 9, 3) . print", "[1, 4, 7]\n"); }
-    #[test] fn test_range_4() { run_str("range(6, 3) . print", "[]\n"); }
-    #[test] fn test_range_5() { run_str("range(10, 4, -2) . print", "[10, 8, 6]\n"); }
-    #[test] fn test_range_6() { run_str("range(0, 20, -1) . print", "[]\n"); }
-    #[test] fn test_range_7() { run_str("range(10, 0, 3) . print", "[]\n"); }
-    #[test] fn test_range_8() { run_str("range(1, 1, 1) . print", "[]\n"); }
-    #[test] fn test_range_9() { run_str("range(1, 1, 0) . print", "ValueError: 'step' argument cannot be zero\n    at: `range(1, 1, 0) . print` (line 1)\n    at: execution of script '<test>'\n"); }
-    #[test] fn test_enumerate_1() { run_str("[] . enumerate . print", "[]\n"); }
-    #[test] fn test_enumerate_2() { run_str("[1, 2, 3] . enumerate . print", "[(0, 1), (1, 2), (2, 3)]\n"); }
-    #[test] fn test_enumerate_3() { run_str("'foobar' . enumerate . print", "[(0, 'f'), (1, 'o'), (2, 'o'), (3, 'b'), (4, 'a'), (5, 'r')]\n"); }
+    #[test] fn test_range_1() { run_str("range(3) . list . print", "[0, 1, 2]\n"); }
+    #[test] fn test_range_2() { run_str("range(3, 7) . list . print", "[3, 4, 5, 6]\n"); }
+    #[test] fn test_range_3() { run_str("range(1, 9, 3) . list . print", "[1, 4, 7]\n"); }
+    #[test] fn test_range_4() { run_str("range(6, 3) . list . print", "[]\n"); }
+    #[test] fn test_range_5() { run_str("range(10, 4, -2) . list . print", "[10, 8, 6]\n"); }
+    #[test] fn test_range_6() { run_str("range(0, 20, -1) . list . print", "[]\n"); }
+    #[test] fn test_range_7() { run_str("range(10, 0, 3) . list . print", "[]\n"); }
+    #[test] fn test_range_8() { run_str("range(1, 1, 1) . list . print", "[]\n"); }
+    #[test] fn test_range_9() { run_str("range(1, 1, 0) . list . print", "ValueError: 'step' argument cannot be zero\n    at: `range(1, 1, 0) . list . print` (line 1)\n    at: execution of script '<test>'\n"); }
+    #[test] fn test_enumerate_1() { run_str("[] . enumerate . list . print", "[]\n"); }
+    #[test] fn test_enumerate_2() { run_str("[1, 2, 3] . enumerate . list . print", "[(0, 1), (1, 2), (2, 3)]\n"); }
+    #[test] fn test_enumerate_3() { run_str("'foobar' . enumerate . list . print", "[(0, 'f'), (1, 'o'), (2, 'o'), (3, 'b'), (4, 'a'), (5, 'r')]\n"); }
     #[test] fn test_for_loop_no_intrinsic_with_list() { run_str("for x in ['a', 'b', 'c'] { x . print }", "a\nb\nc\n") }
     #[test] fn test_for_loop_no_intrinsic_with_set() { run_str("for x in 'foobar' . set { x . print }", "f\no\nb\na\nr\n") }
     #[test] fn test_for_loop_no_intrinsic_with_str() { run_str("for x in 'hello' { x . print }", "h\ne\nl\nl\no\n") }
-    #[test] fn test_for_loop_intrinsic_range_stop() { run_str("for x in range(5) { x . print }", "0\n1\n2\n3\n4\n"); }
-    #[test] fn test_for_loop_intrinsic_range_start_stop() { run_str("for x in range(3, 6) { x . print }", "3\n4\n5\n"); }
-    #[test] fn test_for_loop_intrinsic_range_start_stop_step_positive() { run_str("for x in range(1, 10, 3) { x . print }", "1\n4\n7\n"); }
-    #[test] fn test_for_loop_intrinsic_range_start_stop_step_negative() { run_str("for x in range(11, 0, -4) { x . print }", "11\n7\n3\n"); }
-    #[test] fn test_for_loop_intrinsic_range_start_stop_step_zero() { run_str("for x in range(1, 2, 0) { x . print }", "ValueError: 'step' argument cannot be zero\n    at: `for x in range(1, 2, 0) { x . print }` (line 1)\n    at: execution of script '<test>'\n"); }
+    #[test] fn test_for_loop_range_stop() { run_str("for x in range(5) { x . print }", "0\n1\n2\n3\n4\n"); }
+    #[test] fn test_for_loop_range_start_stop() { run_str("for x in range(3, 6) { x . print }", "3\n4\n5\n"); }
+    #[test] fn test_for_loop_range_start_stop_step_positive() { run_str("for x in range(1, 10, 3) { x . print }", "1\n4\n7\n"); }
+    #[test] fn test_for_loop_range_start_stop_step_negative() { run_str("for x in range(11, 0, -4) { x . print }", "11\n7\n3\n"); }
+    #[test] fn test_for_loop_range_start_stop_step_zero() { run_str("for x in range(1, 2, 0) { x . print }", "ValueError: 'step' argument cannot be zero\n    at: `for x in range(1, 2, 0) { x . print }` (line 1)\n    at: execution of script '<test>'\n"); }
     #[test] fn test_list_literal_empty() { run_str("[] . print", "[]\n"); }
     #[test] fn test_list_literal_len_1() { run_str("['hello'] . print", "['hello']\n"); }
     #[test] fn test_list_literal_len_2() { run_str("['hello', 'world'] . print", "['hello', 'world']\n"); }
@@ -1133,8 +1147,10 @@ mod test {
     #[test] fn test_empty_vector() { run_str("vector() . print", "()\n"); }
     #[test] fn test_str_in_str_yes() { run_str("'hello' in 'hey now, hello world' . print", "true\n"); }
     #[test] fn test_str_in_str_no() { run_str("'hello' in 'hey now, \\'ello world' . print", "false\n"); }
-    #[test] fn test_int_in_list_yes() { run_str("13 in range(10, 15) . print", "true\n"); }
-    #[test] fn test_int_in_list_no() { run_str("3 in range(10, 15) . print", "false\n"); }
+    #[test] fn test_int_in_list_yes() { run_str("13 in [10, 11, 12, 13, 14, 15] . print", "true\n"); }
+    #[test] fn test_int_in_list_no() { run_str("3 in [10, 11, 12, 13, 14, 15] . print", "false\n"); }
+    #[test] fn test_int_in_range_yes() { run_str("13 in range(10, 15) . print", "true\n"); }
+    #[test] fn test_int_in_range_no() { run_str("3 in range(10, 15) . print", "false\n"); }
     #[test] fn test_dict_get_and_set() { run_str("let d = dict() ; d['hi'] = 'yes' ; d['hi'] . print", "yes\n"); }
     #[test] fn test_dict_get_when_not_present() { run_str("let d = dict() ; d['hello']", "ValueError: Key 'hello' of type 'str' not found in dictionary\n    at: `let d = dict() ; d['hello']` (line 1)\n    at: execution of script '<test>'\n"); }
     #[test] fn test_dict_get_when_not_present_with_default() { run_str("let d = dict() . default('haha') ; d['hello'] . print", "haha\n"); }

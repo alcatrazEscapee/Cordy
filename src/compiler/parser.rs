@@ -470,7 +470,6 @@ impl Pattern {
 
 
 const CONSTANT_0: u16 = 0;
-const CONSTANT_1: u16 = 1;
 
 
 impl Parser<'_> {
@@ -918,10 +917,6 @@ impl Parser<'_> {
     fn parse_for_statement(self: &mut Self) {
         trace::trace_parser!("rule <for-statement>");
 
-        // `for` loops, by default, destructure as standard `loop` constructs, but with extra bytecode to generate the index, increment it, test, etc.
-        // In addition, for commonly used cases such as `for x in range()`, there are a number of intrinsics which avoid constructing lists from `range`, or extra local variables, etc.
-        // Based on the type of loop we see, one of these intrinsics will be emitted, or it will use the default iteration handling.
-
         self.push_delayed_pop();
         self.advance(); // Consume `for`
 
@@ -932,228 +927,40 @@ impl Parser<'_> {
 
         self.expect(KeywordIn);
 
-        // Based on what we see next, and what type of variable binding we have, we might use an intrinsic
-        if let VariableBinding::Named(local_x) = local_x {
-            self.parse_for_statement_intrinsic_range(local_x);
-        } else if let VariableBinding::Empty = local_x {
-            let local_i = self.declare_synthetic_local();
-            self.parse_for_statement_intrinsic_range(local_i)
-        } else {
-            self.parse_for_statement_no_intrinsic(local_x);
-        }
+        local_x.push_local_default_values(self);
+
+        self.parse_expression();
+
+        local_x.init_all_locals(self);
+
+        // At the beginning and end of the loop, this local sits on the top of the stack.
+        // We still need to declare it's stack slot space, even though we don't reference it via load/store local opcodes
+        self.declare_synthetic_local();
+
+        // Applies to the top of the stack
+        self.push(InitIterable);
+
+        // Test
+        let jump: u16 = self.next_opcode();
+        self.push(TestIterable);
+        let jump_if_false_pop = self.reserve();
+
+        // Initialize locals
+        local_x.push_store_locals_and_pop(self);
+
+        // Parse the body of the loop, and emit the delayed pop - the stack is restored to the same state as the top of the loop.
+        // So, we jump to the top of the loop, where we test/increment
+        self.parse_block_statement();
+        self.push_delayed_pop();
+        self.push(Jump(jump));
+
+        // Fix the jump
+        self.output[jump_if_false_pop] = JumpIfFalsePop(self.next_opcode());
 
         // Cleanup the `for` loop locals
         self.pop_locals_in_current_scope_depth(true);
         self.scope_depth -= 1;
     }
-
-    fn parse_for_statement_intrinsic_range(self: &mut Self, local_x: usize) {
-        match self.peek() {
-            Some(Identifier(s)) if s == "range" => {
-                // Use one of three `range` intrinsics
-
-                let local_stop: usize = self.declare_synthetic_local();
-
-                self.advance(); // Consume `range`
-                self.expect(OpenParen);
-                self.parse_expression(); // The first argument, places into `local_x`
-
-                match self.peek() {
-                    Some(CloseParen) => {
-                        self.parse_for_statement_intrinsic_range_1(local_x, local_stop);
-                        return
-                    },
-                    Some(Comma) => {
-                        self.advance(); // Consume the `,` and continue
-                    }
-                    _ => self.error_with(|t| ExpectedCommaOrEndOfArguments(t)),
-                }
-
-                self.parse_expression();
-                match self.peek() {
-                    Some(CloseParen) => {
-                        self.parse_for_statement_intrinsic_range_2(local_x, local_stop);
-                        return
-                    },
-                    Some(Comma) => {
-                        self.advance(); // Consume `,`
-                    },
-                    _ => self.error_with(|t| ExpectedCommaOrEndOfArguments(t)),
-                }
-
-                self.parse_expression();
-                self.expect(CloseParen);
-                self.parse_for_statement_intrinsic_range_3(local_x, local_stop);
-            },
-            _ => self.parse_for_statement_no_intrinsic(VariableBinding::Named(local_x))
-        }
-    }
-
-    fn parse_for_statement_intrinsic_range_1(self: &mut Self, local_x: usize, local_stop: usize) {
-        trace::trace_parser!("rule <for-statement-intrinsic-range-1>");
-
-        // Single argument `range()`, so we set push 0 for `local_x`, and then use simple increment (+1) and less than (< local_stop)
-        // We need to swap the `stop` value and initial value for `local_x`, which will be the result of the expression
-        self.advance(); // Consume `)`
-        self.push(Opcode::Int(CONSTANT_0)); // Initial value for `local_x`
-        self.push(Swap);
-
-        // Initialize the loop variable, as we're now in the main block and it can be referenced
-        self.current_locals_mut().locals[local_x].initialize();
-
-        // Bounds check and branch to end
-        let jump = self.next_opcode();
-        self.push_load_local(local_x);
-        self.push_load_local(local_stop);
-        self.push(OpLessThan);
-        let jump_if_false_pop = self.reserve();
-
-        // Parse the body of the loop and emit
-        self.parse_block_statement();
-        self.push_delayed_pop();
-
-        // Increment and jump to head
-        self.push(Increment(local_x as u16));
-        self.push(Jump(jump));
-
-        // Fix the jump
-        self.output[jump_if_false_pop] = JumpIfFalsePop(self.next_opcode());
-    }
-
-    fn parse_for_statement_intrinsic_range_2(self: &mut Self, local_x: usize, local_stop: usize) {
-        trace::trace_parser!("rule <for-statement-intrinsic-range-2>");
-
-        // Two argument `for x in range(start, stop)` intrinsic.
-        // Since the step is known we can use `<` as a comparison
-        // The two expressions (start, stop) have already been placed in the stack and we already declared a synthetic local for `stop`
-        self.advance();
-
-        // Initialize the loop variable, as we're now in the main block and it can be referenced
-        self.current_locals_mut().locals[local_x].initialize();
-
-        // Bounds check and branch to end
-        let jump = self.next_opcode();
-        self.push_load_local(local_x);
-        self.push_load_local(local_stop);
-        self.push(OpLessThan);
-        let jump_if_false_pop = self.reserve();
-
-        // Parse the body of the loop and emit
-        self.parse_block_statement();
-        self.push_delayed_pop();
-
-        // Increment and jump to head
-        self.push(Increment(local_x as u16));
-        self.push(Jump(jump));
-
-        // Fix the jump
-        self.output[jump_if_false_pop] = JumpIfFalsePop(self.next_opcode());
-    }
-
-    fn parse_for_statement_intrinsic_range_3(self: &mut Self, local_x: usize, local_stop: usize) {
-        trace::trace_parser!("rule <for-statement-intrinsic-range-3>");
-
-        // Three argument `for x in range(start, stop, step)`
-        // We need to do a number of things to handle this correctly
-        // 1. We need to check if step == 0, and emit an error if so. We use the CheckNonZero instruction to do so
-        // 2. Based on `step` either being positive or negative, the 'at end' check of the for loop might involve a > or < op, and needs to be handled differently for each case.
-
-        // Two more locals
-        let local_step = self.declare_synthetic_local();
-        let local_step_is_positive = self.declare_synthetic_local();
-
-        self.push(CheckNonZero); // Assert step is nonzero
-        self.push(Dup);
-        self.push(Opcode::Int(CONSTANT_0));
-        self.push(OpGreaterThan); // initialize local step_is_positive with (step > 0)
-
-        // Initialize the loop variable, as we're now in the main block and it can be referenced
-        self.current_locals_mut().locals[local_x].initialize();
-
-        // Bounds check and branch to end
-        let jump = self.next_opcode();
-        self.push_load_local(local_x);
-        self.push_load_local(local_stop);
-        self.push_load_local(local_step_is_positive); // Either push OpLessThan or OpGreaterThan depending on the sign of `step`
-        self.push(JumpIfTruePop(self.next_opcode() + 3)); // Skip this + the `OpGreaterThan` and `Jump`
-        self.push(OpGreaterThan);
-        self.push(Jump(self.next_opcode() + 2)); // Skip this + the `OpLessThan`
-        self.push(OpLessThan);
-        let jump_if_false_pop = self.reserve();
-
-        // Parse the body of the loop and emit
-        self.parse_block_statement();
-        self.push_delayed_pop();
-
-        // Increment and jump to head
-        self.push_load_local(local_x);
-        self.push_load_local(local_step); // Use the step local instead of constant +1
-        self.push(OpAdd);
-        self.push_store_local(local_x);
-        self.push(Opcode::Pop);
-        self.push(Jump(jump));
-
-        // Fix the jump
-        self.output[jump_if_false_pop] = JumpIfFalsePop(self.next_opcode());
-    }
-
-    fn parse_for_statement_no_intrinsic(self: &mut Self, local_x: VariableBinding) {
-        trace::trace_parser!("rule <for-statement-no-intrinsic>");
-
-        // Standard `for` loop destructuring.
-        // We need synthetic variables for the iterable and the loop index. The length is checked each iteration (as it may change)
-        let local_iter: usize = self.declare_synthetic_local();
-        let local_i: usize = self.declare_synthetic_local();
-
-        // Push default values for the locals (in local_x), before the expression.
-        local_x.push_local_default_values(self);
-
-        // Parse the expression, which will be the iterable (as it is declared first)
-        self.parse_expression();
-
-        // Initialize the loop variable(s), as we're now in the main block and it can be referenced
-        // The loop variables cannot be referenced.
-        local_x.init_all_locals(self);
-
-        // In order to support iteration through arbitrary structures, but allow modification during iteration for plain lists, we emit some bridge bytecode to check the type of the iterable before converting it to a list.
-        self.push(Dup);
-        self.push(NativeFunction(StdBinding::List));
-        self.push(OpIs);
-        self.push(JumpIfTruePop(self.next_opcode() + 4));
-        self.push(NativeFunction(StdBinding::List));
-        self.push(Swap);
-        self.push(OpFuncEval(1));
-
-        // Push the loop index
-        self.push(Opcode::Int(CONSTANT_0));
-
-        // Bounds check and branch
-        let jump: u16 = self.next_opcode();
-        self.push_load_local(local_i);
-        self.push(NativeFunction(Len));
-        self.push_load_local(local_iter);
-        self.push(OpFuncEval(1));
-        self.push(OpLessThan);
-        let jump_if_false_pop = self.reserve();
-
-        // Initialize the loop variable
-        self.push_load_local(local_iter);
-        self.push_load_local(local_i);
-        self.push(OpIndex);
-        local_x.push_store_locals_and_pop(self);
-
-        // Parse the body of the loop and emit
-        self.parse_block_statement();
-        self.push_delayed_pop();
-
-        // Increment and jump to head
-        self.push(Increment(local_i as u16));
-        self.push(Jump(jump));
-
-        // Fix the jump
-        self.output[jump_if_false_pop] = JumpIfFalsePop(self.next_opcode());
-    }
-
 
     fn parse_break_statement(self: &mut Self) {
         trace::trace_parser!("rule <break-statement>");
@@ -2772,13 +2579,13 @@ mod tests {
     #[test] fn test_continue_past_locals() { run("continue_past_locals"); }
     #[test] fn test_empty() { run("empty"); }
     #[test] fn test_expressions() { run("expressions"); }
-    #[test] fn test_for_intrinsic_range_start_stop() { run("for_intrinsic_range_start_stop"); }
-    #[test] fn test_for_intrinsic_range_start_stop_no_var() { run("for_intrinsic_range_start_stop_no_var"); }
-    #[test] fn test_for_intrinsic_range_start_stop_step() { run("for_intrinsic_range_start_stop_step"); }
-    #[test] fn test_for_intrinsic_range_start_stop_step_no_var() { run("for_intrinsic_range_start_stop_step_no_var"); }
-    #[test] fn test_for_intrinsic_range_stop() { run("for_intrinsic_range_stop"); }
-    #[test] fn test_for_intrinsic_range_stop_no_var() { run("for_intrinsic_range_stop_no_var"); }
-    #[test] fn test_for_no_intrinsic() { run("for_no_intrinsic"); }
+    #[test] fn test_for_range_start_stop() { run("for_range_start_stop"); }
+    #[test] fn test_for_range_start_stop_no_var() { run("for_range_start_stop_no_var"); }
+    #[test] fn test_for_range_start_stop_step() { run("for_range_start_stop_step"); }
+    #[test] fn test_for_range_start_stop_step_no_var() { run("for_range_start_stop_step_no_var"); }
+    #[test] fn test_for_range_stop() { run("for_range_stop"); }
+    #[test] fn test_for_range_stop_no_var() { run("for_range_stop_no_var"); }
+    #[test] fn test_for_string() { run("for_string"); }
     #[test] fn test_function() { run("function"); }
     #[test] fn test_function_call_after_newline() { run("function_call_after_newline"); }
     #[test] fn test_function_call_no_newline() { run("function_call_no_newline"); }

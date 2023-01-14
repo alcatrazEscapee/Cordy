@@ -21,7 +21,7 @@ pub fn sqrt(a1: Value) -> ValueResult {
     }
 }
 
-pub fn gcd<'a>(a1: impl Iterator<Item=&'a Value>) -> ValueResult {
+pub fn gcd(a1: impl Iterator<Item=Value>) -> ValueResult {
     a1.map(|v| v.as_int())
         .collect::<Result<Vec<i64>, Box<RuntimeError>>>()?
         .into_iter()
@@ -29,7 +29,7 @@ pub fn gcd<'a>(a1: impl Iterator<Item=&'a Value>) -> ValueResult {
         .map_or_else(|| ValueErrorValueMustBeNonEmpty.err(), |v| Ok(Int(v)))
 }
 
-pub fn lcm<'a>(a1: impl Iterator<Item=&'a Value>) -> ValueResult {
+pub fn lcm(a1: impl Iterator<Item=Value>) -> ValueResult {
     a1.map(|v| v.as_int())
         .collect::<Result<Vec<i64>, Box<RuntimeError>>>()?
         .into_iter()
