@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use itertools::Itertools;
 
 use crate::vm::error::RuntimeError;
-use crate::vm::value::{Mut, Value, ValueIntoIter};
+use crate::vm::value::{Iterable, Mut, Value};
 use crate::vm::VirtualInterface;
 
 use RuntimeError::{*};
@@ -88,7 +88,7 @@ pub fn range_3(a1: Value, a2: Value, a3: Value) -> ValueResult {
 
 pub fn enumerate(a1: Value) -> ValueResult {
     match a1.as_iter() {
-        Ok(it) => Ok(Value::iter_list((&it).into_iter().cloned().enumerate().map(|(i, v)| Value::vector(vec![Int(i as i64), v])))),
+        Ok(it) => Ok(Value::iter_list(it.enumerate().map(|(i, v)| Value::vector(vec![Int(i as i64), v])))),
         Err(e) => Err(e)
     }
 }
@@ -121,7 +121,7 @@ fn rev_range(start_high_inclusive: i64, stop_low_exclusive: i64) -> impl Iterato
 // ===== Library Functions ===== //
 
 
-pub fn sum<'a>(args: impl Iterator<Item=&'a Value>) -> ValueResult {
+pub fn sum(args: impl Iterator<Item=Value>) -> ValueResult {
     let mut sum: i64 = 0;
     for v in args {
         match v {
@@ -132,9 +132,9 @@ pub fn sum<'a>(args: impl Iterator<Item=&'a Value>) -> ValueResult {
     Ok(Int(sum))
 }
 
-pub fn min<'a>(args: impl Iterator<Item=&'a Value>) -> ValueResult {
+pub fn min(args: impl Iterator<Item=Value>) -> ValueResult {
     match args.min() {
-        Some(v) => Ok(v.clone()),
+        Some(v) => Ok(v),
         None => ValueErrorValueMustBeNonEmpty.err()
     }
 }
@@ -144,7 +144,7 @@ pub fn min_by<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : V
     match a1.unbox_func_args() {
         Some(Some(2)) => {
             let mut err: Option<Box<RuntimeError>> = None;
-            let ret = iter.into_iter()
+            let ret = iter
                 .min_by(|a, b| misc::yield_result(&mut err, || {
                     let cmp = vm.invoke_func2(a1.clone(), (*a).clone(), (*b).clone())?.as_int()?;
                     cmp_to_ord(cmp)
@@ -154,7 +154,7 @@ pub fn min_by<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : V
         },
         Some(Some(1)) => {
             let mut err = None;
-            let ret = iter.into_iter()
+            let ret = iter
                 .min_by_key(|u| misc::yield_result(&mut err, || vm.invoke_func1(a1.clone(), (*u).clone()), Nil));
 
             non_empty(misc::join_result(ret, err)?)
@@ -164,7 +164,7 @@ pub fn min_by<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : V
     }
 }
 
-pub fn max<'a>(args: impl Iterator<Item=&'a Value>) -> ValueResult {
+pub fn max(args: impl Iterator<Item=Value>) -> ValueResult {
     non_empty(args.max())
 }
 
@@ -173,7 +173,7 @@ pub fn max_by<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : V
     match a1.unbox_func_args() {
         Some(Some(2)) => {
             let mut err: Option<Box<RuntimeError>> = None;
-            let ret = iter.into_iter()
+            let ret = iter
                 .max_by(|a, b| misc::yield_result(&mut err, || {
                     let cmp = vm.invoke_func2(a1.clone(), (*a).clone(), (*b).clone())?.as_int()?;
                     cmp_to_ord(cmp)
@@ -183,7 +183,7 @@ pub fn max_by<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : V
         },
         Some(Some(1)) => {
             let mut err = None;
-            let ret = iter.into_iter()
+            let ret = iter
                 .max_by_key(|u| misc::yield_result(&mut err, || vm.invoke_func1(a1.clone(), (*u).clone()), Nil));
 
             non_empty(misc::join_result(ret, err)?)
@@ -194,9 +194,9 @@ pub fn max_by<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : V
 }
 
 #[inline(always)]
-fn non_empty(it: Option<&Value>) -> ValueResult {
+fn non_empty(it: Option<Value>) -> ValueResult {
     match it {
-        Some(v) => Ok(v.clone()),
+        Some(v) => Ok(v),
         None => ValueErrorValueMustBeNonEmpty.err()
     }
 }
@@ -213,14 +213,14 @@ fn cmp_to_ord<E>(i: i64) -> Result<Ordering, E> {
 }
 
 
-pub fn sort<'a>(args: impl Iterator<Item=&'a Value>) -> ValueResult {
-    let mut sorted: Vec<Value> = args.cloned().collect::<Vec<Value>>();
+pub fn sort(args: impl Iterator<Item=Value>) -> ValueResult {
+    let mut sorted: Vec<Value> = args.collect::<Vec<Value>>();
     sorted.sort_unstable();
     Ok(Value::iter_list(sorted.into_iter()))
 }
 
 pub fn sort_by<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : VirtualInterface {
-    let mut sorted: Vec<Value> = a2.as_iter()?.into_iter().cloned().collect::<Vec<Value>>();
+    let mut sorted: Vec<Value> = a2.as_iter()?.collect::<Vec<Value>>();
     match a1.unbox_func_args() {
         Some(Some(2)) => {
             let mut err: Option<Box<RuntimeError>> = None;
@@ -241,8 +241,10 @@ pub fn sort_by<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : 
     Ok(Value::iter_list(sorted.into_iter()))
 }
 
-pub fn reverse<'a>(args: impl DoubleEndedIterator<Item=&'a Value>) -> ValueResult {
-    Ok(Value::iter_list(args.rev().cloned()))
+pub fn reverse(args: impl Iterator<Item=Value>) -> ValueResult {
+    let mut vec = args.collect::<Vec<Value>>();
+    vec.reverse();
+    Ok(Value::iter_list(vec.into_iter()))
 }
 
 pub fn permutations(a1: Value, a2: Value) -> ValueResult {
@@ -250,7 +252,7 @@ pub fn permutations(a1: Value, a2: Value) -> ValueResult {
     if n <= 0 {
         return ValueErrorValueMustBeNonNegative(n).err();
     }
-    Ok(Value::iter_list(a2.as_iter()?.into_iter().cloned().permutations(n as usize).map(|u| Value::vector(u))))
+    Ok(Value::iter_list(a2.as_iter()?.permutations(n as usize).map(|u| Value::vector(u))))
 }
 
 pub fn combinations(a1: Value, a2: Value) -> ValueResult {
@@ -258,13 +260,12 @@ pub fn combinations(a1: Value, a2: Value) -> ValueResult {
     if n <= 0 {
         return ValueErrorValueMustBeNonNegative(n).err();
     }
-    Ok(Value::iter_list(a2.as_iter()?.into_iter().cloned().combinations(n as usize).map(|u| Value::vector(u))))
+    Ok(Value::iter_list(a2.as_iter()?.combinations(n as usize).map(|u| Value::vector(u))))
 }
 
 pub fn any<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : VirtualInterface {
     match (a1, a2.as_iter()) {
         (l, Ok(rs)) => {
-            let rs = (&rs).into_iter();
             for r in rs {
                 if vm.invoke_func1(l.clone(), r.clone())?.as_bool() {
                     return Ok(Bool(true))
@@ -279,7 +280,6 @@ pub fn any<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : Virt
 pub fn all<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : VirtualInterface {
     match (a1, a2.as_iter()) {
         (l, Ok(rs)) => {
-            let rs = (&rs).into_iter();
             for r in rs {
                 if !vm.invoke_func1(l.clone(), r.clone())?.as_bool() {
                     return Ok(Bool(false))
@@ -296,7 +296,6 @@ pub fn map<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : Virt
     let len: usize = a2.len().unwrap_or(0);
     match (a1, a2.as_iter()) {
         (l, Ok(rs)) => {
-            let rs = (&rs).into_iter();
             let mut acc: VecDeque<Value> = VecDeque::with_capacity(len);
             for r in rs {
                 acc.push_back(vm.invoke_func1(l.clone(), r.clone())?);
@@ -311,7 +310,6 @@ pub fn filter<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : V
     let len: usize = a2.len().unwrap_or(0);
     match (a1, a2.as_iter()) {
         (l, Ok(rs)) => {
-            let rs = (&rs).into_iter();
             let mut acc: VecDeque<Value> = VecDeque::with_capacity(len);
             for r in rs {
                 let ret = vm.invoke_func1(l.clone(), r.clone())?;
@@ -329,15 +327,14 @@ pub fn flat_map<VM>(vm: &mut VM, a1: Option<Value>, a2: Value) -> ValueResult wh
     let len: usize = a2.len().unwrap_or(0);
     match (a1, a2.as_iter()) {
         (l, Ok(rs)) => {
-            let rs = (&rs).into_iter();
             let mut acc: VecDeque<Value> = VecDeque::with_capacity(len);
             for r in rs {
                 let elem = match &l {
                     Some(l) => vm.invoke_func1(l.clone(), r.clone())?,
                     None => r.clone()
                 };
-                for e in elem.as_iter()?.into_iter() {
-                    acc.push_back(e.clone());
+                for e in elem.as_iter()? {
+                    acc.push_back(e);
                 }
             }
             Ok(Value::list(acc))
@@ -346,19 +343,18 @@ pub fn flat_map<VM>(vm: &mut VM, a1: Option<Value>, a2: Value) -> ValueResult wh
     }
 }
 
-pub fn zip<'a>(a1: impl Iterator<Item=&'a Value>) -> ValueResult {
+pub fn zip(a1: impl Iterator<Item=Value>) -> ValueResult {
     // This is convoluted due to rust borrow semantics
     // We cannot zip a vector of iterators, rust doesn't support anything of the sort
     // And due to `Value`'s annoying `into_iter()` only functioning for `&'b ValueIntoIter`, it does not work properly if we were to do something like the following
     // https://play.rust-lang.org/?version=stable&mode=debug&edition=2021&gist=90c1cc7997177df305f549da39a9aaef
     let iters = a1
         .map(|v| v.as_iter())
-        .collect::<Result<Vec<ValueIntoIter>, Box<RuntimeError>>>()?;
+        .collect::<Result<Vec<Iterable>, Box<RuntimeError>>>()?;
     let len: usize = iters.len();
-    let mut iters = iters.iter();
+    let mut iters = iters.into_iter();
     let mut acc: VecDeque<Vec<Value>> = iters.next()
         .unwrap()
-        .into_iter()
         .map(|u| {
             let mut v = Vec::with_capacity(len);
             v.push(u.clone());
@@ -368,7 +364,7 @@ pub fn zip<'a>(a1: impl Iterator<Item=&'a Value>) -> ValueResult {
     let mut min_len: usize = acc.len();
     for iter in iters {
         let mut i: usize = 0;
-        for it in iter.into_iter() {
+        for it in iter {
             if i >= min_len {
                 break
             }
@@ -384,14 +380,13 @@ pub fn zip<'a>(a1: impl Iterator<Item=&'a Value>) -> ValueResult {
 
 pub fn reduce<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : VirtualInterface {
     match (a1, a2.as_iter()) {
-        (l, Ok(rs)) => {
-            let mut iter = (&rs).into_iter().cloned();
-            let mut acc: Value = match iter.next() {
+        (l, Ok(mut rs)) => {
+            let mut acc: Value = match rs.next() {
                 Some(v) => v,
                 None => return ValueErrorValueMustBeNonEmpty.err()
             };
 
-            for r in iter {
+            for r in rs {
                 acc = vm.invoke_func2(l.clone(), acc, r)?;
             }
             Ok(acc)
@@ -403,8 +398,8 @@ pub fn reduce<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : V
 pub fn pop(a1: Value) -> ValueResult {
     match match &a1 {
         List(v) => v.unbox_mut().pop_back(),
-        Set(v) => v.unbox_mut().pop_back(),
-        Dict(v) => v.unbox_mut().dict.pop_back().map(|(k, _)| k),
+        Set(v) => v.unbox_mut().set.pop(),
+        Dict(v) => v.unbox_mut().dict.pop().map(|(k, _)| k),
         Heap(v) => v.unbox_mut().heap.pop().map(|t| t.0),
         _ => return TypeErrorArgMustBeIterable(a1).err()
     } {
@@ -416,7 +411,7 @@ pub fn pop(a1: Value) -> ValueResult {
 pub fn push(a1: Value, a2: Value) -> ValueResult {
     match &a2 {
         List(v) => { v.unbox_mut().push_back(a1); Ok(a2) }
-        Set(v) => { v.unbox_mut().insert(a1); Ok(a2) }
+        Set(v) => { v.unbox_mut().set.insert(a1); Ok(a2) }
         Heap(v) => { v.unbox_mut().heap.push(Reverse(a1)); Ok(a2) }
         _ => TypeErrorArgMustBeIterable(a2).err()
     }
@@ -425,7 +420,7 @@ pub fn push(a1: Value, a2: Value) -> ValueResult {
 pub fn last(a1: Value) -> ValueResult {
     match &a1 {
         List(v) => Ok(v.unbox_mut().back().cloned().unwrap_or(Nil)),
-        Set(v) => Ok(v.unbox_mut().back().cloned().unwrap_or(Nil)),
+        Set(v) => Ok(v.unbox_mut().set.last().cloned().unwrap_or(Nil)),
         _ => TypeErrorArgMustBeIterable(a1).err()
     }
 }
@@ -433,7 +428,7 @@ pub fn last(a1: Value) -> ValueResult {
 pub fn head(a1: Value) -> ValueResult {
     match &a1 {
         List(v) => Ok(v.unbox().front().cloned().unwrap_or(Nil)),
-        Set(v) => Ok(v.unbox().front().cloned().unwrap_or(Nil)),
+        Set(v) => Ok(v.unbox().set.first().cloned().unwrap_or(Nil)),
         Heap(v) => Ok(v.unbox().heap.peek().cloned().map(|t| t.0).unwrap_or(Nil)),
         _ => TypeErrorArgMustBeIterable(a1).err()
     }
@@ -449,7 +444,7 @@ pub fn init(a1: Value) -> ValueResult {
         },
         Set(v) => {
             let v = v.unbox();
-            let mut iter = v.iter();
+            let mut iter = v.set.iter();
             iter.next_back();
             Ok(Value::iter_set(iter.cloned()))
         },
@@ -460,7 +455,7 @@ pub fn init(a1: Value) -> ValueResult {
 pub fn tail(a1: Value) -> ValueResult {
     match &a1 {
         List(v) => Ok(Value::iter_list(v.unbox().iter().skip(1).cloned())),
-        Set(v) => Ok(Value::iter_set(v.unbox().iter().skip(1).cloned())),
+        Set(v) => Ok(Value::iter_set(v.unbox().set.iter().skip(1).cloned())),
         _ => TypeErrorArgMustBeIterable(a1).err()
     }
 }
@@ -501,17 +496,17 @@ pub fn dict_values(a1: Value) -> ValueResult {
 }
 
 pub fn left_find<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : VirtualInterface {
-    let iter = a2.as_iter()?;
+    let mut iter = a2.as_iter()?;
     if a1.is_function() {
-        for (i, v) in iter.into_iter().enumerate() {
-            let ret = vm.invoke_func1(a1.clone(), v.clone())?;
+        for (i, v) in iter.enumerate() {
+            let ret = vm.invoke_func1(a1.clone(), v)?;
             if ret.as_bool() {
                 return Ok(Int(i as i64))
             }
         }
         Ok(Int(-1))
     } else {
-        Ok(Int(match iter.into_iter().position(|v| v == &a1) {
+        Ok(Int(match iter.position(|v| v == a1) {
             Some(i) => i as i64,
             None => -1
         }))
@@ -519,11 +514,11 @@ pub fn left_find<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM 
 }
 
 pub fn right_find<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : VirtualInterface {
-    // Identical to the above except we use `.rev()`, and subtract the index from `len`
-    let iter = a2.as_iter()?;
+    // Identical to the above except we use `.reverse()`, and subtract the index from `len`
+    let mut iter = a2.as_iter()?.reverse();
     let len = iter.len();
     if a1.is_function() {
-        for (i, v) in iter.into_iter().rev().enumerate() {
+        for (i, v) in iter.enumerate() {
             let ret = vm.invoke_func1(a1.clone(), v.clone())?;
             if ret.as_bool() {
                 return Ok(Int((len - 1 - i) as i64))
@@ -531,7 +526,7 @@ pub fn right_find<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM
         }
         Ok(Int(-1))
     } else {
-        Ok(Int(match iter.into_iter().rev().position(|v| v == &a1) {
+        Ok(Int(match iter.position(|v| v == a1) {
             Some(i) => (len - 1 - i) as i64,
             None => -1
         }))
@@ -543,14 +538,14 @@ pub fn find_count<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM
     let iter = a2.as_iter()?;
     if a1.is_function() {
         let mut n: i64 = 0;
-        for v in iter.into_iter() {
-            let ret = vm.invoke_func1(a1.clone(), v.clone())?;
+        for v in iter {
+            let ret = vm.invoke_func1(a1.clone(), v)?;
             if ret.as_bool() {
                 n += 1
             }
         }
         Ok(Int(n))
     } else {
-        Ok(Int(iter.into_iter().filter(|v| v == &&a1).count() as i64))
+        Ok(Int(iter.filter(|v| v == &a1).count() as i64))
     }
 }

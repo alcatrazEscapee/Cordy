@@ -1,7 +1,7 @@
 use std::iter::Peekable;
 use std::str::Chars;
 use crate::vm::error::RuntimeError;
-use crate::vm::value::{Value, ValueIter};
+use crate::vm::value::{Iterable, Value};
 
 use Value::{*};
 use RuntimeError::{*};
@@ -61,7 +61,7 @@ pub fn format_string(literal: &String, args: Value) -> ValueResult {
 
 struct StringFormatter<'a> {
     chars: Peekable<Chars<'a>>,
-    args: ValueIter<'a>,
+    args: Iterable,
 
     output: String,
 }
@@ -74,7 +74,7 @@ impl<'a> StringFormatter<'a> {
 
         let formatter = StringFormatter {
             chars: literal.chars().peekable(),
-            args: args.into_iter(),
+            args,
             output: String::with_capacity(len)
         };
 
@@ -141,7 +141,7 @@ impl<'a> StringFormatter<'a> {
                 None => break
             }
         }
-        match self.args.next() {
+        match (&mut self.args).next() {
             Some(e) => ValueErrorNotAllArgumentsUsedInStringFormatting(e.clone()).err(),
             None => Ok(Str(Box::new(self.output))),
         }
@@ -150,8 +150,8 @@ impl<'a> StringFormatter<'a> {
     fn next(self: &mut Self) -> Option<char> { self.chars.next() }
     fn peek(self: &mut Self) -> Option<&char> { self.chars.peek() }
     fn push(self: &mut Self, c: char) { self.output.push(c); }
-    fn arg(self: &mut Self) -> Result<&Value, Box<RuntimeError>> {
-        match self.args.next() {
+    fn arg(self: &mut Self) -> Result<Value, Box<RuntimeError>> {
+        match (&mut self.args).next() {
             Some(v) => Ok(v),
             None => ValueErrorMissingRequiredArgumentInStringFormatting.err(),
         }

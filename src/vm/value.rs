@@ -4,15 +4,19 @@ use std::cmp::{Ordering, Reverse};
 use std::collections::{BinaryHeap, VecDeque};
 use std::fmt::Debug;
 use std::hash::{Hash, Hasher};
+use std::mem;
 use std::rc::Rc;
-use hashlink::{LinkedHashMap, LinkedHashSet};
+use std::str::Chars;
+use indexmap::{IndexMap, IndexSet};
 
 use crate::stdlib;
 use crate::stdlib::StdBinding;
 use crate::vm::error::RuntimeError;
 
 use Value::{*};
-use RuntimeError::{TypeErrorArgMustBeIterable, TypeErrorArgMustBeIndexable, TypeErrorArgMustBeSliceable, TypeErrorArgMustBeInt, TypeErrorArgMustBeStr};
+use RuntimeError::{*};
+
+type ValueResult = Result<Value, Box<RuntimeError>>;
 
 
 /// The runtime sum type used by the virtual machine
@@ -26,14 +30,25 @@ pub enum Value {
     Str(Box<String>),
 
     // Reference (Mutable) Types
-    // Memory is not really managed at all and cycles are entirely possible.
-    // In future, a GC'd system could be implemented with `Mut` only owning weak references, and the GC owning the only strong reference.
-    // But that comes at even more performance overhead because we'd need to still obey rust reference counting semantics.
     List(Mut<VecDeque<Value>>),
-    Set(Mut<LinkedHashSet<Value>>),
+    Set(Mut<SetImpl>),
     Dict(Mut<DictImpl>),
     Heap(Mut<HeapImpl>), // `List` functions as both Array + Deque, but that makes it un-viable for a heap. So, we have a dedicated heap structure
     Vector(Mut<Vec<Value>>), // `Vector` is a fixed-size list (in theory, not in practice), that most operations will behave elementwise on
+
+    // Iterator Types (Immutable)
+    Range(Box<RangeImpl>),
+
+    /// ### Enumerate Type
+    ///
+    /// This is the type used by the native function `enumerate(...)`. It does not have any additional functionality and is just a wrapper around an internal `Value`.
+    ///
+    /// Note that `enumerate()` object needs to be stateless, hence wrapping a `Value`, and not an `IteratorImpl`. When a `enumerate()` is iterated through, i.e. `is_iter()` is invoked on it, the internal value will be converted to the respective iterator at that time.
+    Enumerate(Box<Value>),
+
+    /// Synthetic Iterator Type - Mutable, but not aliasable.
+    /// This will never be user-code-accessible, as it will only be on the stack as a synthetic variable, or in native code.
+    Iter(Box<Iterable>),
 
     // Functions
     Function(Rc<FunctionImpl>),
@@ -55,8 +70,8 @@ impl Value {
 
     pub fn str(c: char) -> Value { Str(Box::new(String::from(c))) }
     pub fn list(vec: VecDeque<Value>) -> Value { List(Mut::new(vec.into_iter().collect::<VecDeque<Value>>())) }
-    pub fn set(set: LinkedHashSet<Value>) -> Value { Set(Mut::new(set)) }
-    pub fn dict(dict: LinkedHashMap<Value, Value>) -> Value { Dict(Mut::new(DictImpl::new(dict))) }
+    pub fn set(set: IndexSet<Value>) -> Value { Set(Mut::new(SetImpl::new(set))) }
+    pub fn dict(dict: IndexMap<Value, Value>) -> Value { Dict(Mut::new(DictImpl::new(dict))) }
     pub fn heap(heap: BinaryHeap<Reverse<Value>>) -> Value { Heap(Mut::new(HeapImpl::new(heap))) }
     pub fn vector(vec: Vec<Value>) -> Value { Vector(Mut::new(vec)) }
 
@@ -86,11 +101,18 @@ impl Value {
                 let escaped = format!("{:?}", s);
                 format!("'{}'", &escaped[1..escaped.len() - 1])
             },
+
             List(v) => format!("[{}]", v.unbox().iter().map(|t| t.to_repr_str()).collect::<Vec<String>>().join(", ")),
-            Set(v) => format!("{{{}}}", v.unbox().iter().map(|t| t.to_repr_str()).collect::<Vec<String>>().join(", ")),
+            Set(v) => format!("{{{}}}", v.unbox().set.iter().map(|t| t.to_repr_str()).collect::<Vec<String>>().join(", ")),
             Dict(v) => format!("{{{}}}", v.unbox().dict.iter().map(|(k, v)| format!("{}: {}", k.to_repr_str(), v.to_repr_str())).collect::<Vec<String>>().join(", ")),
             Heap(v) => format!("[{}]", v.unbox().heap.iter().map(|t| t.0.to_repr_str()).collect::<Vec<String>>().join(", ")),
             Vector(v) => format!("({})", v.unbox().iter().map(|t| t.to_repr_str()).collect::<Vec<String>>().join(", ")),
+
+            Range(r) => format!("range({}, {}, {})", r.start, r.stop, r.step),
+            Enumerate(v) => format!("enumerate({})", v.to_repr_str()),
+
+            Iter(_) => format!("iterator"),
+
             Function(f) => (*f).as_ref().borrow().as_str(),
             PartialFunction(f) => (*f).as_ref().borrow().func.to_str(),
             NativeFunction(b) => format!("fn {}()", stdlib::lookup_name(*b)),
@@ -111,6 +133,9 @@ impl Value {
             Dict(_) => "dict",
             Heap(_) => "heap",
             Vector(_) => "vector",
+            Range(_) => "range",
+            Enumerate(_) => "enumerate",
+            Iter(_) => "iterator",
             Function(_) => "function",
             PartialFunction(_) => "partial function",
             NativeFunction(_) => "native function",
@@ -126,13 +151,16 @@ impl Value {
     pub fn as_bool(self: &Self) -> bool {
         match self {
             Nil => false,
-            Bool(b) => *b,
-            Int(i) => *i != 0,
-            Str(s) => !s.is_empty(),
-            List(l) => !l.unbox().is_empty(),
-            Set(v) => !v.unbox().is_empty(),
-            Dict(v) => !v.unbox().dict.is_empty(),
-            Heap(v) => !v.unbox().heap.is_empty(),
+            Bool(it) => *it,
+            Int(it) => *it != 0,
+            Str(it) => !it.is_empty(),
+            List(it) => !it.unbox().is_empty(),
+            Set(it) => !it.unbox().set.is_empty(),
+            Dict(it) => !it.unbox().dict.is_empty(),
+            Heap(it) => !it.unbox().heap.is_empty(),
+            Range(it) => !it.is_empty(),
+            Enumerate(it) => (**it).as_bool(),
+            Iter(_) => panic!("Iter() is a synthetic type and should not have as_bool() invoked on it"),
             Vector(v) => v.unbox().is_empty(),
             Function(_) | PartialFunction(_) | NativeFunction(_) | PartialNativeFunction(_, _) | Closure(_) => true,
         }
@@ -165,53 +193,67 @@ impl Value {
         }
     }
 
-    /// Unwraps the value as an `iterable`, or raises a type error
-    pub fn as_iter(self: &Self) -> Result<ValueIntoIter, Box<RuntimeError>> {
+    /// Unwraps the value as an `iterable`, or raises a type error.
+    /// For all value types except `Heap`, this is a O(1) and lazy operation. It also requires no persistent borrows of mutable types that outlast the call to `as_iter()`.
+    pub fn as_iter(self: &Self) -> Result<Iterable, Box<RuntimeError>> {
         match self {
-            Str(it) => {
-                let chars: Vec<Value> = it.chars()
-                    .map(|c| Value::str(c))
-                    .collect::<Vec<Value>>();
-                Ok(ValueIntoIter::Str(chars))
-            }
-            List(it) => Ok(ValueIntoIter::List(it.unbox())),
-            Set(it) => Ok(ValueIntoIter::Set(it.unbox())),
-            Dict(it) => Ok(ValueIntoIter::Dict(it.unbox())),
-            Heap(it) => Ok(ValueIntoIter::Heap(it.unbox())),
-            Vector(it) => Ok(ValueIntoIter::Vector(it.unbox())),
+            Str(it) => Ok(Iterable::str((**it).clone())),
+            List(it) => Ok(Iterable::Collection(0, CollectionIterable::List(it.clone()))),
+            Set(it) => Ok(Iterable::Collection(0, CollectionIterable::Set(it.clone()))),
+            Dict(it) => Ok(Iterable::Collection(0, CollectionIterable::Dict(it.clone()))),
+            Vector(it) => Ok(Iterable::Collection(0, CollectionIterable::Vector(it.clone()))),
+
+            Heap(it) => {
+                // Heaps completely unbox themselves to be iterated over
+                let vec = it.unbox().heap.iter().cloned().map(|u| u.0).collect::<Vec<Value>>();
+                Ok(Iterable::Collection(0, CollectionIterable::RawVector(vec)))
+            },
+
+            Range(it) => Ok(Iterable::Range(it.start, (**it).clone())),
+            Enumerate(it) => Ok(Iterable::Enumerate(0, Box::new((**it).as_iter()?))),
+
             _ => TypeErrorArgMustBeIterable(self.clone()).err(),
         }
     }
 
     /// Unwraps the value as an `iterable`, or if it is not, yields an iterable of the single element
     /// Note that this takes a `str` to be a non-iterable primitive type, unlike `is_iter()` and `as_iter()`
-    pub fn as_iter_or_unit(self: &Self) -> ValueIntoIter {
+    pub fn as_iter_or_unit(self: &Self) -> Iterable {
         match self {
-            List(it) => ValueIntoIter::List(it.unbox()),
-            Set(it) => ValueIntoIter::Set(it.unbox()),
-            Dict(it) => ValueIntoIter::Dict(it.unbox()),
-            Heap(it) => ValueIntoIter::Heap(it.unbox()),
-            Vector(it) => ValueIntoIter::Vector(it.unbox()),
-            it => ValueIntoIter::Unit(it),
+            List(it) => Iterable::Collection(0, CollectionIterable::List(it.clone())),
+            Set(it) => Iterable::Collection(0, CollectionIterable::Set(it.clone())),
+            Dict(it) => Iterable::Collection(0, CollectionIterable::Dict(it.clone())),
+            Vector(it) => Iterable::Collection(0, CollectionIterable::Vector(it.clone())),
+
+            Heap(it) => {
+                // Heaps completely unbox themselves to be iterated over
+                let vec = it.unbox().heap.iter().cloned().map(|u| u.0).collect::<Vec<Value>>();
+                Iterable::Collection(0, CollectionIterable::RawVector(vec))
+            },
+
+            Range(it) => Iterable::Range(it.start, (**it).clone()),
+            Enumerate(it) => Iterable::Enumerate(0, Box::new((**it).as_iter_or_unit())),
+
+            it => Iterable::Unit(Some(it.clone())),
         }
     }
 
     /// Converts this `Value` to a `ValueAsIndex`, which is a index-able object, supported for `List`, `Vector`, and `Str`
-    pub fn as_index(self: &Self) -> Result<ValueAsIndex, Box<RuntimeError>> {
+    pub fn as_index(self: &Self) -> Result<Indexable, Box<RuntimeError>> {
         match self {
-            Str(it) => Ok(ValueAsIndex::Str(it)),
-            List(it) => Ok(ValueAsIndex::List(it.unbox())),
-            Vector(it) => Ok(ValueAsIndex::Vector(it.unbox())),
+            Str(it) => Ok(Indexable::Str(it)),
+            List(it) => Ok(Indexable::List(it.unbox())),
+            Vector(it) => Ok(Indexable::Vector(it.unbox())),
             _ => TypeErrorArgMustBeIndexable(self.clone()).err()
         }
     }
 
     /// Converts this `Value` to a `ValueAsSlice`, which is a builder for slice-like structures, supported for `List` and `Str`
-    pub fn as_slice(self: &Self) -> Result<ValueAsSlice, Box<RuntimeError>> {
+    pub fn as_slice(self: &Self) -> Result<Sliceable, Box<RuntimeError>> {
         match self {
-            Str(it) => Ok(ValueAsSlice::Str(it, String::new())),
-            List(it) => Ok(ValueAsSlice::List(it.unbox(), VecDeque::new())),
-            Vector(it) => Ok(ValueAsSlice::Vector(it.unbox(), Vec::new())),
+            Str(it) => Ok(Sliceable::Str(it, String::new())),
+            List(it) => Ok(Sliceable::List(it.unbox(), VecDeque::new())),
+            Vector(it) => Ok(Sliceable::Vector(it.unbox(), Vec::new())),
             _ => TypeErrorArgMustBeSliceable(self.clone()).err()
         }
     }
@@ -245,10 +287,12 @@ impl Value {
         match &self {
             Str(it) => Ok(it.chars().count()),
             List(it) => Ok(it.unbox().len()),
-            Set(it) => Ok(it.unbox().len()),
+            Set(it) => Ok(it.unbox().set.len()),
             Dict(it) => Ok(it.unbox().dict.len()),
             Heap(it) => Ok(it.unbox().heap.len()),
             Vector(it) => Ok(it.unbox().len()),
+            Range(it) => Ok(it.len()),
+            Enumerate(it) => it.len(),
             _ => TypeErrorArgMustBeIterable(self.clone()).err()
         }
     }
@@ -265,7 +309,7 @@ impl Value {
 
     pub fn is_iter(self: &Self) -> bool {
         match self {
-            Str(_) | List(_) | Set(_) | Dict(_) | Heap(_) | Vector(_) => true,
+            Str(_) | List(_) | Set(_) | Dict(_) | Heap(_) | Vector(_) | Range(_) | Enumerate(_) => true,
             _ => false
         }
     }
@@ -314,26 +358,24 @@ impl Ord for Value {
 }
 
 
-/// Wrapper type to allow mutable types to hash
-/// Yes, mutable types in hash maps is dangerous but this is a language about shooting yourself in the foot
-/// So why would we not allow this?
+/// `Mut<T>` is a wrapper around internally mutable types. It implements the required traits for `Value` through it's inner type.
+/// Note that it also implements `Hash`, even though the internal type is mutable. This is required to satisfy rust's type system.
+/// Mutating values stored in a hash backed structure is legal, from a language point of view, but will just invoke undefined behavior.
 #[derive(Eq, PartialEq, Debug, Clone)]
-pub struct Mut<T : Eq + PartialEq + Debug + Clone + Hash> {
-    value: Rc<RefCell<T>>
-}
+pub struct Mut<T : Eq + PartialEq + Debug + Clone + Hash>(Rc<RefCell<T>>);
 
 impl<T : Eq + PartialEq + Debug + Clone + Hash> Mut<T> {
 
     pub fn new(value: T) -> Mut<T> {
-        Mut { value: Rc::new(RefCell::new(value)) }
+        Mut(Rc::new(RefCell::new(value)))
     }
 
-    pub fn unbox(self: &Self) -> Ref<T> {
-        (*self.value).borrow()
+    pub fn unbox(&self) -> Ref<T> {
+        (*self.0).borrow()
     }
 
-    pub fn unbox_mut(self: &Self) -> RefMut<T> {
-        (*self.value).borrow_mut()
+    pub fn unbox_mut(&self) -> RefMut<T> {
+        (*self.0).borrow_mut()
     }
 }
 
@@ -405,16 +447,77 @@ impl Hash for ClosureImpl {
     }
 }
 
+#[derive(PartialEq, Eq, Debug, Clone)]
+pub struct SetImpl {
+    pub set: IndexSet<Value>
+}
 
-/// Boxes a `LinkedHashMap<Value, Value>`, along with an optional default value
-#[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Clone, Hash)]
+impl SetImpl {
+    fn new(set: IndexSet<Value>) -> SetImpl { SetImpl { set }}
+}
+
+impl PartialOrd for SetImpl {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for SetImpl {
+    fn cmp(&self, other: &Self) -> Ordering {
+        for (l, r) in self.set.iter().zip(other.set.iter()) {
+            match l.cmp(r) {
+                Ordering::Equal => {},
+                ord => return ord,
+            }
+        }
+        self.set.len().cmp(&other.set.len())
+    }
+}
+
+impl Hash for SetImpl {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        for v in &self.set {
+            v.hash(state)
+        }
+    }
+}
+
+
+/// Boxes a `IndexMap<Value, Value>`, along with an optional default value
+#[derive(PartialEq, Eq, Debug, Clone)]
 pub struct DictImpl {
-    pub dict: LinkedHashMap<Value, Value>,
+    pub dict: IndexMap<Value, Value>,
     pub default: Option<Value>
 }
 
 impl DictImpl {
-    fn new(dict: LinkedHashMap<Value, Value>) -> DictImpl { DictImpl { dict, default: None }}
+    fn new(dict: IndexMap<Value, Value>) -> DictImpl { DictImpl { dict, default: None }}
+}
+
+impl PartialOrd for DictImpl {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for DictImpl {
+    fn cmp(&self, other: &Self) -> Ordering {
+        for (l, r) in self.dict.keys().zip(other.dict.keys()) {
+            match l.cmp(r) {
+                Ordering::Equal => {},
+                ord => return ord,
+            }
+        }
+        self.dict.len().cmp(&other.dict.len())
+    }
+}
+
+impl Hash for DictImpl {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        for v in &self.dict {
+            v.hash(state)
+        }
+    }
 }
 
 
@@ -447,129 +550,295 @@ impl Hash for HeapImpl {
     }
 }
 
-// Escapes iterators all having different concrete types
-pub enum ValueIter<'a> {
-    Unit(std::iter::Once<&'a Value>),
-    Str(std::slice::Iter<'a, Value>),
-    List(std::collections::vec_deque::Iter<'a, Value>),
-    Set(hashlink::linked_hash_set::Iter<'a, Value>),
-    Dict(hashlink::linked_hash_map::Keys<'a, Value, Value>),
-    Heap(std::collections::binary_heap::Iter<'a, Reverse<Value>>),
-    Vector(std::slice::Iter<'a, Value>),
+/// ### Range Type
+///
+/// This is the internal lazy type used by the native function `range(...)`. For non-empty ranges, `step` must be non-zero.
+/// For an empty range, this will store the `step` as `0` - in this case the `start` and `stop` values should be ignored
+/// Note that depending on the relation of `start`, `stop` and the sign of `step`, this may represent an empty range.
+///
+/// When iterating over a `Range`, this will create a new `IteratorIndexable::Range`, which
+#[derive(Eq, PartialEq, Debug, Clone, Hash)]
+pub struct RangeImpl {
+    start: i64,
+    stop: i64,
+    step: i64,
 }
 
-impl<'a> Iterator for ValueIter<'a> {
-    type Item = &'a Value;
+impl RangeImpl {
+    /// Creates a new `Range()` value from a given set of integer parameters.
+    /// Raises an error if `step == 0`
+    ///
+    /// Note: this implementation internally replaces all empty range values with the single `range(0, 0, 0)` instance. This means that `range(1, 2, -1) . str` will have to handle this case as it will not be representative.
+    pub fn new(start: i64, stop: i64, step: i64) -> ValueResult {
+        if step == 0 {
+            ValueErrorStepCannotBeZero.err()
+        } else if (stop > start && step > 0) || (stop < start && step < 0) {
+            Ok(Range(Box::new(RangeImpl { start, stop, step }))) // Non-empty range
+        } else {
+            Ok(Range(Box::new(RangeImpl { start: 0, stop: 0, step: 0 }))) // Empty range
+        }
+    }
+
+    /// Used by `operator in`, to check if a value is in this range.
+    pub fn contains(&self, value: i64) -> bool {
+        if self.step == 0 {
+            false
+        } else if self.step > 0 {
+            value >= self.start && value < self.stop && (value - self.start) % self.step == 0
+        } else {
+            value <= self.start && value > self.stop && (self.start - value) % self.step == 0
+        }
+    }
+
+    /// Advances the `Range`, based on the external `current` value.
+    /// The `current` value is the one that will be returned, and internally advanced to the next value.
+    fn next(&self, current: &mut i64) -> Option<Value> {
+        if *current == self.stop || self.step == 0 {
+            None
+        } else if self.step > 0 {
+            let ret = *current;
+            *current += self.step;
+            if *current > self.stop {
+                *current = self.stop;
+            }
+            Some(Int(ret))
+        } else {
+            let ret = *current;
+            *current += self.step;
+            if *current < self.stop {
+                *current = self.stop;
+            }
+            Some(Int(ret))
+        }
+    }
+
+    fn len(&self) -> usize {
+        // Since this type ensures that the range is non-empty, we can do simple checked arithmetic
+        if self.step == 0 { 0 } else { (self.start.abs_diff(self.stop) / self.step.unsigned_abs()) as usize }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.step == 0
+    }
+}
+
+
+
+
+/// ### Iterator Type
+///
+/// Iterators are complex to model within the type system of Rust, with the restrictions imposed by Cordy:
+///
+/// - Rust `Iterator` methods access `Mut` values which enforce that their iterator only lives as long as the borrow from `Ref<'a, T>`. This is unusable as our iterators, i.e. in `for` loops, need to live on the stack.
+/// - In native code, the borrow on the inner value must last for as long as the loop is ran, which means native functions like `map` essentially acquire a lock on their value, preventing mutation. For example the following code:
+///
+/// ```
+/// let a = [1, 2, 3]
+/// a . map(fn(i) -> if len(a) < 4 then a.push(4) else nil) . print
+/// ```
+///
+/// The outer `map` needs to break back into user code, but semantically, it cannot do so as it has a borrow on `a`.
+/// We solve this problem by having a manner of 'stateless iterator'. An iterator is simply a unstable pointer into the structure, i.e. a `usize`, along with a *not-borrowed* reference to the value it is iterating over.
+/// This can then be iterated over as a `Iterator<usize>`, and obtain the inner value *only by taking a borrow during `next()`*.
+///
+/// Almost all applications of this iterator will want to `.clone()` the returned values, i.e. because they need to be placed somewhere on the stack, so we function as a cloning iterator that provides ownership of `Value`s to the source.
+///
+/// Finally, this iterator is as lazy as it can be, and efficient as possible with the aforementioned restrictions. Most Cordy types support O(1) index-by-ordinal, and we use `IndexMap` and `IndexSet` for this exact purpose. The exceptions are `Heap` (which gets unboxed completely into a `Vector` before iterating), and `Str` (more on this later). This makes the following code:
+///
+/// ```
+/// for a in x { break }
+/// ```
+///
+/// is O(n) where `x` is a  `Heap` type, as it is desugared into `for a in vector(x) { break }`, but O(1) for all other types, as expected.
+///
+/// #### String Iterators
+///
+/// Rust's `Chars` iterator has a lifetime - explicitly tied to the lifetime of the string. As it requires that while we iterate over the string, it is not modified.
+/// In our case we can make those same requirements explicit - `String`s are immutable, and still immutable once they are handed over to an iterator.
+///
+/// To do this explicitly, we need a tiny bit of unsafe Rust, in particular, to hold a reference to a `String` and it's own `Chars` iterator in the same struct. Thus, we must meet the following requirement:
+///
+/// SAFETY: The `String` field of `Str` **cannot be modified**.
+///
+/// ---
+///
+/// This makes string iteration with early exiting, `O(1)` upfront, and reduces the constant factor of boxing each `char` into a `Value::Str`.
+#[derive(Debug, Clone)]
+pub enum Iterable {
+    Str(String, Chars<'static>),
+    Unit(Option<Value>),
+    Collection(usize, CollectionIterable),
+    Range(i64, RangeImpl),
+    Enumerate(usize, Box<Iterable>),
+}
+
+impl Iterable {
+    fn str(string: String) -> Iterable {
+        let chars: Chars<'static> = unsafe { mem::transmute(string.chars()) };
+        Iterable::Str(string, chars )
+    }
+
+    pub fn len(&self) -> usize {
+        match &self {
+            Iterable::Str(it, _) => it.chars().count(),
+            Iterable::Unit(it) => if it.is_some() { 1 } else { 0 },
+            Iterable::Collection(_, it) => it.len(),
+            Iterable::Range(_, it) => it.len(),
+            Iterable::Enumerate(_, it) => it.len(),
+        }
+    }
+
+    pub fn reverse(self) -> IterableRev {
+        match self {
+            // todo: reverse a range once, here
+            Iterable::Enumerate(_, it) => IterableRev(Iterable::Enumerate(0, Box::new(it.reverse().0))),
+            it => IterableRev(it)
+        }
+    }
+}
+
+
+/// A simple wrapper around reverse iteration
+/// As most of our iterators are weirdly stateful, we can't support simple reverse iteration via `next_back()`
+/// Instead, we wrap them in this type, by calling `Iterable.reverse()`. This then supports iteration in reverse.
+pub struct IterableRev(Iterable);
+
+impl IterableRev {
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+}
+
+
+impl Iterator for Iterable {
+    type Item = Value;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self {
-            ValueIter::Unit(it) => it.next(),
-            ValueIter::Str(it) => it.next(),
-            ValueIter::List(it) => it.next(),
-            ValueIter::Set(it) => it.next(),
-            ValueIter::Dict(it) => it.next(),
-            ValueIter::Heap(it) => it.next().map(|u| &u.0),
-            ValueIter::Vector(it) => it.next(),
+            Iterable::Str(_, chars) => chars.next().map(|u| Value::str(u)),
+            Iterable::Unit(it) => it.take(),
+            Iterable::Collection(index, it) => {
+                let ret = it.current(*index);
+                *index += 1;
+                ret
+            }
+            Iterable::Range(it, range) => range.next(it),
+            Iterable::Enumerate(index, it) => {
+                let ret = (*it).next().map(|u| Value::vector(vec![Int(*index as i64), u]));
+                *index += 1;
+                ret
+            },
         }
     }
 }
 
-impl<'a> DoubleEndedIterator for ValueIter<'a> {
-    fn next_back(&mut self) -> Option<Self::Item> {
+impl Iterator for IterableRev {
+    type Item = Value;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match &mut self.0 {
+            Iterable::Str(_, chars) => chars.next_back().map(|u| Value::str(u)),
+            Iterable::Unit(it) => it.take(),
+            Iterable::Collection(index, it) => {
+                if *index < it.len() {
+                    let ret = it.current(it.len() - 1 - *index);
+                    *index += 1;
+                    ret
+                } else {
+                    None
+                }
+            }
+            Iterable::Range(it, range) => range.next(it),
+            Iterable::Enumerate(index, it) => {
+                let ret = (*it).next().map(|u| Value::vector(vec![Int(*index as i64), u]));
+                *index += 1;
+                ret
+            },
+        }
+    }
+}
+
+// Instead of deriving these, assert that they panic because it should never happen.
+impl PartialEq for Iterable { fn eq(&self, _: &Self) -> bool { panic!("Iter() is a synthetic type and should not be =='d"); } }
+impl Eq for Iterable {}
+impl PartialOrd for Iterable { fn partial_cmp(&self, _: &Self) -> Option<Ordering> { panic!("Iter() is a synthetic type and should not be compared"); } }
+impl Ord for Iterable { fn cmp(&self, _: &Self) -> Ordering { panic!("Iter() is a synthetic type and should not be compared"); } }
+impl Hash for Iterable { fn hash<H: Hasher>(&self, _: &mut H) { panic!("Iter() is a synthetic type and should not be hashed"); } }
+
+
+/// A single type for all collection iterators that are indexable by `usize`. Exposes a single common method `current()` which returns the value at the current index, or `None` if the index is longer than the length of the collection.
+#[derive(Debug, Clone)]
+pub enum CollectionIterable {
+    List(Mut<VecDeque<Value>>),
+    Set(Mut<SetImpl>),
+    Dict(Mut<DictImpl>),
+    Vector(Mut<Vec<Value>>),
+    RawVector(Vec<Value>),
+}
+
+impl CollectionIterable {
+
+    fn len(&self) -> usize {
         match self {
-            ValueIter::Unit(it) => it.next_back(),
-            ValueIter::Str(it) => it.next_back(),
-            ValueIter::List(it) => it.next_back(),
-            ValueIter::Set(it) => it.next_back(),
-            ValueIter::Dict(it) => it.next_back(),
-            ValueIter::Heap(it) => it.next_back().map(|u| &u.0),
-            ValueIter::Vector(it) => it.next_back(),
+            CollectionIterable::List(it) => it.unbox().len(),
+            CollectionIterable::Set(it) => it.unbox().set.len(),
+            CollectionIterable::Dict(it) => it.unbox().dict.len(),
+            CollectionIterable::Vector(it) => it.unbox().len(),
+            CollectionIterable::RawVector(it) => it.len(),
         }
     }
-}
 
-// Escapes the interior mutability pattern
-pub enum ValueIntoIter<'a> {
-    Unit(&'a Value),
-    Str(Vec<Value>),
-    List(Ref<'a, VecDeque<Value>>),
-    Set(Ref<'a, LinkedHashSet<Value>>),
-    Dict(Ref<'a, DictImpl>),
-    Heap(Ref<'a, HeapImpl>),
-    Vector(Ref<'a, Vec<Value>>),
-}
-
-impl<'a> ValueIntoIter<'a> {
-    pub fn len(self: &Self) -> usize {
+    fn current(&self, index: usize) -> Option<Value> {
         match self {
-            ValueIntoIter::Unit(_) => 1,
-            ValueIntoIter::Str(it) => it.len(),
-            ValueIntoIter::List(it) => it.len(),
-            ValueIntoIter::Set(it) => it.len(),
-            ValueIntoIter::Dict(it) => it.dict.len(),
-            ValueIntoIter::Heap(it) => it.heap.len(),
-            ValueIntoIter::Vector(it) => it.len(),
-        }
-    }
-}
-
-impl<'b: 'a, 'a> IntoIterator for &'b ValueIntoIter<'a> {
-    type Item = &'a Value;
-    type IntoIter = ValueIter<'a>;
-
-    fn into_iter(self) -> ValueIter<'a> {
-        match self {
-            ValueIntoIter::Unit(it) => ValueIter::Unit(std::iter::once(it)),
-            ValueIntoIter::Str(it) => ValueIter::Str(it.into_iter()),
-            ValueIntoIter::List(it) => ValueIter::List(it.iter()),
-            ValueIntoIter::Set(it) => ValueIter::Set(it.iter()),
-            ValueIntoIter::Dict(it) => ValueIter::Dict(it.dict.keys()),
-            ValueIntoIter::Heap(it) => ValueIter::Heap(it.heap.iter()),
-            ValueIntoIter::Vector(it) => ValueIter::Vector(it.iter()),
+            CollectionIterable::List(it) => it.unbox().get(index).cloned(),
+            CollectionIterable::Set(it) => it.unbox().set.get_index(index).cloned(),
+            CollectionIterable::Dict(it) => it.unbox().dict.get_index(index).map(|(l, r)| Value::vector(vec![l.clone(), r.clone()])),
+            CollectionIterable::Vector(it) => it.unbox().get(index).cloned(),
+            CollectionIterable::RawVector(it) => it.get(index).cloned(),
         }
     }
 }
 
 
-pub enum ValueAsIndex<'a> {
+pub enum Indexable<'a> {
     Str(&'a Box<String>),
     List(Ref<'a, VecDeque<Value>>),
     Vector(Ref<'a, Vec<Value>>),
 }
 
-impl<'a> ValueAsIndex<'a> {
+impl<'a> Indexable<'a> {
 
     pub fn len(self: &Self) -> usize {
         match self {
-            ValueAsIndex::Str(it) => it.len(),
-            ValueAsIndex::List(it) => it.len(),
-            ValueAsIndex::Vector(it) => it.len(),
+            Indexable::Str(it) => it.len(),
+            Indexable::List(it) => it.len(),
+            Indexable::Vector(it) => it.len(),
         }
     }
 
     pub fn get_index(self: &Self, index: usize) -> Value {
         match self {
-            ValueAsIndex::Str(it) => Value::str(it.chars().nth(index).unwrap()),
-            ValueAsIndex::List(it) => (&it[index]).clone(),
-            ValueAsIndex::Vector(it) => (&it[index]).clone(),
+            Indexable::Str(it) => Value::str(it.chars().nth(index).unwrap()),
+            Indexable::List(it) => (&it[index]).clone(),
+            Indexable::Vector(it) => (&it[index]).clone(),
         }
     }
 }
 
 
-pub enum ValueAsSlice<'a> {
+pub enum Sliceable<'a> {
     Str(&'a Box<String>, String),
     List(Ref<'a, VecDeque<Value>>, VecDeque<Value>),
     Vector(Ref<'a, Vec<Value>>, Vec<Value>),
 }
 
-impl<'a> ValueAsSlice<'a> {
+impl<'a> Sliceable<'a> {
 
     pub fn len(self: &Self) -> usize {
         match self {
-            ValueAsSlice::Str(it, _) => it.len(),
-            ValueAsSlice::List(it, _) => it.len(),
-            ValueAsSlice::Vector(it, _) => it.len(),
+            Sliceable::Str(it, _) => it.len(),
+            Sliceable::List(it, _) => it.len(),
+            Sliceable::Vector(it, _) => it.len(),
         }
     }
 
@@ -577,18 +846,18 @@ impl<'a> ValueAsSlice<'a> {
         if index >= 0 && index < self.len() as i64 {
             let index = index as usize;
             match self {
-                ValueAsSlice::Str(src, dest) => dest.push(src.chars().nth(index).unwrap()),
-                ValueAsSlice::List(src, dest) => dest.push_back((&src[index]).clone()),
-                ValueAsSlice::Vector(src, dest) => dest.push((&src[index]).clone()),
+                Sliceable::Str(src, dest) => dest.push(src.chars().nth(index).unwrap()),
+                Sliceable::List(src, dest) => dest.push_back((&src[index]).clone()),
+                Sliceable::Vector(src, dest) => dest.push((&src[index]).clone()),
             }
         }
     }
 
     pub fn to_value(self: Self) -> Value {
         match self {
-            ValueAsSlice::Str(_, it) => Str(Box::new(it)),
-            ValueAsSlice::List(_, it) => List(Mut::new(it)),
-            ValueAsSlice::Vector(_, it) => Vector(Mut::new(it)),
+            Sliceable::Str(_, it) => Str(Box::new(it)),
+            Sliceable::List(_, it) => List(Mut::new(it)),
+            Sliceable::Vector(_, it) => Vector(Mut::new(it)),
         }
     }
 }
@@ -598,10 +867,10 @@ impl<'a> ValueAsSlice<'a> {
 mod test {
     use std::collections::VecDeque;
     use std::rc::Rc;
-    use hashlink::{LinkedHashMap, LinkedHashSet};
+    use indexmap::{IndexMap, IndexSet};
     use crate::stdlib::StdBinding;
     use crate::vm::error::RuntimeError;
-    use crate::vm::value::{FunctionImpl, Value};
+    use crate::vm::value::{FunctionImpl, RangeImpl, Value};
 
     #[test] fn test_layout() { assert_eq!(16, std::mem::size_of::<Value>()); }
     #[test] fn test_result_box_layout() { assert_eq!(16, std::mem::size_of::<Result<Value, Box<RuntimeError>>>()); }
@@ -626,10 +895,12 @@ mod test {
             Value::Bool(true),
             Value::Int(1),
             Value::list(VecDeque::new()),
-            Value::set(LinkedHashSet::new()),
-            Value::dict(LinkedHashMap::new()),
+            Value::set(IndexSet::new()),
+            Value::dict(IndexMap::new()),
             Value::iter_heap(std::iter::empty()),
             Value::vector(vec![]),
+            RangeImpl::new(0, 1, 1).unwrap(),
+            Value::Enumerate(Box::new(Value::vector(vec![]))),
             Value::Function(rc.clone()),
             Value::partial(Value::Function(rc.clone()), vec![]),
             Value::NativeFunction(StdBinding::Void),

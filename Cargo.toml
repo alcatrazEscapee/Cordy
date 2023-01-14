@@ -5,10 +5,10 @@
 
 [dependencies]
     lazy_static = "1.4.0"
-    hashlink = "0.8.1"
     rustyline = "10.0.0"
     num-integer = "0.1.45"
     itertools = "0.10.5"
+    indexmap = "1.9.2"
 
 #[profile.release]
 #    debug = true

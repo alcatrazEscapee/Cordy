@@ -1,10 +1,10 @@
 use std::collections::{BinaryHeap, VecDeque};
 use std::fs;
-use hashlink::{LinkedHashMap, LinkedHashSet};
+use indexmap::{IndexMap, IndexSet};
 use lazy_static::lazy_static;
 
 use crate::vm::{operator, VirtualInterface};
-use crate::vm::value::{Mut, Value};
+use crate::vm::value::{Mut, RangeImpl, Value};
 use crate::vm::error::RuntimeError;
 use crate::trace;
 
@@ -423,7 +423,7 @@ pub fn invoke<VM>(binding: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult wh
                 },
                 _ => {
                     let varargs = vm.popn(nargs as usize);
-                    let mut $an = varargs.iter();
+                    let mut $an = varargs.iter().cloned();
                     let ret = $ret_n;
                     ret
                 }
@@ -438,7 +438,7 @@ pub fn invoke<VM>(binding: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult wh
                 },
                 _ => {
                     let varargs = vm.popn(nargs as usize);
-                    let mut $an = varargs.iter();
+                    let mut $an = varargs.iter().cloned();
                     $ret_n
                 },
             }
@@ -452,7 +452,7 @@ pub fn invoke<VM>(binding: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult wh
                 },
                 _ => {
                     let varargs = vm.popn(nargs as usize);
-                    let mut $an = varargs.iter();
+                    let mut $an = varargs.iter().cloned();
                     $ret_n
                 },
             }
@@ -502,11 +502,11 @@ pub fn invoke<VM>(binding: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult wh
             _ => TypeErrorCannotConvertToInt(a1).err(),
         }),
         Str => dispatch!(Ok(Value::Str(Box::new(String::new()))), a1, Ok(Value::Str(Box::new(a1.to_str())))),
-        List => dispatch_varargs!(Ok(Value::list(VecDeque::new())), an, Ok(Value::iter_list(an.into_iter().cloned()))),
-        Set => dispatch_varargs!(Ok(Value::set(LinkedHashSet::new())), an, Ok(Value::iter_set(an.into_iter().cloned()))),
-        Dict => dispatch_varargs!(Ok(Value::dict(LinkedHashMap::new())), an, collections::collect_into_dict(an.into_iter().cloned())),
-        Heap => dispatch_varargs!(Ok(Value::heap(BinaryHeap::new())), an, Ok(Value::iter_heap(an.into_iter().cloned()))),
-        Vector => dispatch_varargs!(Ok(Value::vector(vec![])), an, Ok(Value::iter_vector(an.into_iter().cloned()))),
+        List => dispatch_varargs!(Ok(Value::list(VecDeque::new())), an, Ok(Value::iter_list(an))),
+        Set => dispatch_varargs!(Ok(Value::set(IndexSet::new())), an, Ok(Value::iter_set(an))),
+        Dict => dispatch_varargs!(Ok(Value::dict(IndexMap::new())), an, collections::collect_into_dict(an)),
+        Heap => dispatch_varargs!(Ok(Value::heap(BinaryHeap::new())), an, Ok(Value::iter_heap(an))),
+        Vector => dispatch_varargs!(Ok(Value::vector(vec![])), an, Ok(Value::iter_vector(an))),
         Repr => dispatch!(a1, Ok(Value::Str(Box::new(a1.to_repr_str())))),
         Eval => dispatch!(a1, vm.invoke_eval(a1.as_str()?)),
 
@@ -558,22 +558,22 @@ pub fn invoke<VM>(binding: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult wh
 
         // collections
         Len => dispatch!(a1, a1.len().map(|u| Value::Int(u as i64))),
-        Range => dispatch!(a1, collections::range_1(a1), a2, collections::range_2(a1, a2), a3, collections::range_3(a1, a2, a3)),
-        Enumerate => dispatch!(a1, collections::enumerate(a1)),
-        Sum => dispatch_varargs!(an, collections::sum(an.into_iter())),
-        Min => dispatch_varargs!(an, collections::min(an.into_iter())),
+        Range => dispatch!(a1, RangeImpl::new(0, a1.as_int()?, 1), a2, RangeImpl::new(a1.as_int()?, a2.as_int()?, 1), a3, RangeImpl::new(a1.as_int()?, a2.as_int()?, a3.as_int()?)),
+        Enumerate => dispatch!(a1, Ok(Value::Enumerate(Box::new(a1)))),
+        Sum => dispatch_varargs!(an, collections::sum(an)),
+        Min => dispatch_varargs!(an, collections::min(an)),
         MinBy => dispatch!(a1, a2, collections::min_by(vm, a1, a2)),
-        Max => dispatch_varargs!(an, collections::max(an.into_iter())),
+        Max => dispatch_varargs!(an, collections::max(an)),
         MaxBy => dispatch!(a1, a2, collections::max_by(vm, a1, a2)),
         Map => dispatch!(a1, a2, collections::map(vm, a1, a2)),
         Filter => dispatch!(a1, a2, collections::filter(vm, a1, a2)),
         FlatMap => dispatch!(a1, a2, collections::flat_map(vm, Some(a1), a2)),
         Concat => dispatch!(a1, collections::flat_map(vm, None, a1)),
-        Zip => dispatch_varargs!(an, collections::zip(an.into_iter())),
+        Zip => dispatch_varargs!(an, collections::zip(an)),
         Reduce => dispatch!(a1, a2, collections::reduce(vm, a1, a2)),
-        Sort => dispatch_varargs!(an, collections::sort(an.into_iter())),
+        Sort => dispatch_varargs!(an, collections::sort(an)),
         SortBy => dispatch!(a1, a2, collections::sort_by(vm, a1, a2)),
-        Reverse => dispatch_varargs!(an, collections::reverse(an.into_iter())),
+        Reverse => dispatch_varargs!(an, collections::reverse(an)),
         Permutations => dispatch!(a1, a2, collections::permutations(a1, a2)),
         Combinations => dispatch!(a1, a2, collections::combinations(a1, a2)),
         Any => dispatch!(a1, a2, collections::any(vm, a1, a2)),
@@ -595,8 +595,8 @@ pub fn invoke<VM>(binding: StdBinding, nargs: u8, vm: &mut VM) -> ValueResult wh
         // math
         Abs => dispatch!(a1, math::abs(a1)),
         Sqrt => dispatch!(a1, math::sqrt(a1)),
-        Gcd => dispatch_varargs!(an, math::gcd(an.into_iter())),
-        Lcm => dispatch_varargs!(an, math::lcm(an.into_iter())),
+        Gcd => dispatch_varargs!(an, math::gcd(an)),
+        Lcm => dispatch_varargs!(an, math::lcm(an)),
 
         _ => ValueIsNotFunctionEvaluable(Value::NativeFunction(binding)).err(),
     }
@@ -608,7 +608,7 @@ pub fn get_index(a1: &Value, a2: &Value) -> ValueResult {
     // Dict objects have their own overload of indexing to mean key-value lookups, that doesn't fit with ValueAsIndex (as it doesn't take integer keys, always)
     if let Value::Dict(it) = a1 {
         let it = it.unbox();
-        return if let Some(v) = it.dict.get(&a2).or(it.default.as_ref()) {
+        return if let Some(v) = it.dict.get(a2).or(it.default.as_ref()) {
             Ok(v.clone())
         } else {
             ValueErrorKeyNotPresent(a2.clone()).err()

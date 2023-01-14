@@ -1,0 +1,16 @@
+L1: 0000 NativeFunction(Range)
+    0001 Int(2) -> 4
+    0002 Int(3) -> 7
+    0003 OpFuncEval(2)
+    0004 InitIterable
+    0005 TestIterable
+    0006 JumpIfFalsePop(14)
+    0007 Pop
+L2: 0008 Str(1) -> "hello"
+    0009 NativeFunction(Print)
+    0010 Swap
+    0011 OpFuncEval(1)
+L3: 0012 Pop
+    0013 Jump(5)
+    0014 Pop
+    0015 Exit
