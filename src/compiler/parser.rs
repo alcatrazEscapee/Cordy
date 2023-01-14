@@ -469,8 +469,6 @@ impl Pattern {
 // ===== Main Parser Implementation ===== //
 
 
-const CONSTANT_0: u16 = 0;
-
 
 impl Parser<'_> {
 
@@ -2403,20 +2401,6 @@ impl Parser<'_> {
         }
     }
 
-    /// Specialization of `push` which pushes either `PushLocal` or `PushGlobal` for a given local
-    fn push_load_local(self: &mut Self, index: usize) {
-        trace::trace_parser!("push PushLocal/PushGlobal {}", index);
-
-        let local = &self.current_locals_mut().locals[index];
-        if local.is_true_global() {
-            self.push(PushGlobal(index as u16, false))
-        } else if local.is_global() {
-            self.push(PushGlobal(index as u16, true))
-        } else {
-            self.push(PushLocal(index as u16))
-        }
-    }
-
     /// Specialization of `push` which pushes either `StoreLocal` or `StoreGlobal` for a given local
     fn push_store_local(self: &mut Self, index: usize) {
         trace::trace_parser!("push StoreLocal/StoreGlobal {}", index);
@@ -2513,7 +2497,7 @@ mod tests {
     use crate::vm::opcode::Opcode;
     use crate::trace;
 
-    use StdBinding::{Print, Read, OperatorAdd, OperatorDiv, OperatorMul};
+    use StdBinding::{Print, ReadText, OperatorAdd, OperatorDiv, OperatorMul};
     use Opcode::{*};
 
 
@@ -2529,7 +2513,7 @@ mod tests {
     #[test] fn test_binary_add_and_mod_rev() { run_expr("1 % 2 + 3", vec![Int(1), Int(2), OpMod, Int(3), OpAdd]); }
     #[test] fn test_binary_shifts() { run_expr("1 << 2 >> 3", vec![Int(1), Int(2), OpLeftShift, Int(3), OpRightShift]); }
     #[test] fn test_binary_shifts_and_operators() { run_expr("1 & 2 << 3 | 5", vec![Int(1), Int(2), Int(3), OpLeftShift, OpBitwiseAnd, Int(5), OpBitwiseOr]); }
-    #[test] fn test_function_composition() { run_expr("print . read", vec![NativeFunction(Print), NativeFunction(Read), Swap, OpFuncEval(1)]); }
+    #[test] fn test_function_composition() { run_expr("print . read_text", vec![NativeFunction(Print), NativeFunction(ReadText), Swap, OpFuncEval(1)]); }
     #[test] fn test_precedence_with_parens() { run_expr("(1 + 2) * 3", vec![Int(1), Int(2), OpAdd, Int(3), OpMul]); }
     #[test] fn test_precedence_with_parens_2() { run_expr("6 / (5 - 3)", vec![Int(6), Int(5), Int(3), OpSub, OpDiv]); }
     #[test] fn test_precedence_with_parens_3() { run_expr("-(1 - 3)", vec![Int(1), Int(3), OpSub, UnarySub]); }
@@ -2544,8 +2528,8 @@ mod tests {
     #[test] fn test_function_call_unary_op_precedence_with_parens() { run_expr("(- print) ()", vec![NativeFunction(Print), UnarySub, OpFuncEval(0)]); }
     #[test] fn test_function_call_unary_op_precedence_with_parens_2() { run_expr("- (print () )", vec![NativeFunction(Print), OpFuncEval(0), UnarySub]); }
     #[test] fn test_function_call_binary_op_precedence() { run_expr("print ( 1 ) + ( 2 ( 3 ) )", vec![NativeFunction(Print), Int(1), OpFuncEval(1), Int(2), Int(3), OpFuncEval(1), OpAdd]); }
-    #[test] fn test_function_call_parens_1() { run_expr("print . read (1 + 3) (5)", vec![NativeFunction(Print), NativeFunction(Read), Int(1), Int(3), OpAdd, OpFuncEval(1), Int(5), OpFuncEval(1), Swap, OpFuncEval(1)]); }
-    #[test] fn test_function_call_parens_2() { run_expr("( print . read (1 + 3) ) (5)", vec![NativeFunction(Print), NativeFunction(Read), Int(1), Int(3), OpAdd, OpFuncEval(1), Swap, OpFuncEval(1), Int(5), OpFuncEval(1)]); }
+    #[test] fn test_function_call_parens_1() { run_expr("print . read_text (1 + 3) (5)", vec![NativeFunction(Print), NativeFunction(ReadText), Int(1), Int(3), OpAdd, OpFuncEval(1), Int(5), OpFuncEval(1), Swap, OpFuncEval(1)]); }
+    #[test] fn test_function_call_parens_2() { run_expr("( print . read_text (1 + 3) ) (5)", vec![NativeFunction(Print), NativeFunction(ReadText), Int(1), Int(3), OpAdd, OpFuncEval(1), Swap, OpFuncEval(1), Int(5), OpFuncEval(1)]); }
     #[test] fn test_function_composition_with_is() { run_expr("'123' . int is int . print", vec![Str(1), NativeFunction(StdBinding::Int), NativeFunction(StdBinding::Int), OpIs, Swap, OpFuncEval(1), NativeFunction(Print), Swap, OpFuncEval(1)]); }
     #[test] fn test_and() { run_expr("1 < 2 and 3 < 4", vec![Int(1), Int(2), OpLessThan, JumpIfFalse(8), Pop, Int(3), Int(4), OpLessThan]); }
     #[test] fn test_or() { run_expr("1 < 2 or 3 < 4", vec![Int(1), Int(2), OpLessThan, JumpIfTrue(8), Pop, Int(3), Int(4), OpLessThan]); }
