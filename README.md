@@ -88,7 +88,7 @@ For a more comprehensive documentation, see the [language documentation](./docs/
 
 ### To-Do
 
-- Implement `->` operator, basic named tuple types.
+- implement basic structs: compile time verified access with `->`, type-dispatched at runtime.
 - `continue` and `break` in `for` statements
 - `else` on `while` and `for` statements, like Python
 - Let top level `if`-`then`-`else` get parsed in `parse_if_statement()`
@@ -100,8 +100,6 @@ For a more comprehensive documentation, see the [language documentation](./docs/
 - `iterable` as a type, so `is iterable` works
   - Now that `any` is a function, figure out what to do about the `any` type
 - Even MORE standard library functions
-  - `push_front` for `List` (or `Queue`), `insert` (by index) for `List`
-  - `remove` (by value)
   - regex match, find, and replace -> just on normal strings. Make `\` less required for escaping (only escape if needed)
 - Improved non-java-like-closures, that allow assignment to the target variable.
   - `ref` to make reference variables, which closure-captured variables promote to automatically? Basically a `Mut<Value>` -> this is bad because then everything that unboxes needs to do so within a reference. Cannot do this in general. Rust bad:tm:

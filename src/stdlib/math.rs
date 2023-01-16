@@ -7,6 +7,21 @@ use Value::{*};
 
 type ValueResult = Result<Value, Box<RuntimeError>>;
 
+pub fn convert_to_int(a1: Value, a2: Option<Value>) -> ValueResult {
+    match &a1 {
+        Nil => Ok(Int(0)),
+        Bool(b) => Ok(Int(if *b { 1 } else { 0 })),
+        Int(_) => Ok(a1),
+        Str(s) => match s.parse::<i64>() {
+            Ok(i) => Ok(Int(i)),
+            Err(_) => match a2 {
+                Some(a2) => Ok(a2),
+                None => TypeErrorCannotConvertToInt(a1).err(),
+            },
+        },
+        _ => TypeErrorCannotConvertToInt(a1).err(),
+    }
+}
 
 pub fn abs(a1: Value) -> ValueResult {
     Ok(Int(a1.as_int()?.abs()))

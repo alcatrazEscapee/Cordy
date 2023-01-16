@@ -2593,6 +2593,7 @@ mod tests {
     #[test] fn test_loop_4() { run("loop_4"); }
     #[test] fn test_multiple_undeclared_variables() { run("multiple_undeclared_variables"); }
     #[test] fn test_weird_expression_statements() { run("weird_expression_statements"); }
+    #[test] fn test_weird_closure_not_a_closure() { run("weird_closure_not_a_closure"); }
     #[test] fn test_weird_locals() { run("weird_locals"); }
     #[test] fn test_weird_loop_nesting_in_functions() { run("weird_loop_nesting_in_functions"); }
     #[test] fn test_weird_upvalue_index() { run("weird_upvalue_index"); }

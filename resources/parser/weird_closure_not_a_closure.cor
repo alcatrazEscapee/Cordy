@@ -1,0 +1,7 @@
+loop {
+    let x, y
+    fn trigger() -> (x, y)
+    break
+}
+
+fn bomb() {}
