@@ -6,7 +6,7 @@ use error::{DetailRuntimeError, RuntimeError};
 use crate::{compiler, stdlib, trace};
 use crate::compiler::{CompileResult, IncrementalCompileResult};
 use crate::compiler::parser::Locals;
-use crate::stdlib::StdBinding;
+use crate::stdlib::NativeFunction;
 use crate::vm::opcode::Opcode;
 use crate::vm::value::Value;
 use crate::vm::value::{FunctionImpl, PartialFunctionImpl};
@@ -508,13 +508,6 @@ impl<R, W> VirtualMachine<R, W> where
                     return ValueErrorCannotUnpackLengthMustBeEqual(len, actual, a1.clone()).err()
                 }
             },
-            CheckNonZero => {
-                trace::trace_interpreter!("check != 0");
-                let a1: i64 = self.peek(0).as_int()?;
-                if a1 == 0 {
-                    return ValueErrorStepCannotBeZero.err()
-                }
-            }
 
             OpIndex => {
                 trace::trace_interpreter!("op []");
@@ -690,7 +683,7 @@ impl<R, W> VirtualMachine<R, W> where
                 trace::trace_interpreter!("invoke_func_eval -> {}, nargs = {}", Value::NativeFunction(b.clone()).as_debug_str(), nargs);
                 // Need to consume the arguments and set up the stack for calling as if all partial arguments were just pushed
                 // Surgically extract the binding via std::mem::replace
-                let binding: StdBinding = *b;
+                let binding: NativeFunction = *b;
                 let i: usize = self.stack.len() - 1 - nargs as usize;
                 let args: Vec<Box<Value>> = match std::mem::replace(&mut self.stack[i], Value::Nil) {
                     Value::PartialNativeFunction(_, x) => *x,
@@ -1175,30 +1168,38 @@ mod test {
     #[test] fn test_combinations_empty() { run_str("[] . combinations(3) . print", "[]\n"); }
     #[test] fn test_combinations_n_larger_than_size() { run_str("[1, 2, 3] . combinations(5) . print", "[]\n"); }
     #[test] fn test_combinations() { run_str("[1, 2, 3] . combinations(2) . print", "[(1, 2), (1, 3), (2, 3)]\n"); }
-    #[test] fn test_find_value_empty() { run_str("[] . find(1) . print", "-1\n"); }
-    #[test] fn test_find_func_empty() { run_str("[] . find(==3) . print", "-1\n"); }
-    #[test] fn test_find_value_not_found() { run_str("[1, 3, 5, 7] . find(6) . print", "-1\n"); }
-    #[test] fn test_find_func_not_found() { run_str("[1, 3, 5, 7] . find(fn(i) -> i % 2 == 0) . print", "-1\n"); }
-    #[test] fn test_find_value_found() { run_str("[1, 3, 5, 7] . find(5) . print", "2\n"); }
-    #[test] fn test_find_func_found() { run_str("[1, 3, 5, 7] . find(>3) . print", "2\n"); }
-    #[test] fn test_find_value_found_multiple() { run_str("[1, 3, 5, 5, 7, 5] . find(5) . print", "2\n"); }
-    #[test] fn test_find_func_found_multiple() { run_str("[1, 3, 5, 5, 7, 5] . find(>3) . print", "2\n"); }
-    #[test] fn test_rfind_value_empty() { run_str("[] . rfind(1) . print", "-1\n"); }
-    #[test] fn test_rfind_func_empty() { run_str("[] . rfind(==3) . print", "-1\n"); }
-    #[test] fn test_rfind_value_not_found() { run_str("[1, 3, 5, 7] . rfind(6) . print", "-1\n"); }
-    #[test] fn test_rfind_func_not_found() { run_str("[1, 3, 5, 7] . rfind(fn(i) -> i % 2 == 0) . print", "-1\n"); }
-    #[test] fn test_rfind_value_found() { run_str("[1, 3, 5, 7] . rfind(5) . print", "2\n"); }
-    #[test] fn test_rfind_func_found() { run_str("[1, 3, 5, 7] . rfind(>3) . print", "3\n"); }
+    #[test] fn test_find_value_empty() { run_str("[] . find(1) . print", "nil\n"); }
+    #[test] fn test_find_func_empty() { run_str("[] . find(==3) . print", "nil\n"); }
+    #[test] fn test_find_value_not_found() { run_str("[1, 3, 5, 7] . find(6) . print", "nil\n"); }
+    #[test] fn test_find_func_not_found() { run_str("[1, 3, 5, 7] . find(fn(i) -> i % 2 == 0) . print", "nil\n"); }
+    #[test] fn test_find_value_found() { run_str("[1, 3, 5, 7] . find(5) . print", "5\n"); }
+    #[test] fn test_find_func_found() { run_str("[1, 3, 5, 7] . find(>3) . print", "5\n"); }
+    #[test] fn test_find_value_found_multiple() { run_str("[1, 3, 5, 5, 7, 5] . find(5) . print", "5\n"); }
+    #[test] fn test_find_func_found_multiple() { run_str("[1, 3, 5, 5, 7, 5] . find(>3) . print", "5\n"); }
+    #[test] fn test_rfind_value_empty() { run_str("[] . rfind(1) . print", "nil\n"); }
+    #[test] fn test_rfind_func_empty() { run_str("[] . rfind(==3) . print", "nil\n"); }
+    #[test] fn test_rfind_value_not_found() { run_str("[1, 3, 5, 7] . rfind(6) . print", "nil\n"); }
+    #[test] fn test_rfind_func_not_found() { run_str("[1, 3, 5, 7] . rfind(fn(i) -> i % 2 == 0) . print", "nil\n"); }
+    #[test] fn test_rfind_value_found() { run_str("[1, 3, 5, 7] . rfind(5) . print", "5\n"); }
+    #[test] fn test_rfind_func_found() { run_str("[1, 3, 5, 7] . rfind(>3) . print", "7\n"); }
     #[test] fn test_rfind_value_found_multiple() { run_str("[1, 3, 5, 5, 7, 5, 3, 1] . rfind(5) . print", "5\n"); }
     #[test] fn test_rfind_func_found_multiple() { run_str("[1, 3, 5, 5, 7, 5, 3, 1] . rfind(>3) . print", "5\n"); }
-    #[test] fn test_findn_value_empty() { run_str("[] . findn(1) . print", "0\n"); }
-    #[test] fn test_findn_func_empty() { run_str("[] . findn(==3) . print", "0\n"); }
-    #[test] fn test_findn_value_not_found() { run_str("[1, 3, 5, 7] . findn(6) . print", "0\n"); }
-    #[test] fn test_findn_func_not_found() { run_str("[1, 3, 5, 7] . findn(fn(i) -> i % 2 == 0) . print", "0\n"); }
-    #[test] fn test_findn_value_found() { run_str("[1, 3, 5, 7] . findn(5) . print", "1\n"); }
-    #[test] fn test_findn_func_found() { run_str("[1, 3, 5, 7] . findn(>3) . print", "2\n"); }
-    #[test] fn test_findn_value_found_multiple() { run_str("[1, 3, 5, 5, 7, 5] . findn(5) . print", "3\n"); }
-    #[test] fn test_findn_func_found_multiple() { run_str("[1, 3, 5, 5, 7, 5] . findn(>3) . print", "4\n"); }
+    #[test] fn test_index_of_value_empty() { run_str("[] . index_of(1) . print", "-1\n"); }
+    #[test] fn test_index_of_func_empty() { run_str("[] . index_of(==3) . print", "-1\n"); }
+    #[test] fn test_index_of_value_not_found() { run_str("[1, 3, 5, 7] . index_of(6) . print", "-1\n"); }
+    #[test] fn test_index_of_func_not_found() { run_str("[1, 3, 5, 7] . index_of(fn(i) -> i % 2 == 0) . print", "-1\n"); }
+    #[test] fn test_index_of_value_found() { run_str("[1, 3, 5, 7] . index_of(5) . print", "2\n"); }
+    #[test] fn test_index_of_func_found() { run_str("[1, 3, 5, 7] . index_of(>3) . print", "2\n"); }
+    #[test] fn test_index_of_value_found_multiple() { run_str("[1, 3, 5, 5, 7, 5] . index_of(5) . print", "2\n"); }
+    #[test] fn test_index_of_func_found_multiple() { run_str("[1, 3, 5, 5, 7, 5] . index_of(>3) . print", "2\n"); }
+    #[test] fn test_rindex_of_value_empty() { run_str("[] . rindex_of(1) . print", "-1\n"); }
+    #[test] fn test_rindex_of_func_empty() { run_str("[] . rindex_of(==3) . print", "-1\n"); }
+    #[test] fn test_rindex_of_value_not_found() { run_str("[1, 3, 5, 7] . rindex_of(6) . print", "-1\n"); }
+    #[test] fn test_rindex_of_func_not_found() { run_str("[1, 3, 5, 7] . rindex_of(fn(i) -> i % 2 == 0) . print", "-1\n"); }
+    #[test] fn test_rindex_of_value_found() { run_str("[1, 3, 5, 7] . rindex_of(5) . print", "2\n"); }
+    #[test] fn test_rindex_of_func_found() { run_str("[1, 3, 5, 7] . rindex_of(>3) . print", "3\n"); }
+    #[test] fn test_rindex_of_value_found_multiple() { run_str("[1, 3, 5, 5, 7, 5, 3, 1] . rindex_of(5) . print", "5\n"); }
+    #[test] fn test_rindex_of_func_found_multiple() { run_str("[1, 3, 5, 5, 7, 5, 3, 1] . rindex_of(>3) . print", "5\n"); }
     #[test] fn test_not_in_yes() { run_str("3 not in [1, 2, 3] . print", "false\n"); }
     #[test] fn test_not_in_no() { run_str("3 not in [1, 5, 8] . print", "true\n"); }
     #[test] fn test_min_by_key() { run_str("[[1, 5], [2, 3], [6, 4]] . min_by(fn(i) -> i[1]) . print", "[2, 3]\n"); }
@@ -1263,6 +1264,33 @@ mod test {
     #[test] fn test_format_too_few_args() { run_str("'%d %d %d' % (1, 2, 3, 4)", "ValueError: Not all arguments consumed in format string, next: '4' of type 'int'\n    at: `'%d %d %d' % (1, 2, 3, 4)` (line 1)\n    at: execution of script '<test>'\n"); }
     #[test] fn test_format_incorrect_character() { run_str("'%g' % (1,)", "ValueError: Invalid format character 'g' in format string\n    at: `'%g' % (1,)` (line 1)\n    at: execution of script '<test>'\n"); }
     #[test] fn test_format_incorrect_width() { run_str("'%00' % (1,)", "ValueError: Invalid format character '0' in format string\n    at: `'%00' % (1,)` (line 1)\n    at: execution of script '<test>'\n"); }
+    #[test] fn test_list_pop_empty() { run_str("let x = [] , y = x . pop ; (x, y) . print", "ValueError: Expected value to be a non empty iterable\n    at: `let x = [] , y = x . pop ; (x, y) . print` (line 1)\n    at: execution of script '<test>'\n"); }
+    #[test] fn test_list_pop() { run_str("let x = [1, 2, 3] , y = x . pop ; (x, y) . print", "([1, 2], 3)\n"); }
+    #[test] fn test_set_pop_empty() { run_str("let x = set() , y = x . pop ; (x, y) . print", "ValueError: Expected value to be a non empty iterable\n    at: `let x = set() , y = x . pop ; (x, y) . print` (line 1)\n    at: execution of script '<test>'\n"); }
+    #[test] fn test_set_pop() { run_str("let x = {1, 2, 3} , y = x . pop ; (x, y) . print", "({1, 2}, 3)\n"); }
+    #[test] fn test_dict_pop_empty() { run_str("let x = dict() , y = x . pop ; (x, y) . print", "ValueError: Expected value to be a non empty iterable\n    at: `let x = dict() , y = x . pop ; (x, y) . print` (line 1)\n    at: execution of script '<test>'\n"); }
+    #[test] fn test_dict_pop() { run_str("let x = {1: 'a', 2: 'b', 3: 'c'} , y = x . pop ; (x, y) . print", "({1: 'a', 2: 'b'}, (3, 'c'))\n"); }
+    #[test] fn test_list_pop_front_empty() { run_str("let x = [], y = x . pop_front ; (x, y) . print", "ValueError: Expected value to be a non empty iterable\n    at: `let x = [], y = x . pop_front ; (x, y) . print` (line 1)\n    at: execution of script '<test>'\n"); }
+    #[test] fn test_list_pop_front() { run_str("let x = [1, 2, 3], y = x . pop_front ; (x, y) . print", "([2, 3], 1)\n"); }
+    #[test] fn test_list_push() { run_str("let x = [1, 2, 3] ; x . push(4) ; x . print", "[1, 2, 3, 4]\n"); }
+    #[test] fn test_set_push() { run_str("let x = {1, 2, 3} ; x . push(4) ; x . print", "{1, 2, 3, 4}\n"); }
+    #[test] fn test_list_push_front() { run_str("let x = [1, 2, 3] ; x . push_front(4) ; x . print", "[4, 1, 2, 3]\n"); }
+    #[test] fn test_list_insert_front() { run_str("let x = [1, 2, 3] ; x . insert(0, 4) ; x . print", "[4, 1, 2, 3]\n"); }
+    #[test] fn test_list_insert_middle() { run_str("let x = [1, 2, 3] ; x . insert(1, 4) ; x . print", "[1, 4, 2, 3]\n"); }
+    #[test] fn test_list_insert_end() { run_str("let x = [1, 2, 3] ; x . insert(2, 4) ; x . print", "[1, 2, 4, 3]\n"); }
+    #[test] fn test_list_insert_out_of_bounds() { run_str("let x = [1, 2, 3] ; x . insert(4, 4) ; x . print", "Index '4' is out of bounds for list of length [0, 3)\n    at: `let x = [1, 2, 3] ; x . insert(4, 4) ; x . print` (line 1)\n    at: execution of script '<test>'\n"); }
+    #[test] fn test_dict_insert() { run_str("let x = {1: 'a', 2: 'b', 3: 'c'} ; x . insert(4, 'd') ; x . print", "{1: 'a', 2: 'b', 3: 'c', 4: 'd'}\n"); }
+    #[test] fn test_list_remove_front() { run_str("let x = [1, 2, 3] , y = x . remove(0) ; (x, y) . print", "([2, 3], 1)\n"); }
+    #[test] fn test_list_remove_middle() { run_str("let x = [1, 2, 3] , y = x . remove(1) ; (x, y) . print", "([1, 3], 2)\n"); }
+    #[test] fn test_list_remove_end() { run_str("let x = [1, 2, 3] , y = x . remove(2) ; (x, y) . print", "([1, 2], 3)\n"); }
+    #[test] fn test_set_remove_yes() { run_str("let x = {1, 2, 3}, y = x . remove(2) ; (x, y) . print", "({1, 3}, true)\n"); }
+    #[test] fn test_set_remove_no() { run_str("let x = {1, 2, 3}, y = x . remove(5) ; (x, y) . print", "({1, 2, 3}, false)\n"); }
+    #[test] fn test_dict_remove_yes() { run_str("let x = {1: 'a', 2: 'b', 3: 'c'}, y = x . remove(2) ; (x, y) . print", "({1: 'a', 3: 'c'}, true)\n"); }
+    #[test] fn test_dict_remove_no() { run_str("let x = {1: 'a', 2: 'b', 3: 'c'}, y = x . remove(5) ; (x, y) . print", "({1: 'a', 2: 'b', 3: 'c'}, false)\n"); }
+    #[test] fn test_list_clear() { run_str("let x = [1, 2, 3] ; x . clear ; x . print", "[]\n"); }
+    #[test] fn test_set_clear() { run_str("let x = {1, 2, 3} ; x . clear ; x . print", "{}\n"); }
+    #[test] fn test_dict_clear() { run_str("let x = {1: 'a', 2: 'b', 3: 'c'} ; x . clear ; x . print", "{}\n"); }
+    #[test] fn test_dict_from_enumerate() { run_str("'hey' . enumerate . dict . print", "{0: 'h', 1: 'e', 2: 'y'}\n")}
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }

@@ -320,8 +320,18 @@ pub fn pop(a1: Value) -> ValueResult {
     match match &a1 {
         List(v) => v.unbox_mut().pop_back(),
         Set(v) => v.unbox_mut().set.pop(),
-        Dict(v) => v.unbox_mut().dict.pop().map(|(k, _)| k),
+        Dict(v) => v.unbox_mut().dict.pop().map(|(k, v)| Value::vector(vec![k, v])),
         Heap(v) => v.unbox_mut().heap.pop().map(|t| t.0),
+        _ => return TypeErrorArgMustBeIterable(a1).err()
+    } {
+        Some(v) => Ok(v),
+        None => ValueErrorValueMustBeNonEmpty.err()
+    }
+}
+
+pub fn pop_front(a1: Value) -> ValueResult {
+    match match &a1 {
+        List(v) => v.unbox_mut().pop_front(),
         _ => return TypeErrorArgMustBeIterable(a1).err()
     } {
         Some(v) => Ok(v),
@@ -338,48 +348,57 @@ pub fn push(a1: Value, a2: Value) -> ValueResult {
     }
 }
 
-pub fn last(a1: Value) -> ValueResult {
-    match &a1 {
-        List(v) => Ok(v.unbox_mut().back().cloned().unwrap_or(Nil)),
-        Set(v) => Ok(v.unbox_mut().set.last().cloned().unwrap_or(Nil)),
-        _ => TypeErrorArgMustBeIterable(a1).err()
+pub fn push_front(a1: Value, a2: Value) -> ValueResult {
+    match &a2 {
+        List(v) => { v.unbox_mut().push_front(a1); Ok(a2) }
+        _ => TypeErrorArgMustBeIterable(a2).err()
     }
 }
 
-pub fn head(a1: Value) -> ValueResult {
-    match &a1 {
-        List(v) => Ok(v.unbox().front().cloned().unwrap_or(Nil)),
-        Set(v) => Ok(v.unbox().set.first().cloned().unwrap_or(Nil)),
-        Heap(v) => Ok(v.unbox().heap.peek().cloned().map(|t| t.0).unwrap_or(Nil)),
-        _ => TypeErrorArgMustBeIterable(a1).err()
-    }
-}
-
-pub fn init(a1: Value) -> ValueResult {
-    match &a1 {
+pub fn insert(a1: Value, a2: Value, a3: Value) -> ValueResult {
+    match &a3 {
         List(v) => {
-            let v = v.unbox();
-            let mut iter = v.iter();
-            iter.next_back();
-            Ok(Value::iter_list(iter.cloned()))
+            let index = a1.as_int()?;
+            let len = v.unbox().len();
+            if 0 <= index && index < v.unbox().len() as i64 {
+                v.unbox_mut().insert(index as usize, a2);
+                Ok(a3)
+            } else {
+                ValueErrorIndexOutOfBounds(index as i64, len).err()
+            }
         },
-        Set(v) => {
-            let v = v.unbox();
-            let mut iter = v.set.iter();
-            iter.next_back();
-            Ok(Value::iter_set(iter.cloned()))
-        },
-        _ => TypeErrorArgMustBeIterable(a1).err()
+        Dict(v) => { v.unbox_mut().dict.insert(a1, a2); Ok(a3) },
+        _ => TypeErrorArgMustBeIndexable(a3).err()
     }
 }
 
-pub fn tail(a1: Value) -> ValueResult {
-    match &a1 {
-        List(v) => Ok(Value::iter_list(v.unbox().iter().skip(1).cloned())),
-        Set(v) => Ok(Value::iter_set(v.unbox().set.iter().skip(1).cloned())),
-        _ => TypeErrorArgMustBeIterable(a1).err()
+pub fn remove(a1: Value, a2: Value) -> ValueResult {
+    match &a2 {
+        List(v) => {
+            let index = a1.as_int()?;
+            let len = v.unbox().len();
+            if 0 <= index && index < v.unbox().len() as i64 {
+                Ok(v.unbox_mut().remove(index as usize).unwrap()) // .unwrap() is safe, as we pre-checked the index
+            } else {
+                ValueErrorIndexOutOfBounds(index as i64, len).err()
+            }
+        },
+        Set(v) => Ok(Bool(v.unbox_mut().set.remove(&a1))),
+        Dict(v) => Ok(Bool(v.unbox_mut().dict.remove(&a1).is_some())),
+        _ => TypeErrorArgMustBeIterable(a2).err(),
     }
 }
+
+pub fn clear(a1: Value) -> ValueResult {
+    match &a1 {
+        List(v) => { v.unbox_mut().clear(); Ok(a1) },
+        Set(v) => { v.unbox_mut().set.clear(); Ok(a1) },
+        Dict(v) => { v.unbox_mut().dict.clear(); Ok(a1) },
+        Heap(v) => { v.unbox_mut().heap.clear(); Ok(a1) },
+        _ => TypeErrorArgMustBeIterable(a1).err(),
+    }
+}
+
 
 pub fn collect_into_dict(iter: impl Iterator<Item=Value>) -> ValueResult {
     Ok(Value::iter_dict(iter.map(|t| {
@@ -416,57 +435,48 @@ pub fn dict_values(a1: Value) -> ValueResult {
     }
 }
 
-pub fn left_find<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : VirtualInterface {
+pub fn left_find<VM>(vm: &mut VM, a1: Value, a2: Value, return_index: bool) -> ValueResult where VM : VirtualInterface {
+    // Supports both find index (`index_of`), and find position (`find`)
+    // For predicates, we use the same `enumerate()`, but then either return index, or value
+    // For index with value, we use `.position()`
+    // For value with value, we just use `.find()`
     let mut iter = a2.as_iter()?;
     if a1.is_function() {
         for (i, v) in iter.enumerate() {
-            let ret = vm.invoke_func1(a1.clone(), v)?;
+            let ret = vm.invoke_func1(a1.clone(), v.clone())?;
             if ret.as_bool() {
-                return Ok(Int(i as i64))
+                return Ok(if return_index { Int(i as i64) } else { v })
             }
         }
-        Ok(Int(-1))
-    } else {
+        Ok(if return_index { Int(-1) } else { Nil })
+    } else if return_index {
         Ok(Int(match iter.position(|v| v == a1) {
             Some(i) => i as i64,
             None => -1
         }))
+    } else {
+        Ok(iter.find(|v| v == &a1).unwrap_or(Nil))
     }
 }
 
-pub fn right_find<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : VirtualInterface {
+pub fn right_find<VM>(vm: &mut VM, a1: Value, a2: Value, return_index: bool) -> ValueResult where VM : VirtualInterface {
     // Identical to the above except we use `.reverse()`, and subtract the index from `len`
     let mut iter = a2.as_iter()?.reverse();
     let len = iter.len();
     if a1.is_function() {
         for (i, v) in iter.enumerate() {
-            let ret = vm.invoke_func1(a1.clone(), v)?;
+            let ret = vm.invoke_func1(a1.clone(), v.clone())?;
             if ret.as_bool() {
-                return Ok(Int((len - 1 - i) as i64))
+                return Ok(if return_index { Int((len - 1 - i) as i64) } else { v })
             }
         }
-        Ok(Int(-1))
-    } else {
+        Ok(if return_index { Int(-1) } else { Nil })
+    } else if return_index {
         Ok(Int(match iter.position(|v| v == a1) {
             Some(i) => (len - 1 - i) as i64,
             None => -1
         }))
-    }
-}
-
-pub fn find_count<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : VirtualInterface {
-    // Similar to `left_find()` and `right_find()` except with `count` instead of `position`
-    let iter = a2.as_iter()?;
-    if a1.is_function() {
-        let mut n: i64 = 0;
-        for v in iter {
-            let ret = vm.invoke_func1(a1.clone(), v)?;
-            if ret.as_bool() {
-                n += 1
-            }
-        }
-        Ok(Int(n))
     } else {
-        Ok(Int(iter.filter(|v| v == &a1).count() as i64))
+        Ok(iter.find(|v| v == &a1).unwrap_or(Nil))
     }
 }

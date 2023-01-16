@@ -186,18 +186,20 @@ Possible signatures:
 - `range(start: int, stop: int) -> list<int>`
 - `range(start: int, stop: int, step: int) -> list<int>`
 
-Returns a list of `int`, from `start` inclusive, to `stop` exclusive, counting by `step`. The default value of `start` is `0`, and `step` is 1 when not provided.
+Returns a range of `int`, from `start` inclusive, to `stop` exclusive, counting by `step`. The default value of `start` is `0`, and `step` is 1 when not provided.
 
-**Note:** When used in `for x in range()` loop, this function elides creating a `list<int>` and instead lazily populates `x`.
+**Note**: this function is lazy, and will produce elements when iterated through, i.e. by calling `list`.
 
 ### Enumerate `<T> enumerate(x: iterable<A>) -> list<vector<int, A>>`
 
 Returns a `list` of pairs, of index and value of each element in the iterable `x`.
 
+**Note**: this function is lazy, and will produce elements when iterated through, i.e. by calling `list`.
+
 **Example**
 
 ```
->>> enumerate('hey')
+>>> list(enumerate('hey'))
 [(0, 'h'), (1, 'e'), (2, 'y')]
 ```
 
@@ -374,29 +376,86 @@ Returns a list of all combinations of `n` elements from `it`. If `n` is larger t
 [(1, 2), (1, 3), (2, 3)]
 ```
 
-### Pop `<A> pop(it: list<A> | set<A> | heap<A> | dict<A, ?>) -> A`
+### Pop `<A> pop(it: iterable<A>) -> A`
 
-Pops a value from a collection. For `list`, this will be a value at the back of the collection. For a `heap`, this is the top of the heap, i.e. the minimum value.
+Pops a value from a collection. For `list`, this will be a value at the back of the collection. For a `heap`, this is the top of the heap, i.e. the minimum value. For a `dict`, this will return a key-value pair.
+
+### Pop Front `<A> pop_front(it: list<A>) -> A`
+
+Pops a value from the front of a list.
 
 ### Push `<A> push(x: A, it: list<A> | set<A> | heap<A>) -> iterable<A>`
 
-Pushes a value `x` into a collection `it`. For `list`, this will be a value at the back of the collection.
+Pushes a value `x` into a collection `it`. For `list`, this will be a value at the back of the collection. Returns the collection.
 
-### Last `<A> last(it: list<A> | set<A>) -> A`
+### Push Front `<A> push_front(x: A, it: list<A>) -> list<A>`
 
-Returns the last element of `it`.
+Pushes a value `x` into the front of a list. Returns the list.
 
-### Head `<A> head(it: list<A> | set<A> | heap<A>) -> A`
+### Insert `insert(...)`
 
-Returns the first element (for `list`, the front, for `heap`, the top, i.e. the minimum) of `it`.
+Possible signatures:
 
-### Init `<A> init(it: list<A> | set<A>) -> list<A>`
+- `<A> insert(index: int, x: A, it: list<A>) -> list<A>`
+- `<K, V> insert(key: K, value: V, it: dict<K, V>) -> dict<K, V>`
 
-Returns a list of all elements of `it` except the last.
+Inserts a value `x` into a collection `it`, either by key, or by value. For `list`, will return an error if the index is out of bounds of the list. Returns the collection.
 
-### Tail `<A> tail(it: list<A> | set<A>) -> list<A>`
+### Remove `remove(...)`
 
-Returns a list of all elements of `it` except the first.
+Possible signatures:
+
+- `<A> remove(index: int, it: list<A>) -> A`
+- `<A> remove(value: A, it: set<A>) -> bool`
+- `<K, V> remove(key: K, it: dict<K, V>) -> bool`
+
+Removes a value from a collection `it`, with the behavior differing by collection. For `list`, this removes a value by index. For `set`, this will remove by value, and return `true` if the value was present. For `dict`, this will remove an entry by key, and return `true` if the key was removed.
+
+### Clear `clear(it: iterable) -> iterable`
+
+Clears the contents of a collection. Returns the collection.
+
+### Find `<A> find(x: A | fn(A) -> bool, it: iterable<A>) -> A`
+
+If `x` is a function, this will find the first value from the left in `it` where a value returns `true` to the function. If `x` is a value, it will return the first value from the left in `it` where a value is equal to `x`.
+
+`find(x)` is equivalent to `find(==x)` if `x` is not a function.
+
+Returns `nil` if the value was not found.
+
+**Example**
+
+```
+>>> [1, 2, 3, 4, 5] . find(4)
+4
+>>> [1, 2, 3, 4, 5] . find(fn(i) -> i % 3 == 0)
+3
+```
+
+### Right Find `<A> rfind(x: A | fn(A) -> bool, it: iterable<A>) -> A`
+
+If `x` is a function, this will find the first value from the right in `it` where a value returns `true` to the function. If `x` is a value, it will return the first value from the right in `it` where a value is equal to `x`.
+
+`rfind(x)` is equivalent to `rfind(==x)` if `x` is not a function.
+
+Returns `nil` if the value was not found.
+
+**Example**
+
+```
+>>> [1, 2, 3, 4, 5] . rfind(4)
+4
+>>> [1, 2, 3, 4, 5] . rfind(fn(i) -> i % 3 == 0)
+3
+```
+
+### Index Of `<A> index_of(x: A | fn(A) -> bool, it: iterable<A>) -> int`
+
+Like `find`, but for an indexable collection, returns the index where the value was found, not the value itself.
+
+### Right Index Of `<A> rindex_of(x: A | fn(A) -> bool, it: iterable<A>) -> int`
+
+Like `rfind`, but for an indexable collection, returns the index where the value was found, not the value itself.
 
 ### (Int) Abs `abs(x: int) -> int`
 
@@ -468,43 +527,3 @@ Returns a set of all keys in `it`, maintaining insertion order.
 ### (Dict) Values `<K, V> values(it: dict<K, V>) -> list<V>`
 
 Returns a list of all values in `it`, maintaining insertion order.
-
-### Find `<A> find(x: A | fn(A) -> bool, it: iterable<A>) -> int`
-
-If `x` is a function, this will find the first index from the left in `it` where a value returns `true` to the function. If `x` is a value, it will return the first index from the left in `it` where a value is equal to `x`.
-
-`find(x)` is equivalent to `find(==x)` if `x` is not a function.
-
-Returns `-1` if the value was not found.
-
-**Example**
-
-```
->>> [1, 2, 3, 4, 5] . find(4)
-3
->>> [1, 2, 3, 4, 5] . find(fn(i) -> i % 3 == 0)
-2
-```
-
-### Right Find `<A> rfind(x: A | fn(A) -> bool, it: iterable<A>) -> int`
-
-If `x` is a function, this will find the first index from the right in `it` where a value returns `true` to the function. If `x` is a value, it will return the first index from the right in `it` where a value is equal to `x`.
-
-`rfind(x)` is equivalent to `rfind(==x)` if `x` is not a function.
-
-Returns `-1` if the value was not found.
-
-**Example**
-
-```
->>> [1, 2, 3, 4, 5] . rfind(4)
-3
->>> [1, 2, 3, 4, 5] . rfind(fn(i) -> i % 3 == 0)
-2
-```
-
-### Find Count `<A> findn(x: A | fn(A) -> bool, it: iterable<A>) -> int`
-
-If `x` is a function, this will count the number of occurrences in `it` where `x` returns `true`. If `x` is a value, it will return the number of instances of `x` in `it`.
-
-`. findn(f)` is equivalent to `. filter(f) . len` or `. filter(==f) . len`, depending on if `f` is a function.
