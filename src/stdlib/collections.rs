@@ -377,6 +377,9 @@ pub fn insert(a1: Value, a2: Value, a3: Value) -> ValueResult {
             if 0 <= index && index < v.unbox().len() as i64 {
                 v.unbox_mut().insert(index as usize, a2);
                 Ok(a3)
+            } else if index == len as i64 {
+                v.unbox_mut().push_back(a2);
+                Ok(a3)
             } else {
                 ValueErrorIndexOutOfBounds(index as i64, len).err()
             }
