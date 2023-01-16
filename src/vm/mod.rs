@@ -1290,7 +1290,10 @@ mod test {
     #[test] fn test_list_clear() { run_str("let x = [1, 2, 3] ; x . clear ; x . print", "[]\n"); }
     #[test] fn test_set_clear() { run_str("let x = {1, 2, 3} ; x . clear ; x . print", "{}\n"); }
     #[test] fn test_dict_clear() { run_str("let x = {1: 'a', 2: 'b', 3: 'c'} ; x . clear ; x . print", "{}\n"); }
-    #[test] fn test_dict_from_enumerate() { run_str("'hey' . enumerate . dict . print", "{0: 'h', 1: 'e', 2: 'y'}\n")}
+    #[test] fn test_dict_from_enumerate() { run_str("'hey' . enumerate . dict . print", "{0: 'h', 1: 'e', 2: 'y'}\n"); }
+    #[test] fn test_list_peek() { run_str("let x = [1, 2, 3], y = x . peek ; (x, y) . print", "([1, 2, 3], 1)\n"); }
+    #[test] fn test_set_peek() { run_str("let x = {1, 2, 3}, y = x . peek ; (x, y) . print", "({1, 2, 3}, 1)\n"); }
+    #[test] fn test_dict_peek() { run_str("let x = {1: 'a', 2: 'b', 3: 'c'}, y = x . peek ; (x, y) . print", "({1: 'a', 2: 'b', 3: 'c'}, (1, 'a'))\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }
