@@ -318,6 +318,7 @@ pub fn invoke<VM>(native: NativeFunction, nargs: u8, vm: &mut VM) -> ValueResult
     // <expr>, a1, <expr>                 : f(), f(a1)
     // <expr>, a1, <expr>, a2, <expr>     : f(), f(a1), f(a1, a2)
     //
+    // a1, <expr>, a2, <expr>             : f(a1), f(a1, a2)
     // a1, <expr>, a2, <expr>, a3, <expr> : f(a1), f(a1, a2), f(a1, a2, a3)
     //
     // dispatch_varargs!() handles the following signatures:
@@ -380,6 +381,22 @@ pub fn invoke<VM>(native: NativeFunction, nargs: u8, vm: &mut VM) -> ValueResult
                 1 => {
                     let $a1: Value = vm.pop();
                     let ret = $ret1;
+                    ret
+                },
+                _ => IncorrectNumberOfArguments(native, nargs, 1).err()
+            }
+        };
+        ($a1:ident, $ret1:expr, $a2:ident, $ret2:expr) => { // f(a1), f(a1, a2)
+            match nargs {
+                1 => {
+                    let $a1: Value = vm.pop();
+                    let ret = $ret1;
+                    ret
+                },
+                2 => {
+                    let $a2: Value = vm.pop();
+                    let $a1: Value = vm.pop();
+                    let ret = $ret2;
                     ret
                 },
                 _ => IncorrectNumberOfArguments(native, nargs, 1).err()
@@ -488,16 +505,7 @@ pub fn invoke<VM>(native: NativeFunction, nargs: u8, vm: &mut VM) -> ValueResult
             },
         }),
         Bool => dispatch!(a1, Ok(Value::Bool(a1.as_bool()))),
-        Int => dispatch!(a1, match &a1 {
-            Value::Nil => Ok(Value::Int(0)),
-            Value::Bool(b) => Ok(Value::Int(if *b { 1 } else { 0 })),
-            Value::Int(_) => Ok(a1),
-            Value::Str(s) => match s.parse::<i64>() {
-                Ok(i) => Ok(Value::Int(i)),
-                Err(_) => TypeErrorCannotConvertToInt(a1).err(),
-            },
-            _ => TypeErrorCannotConvertToInt(a1).err(),
-        }),
+        Int => dispatch!(a1, math::convert_to_int(a1, None), a2, math::convert_to_int(a1, Some(a2))),
         Str => dispatch!(Ok(Value::Str(Box::new(String::new()))), a1, Ok(Value::Str(Box::new(a1.to_str())))),
         List => dispatch_varargs!(Ok(Value::list(VecDeque::new())), an, Ok(Value::iter_list(an))),
         Set => dispatch_varargs!(Ok(Value::set(IndexSet::new())), an, Ok(Value::iter_set(an))),
