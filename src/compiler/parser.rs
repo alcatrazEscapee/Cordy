@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use crate::compiler::scanner::{ScanResult, ScanToken};
 use crate::compiler::CompileResult;
-use crate::stdlib::StdBinding;
+use crate::stdlib::NativeFunction;
 use crate::vm::opcode::Opcode;
 use crate::vm::value::FunctionImpl;
 use crate::{stdlib, trace};
@@ -12,7 +12,7 @@ use crate::misc::MaybeRc;
 use ScanToken::{*};
 use ParserErrorType::{*};
 use Opcode::{*};
-use StdBinding::{*};
+use NativeFunction::{*};
 
 pub const RULE_INCREMENTAL: ParseRule = |mut parser| parser.parse_incremental();
 pub const RULE_EXPRESSION: ParseRule = |mut parser| parser.parse_expression();
@@ -265,7 +265,7 @@ impl Local {
 
 #[derive(Eq, PartialEq, Debug, Clone)]
 enum VariableType {
-    NativeFunction(StdBinding),
+    NativeFunction(NativeFunction),
     Local(u16),
     Global(u16),
     TrueGlobal(u16),
@@ -1298,8 +1298,8 @@ impl Parser<'_> {
         // (*) => OperatorMul
         // So, if we peek ahead and see an operator, we know this is a expression of that sort and we need to handle accordingly
         // We *also* know that we will never see a binary operator begin an expression
-        let mut unary: Option<StdBinding> = None;
-        let mut binary: Option<StdBinding> = None;
+        let mut unary: Option<NativeFunction> = None;
+        let mut binary: Option<NativeFunction> = None;
         match self.peek() {
             // Unary operators *can* be present at the start of an expression, but we would see something after
             // So, we peek ahead again and see if the next token is a `)` - that's the only way you evaluate unary operators as functions
@@ -2023,7 +2023,7 @@ impl Parser<'_> {
     fn declare_local(self: &mut Self, name: String) -> Option<usize> {
 
         // Lookup the name as a binding - if it is, it will be denied as we don't allow shadowing global native functions
-        if let Some(_) = stdlib::lookup_named_binding(&name) {
+        if let Some(_) = stdlib::find_native_function(&name) {
             self.semantic_error(LocalVariableConflictWithNativeFunction(name.clone()));
             return None
         }
@@ -2118,7 +2118,7 @@ impl Parser<'_> {
     ///     - If we are in a >0 function depth, we *do* allow late binding globals.
     ///     - Note: we have to use a special opcode which checks if the global actually exists first. *And*, we need to fix it later if the global does not end up being bound by the end of compilation.
     fn resolve_identifier(self: &mut Self, name: &String) -> VariableType {
-        if let Some(b) = stdlib::lookup_named_binding(name) {
+        if let Some(b) = stdlib::find_native_function(name) {
             return VariableType::NativeFunction(b);
         }
 
@@ -2493,11 +2493,11 @@ mod tests {
     use crate::compiler::{parser, CompileResult, scanner};
     use crate::compiler::scanner::ScanResult;
     use crate::reporting;
-    use crate::stdlib::StdBinding;
+    use crate::stdlib::NativeFunction;
     use crate::vm::opcode::Opcode;
     use crate::trace;
 
-    use StdBinding::{Print, ReadText, OperatorAdd, OperatorDiv, OperatorMul};
+    use NativeFunction::{Print, ReadText, OperatorAdd, OperatorDiv, OperatorMul};
     use Opcode::{*};
 
 
@@ -2530,7 +2530,7 @@ mod tests {
     #[test] fn test_function_call_binary_op_precedence() { run_expr("print ( 1 ) + ( 2 ( 3 ) )", vec![NativeFunction(Print), Int(1), OpFuncEval(1), Int(2), Int(3), OpFuncEval(1), OpAdd]); }
     #[test] fn test_function_call_parens_1() { run_expr("print . read_text (1 + 3) (5)", vec![NativeFunction(Print), NativeFunction(ReadText), Int(1), Int(3), OpAdd, OpFuncEval(1), Int(5), OpFuncEval(1), Swap, OpFuncEval(1)]); }
     #[test] fn test_function_call_parens_2() { run_expr("( print . read_text (1 + 3) ) (5)", vec![NativeFunction(Print), NativeFunction(ReadText), Int(1), Int(3), OpAdd, OpFuncEval(1), Swap, OpFuncEval(1), Int(5), OpFuncEval(1)]); }
-    #[test] fn test_function_composition_with_is() { run_expr("'123' . int is int . print", vec![Str(1), NativeFunction(StdBinding::Int), NativeFunction(StdBinding::Int), OpIs, Swap, OpFuncEval(1), NativeFunction(Print), Swap, OpFuncEval(1)]); }
+    #[test] fn test_function_composition_with_is() { run_expr("'123' . int is int . print", vec![Str(1), NativeFunction(NativeFunction::Int), NativeFunction(NativeFunction::Int), OpIs, Swap, OpFuncEval(1), NativeFunction(Print), Swap, OpFuncEval(1)]); }
     #[test] fn test_and() { run_expr("1 < 2 and 3 < 4", vec![Int(1), Int(2), OpLessThan, JumpIfFalse(8), Pop, Int(3), Int(4), OpLessThan]); }
     #[test] fn test_or() { run_expr("1 < 2 or 3 < 4", vec![Int(1), Int(2), OpLessThan, JumpIfTrue(8), Pop, Int(3), Int(4), OpLessThan]); }
     #[test] fn test_precedence_1() { run_expr("1 . 2 & 3 > 4", vec![Int(1), Int(2), Int(3), OpBitwiseAnd, Swap, OpFuncEval(1), Int(4), OpGreaterThan]); }

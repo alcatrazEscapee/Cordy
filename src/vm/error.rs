@@ -1,7 +1,7 @@
 use std::rc::Rc;
 
 use crate::reporting::ProvidesLineNumber;
-use crate::stdlib::StdBinding;
+use crate::stdlib::NativeFunction;
 use crate::vm::CallFrame;
 use crate::vm::opcode::Opcode;
 use crate::vm::value::{FunctionImpl, Value};
@@ -17,8 +17,8 @@ pub enum RuntimeError {
     ValueIsNotFunctionEvaluable(Value),
 
     IncorrectNumberOfFunctionArguments(FunctionImpl, u8),
-    IncorrectNumberOfArguments(StdBinding, u8, u8),
-    IncorrectNumberOfArgumentsVariadicAtLeastOne(StdBinding),
+    IncorrectNumberOfArguments(NativeFunction, u8, u8),
+    IncorrectNumberOfArgumentsVariadicAtLeastOne(NativeFunction),
 
     ValueErrorIndexOutOfBounds(i64, usize),
     ValueErrorStepCannotBeZero,

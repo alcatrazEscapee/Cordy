@@ -3,8 +3,7 @@ use std::rc::Rc;
 use crate::compiler::parser::{ParserError, ParserErrorType};
 use crate::compiler::CompileResult;
 use crate::compiler::scanner::{ScanError, ScanErrorType, ScanToken};
-use crate::stdlib;
-use crate::stdlib::StdBinding;
+use crate::stdlib::NativeFunction;
 use crate::vm::error::{RuntimeError, DetailRuntimeError, StackTraceFrame};
 use crate::vm::opcode::Opcode;
 use crate::vm::value::{FunctionImpl, Value};
@@ -186,9 +185,9 @@ impl AsError for Opcode {
     }
 }
 
-impl AsError for StdBinding {
+impl AsError for NativeFunction {
     fn format_error(self: &Self) -> String {
-        String::from(stdlib::lookup_name(*self))
+        String::from(self.name())
     }
 }
 

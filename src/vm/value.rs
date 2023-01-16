@@ -9,8 +9,7 @@ use std::rc::Rc;
 use std::str::Chars;
 use indexmap::{IndexMap, IndexSet};
 
-use crate::stdlib;
-use crate::stdlib::StdBinding;
+use crate::stdlib::NativeFunction;
 use crate::vm::error::RuntimeError;
 
 use Value::{*};
@@ -53,8 +52,8 @@ pub enum Value {
     // Functions
     Function(Rc<FunctionImpl>),
     PartialFunction(Box<PartialFunctionImpl>),
-    NativeFunction(StdBinding),
-    PartialNativeFunction(StdBinding, Box<Vec<Box<Value>>>),
+    NativeFunction(NativeFunction),
+    PartialNativeFunction(NativeFunction, Box<Vec<Box<Value>>>),
     Closure(Box<ClosureImpl>),
 }
 
@@ -85,8 +84,8 @@ impl Value {
             Str(s) => *s.clone(),
             Function(f) => f.name.clone(),
             PartialFunction(f) => f.func.to_str(),
-            NativeFunction(b) => String::from(stdlib::lookup_name(*b)),
-            PartialNativeFunction(b, _) => String::from(stdlib::lookup_name(*b)),
+            NativeFunction(b) => String::from(b.name()),
+            PartialNativeFunction(b, _) => String::from(b.name()),
             _ => self.to_repr_str(),
         }
     }
@@ -115,8 +114,8 @@ impl Value {
 
             Function(f) => (*f).as_ref().borrow().as_str(),
             PartialFunction(f) => (*f).as_ref().borrow().func.to_str(),
-            NativeFunction(b) => format!("fn {}()", stdlib::lookup_name(*b)),
-            PartialNativeFunction(b, _) => format!("fn {}()", stdlib::lookup_name(*b)),
+            NativeFunction(b) => format!("fn {}({})", b.name(), b.args()),
+            PartialNativeFunction(b, _) => format!("fn {}({})", b.name(), b.args()),
             Closure(c) => (*c).func.as_ref().borrow().as_str(),
         }
     }
@@ -882,7 +881,7 @@ mod test {
     use std::collections::VecDeque;
     use std::rc::Rc;
     use indexmap::{IndexMap, IndexSet};
-    use crate::stdlib::StdBinding;
+    use crate::stdlib::NativeFunction;
     use crate::vm::error::RuntimeError;
     use crate::vm::value::{FunctionImpl, RangeImpl, Value};
 
@@ -917,8 +916,8 @@ mod test {
             Value::Enumerate(Box::new(Value::vector(vec![]))),
             Value::Function(rc.clone()),
             Value::partial(Value::Function(rc.clone()), vec![]),
-            Value::NativeFunction(StdBinding::Void),
-            Value::PartialNativeFunction(StdBinding::Void, Box::new(vec![])),
+            Value::NativeFunction(NativeFunction::Print),
+            Value::PartialNativeFunction(NativeFunction::Print, Box::new(vec![])),
             Value::closure(rc.clone())
         ]
     }

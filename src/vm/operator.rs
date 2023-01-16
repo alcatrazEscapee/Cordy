@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 use crate::stdlib;
-use crate::stdlib::StdBinding;
+use crate::stdlib::NativeFunction;
 use crate::vm::error::RuntimeError;
 use crate::vm::value::{Mut, Value};
 
@@ -94,14 +94,14 @@ pub fn binary_is(a1: Value, a2: Value) -> ValueResult {
         Value::Nil => Ok(Value::Bool(a1.is_nil())),
         Value::NativeFunction(b) => {
             let ret: bool = match b {
-                StdBinding::Bool => a1.is_bool(),
-                StdBinding::Int => a1.is_int(),
-                StdBinding::Str => a1.is_str(),
-                StdBinding::Function => a1.is_function(),
-                StdBinding::List => a1.is_list(),
-                StdBinding::Set => a1.is_set(),
-                StdBinding::Dict => a1.is_dict(),
-                StdBinding::Vector => a1.is_vector(),
+                NativeFunction::Bool => a1.is_bool(),
+                NativeFunction::Int => a1.is_int(),
+                NativeFunction::Str => a1.is_str(),
+                NativeFunction::Function => a1.is_function(),
+                NativeFunction::List => a1.is_list(),
+                NativeFunction::Set => a1.is_set(),
+                NativeFunction::Dict => a1.is_dict(),
+                NativeFunction::Vector => a1.is_vector(),
                 _ => return TypeErrorBinaryIs(a1, Value::NativeFunction(b)).err()
             };
             Ok(Value::Bool(ret))

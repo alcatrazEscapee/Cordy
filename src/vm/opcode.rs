@@ -1,4 +1,4 @@
-use crate::stdlib::StdBinding;
+use crate::stdlib::NativeFunction;
 
 #[derive(Eq, PartialEq, Debug, Clone, Copy)]
 pub enum Opcode {
@@ -59,7 +59,7 @@ pub enum Opcode {
     Int(u16),
     Str(u16),
     Function(u16),
-    NativeFunction(StdBinding),
+    NativeFunction(NativeFunction),
     // Note that `List`, `Vector`, `Set`, `Dict`, are different from invoking native functions
     // 1. They don't require a function evaluation and resolution (efficient)
     // 2. They allow zero and one element cases to be handled exactly as usual (i.e. `list('no')` is `['no'], not ['n', 'o'])
@@ -74,8 +74,6 @@ pub enum Opcode {
     CheckLengthGreaterThan(u16),
     /// Takes an `Int` constant, and checks that the top of the stack is an iterable with length = the provided constant
     CheckLengthEqualTo(u16),
-    /// Checks that the top of the stack is nonzero
-    CheckNonZero,
 
     /// Opcode for function evaluation (either with `()` or with `.`). The `u8` parameter is the number of arguments to the function.
     ///
