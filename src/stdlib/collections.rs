@@ -316,11 +316,25 @@ pub fn reduce<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : V
     Ok(acc)
 }
 
+pub fn peek(a1: Value) -> ValueResult {
+    match match &a1 {
+        List(v) => v.unbox().front().cloned(),
+        Set(v) => v.unbox().set.first().cloned(),
+        Dict(v) => v.unbox().dict.first().map(|u| Value::vector(vec![u.0.clone(), u.1.clone()])),
+        Heap(v) => v.unbox().heap.peek().map(|u| u.clone().0),
+        Vector(v) => v.unbox().first().cloned(),
+        _ => return TypeErrorArgMustBeIterable(a1).err(),
+    } {
+        Some(v) => Ok(v),
+        None => ValueErrorValueMustBeNonEmpty.err(),
+    }
+}
+
 pub fn pop(a1: Value) -> ValueResult {
     match match &a1 {
         List(v) => v.unbox_mut().pop_back(),
         Set(v) => v.unbox_mut().set.pop(),
-        Dict(v) => v.unbox_mut().dict.pop().map(|(k, v)| Value::vector(vec![k, v])),
+        Dict(v) => v.unbox_mut().dict.pop().map(|u| Value::vector(vec![u.0, u.1])),
         Heap(v) => v.unbox_mut().heap.pop().map(|t| t.0),
         _ => return TypeErrorArgMustBeIterable(a1).err()
     } {

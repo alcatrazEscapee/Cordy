@@ -113,6 +113,7 @@ pub enum NativeFunction {
     Any,
     All,
 
+    Peek,
     Pop, // Remove value at end
     PopFront, // Remove value at front
     Push, // Insert value at end
@@ -270,6 +271,7 @@ fn load_native_functions() -> Vec<NativeFunctionInfo> {
     declare!(Any, "any", "...");
     declare!(All, "all", "...");
 
+    declare!(Peek, "peek", "collection", 1); // Peek first value
     declare!(Pop, "pop", "collection", 1); // Remove value at end
     declare!(PopFront, "pop_front", "collection", 1); // Remove value at front
     declare!(Push, "push", "value, collection", 2); // Insert value at end
@@ -574,6 +576,7 @@ pub fn invoke<VM>(native: NativeFunction, nargs: u8, vm: &mut VM) -> ValueResult
         Any => dispatch!(a1, a2, collections::any(vm, a1, a2)),
         All => dispatch!(a1, a2, collections::all(vm, a1, a2)),
 
+        Peek => dispatch!(a1, collections::peek(a1)),
         Pop => dispatch!(a1, collections::pop(a1)),
         PopFront => dispatch!(a1, collections::pop_front(a1)),
         Push => dispatch!(a1, a2, collections::push(a1, a2)),
