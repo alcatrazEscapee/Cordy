@@ -1,3 +1,5 @@
+use std::cell::Cell;
+use std::collections::HashMap;
 use std::io::{BufRead, Write};
 use std::rc::Rc;
 use itertools::Itertools;
@@ -8,7 +10,7 @@ use crate::compiler::{CompileResult, IncrementalCompileResult};
 use crate::compiler::parser::Locals;
 use crate::stdlib::NativeFunction;
 use crate::vm::opcode::Opcode;
-use crate::vm::value::Value;
+use crate::vm::value::{UpValue, Value};
 use crate::vm::value::{FunctionImpl, PartialFunctionImpl};
 
 use Opcode::{*};
@@ -29,6 +31,7 @@ pub struct VirtualMachine<R, W> {
     pub stack: Vec<Value>,
     pub call_stack: Vec<CallFrame>,
     global_count: usize,
+    open_upvalues: HashMap<usize, Rc<Cell<UpValue>>>,
 
     strings: Vec<String>,
     globals: Vec<String>,
@@ -106,6 +109,7 @@ impl<R, W> VirtualMachine<R, W> where
             stack: Vec::with_capacity(256), // Just guesses, not hard limits
             call_stack: vec![CallFrame { return_ip: 0, frame_pointer: 0 }],
             global_count: 0,
+            open_upvalues: HashMap::new(),
             strings: result.strings,
             globals: result.globals,
             constants: result.constants,
@@ -311,6 +315,49 @@ impl<R, W> VirtualMachine<R, W> where
                     return ValueErrorVariableNotDeclaredYet(self.globals[local].clone()).err()
                 }
             },
+            PushUpValue(index) => {
+                let fp = self.frame_pointer() - 1;
+                let upvalue: Rc<Cell<UpValue>> = match &mut self.stack[fp] {
+                    Value::Closure(c) => c.get_environment(index as usize),
+                    _ => panic!("Malformed bytecode"),
+                };
+
+                // Reasons why this is convoluted:
+                // - We cannot use `.get()` (as it requires `Value` to be `Copy`)
+                // - We cannot use `get_mut()` (as even if we have `&mut ClosureImpl`, unboxing the `Rc<>` only gives us `&Cell`)
+                let unboxed: UpValue = (*upvalue).replace(UpValue::Open(0));
+                (*upvalue).replace(unboxed.clone());
+
+                let value: Value = match unboxed {
+                    UpValue::Open(index) => self.stack[index].clone(),
+                    UpValue::Closed(value) => value,
+                };
+                trace::trace_interpreter!("push upvalue {} : {}", index, value.as_debug_str());
+                self.push(value);
+            },
+            StoreUpValue(index) => {
+                trace::trace_interpreter!("store upvalue {} : {} -> {}", index, self.stack.last().unwrap().as_debug_str(), self.stack[index as usize].as_debug_str());
+                let fp = self.frame_pointer() - 1;
+                let value = self.peek(0).clone();
+                let upvalue: Rc<Cell<UpValue>> = match &mut self.stack[fp] {
+                    Value::Closure(c) => c.get_environment(index as usize),
+                    _ => panic!("Malformed bytecode"),
+                };
+
+                // Reasons why this is convoluted:
+                // - We cannot use `.get()` (as it requires `Value` to be `Copy`)
+                // - We cannot use `get_mut()` (as even if we have `&mut ClosureImpl`, unboxing the `Rc<>` only gives us `&Cell`)
+                let unboxed: UpValue = (*upvalue).replace(UpValue::Open(0));
+                let modified: UpValue = match unboxed {
+                    UpValue::Open(stack_index) => {
+                        let ret = UpValue::Open(stack_index); // And return the upvalue, unmodified
+                        self.stack[stack_index] = value; // Mutate on the stack
+                        ret
+                    },
+                    UpValue::Closed(_) => UpValue::Closed(value), // Mutate on the heap
+                };
+                (*upvalue).replace(modified);
+            },
 
             StoreArray => {
                 trace::trace_interpreter!("store array array = {}, index = {}, value = {}", self.stack[self.stack.len() - 3].as_debug_str(), self.stack[self.stack.len() - 2].as_debug_str(), self.stack.last().unwrap().as_debug_str());
@@ -329,14 +376,6 @@ impl<R, W> VirtualMachine<R, W> where
                 }
             },
 
-            PushUpValue(index, _) => {
-                let value: Value = match &self.stack[self.frame_pointer() - 1] {
-                    Value::Closure(c) => c.environment[index as usize].clone(),
-                    _ => panic!("Malformed bytecode"),
-                };
-                self.push(value);
-            },
-
             IncGlobalCount => {
                 trace::trace_interpreter!("inc global count -> {}", self.global_count + 1);
                 self.global_count += 1;
@@ -351,26 +390,43 @@ impl<R, W> VirtualMachine<R, W> where
             },
 
             CloseLocal(index) => {
-                trace::trace_interpreter!("close local {} into {}", index, self.stack.last().unwrap().as_debug_str());
                 let local: usize = self.frame_pointer() + index as usize;
-                let value: Value = self.stack[local].clone();
+                trace::trace_interpreter!("close local {} -> stack[{}] = {} into {}", index, local, self.stack[local].as_debug_str(), self.stack.last().unwrap().as_debug_str());
+                let upvalue: Rc<Cell<UpValue>> = self.open_upvalues.entry(local)
+                    .or_insert_with(|| Rc::new(Cell::new(UpValue::Open(local))))
+                    .clone();
                 match self.stack.last_mut().unwrap() {
-                    Value::Closure(c) => c.environment.push(value),
+                    Value::Closure(c) => c.push(upvalue),
                     _ => panic!("Malformed bytecode"),
                 }
             },
             CloseUpValue(index) => {
                 trace::trace_interpreter!("close upvalue {} into {} from {}", index, self.stack.last().unwrap().as_debug_str(), &self.stack[self.frame_pointer() - 1].as_debug_str());
+                let fp = self.frame_pointer() - 1;
                 let index: usize = index as usize;
-                let value: Value = match &self.stack[self.frame_pointer() - 1] {
-                    Value::Closure(c) => c.environment[index].clone(),
+                let upvalue: Rc<Cell<UpValue>> = match &mut self.stack[fp] {
+                    Value::Closure(c) => c.get_environment(index),
                     _ => panic!("Malformed bytecode"),
                 };
 
                 match self.stack.last_mut().unwrap() {
-                    Value::Closure(c) => c.environment.push(value),
+                    Value::Closure(c) => c.push(upvalue.clone()),
                     _ => panic!("Malformed bytecode"),
                 }
+            },
+
+            LiftUpValue(index) => {
+                trace::trace_interpreter!("lift upvalue {}", self.stack.last().unwrap().as_debug_str());
+                let index = self.frame_pointer() + index as usize;
+                let value: Value = self.stack[index].clone();
+                let upvalue = self.open_upvalues.remove(&index).unwrap(); // `.unwrap()` is safe, as the upvalue should always exist by now
+
+                let unboxed: UpValue = (*upvalue).replace(UpValue::Open(0));
+                let closed: UpValue = match unboxed {
+                    UpValue::Open(_) => UpValue::Closed(value),
+                    UpValue::Closed(_) => panic!("Tried to life an already closed upvalue"),
+                };
+                (*upvalue).replace(closed);
             },
 
             InitIterable => {
@@ -968,6 +1024,11 @@ mod test {
     #[test] fn test_closures_05() { run_str("{ fn foo() { 'hello' . print } ; { fn bar(a) { foo() } bar(1) } }", "hello\n"); }
     #[test] fn test_closures_06() { run_str("{ let x = 'hello' ; { fn foo() { x . print } foo() } }", "hello\n"); }
     #[test] fn test_closures_07() { run_str("{ let x = 'hello' ; { { fn foo() { x . print } foo() } } }", "hello\n"); }
+    #[test] fn test_closures_08() { run_str("fn foo() { let x = 'before' ; (fn() -> x = 'hello')() ; x } foo() . print", "hello\n"); }
+    #[test] fn test_closures_09() { run_str("fn foo() { let x = 'before' ; (fn() -> x = 'hello')() ; (fn() -> x = 'goodbye')() ; x } foo() . print", "goodbye\n"); }
+    #[test] fn test_closures_10() { run_str("fn foo() { let x = 'before' ; (fn() -> x = 'hello')() ; let y = (fn() -> x)() ; y } foo() . print", "hello\n"); }
+    #[test] fn test_closures_11() { run_str("fn foo() { let x = 'hello' ; (fn() -> x += ' world')() ; x } foo() . print", "hello world\n"); }
+    #[test] fn test_closures_12() { run_str("fn foo() { let x = 'hello' ; (fn() -> x += ' world')() ; (fn() -> x)() } foo() . print", "hello world\n"); }
     #[test] fn test_function_return_1() { run_str("fn foo() { return 3 } foo() . print", "3\n"); }
     #[test] fn test_function_return_2() { run_str("fn foo() { let x = 3; return x } foo() . print", "3\n"); }
     #[test] fn test_function_return_3() { run_str("fn foo() { let x = 3; { return x } } foo() . print", "3\n"); }
@@ -1299,10 +1360,24 @@ mod test {
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }
     #[test] fn test_append_large_lists() { run("append_large_lists"); }
     #[test] fn test_closure_instead_of_global_variable() { run("closure_instead_of_global_variable"); }
+    #[test] fn test_closure_of_loop_variable() { run("closure_of_loop_variable"); }
     #[test] fn test_closure_of_partial_function() { run("closure_of_partial_function"); }
     #[test] fn test_closure_with_non_unique_values() { run("closure_with_non_unique_values"); }
     #[test] fn test_closure_without_stack_semantics() { run("closure_without_stack_semantics"); }
     #[test] fn test_closures_are_poor_mans_classes() { run("closures_are_poor_mans_classes"); }
+    #[test] fn test_closures_inner_multiple_functions_read_stack() { run("closures_inner_multiple_functions_read_stack"); }
+    #[test] fn test_closures_inner_multiple_functions_read_stack_and_heap() { run("closures_inner_multiple_functions_read_stack_and_heap"); }
+    #[test] fn test_closures_inner_multiple_variables_read_heap() { run("closures_inner_multiple_variables_read_heap"); }
+    #[test] fn test_closures_inner_multiple_variables_read_stack() { run("closures_inner_multiple_variables_read_stack"); }
+    #[test] fn test_closures_inner_write_heap_read_heap() { run("closures_inner_write_heap_read_heap"); }
+    #[test] fn test_closures_inner_write_stack_read_heap() { run("closures_inner_write_stack_read_heap"); }
+    #[test] fn test_closures_inner_write_stack_read_return() { run("closures_inner_write_stack_read_return"); }
+    #[test] fn test_closures_inner_write_stack_read_stack() { run("closures_inner_write_stack_read_stack"); }
+    #[test] fn test_closures_inner_read_heap() { run("closures_inner_read_heap"); }
+    #[test] fn test_closures_inner_read_stack() { run("closures_inner_read_stack"); }
+    #[test] fn test_closures_nested_inner_read_heap() { run("closures_nested_inner_read_heap"); }
+    #[test] fn test_closures_nested_inner_read_heap_x2() { run("closures_nested_inner_read_heap_x2"); }
+    #[test] fn test_closures_nested_inner_read_stack() { run("closures_nested_inner_read_stack"); }
     #[test] fn test_fibonacci() { run("fibonacci"); }
     #[test] fn test_for_loop_modify_loop_variable() { run("for_loop_modify_loop_variable"); }
     #[test] fn test_for_loop_range_map() { run("for_loop_range_map"); }

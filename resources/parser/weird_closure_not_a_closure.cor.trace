@@ -1,0 +1,26 @@
+L2: 0000 Nil
+    0001 Nil
+L3: 0002 Function(0) -> FunctionImpl { head: 4, tail: 7, nargs: 0, name: "trigger", args: [] }
+    0003 Jump(8)
+    0004 PushUpValue(0)
+    0005 PushUpValue(1)
+    0006 Vector(2)
+    0007 Return
+    0008 Closure
+    0009 CloseLocal(0)
+    0010 CloseLocal(1)
+L4: 0011 LiftUpValue(1)
+    0012 LiftUpValue(0)
+    0013 PopN(3)
+    0014 Jump(19)
+    0015 LiftUpValue(1)
+    0016 LiftUpValue(0)
+    0017 PopN(3)
+L5: 0018 Jump(0)
+L7: 0019 IncGlobalCount
+    0020 Function(1) -> FunctionImpl { head: 22, tail: 23, nargs: 0, name: "bomb", args: [] }
+    0021 Jump(24)
+    0022 Nil
+    0023 Return
+    0024 Pop
+    0025 Exit

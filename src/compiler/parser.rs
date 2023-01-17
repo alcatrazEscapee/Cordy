@@ -233,16 +233,22 @@ impl Loop {
 
 #[derive(Eq, PartialEq, Debug, Clone)]
 struct Local {
+    /// The local variable name
     name: String,
+    /// The index of the local variable within it's `Locals` array.
+    /// - At runtime, this matches the stack offset of this variable.
+    /// - At compile time, this is used to index into `Parser.locals`
     index: u16,
     scope_depth: u16,
     function_depth: u16,
     initialized: bool,
+    /// `true` if this local variable has been captured as an `UpValue`. This means when it is popped, the corresponding `UpValue` must also be popped.
+    captured: bool,
 }
 
 impl Local {
     fn new(name: String, index: usize, scope_depth: u16, function_depth: u16) -> Local {
-        Local { name, index: index as u16, scope_depth, function_depth, initialized: false }
+        Local { name, index: index as u16, scope_depth, function_depth, initialized: false, captured: false }
     }
 
     /// Sets this local as `initialized`, meaning it is pushed onto the stack and can be referred to in expressions.
@@ -270,7 +276,7 @@ enum VariableType {
     Global(u16),
     TrueGlobal(u16),
     LateBoundGlobal(LateBoundGlobal),
-    UpValue(u16, bool), // index, is_local
+    UpValue(u16),
     None,
 }
 
@@ -296,7 +302,7 @@ enum VariableBinding {
 
 impl VariableBinding {
 
-    /// Initializes all local variables used in this pattern, or named variable binding
+    /// Initializes all local variables used in this pattern, or named variable binding.
     fn init_all_locals(self: &Self, parser: &mut Parser) {
         match self {
             VariableBinding::Pattern(it) => it.init_all_locals(parser),
@@ -504,7 +510,7 @@ impl Parser<'_> {
         trace::trace_parser!("rule <root>");
         self.parse_statements();
         self.push_delayed_pop();
-        self.pop_locals_in_current_scope_depth(true); // Pop top level 'local' variables
+        self.pop_locals(None, true, true, true); // Pop top level 'local' variables
         self.teardown();
     }
 
@@ -574,7 +580,7 @@ impl Parser<'_> {
         self.prevent_expression_statement = false;
         self.parse_statements();
         self.prevent_expression_statement = false;
-        self.pop_locals_in_current_scope_depth(true);
+        self.pop_locals(Some(self.scope_depth), true, true, true);
         self.scope_depth -= 1;
         self.expect_resync(CloseBrace);
     }
@@ -728,21 +734,22 @@ impl Parser<'_> {
             self.functions[func_id as usize].unbox_mut().tail = self.next_opcode() as usize;
         }
 
+        // Since `Return` cleans up all function locals, we just discard them from the parser without emitting any `Pop` tokens.
+        // But, we still need to do this first, as we need to ensure `LiftUpValue` opcodes are still emitted before the `Return`
+        // We do this twice, once for function locals, and once for function parameters (since they live in their own scope)
+        self.prevent_expression_statement = false;
+        self.pop_locals(Some(self.scope_depth), true, false, true);
+        self.scope_depth -= 1;
+
+        self.pop_locals(Some(self.scope_depth), true, false, true);
+        self.locals.pop().unwrap();
+        self.function_depth -= 1;
+        self.scope_depth -= 1;
+
         self.push(Return); // Returns the last expression in the function
 
         let end: u16 = self.next_opcode(); // Repair the jump, to skip the function body itself
         self.output[jump] = Jump(end);
-
-        // Since `Return` cleans up all function locals, we just discard them from the parser without emitting any `Pop` tokens.
-        // We do this twice, once for function locals, and once for function parameters (since they live in their own scope)
-        self.prevent_expression_statement = false;
-        self.pop_locals_in_current_scope_depth(false);
-        self.scope_depth -= 1;
-
-        self.pop_locals_in_current_scope_depth(false);
-        self.locals.pop().unwrap();
-        self.function_depth -= 1;
-        self.scope_depth -= 1;
 
         // If this function has captured any upvalues, we need to emit the correct tokens for them now, including wrapping the function in a closure
         if !self.current_locals().upvalues.is_empty() {
@@ -777,7 +784,8 @@ impl Parser<'_> {
             }
         }
         // As the VM cleans up it's own call stack properly, by discarding everything above the function's frame when exiting,
-        // we don't need to clean up the call stack ourselves! And that's brilliant!
+        // the only thing we need to do here is make sure we emit `LiftUpValue` opcodes.
+        self.pop_locals(None, false, false, true);
         self.push(Return);
     }
 
@@ -950,13 +958,19 @@ impl Parser<'_> {
         // So, we jump to the top of the loop, where we test/increment
         self.parse_block_statement();
         self.push_delayed_pop();
+
+        // We want the variables declared in a `for` loop to be somewhat unique - if they get captured, we want them to be closed over each iteration of the loop
+        // This effectively means there's a new heap-allocated variable for each iteration of the loop.
+        // In order to do this, we just need to emit the proper `LiftUpValue` opcodes each iteration of the loop
+        self.pop_locals(Some(self.scope_depth), false, false, true);
+
         self.push(Jump(jump));
 
         // Fix the jump
         self.output[jump_if_false_pop] = JumpIfFalsePop(self.next_opcode());
 
-        // Cleanup the `for` loop locals
-        self.pop_locals_in_current_scope_depth(true);
+        // Cleanup the `for` loop locals, but don't emit lifts as we do them per-iteration.
+        self.pop_locals(Some(self.scope_depth), true, true, false);
         self.scope_depth -= 1;
     }
 
@@ -965,8 +979,8 @@ impl Parser<'_> {
         self.push_delayed_pop();
         self.advance();
         match self.current_locals().loops.last() {
-            Some(_) => {
-                self.pop_locals_in_current_loop();
+            Some(loop_stmt) => {
+                self.pop_locals(Some(loop_stmt.scope_depth + 1), false, true, true);
                 let jump = self.reserve();
                 self.current_locals_mut().loops.last_mut().unwrap().break_statements.push(jump as u16);
             },
@@ -981,7 +995,7 @@ impl Parser<'_> {
         match self.current_locals().loops.last() {
             Some(loop_stmt) => {
                 let jump_to: u16 = loop_stmt.start_index;
-                self.pop_locals_in_current_loop();
+                self.pop_locals(Some(loop_stmt.scope_depth + 1), false, true, true);
                 self.push(Jump(jump_to));
             },
             None => self.semantic_error(ContinueOutsideOfLoop),
@@ -1258,7 +1272,7 @@ impl Parser<'_> {
                         self.late_bound_globals.push(global);
                         self.push(Noop) // Push `Noop` for now, fix it later
                     },
-                    VariableType::UpValue(index, is_local) => self.push(PushUpValue(index, is_local)),
+                    VariableType::UpValue(index) => self.push(PushUpValue(index)),
                     _ => self.semantic_error(UndeclaredIdentifier(string))
                 };
             },
@@ -1930,10 +1944,12 @@ impl Parser<'_> {
             // We have to handle the left hand side, as we may need to rewrite the most recent tokens based on what we just parsed.
             // Valid LHS expressions for a direct assignment, and their translations are:
             // PushLocal(a)                => pop, and emit a StoreLocal(a) instead
+            // PushUpValue(a)              => pop, and emit a StoreUpValue(a) instead
             // <expr> <expr> OpIndex       => pop, and emit a StoreArray instead
             // <expr> <expr> OpPropertyGet => pop, and emit a StoreProperty instead
             // If we have a assignment-expression operator, like `+=`, then we need to do it slightly differently
             // PushLocal(a)                => parse <expr>, and emit <op>, StoreLocal(a)
+            // PushUpValue(a)              => parse <expr>, and emit <op>, StoreUpValue(a)
             // <expr> <expr> OpIndex       => pop, emit OpIndexPeek, parse <expr>, then emit <op>, StoreArray
             // <expr> <expr> OpPropertyGet => pop, emit OpPropertyGetPeek, parse <expr>, then emit <op>, StoreProperty
             //
@@ -1945,6 +1961,11 @@ impl Parser<'_> {
                         self.pop();
                         self.parse_expr_10();
                         self.push(StoreLocal(id));
+                    },
+                    Some(PushUpValue(id)) => {
+                        self.pop();
+                        self.parse_expr_10();
+                        self.push(StoreUpValue(id));
                     },
                     Some(PushGlobal(id, local)) => {
                         self.pop();
@@ -1966,6 +1987,11 @@ impl Parser<'_> {
                         self.parse_expr_10();
                         self.push(op);
                         self.push(StoreLocal(id));
+                    },
+                    Some(PushUpValue(id)) => {
+                        self.parse_expr_10();
+                        self.push(op);
+                        self.push(StoreUpValue(id));
                     },
                     Some(PushGlobal(id, is_local)) => {
                         self.parse_expr_10();
@@ -2073,30 +2099,95 @@ impl Parser<'_> {
     }
 
     /// Pops all locals declared in the current scope, *before* decrementing the scope depth
-    /// Also emits the relevant `OpPop` opcodes to the output token stream.
-    fn pop_locals_in_current_scope_depth(self: &mut Self, emit_pop_token: bool) {
-        let local_count = self.current_locals().locals.len();
+    /// Emits the relevant `Pop` opcodes to the output token stream if `emit_pop_token`, and always emits `LiftUpValue` tokens.
+    fn pop_locals_in_current_scope(self: &mut Self, emit_pop_token: bool) {
         let scope_depth = self.scope_depth;
-        self.current_locals_mut().locals.retain(|e| e.scope_depth != scope_depth);
-        if emit_pop_token {
-            self.push_pop((local_count - self.current_locals().locals.len()) as u16);
-        }
-    }
+        let mut pops: u16 = 0;
+        while let Some(local) = self.current_locals_mut().locals.last() {
+            if local.scope_depth == scope_depth {
+                let local_index: u16 = local.index;
+                if local.captured {
+                    // Emit a special `PopUpValue` token, as we need to lift the upvalue into the heap
+                    self.push(LiftUpValue(local_index));
 
-    /// Pops all locals that are within the most recent loop, and outputs the relevant `Pop` / `PopN` opcodes
-    /// It **does not** modify the local variable stack, and only outputs these tokens for the purposes of a jump across scopes.
-    fn pop_locals_in_current_loop(self: &mut Self) {
-        let loop_stmt: &Loop = self.current_locals().loops.last().unwrap();
-        let mut count: u16 = 0;
-
-        for local in self.current_locals().locals.iter().rev() {
-            if local.scope_depth > loop_stmt.scope_depth {
-                count += 1;
+                    // Additionally pop upvalues matching this local, as they cannot be referenced anymore.
+                    if let Some(upvalue) = self.current_locals_mut().upvalues.last() {
+                        if upvalue.index == local_index && upvalue.is_local {
+                            self.current_locals_mut().upvalues.pop().unwrap();
+                        }
+                    }
+                }
+                pops += 1;
+                self.current_locals_mut().locals.pop().unwrap();
             } else {
                 break
             }
         }
-        self.push_pop(count);
+        if emit_pop_token && pops > 0 {
+            self.push_pop(pops);
+        }
+    }
+
+    /// Manages popping local variables and upvalues. Does a number of tasks, based on what is requested.
+    ///
+    /// 1. Pops local variables from the parser's local variable stack.
+    ///    This is required when the variable goes out of scope, as we can no longer reference it.
+    ///    Note however, if we're using this to emit pop tokens for non-sequential code (i.e. a `break` or `return`), we want to keep these variables around.
+    ///
+    ///    This behavior is thus controlled by `modify_lvt` parameter.
+    ///
+    /// 2. Emit `Pop` tokens for the local variables that would be caught by (1.). This is required without (1.) when we are in non-sequential code, (i.e. a `break` or `return`), as we need to make sure the runtime stack is correct.
+    ///    Note that this is also not required after a `return`, as the `Return` opcode will clear everything above the current frame pointer, hence not needing explicit `Pop` opcodes.
+    ///
+    ///    This behavior is controlled by the `emit_pop` parameter.
+    ///
+    /// 3. Emit `LiftUpValue` opcodes for any captured local variables. This ensures that these variables live on the heap as long as required, by any closures that have captured them.
+    ///    This can be used without (1.) or (2.) to create the illusion of having local variables local to a loop structure, i.e. `for` loop - each iteration of the loop, we just emit `LiftUpValue` tokens, and only do a `Pop` at the final iteration of the loop.
+    ///
+    ///    This behavior is controlled by the `emit_lifts` parameter.
+    ///
+    /// ---
+    ///
+    /// This function also can pop different local variables. If `scope` is `Some(scope)`, then it will pop all local variables **equal to and including** a certain scope depth. If `scope` is `None`, it will pop all locals in the current function. This can be used in different situations:
+    ///
+    /// - At the closure of a block scope, only a single scope needs to be popped, so `scope` is `Some(self.current_scope_depth)`
+    /// - At a `break` or `continue` statement, this jumps multiple block scopes, so any scope above `loop.scope_depth` needs to be popped.
+    /// - At a `return` statement, this jumps out of all scopes in the current function, so any scopes above that need to be popped.
+    fn pop_locals(self: &mut Self, scope: Option<u16>, modify_lvt: bool, emit_pop: bool, emit_lifts: bool) {
+
+        let len = self.current_locals().locals.len() as u16;
+        let mut pop_count = 0;
+        for local_index in (0..len).rev() {
+            let local = &self.current_locals().locals[local_index as usize];
+
+            if match scope {
+                Some(min_scope) => local.scope_depth >= min_scope,
+                None => true,
+            } {
+                pop_count += 1;
+
+                if local.captured && emit_lifts {
+                    self.push(LiftUpValue(local_index));
+                }
+
+                if modify_lvt {
+                    // Pop the local
+                    self.current_locals_mut().locals.pop().unwrap();
+
+                    // And pop any matching upvalues
+                    if let Some(upvalue) = self.current_locals_mut().upvalues.last() {
+                        if upvalue.index == local_index && upvalue.is_local {
+                            self.current_locals_mut().upvalues.pop().unwrap();
+                        }
+                    }
+                }
+            }
+        }
+
+        // Emit pop tokens for the locals that were popped
+        if emit_pop && pop_count > 0 {
+            self.push_pop(pop_count);
+        }
     }
 
     /// Returns the current function's `locals`
@@ -2123,6 +2214,7 @@ impl Parser<'_> {
         }
 
         // 1. Search for locals in the current function. This may return `Local`, `Global`, or `TrueGlobal` based on the scope of the variable.
+        //   - Locals that are captured as upvalues, but are now being referenced as locals again, emit upvalue references, as the stack stops getting updated after a value is lifted into an upvalue.
         for local in self.current_locals().locals.iter().rev() {
             if &local.name == name && local.initialized {
                 return local.resolve_type()
@@ -2135,8 +2227,10 @@ impl Parser<'_> {
         if self.function_depth > 0 {
             for depth in (0..self.function_depth).rev() { // Iterate through the range of [function_depth - 1, ... 0]
                 for local in self.locals[depth as usize].locals.iter().rev() { // In reverse, as we go inner -> outer scopes
-                    if &local.name == name && local.initialized && (local.function_depth > 0 || local.scope_depth > 0) { // Note that it must **not** be a true global, anything else can be captured as an upvalue
-                        return self.resolve_upvalue(depth, local.index);
+                    if &local.name == name && local.initialized && !local.is_true_global() { // Note that it must **not** be a true global, anything else can be captured as an upvalue
+                        let index = local.index;
+                        self.locals[depth as usize].locals[index as usize].captured = true;
+                        return self.resolve_upvalue(depth, index);
                     }
                 }
             }
@@ -2183,7 +2277,6 @@ impl Parser<'_> {
         }
 
         // If we did not find it, then capture the local - add this as an upvalue to the function at this depth
-        let mut is_local = true;
         let mut index = if let Some(index) = maybe_index {
             index as u16
         } else {
@@ -2210,15 +2303,11 @@ impl Parser<'_> {
                 self.locals[depth as usize].upvalues.push(UpValue::new(false, index));
                 index = (self.locals[depth as usize].upvalues.len() - 1) as u16
             }
-
-            // This is no longer a local upvalue reference, the final upvalue will be a reference to a enclosing upvalue
-            is_local = false;
         }
 
         // Finally, the last value of `index` will be one set from the directly enclosing function
         // We can thus return a `UpValue` reference, which contains the index of the upvalue in the enclosing function
-        // We also return if the upvalue was local or not, as that's also needed to emit the correct bytecode
-        return VariableType::UpValue(index, is_local)
+        return VariableType::UpValue(index)
     }
 
 

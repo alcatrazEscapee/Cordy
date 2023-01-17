@@ -1,8 +1,8 @@
 use std::borrow::Borrow;
-use std::cell::{Ref, RefCell, RefMut};
+use std::cell::{Cell, Ref, RefCell, RefMut};
 use std::cmp::{Ordering, Reverse};
 use std::collections::{BinaryHeap, VecDeque};
-use std::fmt::Debug;
+use std::fmt::{Debug, Formatter};
 use std::hash::{Hash, Hasher};
 use std::mem;
 use std::rc::Rc;
@@ -434,10 +434,54 @@ impl Hash for PartialFunctionImpl {
 
 /// A closure is a combination of a function, and a set of `environment` variables.
 /// These variables are references either to locals in the enclosing function, or captured variables from the enclosing function itself.
-#[derive(Eq, PartialEq, Debug, Clone)]
+///
+/// A closure also provides *interior mutability* for it's captured upvalues, allowing them to be modified even from the surrounding function.
+/// Unlike with other mutable `Value` types, this does so using `Rc<Cell<Value>>`. The reason being:
+///
+/// - A `Mut` cannot be unboxed without creating a borrow, which introduces lifetime restrictions. It also cannot be mutably unboxed without creating a write lock. With a closure, we need to be free to unbox the environment straight onto the stack, so this is off the table.
+/// - The closure's inner value can be thought of as immutable. As `Value` is immutable, and clone-able, so can the contents of `Cell`. We can then unbox this completely - take a reference to the `Rc`, and call `get()` to unbox the current value of the cell, onto the stack.
+///
+/// This has one problem, which is we can't call `.get()` unless the cell is `Copy`, which `Value` isn't, and can't be, because `Mut` can't be copy due to the presence of `Rc`... Fortunately, this is just an API limitation, and we can unbox the cell in other ways.
+///
+/// Note we cannot derive most functions, as that also requires `Cell<Value>` to be `Copy`, due to convoluted trait requirements.
+#[derive(Clone)]
 pub struct ClosureImpl {
-    pub func: Rc<FunctionImpl>,
-    pub environment: Vec<Value>,
+    func: Rc<FunctionImpl>,
+    environment: Vec<Rc<Cell<UpValue>>>,
+}
+
+impl ClosureImpl {
+    pub fn push(&mut self, value: Rc<Cell<UpValue>>) {
+        self.environment.push(value);
+    }
+
+    /// Returns the current environment value for the upvalue index `index.
+    /// /// Reasons why this method is convoluted:
+    //     /// - We cannot use `.get()` (as it requires `Value` to be `Copy`)
+    //     /// - We cannot use `get_mut()` (as even if we have `&mut ClosureImpl`, unboxing the `Rc<>` only gives us `&Cell`)
+    pub fn get_environment(&self, index: usize) -> Rc<Cell<UpValue>> {
+        self.environment[index].clone()
+    }
+}
+
+#[derive(Clone)]
+pub enum UpValue {
+    Open(usize),
+    Closed(Value)
+}
+
+impl PartialEq for ClosureImpl {
+    fn eq(&self, other: &Self) -> bool {
+        self.func == other.func
+    }
+}
+
+impl Eq for ClosureImpl {}
+
+impl Debug for ClosureImpl {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        Debug::fmt(&self.func, f)
+    }
 }
 
 impl Hash for ClosureImpl {

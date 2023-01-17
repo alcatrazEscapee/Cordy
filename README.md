@@ -101,8 +101,6 @@ For a more comprehensive documentation, see the [language documentation](./docs/
   - Now that `any` is a function, figure out what to do about the `any` type
 - Even MORE standard library functions
   - regex match, find, and replace -> just on normal strings. Make `\` less required for escaping (only escape if needed)
-- Improved non-java-like-closures, that allow assignment to the target variable.
-  - `ref` to make reference variables, which closure-captured variables promote to automatically? Basically a `Mut<Value>` -> this is bad because then everything that unboxes needs to do so within a reference. Cannot do this in general. Rust bad:tm:
 - Make dict/set literals take priority over bare block statements (prevent bare block statements entirely?)
 - Investigate making a separate `Queue` type and making `List` a `Vec`? Benchmarks...
 - Fix `dict.default` to, if given a function, invoke and insert on getting a default value. goal is making `d[x].push(y)` work, while `d[x]` does not insert in general (i.e. if default is `0`).

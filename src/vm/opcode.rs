@@ -28,7 +28,8 @@ pub enum Opcode {
     PushGlobal(u16, bool), // bool = is_local = !is_true_global
     StoreGlobal(u16, bool),
 
-    PushUpValue(u16, bool), // index, is_local
+    PushUpValue(u16), // index
+    StoreUpValue(u16), // index
 
     StoreArray,
 
@@ -42,6 +43,11 @@ pub enum Opcode {
     // Take a closure, and add the respective local or upvalue to the closure
     CloseLocal(u16),
     CloseUpValue(u16),
+
+    /// Lifts an UpValue from a stack slot (offset by the frame pointer) to the heap
+    /// It does so by boxing it into a `Rc<Cell<Value>>`, stored on the closure's `environment` array. Each closure references the same `UpValue`, and hence will see all mutations.
+    /// Takes a local index of an upvalue to lift.
+    LiftUpValue(u16),
 
     /// Converts the top of the stack to an `Value::Iter()`.
     InitIterable,

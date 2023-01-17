@@ -43,17 +43,17 @@ All the above binary operators come in operator-equals variants: `+=`, `-=`, `*=
 
 All operators are left associative (except `=` for assigning variables). Their precedence is noted as below, where higher entries are higher precedence:
 
-| Precedence | Operators                                                                               | Description                                                                            |
-|------------|-----------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------|
-| 1          | `[]`, `()`, `if then else`                                                              | Array Access, Function Evaluation, Ternary `if`                                        |
-| 2          | `-`, `!`, `~`                                                                           | Unary Negation, Logical Not, and Bitwise Not                                           |
-| 3          | `*`, `/`, `%`, `**`, `is`, `in`, `not in`                                               | Multiplication, Division, Modulo, Power, Is In, Not In                                 |
-| 4          | `+`, `-`                                                                                | Addition, Subtraction                                                                  |
-| 5          | `<<`, `>>`                                                                              | Left Shift, Right Shift                                                                |
-| 6          | `&`, `∣`, `^`                                                                           | Bitwise AND, Bitwise OR, Bitwise XOR                                                   |
-| 7          | `.`                                                                                     | [Function Composition](#function-evaluation)                                           |
-| 8          | `<`, `<=`, `>`, `>=`, `==`, `!=`                                                        | Less Than, Less Than or Equal, Greater Than, Greater Than or Equal, Equals, Not Equals |
-| 9          | `and`, `or`                                                                             | Logical And, Logical Or                                                                |
+| Precedence | Operators                                                                                | Description                                                                            |
+|------------|------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------|
+| 1          | `[]`, `()`, `if then else`                                                               | Array Access, Function Evaluation, Ternary `if`                                        |
+| 2          | `-`, `!`, `~`                                                                            | Unary Negation, Logical Not, and Bitwise Not                                           |
+| 3          | `*`, `/`, `%`, `**`, `is`, `in`, `not in`                                                | Multiplication, Division, Modulo, Power, Is In, Not In                                 |
+| 4          | `+`, `-`                                                                                 | Addition, Subtraction                                                                  |
+| 5          | `<<`, `>>`                                                                               | Left Shift, Right Shift                                                                |
+| 6          | `&`, `∣`, `^`                                                                            | Bitwise AND, Bitwise OR, Bitwise XOR                                                   |
+| 7          | `.`                                                                                      | [Function Composition](#function-evaluation)                                           |
+| 8          | `<`, `<=`, `>`, `>=`, `==`, `!=`                                                         | Less Than, Less Than or Equal, Greater Than, Greater Than or Equal, Equals, Not Equals |
+| 9          | `and`, `or`                                                                              | Logical And, Logical Or                                                                |
 | 10         | `=`, `+=`, `-=`, `*=`, `/=`, `&=`, `∣=`, `^=`, `<<=`, `>>=`, `%=`, `**=`, `max=`, `min=` | Assignment, and Operator Assignment                                                    |
 
 ### Variables
@@ -180,17 +180,31 @@ input . map(int) . filter(>0) . reduce(+) . print
 
 #### Closures
 
-Functions can reference local and global variables outside of themselves, but they cannot assign to them. Variables captured in closures are 'effectively final', to borrow the terminology form Java.
+Functions can reference local and global variables outside of themselves, mutate them, and assign to them. Closures capture the *value* of variables at the time of the closure being closed.
 
 ```
 fn foo() {
     let x = 'hello'
-    fn bar() {
-        x . print // this is valid
-        x = 'world' // this is not
-    }
+    fn bar() -> x = 'goodbye'
+    fn baz() -> x . print
+    baz() // prints 'hello'
+    bar()
+    baz() // prints 'goodbye'
 }
 ```
+
+Variables declared in loops are captured each iteration of the loop. So the following code:
+
+```
+let values = []
+for i in range(5) {
+    values.push(fn() -> i)
+}
+values . map(fn(f) -> f()) . print
+```
+
+Will print the sequence `[1, 2, 3, 4, 5]`, as intuitively expected.
+
 
 ### Control Structures
 
