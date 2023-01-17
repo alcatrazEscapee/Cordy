@@ -1,9 +1,9 @@
 // Closures are poor man's classes
 
 let cls = (fn() {
-    let x_ = [0]
-    fn set_(x) -> x_[0] = x
-    fn get_() -> x_[0]
+    let x_ = 0
+    fn set_(x) -> x_ = x
+    fn get_() -> x_
 
     return [set_, get_]
 })

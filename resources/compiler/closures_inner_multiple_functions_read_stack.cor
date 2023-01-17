@@ -1,0 +1,12 @@
+fn foo() {
+    let x = 'hello', y = 'the', z = 'world'
+    fn bar() {
+        x . print
+    }
+    bar()
+    fn baz() {
+        z . print
+    }
+    baz()
+}
+foo()
