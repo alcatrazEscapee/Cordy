@@ -2098,36 +2098,6 @@ impl Parser<'_> {
         self.locals.last().unwrap().locals.len() - 1
     }
 
-    /// Pops all locals declared in the current scope, *before* decrementing the scope depth
-    /// Emits the relevant `Pop` opcodes to the output token stream if `emit_pop_token`, and always emits `LiftUpValue` tokens.
-    fn pop_locals_in_current_scope(self: &mut Self, emit_pop_token: bool) {
-        let scope_depth = self.scope_depth;
-        let mut pops: u16 = 0;
-        while let Some(local) = self.current_locals_mut().locals.last() {
-            if local.scope_depth == scope_depth {
-                let local_index: u16 = local.index;
-                if local.captured {
-                    // Emit a special `PopUpValue` token, as we need to lift the upvalue into the heap
-                    self.push(LiftUpValue(local_index));
-
-                    // Additionally pop upvalues matching this local, as they cannot be referenced anymore.
-                    if let Some(upvalue) = self.current_locals_mut().upvalues.last() {
-                        if upvalue.index == local_index && upvalue.is_local {
-                            self.current_locals_mut().upvalues.pop().unwrap();
-                        }
-                    }
-                }
-                pops += 1;
-                self.current_locals_mut().locals.pop().unwrap();
-            } else {
-                break
-            }
-        }
-        if emit_pop_token && pops > 0 {
-            self.push_pop(pops);
-        }
-    }
-
     /// Manages popping local variables and upvalues. Does a number of tasks, based on what is requested.
     ///
     /// 1. Pops local variables from the parser's local variable stack.
