@@ -456,10 +456,7 @@ impl ClosureImpl {
     }
 
     /// Returns the current environment value for the upvalue index `index.
-    /// /// Reasons why this method is convoluted:
-    //     /// - We cannot use `.get()` (as it requires `Value` to be `Copy`)
-    //     /// - We cannot use `get_mut()` (as even if we have `&mut ClosureImpl`, unboxing the `Rc<>` only gives us `&Cell`)
-    pub fn get_environment(&self, index: usize) -> Rc<Cell<UpValue>> {
+    pub fn get(&self, index: usize) -> Rc<Cell<UpValue>> {
         self.environment[index].clone()
     }
 }

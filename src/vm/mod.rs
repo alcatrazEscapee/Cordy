@@ -318,7 +318,7 @@ impl<R, W> VirtualMachine<R, W> where
             PushUpValue(index) => {
                 let fp = self.frame_pointer() - 1;
                 let upvalue: Rc<Cell<UpValue>> = match &mut self.stack[fp] {
-                    Value::Closure(c) => c.get_environment(index as usize),
+                    Value::Closure(c) => c.get(index as usize),
                     _ => panic!("Malformed bytecode"),
                 };
 
@@ -340,7 +340,7 @@ impl<R, W> VirtualMachine<R, W> where
                 let fp = self.frame_pointer() - 1;
                 let value = self.peek(0).clone();
                 let upvalue: Rc<Cell<UpValue>> = match &mut self.stack[fp] {
-                    Value::Closure(c) => c.get_environment(index as usize),
+                    Value::Closure(c) => c.get(index as usize),
                     _ => panic!("Malformed bytecode"),
                 };
 
@@ -405,7 +405,7 @@ impl<R, W> VirtualMachine<R, W> where
                 let fp = self.frame_pointer() - 1;
                 let index: usize = index as usize;
                 let upvalue: Rc<Cell<UpValue>> = match &mut self.stack[fp] {
-                    Value::Closure(c) => c.get_environment(index),
+                    Value::Closure(c) => c.get(index),
                     _ => panic!("Malformed bytecode"),
                 };
 

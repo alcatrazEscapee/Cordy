@@ -1,7 +1,5 @@
 ## Cordy
 
-**Note** This is still very unfinished and rough around the edges.
-
 Cordy is a dynamically typed, interpreted, semi-functional / semi-procedural language I made up. It is meant to be a quick scripting language for solving puzzles and other fun things as an alternative to Python, and as a personal challenge to myself to use. It is implemented here in Rust, with a custom recursive descent parser, and a stack based interpreter.
 
 ### Usage
