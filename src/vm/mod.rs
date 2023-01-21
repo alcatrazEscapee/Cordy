@@ -365,16 +365,7 @@ impl<R, W> VirtualMachine<R, W> where
                 let a3: Value = self.pop();
                 let a2: Value = self.pop();
                 let a1: &Value = self.peek(0); // Leave this on the stack when done
-                match (a1, a2) {
-                    (Value::List(l), Value::Int(r)) => match stdlib::list_set_index(l, r, a3) {
-                        Ok(_) => {}, // No push, as we left the previous value on top of the stack
-                        Err(e) => return Err(e),
-                    },
-                    (Value::Dict(l), r) => {
-                        l.unbox_mut().dict.insert(r, a3);
-                    },
-                    (l, r) => return TypeErrorBinaryOp(OpIndex, l.clone(), r).err()
-                }
+                stdlib::set_index(a1, a2, a3)?;
             },
 
             IncGlobalCount => {
@@ -1364,6 +1355,7 @@ mod test {
     #[test] fn test_list_peek() { run_str("let x = [1, 2, 3], y = x . peek ; (x, y) . print", "([1, 2, 3], 1)\n"); }
     #[test] fn test_set_peek() { run_str("let x = {1, 2, 3}, y = x . peek ; (x, y) . print", "({1, 2, 3}, 1)\n"); }
     #[test] fn test_dict_peek() { run_str("let x = {1: 'a', 2: 'b', 3: 'c'}, y = x . peek ; (x, y) . print", "({1: 'a', 2: 'b', 3: 'c'}, (1, 'a'))\n"); }
+    #[test] fn test_vector_set_index() { run_str("let x = (1, 2, 3) ; x[0] = 3 ; x . print", "(3, 2, 3)\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }

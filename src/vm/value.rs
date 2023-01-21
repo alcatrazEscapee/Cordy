@@ -247,8 +247,8 @@ impl Value {
     pub fn as_index(self: &Self) -> Result<Indexable, Box<RuntimeError>> {
         match self {
             Str(it) => Ok(Indexable::Str(it)),
-            List(it) => Ok(Indexable::List(it.unbox())),
-            Vector(it) => Ok(Indexable::Vector(it.unbox())),
+            List(it) => Ok(Indexable::List(it.unbox_mut())),
+            Vector(it) => Ok(Indexable::Vector(it.unbox_mut())),
             _ => TypeErrorArgMustBeIndexable(self.clone()).err()
         }
     }
@@ -880,8 +880,8 @@ impl Hash for MemoizedImpl {
 
 pub enum Indexable<'a> {
     Str(&'a Box<String>),
-    List(Ref<'a, VecDeque<Value>>),
-    Vector(Ref<'a, Vec<Value>>),
+    List(RefMut<'a, VecDeque<Value>>),
+    Vector(RefMut<'a, Vec<Value>>),
 }
 
 impl<'a> Indexable<'a> {
@@ -899,6 +899,15 @@ impl<'a> Indexable<'a> {
             Indexable::Str(it) => Value::str(it.chars().nth(index).unwrap()),
             Indexable::List(it) => (&it[index]).clone(),
             Indexable::Vector(it) => (&it[index]).clone(),
+        }
+    }
+
+    /// Setting indexes only works for immutable collections - so not strings
+    pub fn set_index(self: &mut Self, index: usize, value: Value) -> Result<(), Box<RuntimeError>> {
+        match self {
+            Indexable::Str(it) => TypeErrorArgMustBeIndexable(Str((*it).clone())).err(),
+            Indexable::List(it) => { it[index] = value; Ok(()) },
+            Indexable::Vector(it) => { it[index] = value; Ok(()) },
         }
     }
 }
