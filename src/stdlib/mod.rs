@@ -4,7 +4,7 @@ use indexmap::{IndexMap, IndexSet};
 use lazy_static::lazy_static;
 
 use crate::vm::{operator, VirtualInterface};
-use crate::vm::value::{Mut, RangeImpl, Value};
+use crate::vm::value::{RangeImpl, Value};
 use crate::vm::error::RuntimeError;
 use crate::trace;
 
@@ -642,7 +642,7 @@ pub fn get_index(a1: &Value, a2: &Value) -> ValueResult {
     }
 
     let indexable = a1.as_index()?;
-    let index: usize = collections::get_checked_index(a1.len()?, a2.as_int()?)?;
+    let index: usize = collections::get_checked_index(indexable.len(), a2.as_int()?)?;
 
     Ok(indexable.get_index(index))
 }
@@ -651,8 +651,17 @@ pub fn get_slice(a1: Value, a2: Value, a3: Value, a4: Value) -> ValueResult {
     collections::list_slice(a1, a2, a3, a4)
 }
 
-pub fn list_set_index(list_ref: &Mut<VecDeque<Value>>, index: i64, value: Value) -> Result<(), Box<RuntimeError>> {
-    collections::list_set_index(list_ref, index, value)
+pub fn set_index(a1: &Value, a2: Value, a3: Value) -> Result<(), Box<RuntimeError>> {
+
+    if let Value::Dict(it) = a1 {
+        it.unbox_mut().dict.insert(a2, a3);
+        Ok(())
+    } else {
+        let mut indexable = a1.as_index()?;
+        let index: usize = collections::get_checked_index(indexable.len(), a2.as_int()?)?;
+
+        indexable.set_index(index, a3)
+    }
 }
 
 pub fn format_string(string: &String, args: Value) -> ValueResult {

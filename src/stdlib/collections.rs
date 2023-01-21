@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use itertools::Itertools;
 
 use crate::vm::error::RuntimeError;
-use crate::vm::value::{Iterable, MemoizedImpl, Mut, Value};
+use crate::vm::value::{Iterable, MemoizedImpl, Value};
 use crate::vm::VirtualInterface;
 
 use RuntimeError::{*};
@@ -24,16 +24,6 @@ pub fn get_checked_index(len: usize, rhs: i64) -> Result<usize, Box<RuntimeError
     }
 }
 
-pub fn list_set_index(list_ref: &Mut<VecDeque<Value>>, rhs: i64, value: Value) -> Result<(), Box<RuntimeError>> {
-    let mut list = list_ref.unbox_mut();
-    let index: usize = to_index(list.len() as i64, rhs) as usize;
-    if index < list.len() {
-        list[index] = value;
-        Ok(())
-    } else {
-        ValueErrorIndexOutOfBounds(rhs, list.len()).err()
-    }
-}
 
 pub fn list_slice(a1: Value, a2: Value, a3: Value, a4: Value) -> ValueResult {
 
