@@ -3,12 +3,13 @@ use std::collections::VecDeque;
 use itertools::Itertools;
 
 use crate::vm::error::RuntimeError;
-use crate::vm::value::{Iterable, Mut, Value};
+use crate::vm::value::{Iterable, MemoizedImpl, Mut, Value};
 use crate::vm::VirtualInterface;
 
 use RuntimeError::{*};
 use Value::{*};
 use crate::misc;
+use crate::stdlib::NativeFunction::{SyntheticMemoizedFunction};
 
 type ValueResult = Result<Value, Box<RuntimeError>>;
 
@@ -496,4 +497,25 @@ pub fn right_find<VM>(vm: &mut VM, a1: Value, a2: Value, return_index: bool) -> 
     } else {
         Ok(iter.find(|v| v == &a1).unwrap_or(Nil))
     }
+}
+
+pub fn create_memoized(f: Value) -> ValueResult {
+    match &f.is_function() {
+        true => Ok(PartialNativeFunction(SyntheticMemoizedFunction, Box::new(vec![Memoized(Box::new(MemoizedImpl::new(f)))]))),
+        false => TypeErrorArgMustBeFunction(f).err()
+    }
+}
+
+pub fn invoke_memoized<VM>(vm: &mut VM, a1: Value, args: Vec<Value>) -> ValueResult where VM : VirtualInterface {
+    let memoized = match a1 {
+        Memoized(it) => it,
+        _ => panic!("Missing partial argument for `Memoize`")
+    };
+
+    let mut cache = memoized.cache.unbox_mut();
+    let mut err: Option<Box<RuntimeError>> = None;
+    let ret = cache.entry(args)
+        .or_insert_with_key(|args| misc::yield_result(&mut err, || vm.invoke_func(memoized.func.clone(), args), Nil));
+
+    misc::join_result(ret.clone(), err)
 }

@@ -112,6 +112,8 @@ pub enum NativeFunction {
     Combinations,
     Any,
     All,
+    Memoize,
+    SyntheticMemoizedFunction,
 
     Peek,
     Pop, // Remove value at end
@@ -270,6 +272,8 @@ fn load_native_functions() -> Vec<NativeFunctionInfo> {
     declare!(Combinations, "combinations", "n, iter", 2);
     declare!(Any, "any", "...");
     declare!(All, "all", "...");
+    declare!(Memoize, "memoize", "f", 1);
+    declare!(SyntheticMemoizedFunction, "<synthetic memoized>", "f, ...", None, true);
 
     declare!(Peek, "peek", "collection", 1); // Peek first value
     declare!(Pop, "pop", "collection", 1); // Remove value at end
@@ -323,10 +327,12 @@ pub fn invoke<VM>(native: NativeFunction, nargs: u8, vm: &mut VM) -> ValueResult
     //
     // dispatch_varargs!() handles the following signatures:
     //
+    // a1 an <expr>                       : f(a1, an, ...)  *for synthetic partial methods only
+    //
     // <expr> a1 <expr> an <expr>         : f(), f(a1), f(an, ...)
     //
     // an <expr>                          : f(an), f(an, ...)  *single argument is expanded as iterable
-    // <expr> an <expr>                   : f(), f(an), f(an, ...)  * single argument is expanded as iterable
+    // <expr> an <expr>                   : f(), f(an), f(an, ...)  *single argument is expanded as iterable
     macro_rules! dispatch {
         ($ret:expr) => { // f()
             match nargs {
@@ -427,6 +433,16 @@ pub fn invoke<VM>(native: NativeFunction, nargs: u8, vm: &mut VM) -> ValueResult
         };
     }
     macro_rules! dispatch_varargs {
+        ($a1:ident, $an:ident, $ret:expr) => {
+            match nargs {
+                0 => panic!("Illegal invoke of synthetic method with no primary argument"),
+                _ => {
+                    let $an = vm.popn(nargs as usize - 1);
+                    let $a1 = vm.pop();
+                    $ret
+                }
+            }
+        };
         ($ret0:expr, $a1:ident, $ret1:expr, $an:ident, $ret_n:expr) => { // f(), f(a1), f(an, ...)
             match nargs {
                 0 => {
@@ -583,6 +599,8 @@ pub fn invoke<VM>(native: NativeFunction, nargs: u8, vm: &mut VM) -> ValueResult
         Combinations => dispatch!(a1, a2, collections::combinations(a1, a2)),
         Any => dispatch!(a1, a2, collections::any(vm, a1, a2)),
         All => dispatch!(a1, a2, collections::all(vm, a1, a2)),
+        Memoize => dispatch!(a1, collections::create_memoized(a1)),
+        SyntheticMemoizedFunction => dispatch_varargs!(a1, an, collections::invoke_memoized(vm, a1, an)),
 
         Peek => dispatch!(a1, collections::peek(a1)),
         Pop => dispatch!(a1, collections::pop(a1)),
@@ -647,9 +665,9 @@ pub fn format_string(string: &String, args: Value) -> ValueResult {
 fn wrap_as_partial<VM>(native: NativeFunction, nargs: u8, vm: &mut VM) -> Value where VM : VirtualInterface {
     // vm stack will contain [..., arg1, arg2, ... argN]
     // popping in order will populate the vector with [argN, argN-1, ... arg1]
-    let mut args: Vec<Box<Value>> = Vec::with_capacity(nargs as usize);
+    let mut args: Vec<Value> = Vec::with_capacity(nargs as usize);
     for _ in 0..nargs {
-        args.push(Box::new(vm.pop().clone()));
+        args.push(vm.pop().clone());
     }
     Value::PartialNativeFunction(native, Box::new(args))
 }

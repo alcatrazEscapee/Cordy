@@ -68,6 +68,7 @@ pub trait VirtualInterface {
 
     fn invoke_func1(self: &mut Self, f: Value, a1: Value) -> ValueResult;
     fn invoke_func2(self: &mut Self, f: Value, a1: Value, a2: Value) -> ValueResult;
+    fn invoke_func(self: &mut Self, f: Value, args: &Vec<Value>) -> ValueResult;
 
     fn invoke_eval(self: &mut Self, s: &String) -> ValueResult;
 
@@ -741,7 +742,7 @@ impl<R, W> VirtualMachine<R, W> where
                 // Surgically extract the binding via std::mem::replace
                 let binding: NativeFunction = *b;
                 let i: usize = self.stack.len() - 1 - nargs as usize;
-                let args: Vec<Box<Value>> = match std::mem::replace(&mut self.stack[i], Value::Nil) {
+                let args: Vec<Value> = match std::mem::replace(&mut self.stack[i], Value::Nil) {
                     Value::PartialNativeFunction(_, x) => *x,
                     _ => panic!("Stack corruption")
                 };
@@ -752,7 +753,7 @@ impl<R, W> VirtualMachine<R, W> where
                 // After this, the vm stack should contain the args [..., arg1, arg2, ... argM]
                 let j: usize = self.stack.len() - nargs as usize;
                 let partial_args: u8 = args.len() as u8;
-                self.stack.splice(j..j, args.into_iter().map(|t| *t).rev());
+                self.stack.splice(j..j, args.into_iter().rev());
 
                 match stdlib::invoke(binding, nargs + partial_args, self) {
                     Ok(v) => {
@@ -808,6 +809,14 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
         self.push(a1);
         self.push(a2);
         self.invoke_func_and_spin(2)
+    }
+
+    fn invoke_func(self: &mut Self, f: Value, args: &Vec<Value>) -> ValueResult {
+        self.push(f);
+        for arg in args {
+            self.push(arg.clone());
+        }
+        self.invoke_func_and_spin(args.len() as u8)
     }
 
     fn invoke_eval(self: &mut Self, text: &String) -> ValueResult {
@@ -1387,6 +1396,7 @@ mod test {
     #[test] fn test_late_bound_global() { run("late_bound_global"); }
     #[test] fn test_late_bound_global_invalid() { run("late_bound_global_invalid"); }
     #[test] fn test_map_loop_with_multiple_references() { run("map_loop_with_multiple_references"); }
+    #[test] fn test_memoize() { run("memoize"); }
     #[test] fn test_range_used_twice() { run("range_used_twice"); }
     #[test] fn test_runtime_error_with_trace() { run("runtime_error_with_trace"); }
 
