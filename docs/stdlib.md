@@ -376,6 +376,45 @@ Returns a list of all combinations of `n` elements from `it`. If `n` is larger t
 [(1, 2), (1, 3), (2, 3)]
 ```
 
+### Any `<A> any(f: fn(A) -> bool, it: iterable<A>) -> bool`
+
+Returns `true` if any of the values in `it` return `true` to the function `f`. This is lazy and only evaluates as many elements in `it` as needed.
+
+```
+>>> [-1, -6, 3, -2] . any(>0)
+true
+```
+
+### All `<A> all(f: fn(A) -> bool, it: iterable<A>) -> bool`
+
+Returns `true` if all the values in `it` return `true` to the function `f`. This is lazy and only evaluates as many elements in `it` as needed.
+
+**Example**
+
+```
+>>> [1, 6, 3, 2] . all(>0)
+true
+```
+
+### Memoize `<A> memoize(f: fn(...) -> A) -> fn(...) -> A`
+
+This creates a memorizing wrapper around a function. The returned function will cache all values based on the input parameters. The return value is invoked identically to the provided function.
+
+**Example**
+
+```
+>>> fn add(x, y) {
+...     print('add was called')
+...     x + y
+... }
+>>> let cached_add = memoize(add)
+>>> add(1, 2)
+add was called
+3
+>>> add(1, 2)
+3
+```
+
 ### Pop `<A> pop(it: iterable<A>) -> A`
 
 Pops a value from a collection. For `list`, this will be a value at the back of the collection. For a `heap`, this is the top of the heap, i.e. the minimum value. For a `dict`, this will return a key-value pair.

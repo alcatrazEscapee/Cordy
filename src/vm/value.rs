@@ -1,7 +1,7 @@
 use std::borrow::Borrow;
 use std::cell::{Cell, Ref, RefCell, RefMut};
 use std::cmp::{Ordering, Reverse};
-use std::collections::{BinaryHeap, VecDeque};
+use std::collections::{BinaryHeap, HashMap, VecDeque};
 use std::fmt::{Debug, Formatter};
 use std::hash::{Hash, Hasher};
 use std::mem;
@@ -49,11 +49,16 @@ pub enum Value {
     /// This will never be user-code-accessible, as it will only be on the stack as a synthetic variable, or in native code.
     Iter(Box<Iterable>),
 
+    /// Synthetic Memoized Function Argument
+    /// This is a argument which is partially evaluated to the result of a `Memoized` stdlib function.
+    /// It will only ever be present as the first partial argument for a `SyntheticMemoizedFunction` native function.
+    Memoized(Box<MemoizedImpl>),
+
     // Functions
     Function(Rc<FunctionImpl>),
     PartialFunction(Box<PartialFunctionImpl>),
     NativeFunction(NativeFunction),
-    PartialNativeFunction(NativeFunction, Box<Vec<Box<Value>>>),
+    PartialNativeFunction(NativeFunction, Box<Vec<Value>>),
     Closure(Box<ClosureImpl>),
 }
 
@@ -110,7 +115,8 @@ impl Value {
             Range(r) => if r.step == 0 { String::from("range(empty)") } else { format!("range({}, {}, {})", r.start, r.stop, r.step) },
             Enumerate(v) => format!("enumerate({})", v.to_repr_str()),
 
-            Iter(_) => format!("iterator"),
+            Iter(_) => format!("<synthetic> iterator"),
+            Memoized(_) => format!("<synthetic> memoized"),
 
             Function(f) => (*f).as_ref().borrow().as_str(),
             PartialFunction(f) => (*f).as_ref().borrow().func.to_str(),
@@ -134,7 +140,7 @@ impl Value {
             Vector(_) => "vector",
             Range(_) => "range",
             Enumerate(_) => "enumerate",
-            Iter(_) => "iterator",
+            Iter(_) | Memoized(_) => "synthetic",
             Function(_) => "function",
             PartialFunction(_) => "partial function",
             NativeFunction(_) => "native function",
@@ -159,7 +165,7 @@ impl Value {
             Heap(it) => !it.unbox().heap.is_empty(),
             Range(it) => !it.is_empty(),
             Enumerate(it) => (**it).as_bool(),
-            Iter(_) => panic!("Iter() is a synthetic type and should not have as_bool() invoked on it"),
+            Iter(_) | Memoized(_) => panic!("{:?} is a synthetic type should not have as_bool() invoked on it", self),
             Vector(v) => v.unbox().is_empty(),
             Function(_) | PartialFunction(_) | NativeFunction(_) | PartialNativeFunction(_, _) | Closure(_) => true,
         }
@@ -361,9 +367,9 @@ impl Ord for Value {
 /// Note that it also implements `Hash`, even though the internal type is mutable. This is required to satisfy rust's type system.
 /// Mutating values stored in a hash backed structure is legal, from a language point of view, but will just invoke undefined behavior.
 #[derive(Eq, PartialEq, Debug, Clone)]
-pub struct Mut<T : Eq + PartialEq + Debug + Clone + Hash>(Rc<RefCell<T>>);
+pub struct Mut<T : Eq + PartialEq + Debug + Clone>(Rc<RefCell<T>>);
 
-impl<T : Eq + PartialEq + Debug + Clone + Hash> Mut<T> {
+impl<T : Eq + PartialEq + Debug + Clone> Mut<T> {
 
     pub fn new(value: T) -> Mut<T> {
         Mut(Rc::new(RefCell::new(value)))
@@ -850,6 +856,24 @@ impl CollectionIterable {
             CollectionIterable::Vector(it) => it.unbox().get(index).cloned(),
             CollectionIterable::RawVector(it) => it.get(index).cloned(),
         }
+    }
+}
+
+#[derive(Eq, PartialEq, Debug, Clone)]
+pub struct MemoizedImpl {
+    pub func: Value,
+    pub cache: Mut<HashMap<Vec<Value>, Value>>
+}
+
+impl MemoizedImpl {
+    pub fn new(func: Value) -> MemoizedImpl {
+        MemoizedImpl { func, cache: Mut::new(HashMap::new()) }
+    }
+}
+
+impl Hash for MemoizedImpl {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.func.hash(state)
     }
 }
 
