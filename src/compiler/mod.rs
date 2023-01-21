@@ -97,7 +97,7 @@ fn try_incremental_compile(source: &String, text: &String, code: &mut Vec<Opcode
     if !scan_result.errors.is_empty() {
         let rpt: ErrorReporter = ErrorReporter::new(text, source);
         for error in &scan_result.errors {
-            if error.is_eof() && abort_in_eof {
+            if error.is_eof() && abort_in_eof && errors.is_empty() {
                 return IncrementalCompileResult::Aborted;
             }
             errors.push(rpt.format_scan_error(&error));
@@ -110,7 +110,7 @@ fn try_incremental_compile(source: &String, text: &String, code: &mut Vec<Opcode
     if !parse_errors.is_empty() {
         let rpt: ErrorReporter = ErrorReporter::new(text, source);
         for error in &parse_errors {
-            if error.is_eof() && abort_in_eof {
+            if error.is_eof() && abort_in_eof && errors.is_empty() {
                 return IncrementalCompileResult::Aborted;
             }
             errors.push(rpt.format_parse_error(&error));
