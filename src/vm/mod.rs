@@ -410,15 +410,18 @@ impl<R, W> VirtualMachine<R, W> where
             LiftUpValue(index) => {
                 trace::trace_interpreter!("lift upvalue {}", self.stack.last().unwrap().as_debug_str());
                 let index = self.frame_pointer() + index as usize;
-                let value: Value = self.stack[index].clone();
-                let upvalue = self.open_upvalues.remove(&index).unwrap(); // `.unwrap()` is safe, as the upvalue should always exist by now
-
-                let unboxed: UpValue = (*upvalue).replace(UpValue::Open(0));
-                let closed: UpValue = match unboxed {
-                    UpValue::Open(_) => UpValue::Closed(value),
-                    UpValue::Closed(_) => panic!("Tried to life an already closed upvalue"),
-                };
-                (*upvalue).replace(closed);
+                match self.open_upvalues.remove(&index) {
+                    Some(upvalue) => {
+                        let value: Value = self.stack[index].clone();
+                        let unboxed: UpValue = (*upvalue).replace(UpValue::Open(0));
+                        let closed: UpValue = match unboxed {
+                            UpValue::Open(_) => UpValue::Closed(value),
+                            UpValue::Closed(_) => panic!("Tried to life an already closed upvalue"),
+                        };
+                        (*upvalue).replace(closed);
+                    },
+                    None => {}, // This upvalue was never captured - the code path that would've created a closure didn't run, so we don't need to lift it
+                }
             },
 
             InitIterable => {
@@ -1391,6 +1394,7 @@ mod test {
     #[test] fn test_memoize() { run("memoize"); }
     #[test] fn test_range_used_twice() { run("range_used_twice"); }
     #[test] fn test_runtime_error_with_trace() { run("runtime_error_with_trace"); }
+    #[test] fn test_upvalue_never_captured() { run("upvalue_never_captured"); }
 
 
     fn run_str(code: &'static str, expected: &'static str) {
