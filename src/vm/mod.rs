@@ -1392,6 +1392,7 @@ mod test {
     #[test] fn test_late_bound_global_invalid() { run("late_bound_global_invalid"); }
     #[test] fn test_map_loop_with_multiple_references() { run("map_loop_with_multiple_references"); }
     #[test] fn test_memoize() { run("memoize"); }
+    #[test] fn test_memoize_recursive() { run("memoize_recursive"); }
     #[test] fn test_range_used_twice() { run("range_used_twice"); }
     #[test] fn test_runtime_error_with_trace() { run("runtime_error_with_trace"); }
     #[test] fn test_upvalue_never_captured() { run("upvalue_never_captured"); }
