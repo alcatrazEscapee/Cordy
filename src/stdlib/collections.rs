@@ -502,10 +502,21 @@ pub fn invoke_memoized<VM>(vm: &mut VM, a1: Value, args: Vec<Value>) -> ValueRes
         _ => panic!("Missing partial argument for `Memoize`")
     };
 
-    let mut cache = memoized.cache.unbox_mut();
-    let mut err: Option<Box<RuntimeError>> = None;
-    let ret = cache.entry(args)
-        .or_insert_with_key(|args| misc::yield_result(&mut err, || vm.invoke_func(memoized.func.clone(), args), Nil));
+    // We cannot use the `.entry()` API, as that requires we mutably borrow the cache during the call to `vm.invoke_func()`
+    // We only lookup by key once (in the cached case), and twice (in the uncached case)
+    {
+        let cache = memoized.cache.unbox();
+        match cache.get(&args) {
+            Some(ret) => return Ok(ret.clone()),
+            None => {}
+        }
+    } // cache falls out of scope, and thus is no longer borrowed
 
-    misc::join_result(ret.clone(), err)
+    let value: Value = vm.invoke_func(memoized.func.clone(), &args)?;
+
+    // The above computation might've entered a value into the cache - so we have to go through `.entry()` again
+    return Ok(memoized.cache.unbox_mut()
+        .entry(args)
+        .or_insert(value)
+        .clone());
 }
