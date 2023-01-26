@@ -60,23 +60,23 @@ All operators are left associative (except `=` for assigning variables). Their p
 
 Variables must be declared with `let`. They can optionally be followed by a initialization.
 
-```
+```rust
 // A variable declaration, it is initialized to `nil`
 let x
 
-// A variable declaration and assignent
+// A variable declaration and assignment
 let y = 'hello'
 ```
 
 Variable declarations can be chained:
 
-```
+```rust
 let x, y, z
 ```
 
 Even with assignments:
 
-```
+```rust
 let x = 1, y = 2, z = 3
 ```
 
@@ -84,7 +84,7 @@ let x = 1, y = 2, z = 3
 
 Cordy has functions as a first class type, so they can be declared anywhere. It also supports anonymous (lambda) functions which can be used as part of expressions. A function begins with `fn`, followed by a name (if it is not an anonymous function), and then the function body:
 
-```
+```rust
 // the most basic function, `foo`, which does nothing
 fn foo() {}
 
@@ -99,7 +99,7 @@ The body of a function can either be a block statement (a series of statements w
 
 A function will return the last expression present in the function, or whenever a `return` keyword is reached.
 
-```
+```rust
 // these functions are semantically equivilant
 fn three() { 
     3
@@ -116,7 +116,7 @@ fn three() -> 3
 
 Cordy has a number of [Native Functions](./stdlib.md), which can be used as normal functions. In addition to these, each operator is also a function, which can be referenced by placing it in `(` parentheses `)`.
 
-```
+```rust
 let addition = (+)
 ```
 
@@ -129,7 +129,7 @@ Note in some cases the additional parenthesis can be omitted, for instance if pa
 
 One such important native function is `print`, which prints all arguments, space seperated, to standard out, followed by a newline:
 
-```
+```rust
 // rite of passage!
 print('hello world!')
 ```
@@ -138,14 +138,14 @@ print('hello world!')
 
 Functions can be invoked in two ways. First, in a C-style function invocation, the function name and passing arguments within brackets:
 
-```
+```rust
 // calls the function foo with the arguments 1, 2
 foo(1, 2)
 ```
 
 Alternatively, single-argument functions can be invoked with the `.` operator, which reverses the order of function and argument:
 
-```
+```rust
 // same as writing foo('hello')
 'hello' . foo
 ```
@@ -154,7 +154,7 @@ Alternatively, single-argument functions can be invoked with the `.` operator, w
 
 Functions can be *partially evaluated*, that is, if a function is evaluated with less than the required number of arguments, it returns a new function which can be evaluated with the remaining arguments:
 
-```
+```rust
 // foo takes three arguments
 fn foo(a, b, c) {}
 
@@ -167,14 +167,14 @@ partial_foo(3)
 
 Operators can also be partially evaluated, and like above, the parenthesis can be omitted around the operator:
 
-```
+```rust
 let add3 = (+3)
 add3(4) // returns 7
 ```
 
 Note that function evaluation with `()` is high precedence, whereas function evaluation with `.` is low precedence. This can be used alongside partial functions to great effect:
 
-```
+```rust
 input . map(int) . filter(>0) . reduce(+) . print
 ```
 
@@ -182,7 +182,7 @@ input . map(int) . filter(>0) . reduce(+) . print
 
 Functions can reference local and global variables outside of themselves, mutate them, and assign to them. Closures capture the *value* of variables at the time of the closure being closed.
 
-```
+```rust
 fn foo() {
     let x = 'hello'
     fn bar() -> x = 'goodbye'
@@ -195,7 +195,7 @@ fn foo() {
 
 Variables declared in loops are captured each iteration of the loop. So the following code:
 
-```
+```rust
 let values = []
 for i in range(5) {
     values.push(fn() -> i)
@@ -212,7 +212,7 @@ Cordy has a number of procedural style control structures, some familiar from C,
 
 `loop` is a simple infinite loop, which must be terminated via the use of `break` (which exits the loop), or `return`:
 
-```
+```rust
 loop {
     // statements
 }
@@ -220,7 +220,7 @@ loop {
 
 `while` is a conditional loop which evaluates so long as the expression returns truthy:
 
-```
+```rust
 while condition {
     // statements
 }
@@ -228,7 +228,7 @@ while condition {
 
 `for-in` is a loop which iterates through a collection or string, yielding elements from the collection each iteration.
 
-```
+```rust
 // declares `x` local to the loop
 for x in collection {
     // statements
@@ -239,7 +239,7 @@ Note: `break` and `continue` can be used in all loop-like structures, which will
 
 Finally, `if`, `else`, `elif` perform control flow not in expressions:
 
-```
+```rust
 if condition1 {
     // statements
 } elif condition2 {
@@ -251,7 +251,7 @@ if condition1 {
 
 Note that `if`, `else` blocks will return the last expression in the block that was executed, meaning they can be used as return values:
 
-```
+```rust
 // These are semantically equivilant
 
 fn foo(x) {
@@ -275,7 +275,7 @@ In addition to primitive types, Cordy supports a number of mutable collection ty
   - Negative indexes wrap to the end of the list, i.e. `my_list[-1]` is the last element in the list
   - Lists (and strings) can also be sliced via `list[start:stop:step]`, using Python-like slicing mechanics, i.e. `my_list[2:]` takes everything after the first two elements.
 
-```
+```rust
 let my_list = [1, 2, 3, 4]
 ```
 
@@ -283,7 +283,7 @@ let my_list = [1, 2, 3, 4]
 - `dict`: A hash map, with O(1) element lookup, and optional support for default values.
   - Accessing and mutating the `dict` can be done with array-like syntax:
 
-```
+```rust
 let my_dict = dict()
 my_dict['hello'] = 'world'
 my_dict['hello'] . print
@@ -310,7 +310,7 @@ my_dict['hello'] . print
 
 Variable declarations, both in `let` statements, and in the declaration of a `for-in` loop, support pattern matching / destructuring. This takes the form of mirroring the iterable-like structure, like Python:
 
-```
+```rust
 // multiple variables 'unpack' the list
 let x, y, z = [1, 2, 3]
 
@@ -325,4 +325,29 @@ let a, (b, c), d = [[1, 2], [3, 4], [5, 6]]
 
 // Any values which wish to be ignored can be replaced with `_`
 let _, _, x, _ = [1, 2, 3, 4]
+```
+
+### Decorators
+
+Functions can optionally be *decorated*, which is a way to modify the function in-place, without having to reassign to it. A decorator consists of a `@` followed by an expression, before the function is declared:
+
+```rust
+@memoize
+fn fib(n) -> if n <= 1 then 1 else fib(n - 1) + fib(n - 2)
+```
+
+This can be understood as the following:
+
+```rust
+fn fib(n) -> if n <= 1 then 1 else fib(n - 1) + fib(n - 2)
+fib = memoize(fib)
+```
+
+Decorators can be chained - the innermost decorators will apply first, then the outermost ones. They can also be attached to anonymous functions. The expression of a decorator must resolve to a function, which takes in the original function as an argument, and outputs a new value - most typically a function, but it doesn't need to. For example:
+
+```rust
+fn iife(f) -> f() // 'Immediately Invoked Function Expression', from JavaScript
+
+@iffe
+fn do_stuff() { print('hello world') } // prints 'hello world' immediately, and assigns `do_stuff` to `nil`
 ```

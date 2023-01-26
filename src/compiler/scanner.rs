@@ -135,6 +135,7 @@ pub enum ScanToken {
     Arrow,
     Underscore,
     Semicolon,
+    At,
 
     NewLine,
 }
@@ -360,6 +361,7 @@ impl<'a> Scanner<'a> {
                        ':' => self.push(Colon),
                        '_' => self.push(Underscore),
                        ';' => self.push(Semicolon),
+                       '@' => self.push(At),
                        '\\' => {}, // Discard backslashes... like a ninja
 
                        e => self.push_err(InvalidCharacter(e))
@@ -489,7 +491,7 @@ mod tests {
     #[test] fn test_str_other_arithmetic_operators() { run_str("% %= ** *= **= * *=", vec![Mod, ModEquals, Pow, MulEquals, PowEquals, Mul, MulEquals]); }
     #[test] fn test_str_bitwise_operators() { run_str("| ^ ~ & &= |= ^=", vec![BitwiseOr, BitwiseXor, BitwiseNot, BitwiseAnd, AndEquals, OrEquals, XorEquals]); }
     #[test] fn test_str_groupings() { run_str("( [ { } ] )", vec![OpenParen, OpenSquareBracket, OpenBrace, CloseBrace, CloseSquareBracket, CloseParen]); }
-    #[test] fn test_str_syntax() { run_str(". , -> - > :", vec![Dot, Comma, Arrow, Minus, GreaterThan, Colon]); }
+    #[test] fn test_str_syntax() { run_str(". , -> - > : @", vec![Dot, Comma, Arrow, Minus, GreaterThan, Colon, At]); }
 
     fn run_str(text: &str, tokens: Vec<ScanToken>) {
         let result: ScanResult = scanner::scan(&String::from(text));

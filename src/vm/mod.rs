@@ -1359,6 +1359,11 @@ mod test {
     #[test] fn test_set_peek() { run_str("let x = {1, 2, 3}, y = x . peek ; (x, y) . print", "({1, 2, 3}, 1)\n"); }
     #[test] fn test_dict_peek() { run_str("let x = {1: 'a', 2: 'b', 3: 'c'}, y = x . peek ; (x, y) . print", "({1: 'a', 2: 'b', 3: 'c'}, (1, 'a'))\n"); }
     #[test] fn test_vector_set_index() { run_str("let x = (1, 2, 3) ; x[0] = 3 ; x . print", "(3, 2, 3)\n"); }
+    #[test] fn test_annotation_named_func_with_name() { run_str("fn par(f) -> (fn(x) -> f('hello')) ; @par fn do(x) -> print(x) ; do('goodbye')", "hello\n"); }
+    #[test] fn test_annotation_expression_func_with_name() { run_str("fn par(f) -> (fn(x) -> f('hello')) ; (@par fn(x) -> print(x))('goodbye')", "hello\n"); }
+    #[test] fn test_annotation_named_func_with_expression() { run_str("fn par(a, f) -> (fn(x) -> f(a)) ; @par('hello') fn do(x) -> print(x) ; do('goodbye')", "hello\n"); }
+    #[test] fn test_annotation_expression_func_with_expression() { run_str("fn par(a, f) -> (fn(x) -> f(a)) ; (@par('hello') fn(x) -> print(x))('goodbye')", "hello\n"); }
+    #[test] fn test_annotation_iife() { run_str("fn iife(f) -> f() ; @iife fn do() -> print('hello')", "hello\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }
@@ -1393,6 +1398,7 @@ mod test {
     #[test] fn test_map_loop_with_multiple_references() { run("map_loop_with_multiple_references"); }
     #[test] fn test_memoize() { run("memoize"); }
     #[test] fn test_memoize_recursive() { run("memoize_recursive"); }
+    #[test] fn test_memoize_recursive_as_annotation() { run("memoize_recursive_as_annotation"); }
     #[test] fn test_range_used_twice() { run("range_used_twice"); }
     #[test] fn test_runtime_error_with_trace() { run("runtime_error_with_trace"); }
     #[test] fn test_upvalue_never_captured() { run("upvalue_never_captured"); }
