@@ -11,7 +11,7 @@ NewLine
 
 ScanError { error: InvalidCharacter('$'), lineno: 1 }
 ScanError { error: InvalidCharacter('#'), lineno: 2 }
-ScanError { error: InvalidCharacter('@'), lineno: 3 }
+ScanError { error: InvalidCharacter('#'), lineno: 3 }
 ScanError { error: InvalidCharacter('$'), lineno: 5 }
 ScanError { error: InvalidCharacter('$'), lineno: 6 }
 
@@ -29,11 +29,11 @@ Invalid character: '#'
 
 #
 
-Invalid character: '@'
+Invalid character: '#'
   at: line 4 (invalid_character.cor)
   at:
 
-/* this one is fine $#@ */ @ /* that one is not */
+/* this one is fine $#@ */ # /* that one is not */
 
 Invalid character: '$'
   at: line 6 (invalid_character.cor)

@@ -214,6 +214,8 @@ impl AsError for ParserError {
             ParserErrorType::ExpectedPatternTerm(e) => format!("Expected a name, '_', or variadic term in a pattern variable, got {} instead", e.format_error()),
             ParserErrorType::ExpectedUnderscoreOrVariableNameAfterVariadicInPattern(e) => format!("Expected a name or '_' after '*' in a pattern variable, got {} instead", e.format_error()),
             ParserErrorType::ExpectedUnderscoreOrVariableNameOrPattern(e) => format!("Expected a variable binding, either a name, or '_', or pattern (i.e. 'x, (_, y), *z'), got {} instead", e.format_error()),
+            ParserErrorType::ExpectedAnnotationOrNamedFunction(e) => format!("Expected another decorator, or a named function after decorator, got {} instead", e.format_error()),
+            ParserErrorType::ExpectedAnnotationOrAnonymousFunction(e) => format!("Expected another decorator, or an expression function after decorator, got {} instead", e.format_error()),
 
             ParserErrorType::LocalVariableConflict(e) => format!("Multiple declarations for 'let {}' in the same scope", e),
             ParserErrorType::LocalVariableConflictWithNativeFunction(e) => format!("Name for variable '{}' conflicts with the native function by the same name", e),
@@ -327,6 +329,7 @@ impl AsError for ScanToken {
             ScanToken::Arrow => String::from("'->' token"),
             ScanToken::Underscore => String::from("'_' token"),
             ScanToken::Semicolon => String::from("';' token"),
+            ScanToken::At => String::from("'@' token"),
 
             ScanToken::NewLine => String::from("new line"),
         }

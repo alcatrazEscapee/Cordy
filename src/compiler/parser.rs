@@ -97,7 +97,7 @@ impl ParserError {
     pub fn is_eof(self: &Self) -> bool {
         match &self.error {
             ExpectedToken(_, it) => it.is_none(),
-            ExpectedExpressionTerminal(it) | ExpectedCommaOrEndOfArguments(it) | ExpectedCommaOrEndOfList(it)  | ExpectedCommaOrEndOfVector(it) | ExpectedCommaOrEndOfDict(it) | ExpectedCommaOrEndOfSet(it) | ExpectedColonOrEndOfSlice(it) | ExpectedStatement(it) | ExpectedVariableNameAfterLet(it) | ExpectedVariableNameAfterFor(it) | ExpectedFunctionNameAfterFn(it) | ExpectedFunctionBlockOrArrowAfterFn(it) | ExpectedParameterOrEndOfList(it) | ExpectedCommaOrEndOfParameters(it) | ExpectedPatternTerm(it) | ExpectedUnderscoreOrVariableNameAfterVariadicInPattern(it) | ExpectedUnderscoreOrVariableNameOrPattern(it) => it.is_none(),
+            ExpectedExpressionTerminal(it) | ExpectedCommaOrEndOfArguments(it) | ExpectedCommaOrEndOfList(it)  | ExpectedCommaOrEndOfVector(it) | ExpectedCommaOrEndOfDict(it) | ExpectedCommaOrEndOfSet(it) | ExpectedColonOrEndOfSlice(it) | ExpectedStatement(it) | ExpectedVariableNameAfterLet(it) | ExpectedVariableNameAfterFor(it) | ExpectedFunctionNameAfterFn(it) | ExpectedFunctionBlockOrArrowAfterFn(it) | ExpectedParameterOrEndOfList(it) | ExpectedCommaOrEndOfParameters(it) | ExpectedPatternTerm(it) | ExpectedUnderscoreOrVariableNameAfterVariadicInPattern(it) | ExpectedUnderscoreOrVariableNameOrPattern(it) | ExpectedAnnotationOrNamedFunction(it) | ExpectedAnnotationOrAnonymousFunction(it) => it.is_none(),
             UnexpectedTokenAfterEoF(_) | LocalVariableConflict(_) | LocalVariableConflictWithNativeFunction(_) | UndeclaredIdentifier(_) | InvalidAssignmentTarget | MultipleVariadicTermsInPattern | LetWithPatternBindingNoExpression | BreakOutsideOfLoop | ContinueOutsideOfLoop => false,
         }
     }
@@ -126,6 +126,8 @@ pub enum ParserErrorType {
     ExpectedPatternTerm(Option<ScanToken>),
     ExpectedUnderscoreOrVariableNameAfterVariadicInPattern(Option<ScanToken>),
     ExpectedUnderscoreOrVariableNameOrPattern(Option<ScanToken>),
+    ExpectedAnnotationOrNamedFunction(Option<ScanToken>),
+    ExpectedAnnotationOrAnonymousFunction(Option<ScanToken>),
 
     LocalVariableConflict(String),
     LocalVariableConflictWithNativeFunction(String),
@@ -545,6 +547,7 @@ impl Parser<'_> {
         loop {
             trace::trace_parser!("rule <statement>");
             match self.peek() {
+                Some(At) => self.parse_annotated_named_function(),
                 Some(KeywordFn) => self.parse_named_function(),
                 Some(KeywordReturn) => self.parse_return_statement(),
                 Some(KeywordLet) => self.parse_let_statement(),
@@ -585,6 +588,20 @@ impl Parser<'_> {
         self.expect_resync(CloseBrace);
     }
 
+    fn parse_annotated_named_function(self: &mut Self) {
+        trace::trace_parser!("rule <annotated-named-function");
+
+        self.push_delayed_pop();
+        self.advance(); // Consume `@`
+        self.parse_expression(); // The annotation body
+        match self.peek() {
+            Some(At) => self.parse_annotated_named_function(),
+            Some(KeywordFn) => self.parse_named_function(),
+            _ => self.error_with(|t| ExpectedAnnotationOrNamedFunction(t)),
+        }
+        self.push(OpFuncEval(1)) // Evaluate the annotation
+    }
+
     fn parse_named_function(self: &mut Self) {
         trace::trace_parser!("rule <named-function>");
 
@@ -616,6 +633,20 @@ impl Parser<'_> {
         }
 
         self.parse_function_body(args, func_id);
+    }
+
+    fn parse_annotated_expression_function(self: &mut Self) {
+        trace::trace_parser!("rule <annotated-expression-function");
+
+        self.push_delayed_pop();
+        self.advance(); // Consume `@`
+        self.parse_expression(); // The annotation body
+        match self.peek() {
+            Some(At) => self.parse_annotated_expression_function(),
+            Some(KeywordFn) => self.parse_expression_function(),
+            _ => self.error_with(|t| ExpectedAnnotationOrAnonymousFunction(t)),
+        }
+        self.push(OpFuncEval(1)) // Evaluate the annotation
     }
 
     fn parse_expression_function(self: &mut Self) {
@@ -1297,6 +1328,7 @@ impl Parser<'_> {
             },
             Some(OpenSquareBracket) => self.parse_expr_1_list_literal(),
             Some(OpenBrace) => self.parse_expr_1_dict_or_set_literal(),
+            Some(At) => self.parse_annotated_expression_function(),
             Some(KeywordFn) => self.parse_expression_function(),
             Some(KeywordIf) => self.parse_expr_1_inline_if_then_else(),
             _ => self.error_with(|t| ExpectedExpressionTerminal(t)),
