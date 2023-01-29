@@ -26,7 +26,7 @@ pub enum Value {
     Nil,
     Bool(bool),
     Int(i64),
-    Str(Box<String>),
+    Str(Rc<String>),
 
     // Reference (Mutable) Types
     List(Mut<VecDeque<Value>>),
@@ -77,7 +77,7 @@ impl Value {
     /// Converts the `Value` to a `String`. This is equivalent to the stdlib function `str()`
     pub fn to_str(self: &Self) -> String {
         match self {
-            Str(s) => *s.clone(),
+            Str(s) => (**s).to_owned(),
             Function(f) => f.name.clone(),
             PartialFunction(f) => f.func.to_str(),
             NativeFunction(b) => String::from(b.name()),
@@ -363,9 +363,9 @@ pub trait IntoValue {
 
 impl IntoValue for bool { fn to_value(self) -> Value { Bool(self) } }
 impl IntoValue for i64 { fn to_value(self) -> Value { Int(self) } }
-impl IntoValue for char { fn to_value(self) -> Value { Str(Box::new(String::from(self))) } }
-impl<'a> IntoValue for &'a str { fn to_value(self) -> Value { Str(Box::new(String::from(self))) } }
-impl IntoValue for String { fn to_value(self) -> Value { Str(Box::new(self)) } }
+impl IntoValue for char { fn to_value(self) -> Value { Str(Rc::new(String::from(self))) } }
+impl<'a> IntoValue for &'a str { fn to_value(self) -> Value { Str(Rc::new(String::from(self))) } }
+impl IntoValue for String { fn to_value(self) -> Value { Str(Rc::new(self)) } }
 impl IntoValue for VecDeque<Value> { fn to_value(self) -> Value { List(Mut::new(self)) } }
 impl IntoValue for Vec<Value> { fn to_value(self) -> Value { Vector(Mut::new(self)) } }
 impl IntoValue for IndexSet<Value> { fn to_value(self) -> Value { Set(Mut::new(SetImpl { set: self })) } }
@@ -922,7 +922,7 @@ impl Hash for MemoizedImpl {
 
 
 pub enum Indexable<'a> {
-    Str(&'a Box<String>),
+    Str(&'a Rc<String>),
     List(RefMut<'a, VecDeque<Value>>),
     Vector(RefMut<'a, Vec<Value>>),
 }
@@ -960,7 +960,7 @@ impl<'a> Indexable<'a> {
 
 
 pub enum Sliceable<'a> {
-    Str(&'a Box<String>, String),
+    Str(&'a Rc<String>, String),
     List(Ref<'a, VecDeque<Value>>, VecDeque<Value>),
     Vector(Ref<'a, Vec<Value>>, Vec<Value>),
 }
