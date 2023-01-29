@@ -43,18 +43,18 @@ All the above binary operators come in operator-equals variants: `+=`, `-=`, `*=
 
 All operators are left associative (except `=` for assigning variables). Their precedence is noted as below, where higher entries are higher precedence:
 
-| Precedence | Operators                                                                                | Description                                                                            |
-|------------|------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------|
-| 1          | `[]`, `()`, `if then else`                                                               | Array Access, Function Evaluation, Ternary `if`                                        |
-| 2          | `-`, `!`, `~`                                                                            | Unary Negation, Logical Not, and Bitwise Not                                           |
-| 3          | `*`, `/`, `%`, `**`, `is`, `in`, `not in`                                                | Multiplication, Division, Modulo, Power, Is In, Not In                                 |
-| 4          | `+`, `-`                                                                                 | Addition, Subtraction                                                                  |
-| 5          | `<<`, `>>`                                                                               | Left Shift, Right Shift                                                                |
-| 6          | `&`, `∣`, `^`                                                                            | Bitwise AND, Bitwise OR, Bitwise XOR                                                   |
-| 7          | `.`                                                                                      | [Function Composition](#function-evaluation)                                           |
-| 8          | `<`, `<=`, `>`, `>=`, `==`, `!=`                                                         | Less Than, Less Than or Equal, Greater Than, Greater Than or Equal, Equals, Not Equals |
-| 9          | `and`, `or`                                                                              | Logical And, Logical Or                                                                |
-| 10         | `=`, `+=`, `-=`, `*=`, `/=`, `&=`, `∣=`, `^=`, `<<=`, `>>=`, `%=`, `**=`, `max=`, `min=` | Assignment, and Operator Assignment                                                    |
+| Precedence | Operators                                                                                      | Description                                                                            |
+|------------|------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------|
+| 1          | `[]`, `()`, `if then else`                                                                     | Array Access, Function Evaluation, Ternary `if`                                        |
+| 2          | `-`, `!`, `~`                                                                                  | Unary Negation, Logical Not, and Bitwise Not                                           |
+| 3          | `*`, `/`, `%`, `**`, `is`, `in`, `not in`                                                      | Multiplication, Division, Modulo, Power, Is In, Not In                                 |
+| 4          | `+`, `-`                                                                                       | Addition, Subtraction                                                                  |
+| 5          | `<<`, `>>`                                                                                     | Left Shift, Right Shift                                                                |
+| 6          | `&`, `∣`, `^`                                                                                  | Bitwise AND, Bitwise OR, Bitwise XOR                                                   |
+| 7          | `.`                                                                                            | [Function Composition](#function-evaluation)                                           |
+| 8          | `<`, `<=`, `>`, `>=`, `==`, `!=`                                                               | Less Than, Less Than or Equal, Greater Than, Greater Than or Equal, Equals, Not Equals |
+| 9          | `and`, `or`                                                                                    | Logical And, Logical Or                                                                |
+| 10         | `=`, `+=`, `-=`, `*=`, `/=`, `&=`, `∣=`, `^=`, `<<=`, `>>=`, `%=`, `**=`, `.=`, `max=`, `min=` | Assignment, and Operator Assignment                                                    |
 
 ### Variables
 

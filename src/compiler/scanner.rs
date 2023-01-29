@@ -96,6 +96,7 @@ pub enum ScanToken {
     RightShiftEquals,
     ModEquals,
     PowEquals,
+    DotEquals,
 
     Plus,
     Minus,
@@ -347,6 +348,10 @@ impl<'a> Scanner<'a> {
                            Some('=') => self.push_skip(ModEquals),
                            _ => self.push(Mod)
                        },
+                       '.' => match self.peek() {
+                           Some('=') => self.push_skip(DotEquals),
+                           _ => self.push(Dot)
+                       }
 
 
                        '(' => self.push(OpenParen),
@@ -357,7 +362,6 @@ impl<'a> Scanner<'a> {
                        '}' => self.push(CloseBrace),
 
                        ',' => self.push(Comma),
-                       '.' => self.push(Dot),
                        ':' => self.push(Colon),
                        '_' => self.push(Underscore),
                        ';' => self.push(Semicolon),
@@ -491,7 +495,7 @@ mod tests {
     #[test] fn test_str_other_arithmetic_operators() { run_str("% %= ** *= **= * *=", vec![Mod, ModEquals, Pow, MulEquals, PowEquals, Mul, MulEquals]); }
     #[test] fn test_str_bitwise_operators() { run_str("| ^ ~ & &= |= ^=", vec![BitwiseOr, BitwiseXor, BitwiseNot, BitwiseAnd, AndEquals, OrEquals, XorEquals]); }
     #[test] fn test_str_groupings() { run_str("( [ { } ] )", vec![OpenParen, OpenSquareBracket, OpenBrace, CloseBrace, CloseSquareBracket, CloseParen]); }
-    #[test] fn test_str_syntax() { run_str(". , -> - > : @", vec![Dot, Comma, Arrow, Minus, GreaterThan, Colon, At]); }
+    #[test] fn test_str_syntax() { run_str(". .= , -> - > : @", vec![Dot, DotEquals, Comma, Arrow, Minus, GreaterThan, Colon, At]); }
 
     fn run_str(text: &str, tokens: Vec<ScanToken>) {
         let result: ScanResult = scanner::scan(&String::from(text));

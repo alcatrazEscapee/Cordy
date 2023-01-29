@@ -290,6 +290,7 @@ impl AsError for ScanToken {
             ScanToken::RightShiftEquals => String::from("'>>=' token"),
             ScanToken::ModEquals => String::from("'%=' token"),
             ScanToken::PowEquals => String::from("'**=' token"),
+            ScanToken::DotEquals => String::from("'.=' token"),
 
             ScanToken::Plus => String::from("'+' token"),
             ScanToken::Minus => String::from("'-' token"),
