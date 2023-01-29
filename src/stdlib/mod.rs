@@ -4,7 +4,7 @@ use indexmap::{IndexMap, IndexSet};
 use lazy_static::lazy_static;
 
 use crate::vm::{operator, VirtualInterface};
-use crate::vm::value::{RangeImpl, Value};
+use crate::vm::value::{IntoIterableValue, IntoValue, RangeImpl, Value};
 use crate::vm::error::RuntimeError;
 use crate::trace;
 
@@ -504,7 +504,7 @@ pub fn invoke<VM>(native: NativeFunction, nargs: u8, vm: &mut VM) -> ValueResult
             Ok(Value::Nil)
         },
         ReadText => dispatch!(a1, match a1 {
-            Value::Str(s1) => Ok(Value::Str(Box::new(fs::read_to_string(s1.as_ref()).unwrap().replace("\r", "")))), // todo: error handling?
+            Value::Str(s1) => Ok(fs::read_to_string(s1.as_ref()).unwrap().replace("\r", "").to_value()), // todo: error handling?
             _ => TypeErrorArgMustBeStr(a1).err(),
         }),
         WriteText => dispatch!(a1, a2, match (&a1, &a2) {
@@ -522,13 +522,13 @@ pub fn invoke<VM>(native: NativeFunction, nargs: u8, vm: &mut VM) -> ValueResult
         }),
         Bool => dispatch!(a1, Ok(Value::Bool(a1.as_bool()))),
         Int => dispatch!(a1, math::convert_to_int(a1, None), a2, math::convert_to_int(a1, Some(a2))),
-        Str => dispatch!(Ok(Value::Str(Box::new(String::new()))), a1, Ok(Value::Str(Box::new(a1.to_str())))),
-        List => dispatch_varargs!(Ok(Value::list(VecDeque::new())), an, Ok(Value::iter_list(an))),
-        Set => dispatch_varargs!(Ok(Value::set(IndexSet::new())), an, Ok(Value::iter_set(an))),
-        Dict => dispatch_varargs!(Ok(Value::dict(IndexMap::new())), an, collections::collect_into_dict(an)),
-        Heap => dispatch_varargs!(Ok(Value::heap(BinaryHeap::new())), an, Ok(Value::iter_heap(an))),
-        Vector => dispatch_varargs!(Ok(Value::vector(vec![])), an, Ok(Value::iter_vector(an))),
-        Repr => dispatch!(a1, Ok(Value::Str(Box::new(a1.to_repr_str())))),
+        Str => dispatch!(Ok("".to_value()), a1, Ok(a1.to_str().to_value())),
+        List => dispatch_varargs!(Ok(VecDeque::new().to_value()), an, Ok(an.to_list())),
+        Set => dispatch_varargs!(Ok(IndexSet::new().to_value()), an, Ok(an.to_set())),
+        Dict => dispatch_varargs!(Ok(IndexMap::new().to_value()), an, collections::collect_into_dict(an)),
+        Heap => dispatch_varargs!(Ok(BinaryHeap::new().to_value()), an, Ok(an.to_heap())),
+        Vector => dispatch_varargs!(Ok(vec![].to_value()), an, Ok(an.to_vector())),
+        Repr => dispatch!(a1, Ok(a1.to_repr_str().to_value())),
         Eval => dispatch!(a1, vm.invoke_eval(a1.as_str()?)),
 
         // operator

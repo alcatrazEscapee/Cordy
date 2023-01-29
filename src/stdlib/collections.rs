@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use itertools::Itertools;
 
 use crate::vm::error::RuntimeError;
-use crate::vm::value::{Iterable, MemoizedImpl, Value};
+use crate::vm::value::{IntoIterableValue, IntoDictValue, IntoValue, Iterable, MemoizedImpl, Value};
 use crate::vm::VirtualInterface;
 
 use RuntimeError::{*};
@@ -175,7 +175,7 @@ fn cmp_to_ord<E>(i: i64) -> Result<Ordering, E> {
 pub fn sort(args: impl Iterator<Item=Value>) -> ValueResult {
     let mut sorted: Vec<Value> = args.collect::<Vec<Value>>();
     sorted.sort_unstable();
-    Ok(Value::iter_list(sorted.into_iter()))
+    Ok(sorted.into_iter().to_list())
 }
 
 pub fn sort_by<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : VirtualInterface {
@@ -197,13 +197,13 @@ pub fn sort_by<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : 
         Some(_) => return TypeErrorArgMustBeCmpOrKeyFunction(a1).err(),
         None => return TypeErrorArgMustBeFunction(a1).err(),
     }
-    Ok(Value::iter_list(sorted.into_iter()))
+    Ok(sorted.into_iter().to_list())
 }
 
 pub fn reverse(args: impl Iterator<Item=Value>) -> ValueResult {
     let mut vec = args.collect::<Vec<Value>>();
     vec.reverse();
-    Ok(Value::iter_list(vec.into_iter()))
+    Ok(vec.into_iter().to_list())
 }
 
 pub fn permutations(a1: Value, a2: Value) -> ValueResult {
@@ -211,7 +211,7 @@ pub fn permutations(a1: Value, a2: Value) -> ValueResult {
     if n <= 0 {
         return ValueErrorValueMustBeNonNegative(n).err();
     }
-    Ok(Value::iter_list(a2.as_iter()?.permutations(n as usize).map(|u| Value::vector(u))))
+    Ok(a2.as_iter()?.permutations(n as usize).map(|u| u.to_value()).to_list())
 }
 
 pub fn combinations(a1: Value, a2: Value) -> ValueResult {
@@ -219,7 +219,7 @@ pub fn combinations(a1: Value, a2: Value) -> ValueResult {
     if n <= 0 {
         return ValueErrorValueMustBeNonNegative(n).err();
     }
-    Ok(Value::iter_list(a2.as_iter()?.combinations(n as usize).map(|u| Value::vector(u))))
+    Ok(a2.as_iter()?.combinations(n as usize).map(|u| u.to_value()).to_list())
 }
 
 pub fn any<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : VirtualInterface {
@@ -247,7 +247,7 @@ pub fn map<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : Virt
     for r in a2.as_iter()? {
         acc.push_back(vm.invoke_func1(a1.clone(), r)?);
     }
-    Ok(Value::list(acc))
+    Ok(acc.to_value())
 }
 
 pub fn filter<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : VirtualInterface {
@@ -259,7 +259,7 @@ pub fn filter<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : V
             acc.push_back(r);
         }
     }
-    Ok(Value::list(acc))
+    Ok(acc.to_value())
 }
 
 pub fn flat_map<VM>(vm: &mut VM, a1: Option<Value>, a2: Value) -> ValueResult where VM : VirtualInterface {
@@ -274,7 +274,7 @@ pub fn flat_map<VM>(vm: &mut VM, a1: Option<Value>, a2: Value) -> ValueResult wh
             acc.push_back(e);
         }
     }
-    Ok(Value::list(acc))
+    Ok(acc.to_value())
 }
 
 pub fn zip(a1: impl Iterator<Item=Value>) -> ValueResult {
@@ -287,10 +287,10 @@ pub fn zip(a1: impl Iterator<Item=Value>) -> ValueResult {
         for iter in &mut iters {
             match iter.next() {
                 Some(it) => vec.push(it),
-                None => return Ok(Value::list(acc)),
+                None => return Ok(acc.to_value()),
             }
         }
-        acc.push_back(Value::vector(vec));
+        acc.push_back(vec.to_value());
     }
 }
 
@@ -311,7 +311,7 @@ pub fn peek(a1: Value) -> ValueResult {
     match match &a1 {
         List(v) => v.unbox().front().cloned(),
         Set(v) => v.unbox().set.first().cloned(),
-        Dict(v) => v.unbox().dict.first().map(|u| Value::vector(vec![u.0.clone(), u.1.clone()])),
+        Dict(v) => v.unbox().dict.first().map(|u| vec![u.0.clone(), u.1.clone()].to_value()),
         Heap(v) => v.unbox().heap.peek().map(|u| u.clone().0),
         Vector(v) => v.unbox().first().cloned(),
         _ => return TypeErrorArgMustBeIterable(a1).err(),
@@ -325,7 +325,7 @@ pub fn pop(a1: Value) -> ValueResult {
     match match &a1 {
         List(v) => v.unbox_mut().pop_back(),
         Set(v) => v.unbox_mut().set.pop(),
-        Dict(v) => v.unbox_mut().dict.pop().map(|u| Value::vector(vec![u.0, u.1])),
+        Dict(v) => v.unbox_mut().dict.pop().map(|u| vec![u.0, u.1].to_value()),
         Heap(v) => v.unbox_mut().heap.pop().map(|t| t.0),
         _ => return TypeErrorArgMustBeIterable(a1).err()
     } {
@@ -409,14 +409,17 @@ pub fn clear(a1: Value) -> ValueResult {
 
 
 pub fn collect_into_dict(iter: impl Iterator<Item=Value>) -> ValueResult {
-    Ok(Value::iter_dict(iter.map(|t| {
+    Ok(iter.map(|t| {
         let index = t.as_index()?;
         if index.len() == 2 {
             Ok((index.get_index(0), index.get_index(1)))
         } else {
             ValueErrorCannotCollectIntoDict(t.clone()).err()
         }
-    }).collect::<Result<Vec<(Value, Value)>, Box<RuntimeError>>>()?.into_iter()))
+    })
+        .collect::<Result<Vec<(Value, Value)>, Box<RuntimeError>>>()?
+        .into_iter()
+        .to_dict())
 }
 
 pub fn dict_set_default(a1: Value, a2: Value) -> ValueResult {
@@ -431,14 +434,14 @@ pub fn dict_set_default(a1: Value, a2: Value) -> ValueResult {
 
 pub fn dict_keys(a1: Value) -> ValueResult {
     match a1 {
-        Dict(it) => Ok(Value::iter_set(it.unbox().dict.keys().cloned())),
+        Dict(it) => Ok(it.unbox().dict.keys().cloned().to_set()),
         a1 => TypeErrorArgMustBeDict(a1).err()
     }
 }
 
 pub fn dict_values(a1: Value) -> ValueResult {
     match a1 {
-        Dict(it) => Ok(Value::iter_list(it.unbox().dict.values().cloned())),
+        Dict(it) => Ok(it.unbox().dict.values().cloned().to_list()),
         a1 => TypeErrorArgMustBeDict(a1).err()
     }
 }

@@ -66,21 +66,12 @@ pub enum Value {
 impl Value {
 
     // Constructors
-    pub fn iter_list(iter: impl Iterator<Item=Value>) -> Value { Value::list(iter.collect()) }
-    pub fn iter_set(iter: impl Iterator<Item=Value>) -> Value { Value::set(iter.collect()) }
-    pub fn iter_dict(iter: impl Iterator<Item=(Value, Value)>) -> Value { Value::dict(iter.collect()) }
-    pub fn iter_heap(iter: impl Iterator<Item=Value>) -> Value { Heap(Mut::new(HeapImpl::new(iter.map(|t| Reverse(t)).collect::<BinaryHeap<Reverse<Value>>>()))) }
-    pub fn iter_vector(iter: impl Iterator<Item=Value>) -> Value { Value::vector(iter.collect()) }
-
-    pub fn str(c: char) -> Value { Str(Box::new(String::from(c))) }
-    pub fn list(vec: VecDeque<Value>) -> Value { List(Mut::new(vec.into_iter().collect::<VecDeque<Value>>())) }
-    pub fn set(set: IndexSet<Value>) -> Value { Set(Mut::new(SetImpl::new(set))) }
-    pub fn dict(dict: IndexMap<Value, Value>) -> Value { Dict(Mut::new(DictImpl::new(dict))) }
-    pub fn heap(heap: BinaryHeap<Reverse<Value>>) -> Value { Heap(Mut::new(HeapImpl::new(heap))) }
-    pub fn vector(vec: Vec<Value>) -> Value { Vector(Mut::new(vec)) }
+    pub fn iter_list(iter: impl Iterator<Item=Value>) -> Value { iter.to_list() }
+    pub fn iter_set(iter: impl Iterator<Item=Value>) -> Value { iter.to_set() }
+    pub fn iter_heap(iter: impl Iterator<Item=Value>) -> Value { iter.to_heap() }
+    pub fn iter_vector(iter: impl Iterator<Item=Value>) -> Value { iter.to_vector() }
 
     pub fn partial(func: Value, args: Vec<Value>) -> Value { PartialFunction(Box::new(PartialFunctionImpl { func, args: args.into_iter().map(|v| Box::new(v)).collect() }))}
-
     pub fn closure(func: Rc<FunctionImpl>) -> Value { Closure(Box::new(ClosureImpl { func, environment: Vec::new() })) }
 
     /// Converts the `Value` to a `String`. This is equivalent to the stdlib function `str()`
@@ -363,6 +354,63 @@ impl Ord for Value {
 }
 
 
+
+/// A trait which is responsible for converting native types into a `Value`.
+/// It is preferred to boxing these types directly using `Value::Foo()`, as most types have inner complexity that needs to be managed.
+pub trait IntoValue {
+    fn to_value(self) -> Value;
+}
+
+impl IntoValue for bool { fn to_value(self) -> Value { Bool(self) } }
+impl IntoValue for i64 { fn to_value(self) -> Value { Int(self) } }
+impl IntoValue for char { fn to_value(self) -> Value { Str(Box::new(String::from(self))) } }
+impl<'a> IntoValue for &'a str { fn to_value(self) -> Value { Str(Box::new(String::from(self))) } }
+impl IntoValue for String { fn to_value(self) -> Value { Str(Box::new(self)) } }
+impl IntoValue for VecDeque<Value> { fn to_value(self) -> Value { List(Mut::new(self)) } }
+impl IntoValue for Vec<Value> { fn to_value(self) -> Value { Vector(Mut::new(self)) } }
+impl IntoValue for IndexSet<Value> { fn to_value(self) -> Value { Set(Mut::new(SetImpl { set: self })) } }
+impl IntoValue for IndexMap<Value, Value> { fn to_value(self) -> Value { Dict(Mut::new(DictImpl { dict: self, default: None })) } }
+impl IntoValue for BinaryHeap<Reverse<Value>> { fn to_value(self) -> Value { Heap(Mut::new(HeapImpl { heap: self }))} }
+
+impl<'a> IntoValue for Sliceable<'a> {
+    fn to_value(self: Self) -> Value {
+        match self {
+            Sliceable::Str(_, it) => it.to_value(),
+            Sliceable::List(_, it) => it.to_value(),
+            Sliceable::Vector(_, it) => it.to_value(),
+        }
+    }
+}
+
+
+/// A trait which is responsible for wrapping conversions from a `Iterator<Item=Value>` into `IntoValue`, which then converts to a `Value`.
+pub trait IntoIterableValue {
+    fn to_list(self) -> Value;
+    fn to_vector(self) -> Value;
+    fn to_set(self) -> Value;
+    fn to_heap(self) -> Value;
+}
+
+impl<I> IntoIterableValue for I where I : Iterator<Item=Value> {
+    fn to_list(self) -> Value { self.collect::<VecDeque<Value>>().to_value() }
+    fn to_vector(self) -> Value { self.collect::<Vec<Value>>().to_value() }
+    fn to_set(self) -> Value { self.collect::<IndexSet<Value>>().to_value() }
+    fn to_heap(self) -> Value { self.map(|u| Reverse(u)).collect::<BinaryHeap<Reverse<Value>>>().to_value() }
+}
+
+/// A trait which is responsible for wrapping conversions from an `Iterator<Item=(Value, Value)>` into a `Value::Dict`
+pub trait IntoDictValue {
+    fn to_dict(self) -> Value;
+}
+
+impl<I> IntoDictValue for I where I : Iterator<Item=(Value, Value)> {
+    fn to_dict(self) -> Value {
+        self.collect::<IndexMap<Value, Value>>().to_value()
+    }
+}
+
+
+
 /// `Mut<T>` is a wrapper around internally mutable types. It implements the required traits for `Value` through it's inner type.
 /// Note that it also implements `Hash`, even though the internal type is mutable. This is required to satisfy rust's type system.
 /// Mutating values stored in a hash backed structure is legal, from a language point of view, but will just invoke undefined behavior.
@@ -498,10 +546,6 @@ pub struct SetImpl {
     pub set: IndexSet<Value>
 }
 
-impl SetImpl {
-    fn new(set: IndexSet<Value>) -> SetImpl { SetImpl { set } }
-}
-
 impl PartialOrd for SetImpl {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
@@ -536,10 +580,6 @@ pub struct DictImpl {
     pub default: Option<Value>
 }
 
-impl DictImpl {
-    fn new(dict: IndexMap<Value, Value>) -> DictImpl { DictImpl { dict, default: None }}
-}
-
 impl PartialOrd for DictImpl {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
@@ -572,12 +612,6 @@ impl Hash for DictImpl {
 #[derive(Debug, Clone)]
 pub struct HeapImpl {
     pub heap: BinaryHeap<Reverse<Value>>
-}
-
-impl HeapImpl {
-    pub fn new(heap: BinaryHeap<Reverse<Value>>) -> HeapImpl {
-        HeapImpl { heap }
-    }
 }
 
 impl PartialEq<Self> for HeapImpl {
@@ -775,7 +809,7 @@ impl Iterator for Iterable {
 
     fn next(&mut self) -> Option<Self::Item> {
         match self {
-            Iterable::Str(_, chars) => chars.next().map(|u| Value::str(u)),
+            Iterable::Str(_, chars) => chars.next().map(|u| u.to_value()),
             Iterable::Unit(it) => it.take(),
             Iterable::Collection(index, it) => {
                 let ret = it.current(*index);
@@ -784,7 +818,10 @@ impl Iterator for Iterable {
             }
             Iterable::Range(it, range) => range.next(it),
             Iterable::Enumerate(index, it) => {
-                let ret = (*it).next().map(|u| Value::vector(vec![Int(*index as i64), u]));
+                let ret = (*it).next().map(|u| {
+                    let vec = vec![Int(*index as i64), u];
+                    vec.to_value()
+                });
                 *index += 1;
                 ret
             },
@@ -797,7 +834,7 @@ impl Iterator for IterableRev {
 
     fn next(&mut self) -> Option<Self::Item> {
         match &mut self.0 {
-            Iterable::Str(_, chars) => chars.next_back().map(|u| Value::str(u)),
+            Iterable::Str(_, chars) => chars.next_back().map(|u| u.to_value()),
             Iterable::Unit(it) => it.take(),
             Iterable::Collection(index, it) => {
                 if *index < it.len() {
@@ -810,7 +847,10 @@ impl Iterator for IterableRev {
             }
             Iterable::Range(it, range) => range.next(it),
             Iterable::Enumerate(index, it) => {
-                let ret = (*it).next().map(|u| Value::vector(vec![Int(*index as i64), u]));
+                let ret = (*it).next().map(|u| {
+                    let vec = vec![Int(*index as i64), u];
+                    vec.to_value()
+                });
                 *index += 1;
                 ret
             },
@@ -852,7 +892,10 @@ impl CollectionIterable {
         match self {
             CollectionIterable::List(it) => it.unbox().get(index).cloned(),
             CollectionIterable::Set(it) => it.unbox().set.get_index(index).cloned(),
-            CollectionIterable::Dict(it) => it.unbox().dict.get_index(index).map(|(l, r)| Value::vector(vec![l.clone(), r.clone()])),
+            CollectionIterable::Dict(it) => it.unbox().dict.get_index(index).map(|(l, r)| {
+                let vec = vec![l.clone(), r.clone()];
+                vec.to_value()
+            }),
             CollectionIterable::Vector(it) => it.unbox().get(index).cloned(),
             CollectionIterable::RawVector(it) => it.get(index).cloned(),
         }
@@ -896,7 +939,10 @@ impl<'a> Indexable<'a> {
 
     pub fn get_index(self: &Self, index: usize) -> Value {
         match self {
-            Indexable::Str(it) => Value::str(it.chars().nth(index).unwrap()),
+            Indexable::Str(it) => {
+                let c = it.chars().nth(index).unwrap();
+                c.to_value()
+            }
             Indexable::List(it) => (&it[index]).clone(),
             Indexable::Vector(it) => (&it[index]).clone(),
         }
@@ -939,14 +985,6 @@ impl<'a> Sliceable<'a> {
             }
         }
     }
-
-    pub fn to_value(self: Self) -> Value {
-        match self {
-            Sliceable::Str(_, it) => Str(Box::new(it)),
-            Sliceable::List(_, it) => List(Mut::new(it)),
-            Sliceable::Vector(_, it) => Vector(Mut::new(it)),
-        }
-    }
 }
 
 
@@ -957,7 +995,7 @@ mod test {
     use indexmap::{IndexMap, IndexSet};
     use crate::stdlib::NativeFunction;
     use crate::vm::error::RuntimeError;
-    use crate::vm::value::{FunctionImpl, RangeImpl, Value};
+    use crate::vm::value::{FunctionImpl, IntoIterableValue, IntoValue, RangeImpl, Value};
 
     #[test] fn test_layout() { assert_eq!(16, std::mem::size_of::<Value>()); }
     #[test] fn test_result_box_layout() { assert_eq!(16, std::mem::size_of::<Result<Value, Box<RuntimeError>>>()); }
@@ -977,17 +1015,23 @@ mod test {
 
     fn all_values() -> Vec<Value> {
         let rc = Rc::new(FunctionImpl::new(0, String::new(), vec![]));
+        let vec = VecDeque::new();
+        let set = IndexSet::new();
+        let dict = IndexMap::new();
+        let vec1 = vec![];
+        let vec2 = vec![];
+        let iter = std::iter::empty();
         vec![
             Value::Nil,
             Value::Bool(true),
             Value::Int(1),
-            Value::list(VecDeque::new()),
-            Value::set(IndexSet::new()),
-            Value::dict(IndexMap::new()),
-            Value::iter_heap(std::iter::empty()),
-            Value::vector(vec![]),
+            vec.to_value(),
+            set.to_value(),
+            dict.to_value(),
+            iter.to_heap(),
+            vec2.to_value(),
             RangeImpl::new(0, 1, 1).unwrap(),
-            Value::Enumerate(Box::new(Value::vector(vec![]))),
+            Value::Enumerate(Box::new(vec1.to_value())),
             Value::Function(rc.clone()),
             Value::partial(Value::Function(rc.clone()), vec![]),
             Value::NativeFunction(NativeFunction::Print),
