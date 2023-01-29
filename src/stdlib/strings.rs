@@ -1,7 +1,7 @@
 use std::iter::Peekable;
 use std::str::Chars;
 use crate::vm::error::RuntimeError;
-use crate::vm::value::{Iterable, Value};
+use crate::vm::value::{IntoIterableValue, IntoValue, Iterable, Value};
 
 use Value::{*};
 use RuntimeError::{*};
@@ -10,29 +10,29 @@ type ValueResult = Result<Value, Box<RuntimeError>>;
 
 
 pub fn to_lower(a0: Value) -> ValueResult {
-    Ok(Str(Box::new(a0.as_str()?.to_lowercase())))
+    Ok(a0.as_str()?.to_lowercase().to_value())
 }
 
 pub fn to_upper(a0: Value) -> ValueResult {
-    Ok(Str(Box::new(a0.as_str()?.to_uppercase())))
+    Ok(a0.as_str()?.to_uppercase().to_value())
 }
 
 pub fn trim(a0: Value) -> ValueResult {
-    Ok(Str(Box::new(String::from(a0.as_str()?.trim()))))
+    Ok(a0.as_str()?.trim().to_value())
 }
 
 pub fn replace(a0: Value, a1: Value, a2: Value) -> ValueResult {
-    Ok(Str(Box::new(a2.as_str()?.replace(a0.as_str()?, a1.as_str()?.as_str()))))
+    Ok(a2.as_str()?.replace(a0.as_str()?, a1.as_str()?.as_str()).to_value())
 }
 
 pub fn split(a0: Value, a1: Value) -> ValueResult {
-    Ok(Value::iter_list(a1.as_str()?.split(a0.as_str()?).map(|u| Str(Box::new(String::from(u))))))
+    Ok(a1.as_str()?.split(a0.as_str()?).map(|u| u.to_value()).to_list())
 }
 
 pub fn to_char(a1: Value) -> ValueResult {
     match &a1 {
         Int(i) if i > &0 => match char::from_u32(*i as u32) {
-            Some(c) => Ok(Value::str(c)),
+            Some(c) => Ok(c.to_value()),
             None => ValueErrorInvalidCharacterOrdinal(*i).err()
         },
         Int(i) => ValueErrorInvalidCharacterOrdinal(*i).err(),
@@ -48,11 +48,11 @@ pub fn to_ord(a1: Value) -> ValueResult {
 }
 
 pub fn to_hex(a1: Value) -> ValueResult {
-    Ok(Str(Box::new(format!("{:x}", a1.as_int()?))))
+    Ok(format!("{:x}", a1.as_int()?).to_value())
 }
 
 pub fn to_bin(a1: Value) -> ValueResult {
-    Ok(Str(Box::new(format!("{:b}", a1.as_int()?))))
+    Ok(format!("{:b}", a1.as_int()?).to_value())
 }
 
 pub fn format_string(literal: &String, args: Value) -> ValueResult {
@@ -143,7 +143,7 @@ impl<'a> StringFormatter<'a> {
         }
         match (&mut self.args).next() {
             Some(e) => ValueErrorNotAllArgumentsUsedInStringFormatting(e.clone()).err(),
-            None => Ok(Str(Box::new(self.output))),
+            None => Ok(self.output.to_value()),
         }
     }
 

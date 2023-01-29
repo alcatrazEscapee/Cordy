@@ -10,7 +10,7 @@ use crate::compiler::{CompileResult, IncrementalCompileResult};
 use crate::compiler::parser::Locals;
 use crate::stdlib::NativeFunction;
 use crate::vm::opcode::Opcode;
-use crate::vm::value::{UpValue, Value};
+use crate::vm::value::{IntoIterableValue, IntoDictValue, UpValue, Value, IntoValue};
 use crate::vm::value::{FunctionImpl, PartialFunctionImpl};
 
 use Opcode::{*};
@@ -454,23 +454,23 @@ impl<R, W> VirtualMachine<R, W> where
             },
             True => {
                 trace::trace_interpreter!("push true");
-                self.push(Value::Bool(true));
+                self.push(true.to_value());
             },
             False => {
                 trace::trace_interpreter!("push false");
-                self.push(Value::Bool(false));
+                self.push(false.to_value());
             },
             Int(cid) => {
                 let cid: usize = cid as usize;
                 let value: i64 = self.constants[cid];
                 trace::trace_interpreter!("push constant {} -> {}", cid, value);
-                self.push(Value::Int(value));
+                self.push(value.to_value());
             }
             Str(sid) => {
                 let sid: usize = sid as usize;
                 let str: String = self.strings[sid].clone();
                 trace::trace_interpreter!("push {} -> '{}'", sid, str);
-                self.push(Value::Str(Box::new(str)));
+                self.push(str.to_value());
             },
             Function(fid) => {
                 let fid: usize = fid as usize;
@@ -490,7 +490,7 @@ impl<R, W> VirtualMachine<R, W> where
                 let start: usize = self.stack.len() - length;
                 let end: usize = self.stack.len();
                 trace::trace_interpreter_stack!("stack splice {}..{} into list", start, end);
-                let list: Value = Value::iter_list(self.stack.splice(start..end, std::iter::empty()));
+                let list: Value = self.stack.splice(start..end, std::iter::empty()).to_list();
                 self.push(list);
             },
             Vector(cid) => {
@@ -501,7 +501,7 @@ impl<R, W> VirtualMachine<R, W> where
                 let start: usize = self.stack.len() - length;
                 let end: usize = self.stack.len();
                 trace::trace_interpreter_stack!("stack splice {}..{} into list", start, end);
-                let vector: Value = Value::iter_vector(self.stack.splice(start..end, std::iter::empty()));
+                let vector: Value = self.stack.splice(start..end, std::iter::empty()).to_vector();
                 self.push(vector);
             },
             Set(cid) => {
@@ -512,7 +512,7 @@ impl<R, W> VirtualMachine<R, W> where
                 let start: usize = self.stack.len() - length;
                 let end: usize = self.stack.len();
                 trace::trace_interpreter_stack!("stack splice {}..{} into set", start, end);
-                let set: Value = Value::iter_set(self.stack.splice(start..end, std::iter::empty()));
+                let set: Value = self.stack.splice(start..end, std::iter::empty()).to_set();
                 self.push(set);
             },
             Dict(cid) => {
@@ -523,7 +523,7 @@ impl<R, W> VirtualMachine<R, W> where
                 let start: usize = self.stack.len() - length;
                 let end: usize = self.stack.len();
                 trace::trace_interpreter_stack!("stack splice {}..{} into dict", start, end);
-                let dict: Value = Value::iter_dict(self.stack.splice(start..end, std::iter::empty()).tuples());
+                let dict: Value = self.stack.splice(start..end, std::iter::empty()).tuples().to_dict();
                 self.push(dict);
             },
 

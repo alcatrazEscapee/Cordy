@@ -1,55 +1,56 @@
 use std::collections::VecDeque;
+use Value::{*};
 use crate::stdlib;
 use crate::stdlib::NativeFunction;
 use crate::vm::error::RuntimeError;
-use crate::vm::value::{Mut, Value};
+use crate::vm::value::{IntoIterableValue, IntoValue, Mut, Value};
 
 use crate::vm::error::RuntimeError::{*};
-use crate::vm::opcode::Opcode::{*};
+use crate::vm::opcode::Opcode;
 
 type ValueResult = Result<Value, Box<RuntimeError>>;
 
 
 pub fn unary_sub(a1: Value) -> ValueResult {
     match a1 {
-        Value::Int(it) => Ok(Value::Int(-it)),
-        Value::Vector(it) => apply_vector_unary(it, unary_sub),
-        v => TypeErrorUnaryOp(UnarySub, v).err(),
+        Int(it) => Ok(Int(-it)),
+        Vector(it) => apply_vector_unary(it, unary_sub),
+        v => TypeErrorUnaryOp(Opcode::UnarySub, v).err(),
     }
 }
 
 pub fn unary_logical_not(a1: Value) -> ValueResult {
     match a1 {
-        Value::Bool(b1) => Ok(Value::Bool(!b1)),
-        Value::Vector(it) => apply_vector_unary(it, unary_logical_not),
-        v => TypeErrorUnaryOp(UnaryLogicalNot, v).err(),
+        Bool(b1) => Ok(Bool(!b1)),
+        Vector(it) => apply_vector_unary(it, unary_logical_not),
+        v => TypeErrorUnaryOp(Opcode::UnaryLogicalNot, v).err(),
     }
 }
 
 pub fn unary_bitwise_not(a1: Value) -> ValueResult {
     match a1 {
-        Value::Int(i1) => Ok(Value::Int(!i1)),
-        Value::Vector(it) => apply_vector_unary(it, unary_bitwise_not),
-        v => TypeErrorUnaryOp(UnaryBitwiseNot, v).err(),
+        Int(i1) => Ok(Int(!i1)),
+        Vector(it) => apply_vector_unary(it, unary_bitwise_not),
+        v => TypeErrorUnaryOp(Opcode::UnaryBitwiseNot, v).err(),
     }
 }
 
 
 pub fn binary_mul(a1: Value, a2: Value) -> ValueResult {
     match (a1, a2) {
-        (Value::Int(i1), Value::Int(i2)) => Ok(Value::Int(i1 * i2)),
-        (Value::Str(s1), Value::Int(i2)) if i2 > 0 => Ok(Value::Str(Box::new(s1.repeat(i2 as usize)))),
-        (Value::Int(i1), Value::Str(s2)) if i1 > 0 => Ok(Value::Str(Box::new(s2.repeat(i1 as usize)))),
-        (Value::List(l1), Value::Int(i1)) if i1 > 0 => {
+        (Int(i1), Int(i2)) => Ok(Int(i1 * i2)),
+        (Str(s1), Int(i2)) if i2 > 0 => Ok(s1.repeat(i2 as usize).to_value()),
+        (Int(i1), Str(s2)) if i1 > 0 => Ok(s2.repeat(i1 as usize).to_value()),
+        (List(l1), Int(i1)) if i1 > 0 => {
             let l1 = l1.unbox();
             let len: usize = l1.len();
-            Ok(Value::iter_list(l1.iter().cycle().take(i1 as usize * len).cloned()))
+            Ok(l1.iter().cycle().take(i1 as usize * len).cloned().to_list())
         },
-        (l @ Value::Int(_), r @ Value::List(_)) => binary_mul(r, l),
-        (Value::Vector(l), Value::Vector(r)) => apply_vector_binary(l, r, binary_mul),
-        (Value::Vector(l), r) => apply_vector_binary_scalar_rhs(l, r, binary_mul),
-        (l, Value::Vector(r)) => apply_vector_binary_scalar_lhs(l, r, binary_mul),
-        (l, r) => TypeErrorBinaryOp(OpMul, l, r).err()
+        (l @ Int(_), r @ List(_)) => binary_mul(r, l),
+        (Vector(l), Vector(r)) => apply_vector_binary(l, r, binary_mul),
+        (Vector(l), r) => apply_vector_binary_scalar_rhs(l, r, binary_mul),
+        (l, Vector(r)) => apply_vector_binary_scalar_lhs(l, r, binary_mul),
+        (l, r) => TypeErrorBinaryOp(Opcode::OpMul, l, r).err()
     }
 }
 
@@ -57,11 +58,11 @@ pub fn binary_mul(a1: Value, a2: Value) -> ValueResult {
 /// The sign will be treated independently of the division, so if a, b > 0, then a / b == -a / -b, and -a / b = a / -b = -(a / b)
 pub fn binary_div(a1: Value, a2: Value) -> ValueResult {
     match (a1, a2) {
-        (Value::Int(i1), Value::Int(i2)) if i2 != 0 => Ok(Value::Int(if i2 < 0 { -(-i1).div_euclid(i2) } else { i1.div_euclid(i2) })),
-        (Value::Vector(l), Value::Vector(r)) => apply_vector_binary(l, r, binary_div),
-        (Value::Vector(l), r) => apply_vector_binary_scalar_rhs(l, r, binary_div),
-        (l, Value::Vector(r)) => apply_vector_binary_scalar_lhs(l, r, binary_div),
-        (l, r) => TypeErrorBinaryOp(OpDiv, l, r).err()
+        (Int(i1), Int(i2)) if i2 != 0 => Ok(Int(if i2 < 0 { -(-i1).div_euclid(i2) } else { i1.div_euclid(i2) })),
+        (Vector(l), Vector(r)) => apply_vector_binary(l, r, binary_div),
+        (Vector(l), r) => apply_vector_binary_scalar_rhs(l, r, binary_div),
+        (l, Vector(r)) => apply_vector_binary_scalar_lhs(l, r, binary_div),
+        (l, r) => TypeErrorBinaryOp(Opcode::OpDiv, l, r).err()
     }
 }
 
@@ -70,28 +71,28 @@ pub fn binary_div(a1: Value, a2: Value) -> ValueResult {
 /// Unlike Python, we don't define the behavior for negative modulus.
 pub fn binary_mod(a1: Value, a2: Value) -> ValueResult {
     match (a1, a2) {
-        (Value::Int(i1), Value::Int(i2)) if i2 > 0 => Ok(Value::Int(i1.rem_euclid(i2))),
-        (Value::Str(l), r) => stdlib::format_string(&*l, r),
-        (Value::Vector(l), Value::Vector(r)) => apply_vector_binary(l, r, binary_mod),
-        (Value::Vector(l), r) => apply_vector_binary_scalar_rhs(l, r, binary_mod),
-        (l, Value::Vector(r)) => apply_vector_binary_scalar_lhs(l, r, binary_mod),
-        (l, r) => TypeErrorBinaryOp(OpMod, l, r).err()
+        (Int(i1), Int(i2)) if i2 > 0 => Ok(Int(i1.rem_euclid(i2))),
+        (Str(l), r) => stdlib::format_string(&*l, r),
+        (Vector(l), Vector(r)) => apply_vector_binary(l, r, binary_mod),
+        (Vector(l), r) => apply_vector_binary_scalar_rhs(l, r, binary_mod),
+        (l, Vector(r)) => apply_vector_binary_scalar_lhs(l, r, binary_mod),
+        (l, r) => TypeErrorBinaryOp(Opcode::OpMod, l, r).err()
     }
 }
 
 pub fn binary_pow(a1: Value, a2: Value) -> ValueResult {
     match (a1, a2) {
-        (Value::Int(i1), Value::Int(i2)) if i2 > 0 => Ok(Value::Int(i1.pow(i2 as u32))),
-        (Value::Vector(l), Value::Vector(r)) => apply_vector_binary(l, r, binary_pow),
-        (Value::Vector(l), r) => apply_vector_binary_scalar_rhs(l, r, binary_pow),
-        (l, Value::Vector(r)) => apply_vector_binary_scalar_lhs(l, r, binary_pow),
-        (l, r) => TypeErrorBinaryOp(OpMod, l, r).err()
+        (Int(i1), Int(i2)) if i2 > 0 => Ok(Int(i1.pow(i2 as u32))),
+        (Vector(l), Vector(r)) => apply_vector_binary(l, r, binary_pow),
+        (Vector(l), r) => apply_vector_binary_scalar_rhs(l, r, binary_pow),
+        (l, Vector(r)) => apply_vector_binary_scalar_lhs(l, r, binary_pow),
+        (l, r) => TypeErrorBinaryOp(Opcode::OpMod, l, r).err()
     }
 }
 
 pub fn binary_is(a1: Value, a2: Value) -> ValueResult {
     match a2 {
-        Value::Nil => Ok(Value::Bool(a1.is_nil())),
+        Nil => Ok(Bool(a1.is_nil())),
         Value::NativeFunction(b) => {
             let ret: bool = match b {
                 NativeFunction::Bool => a1.is_bool(),
@@ -104,7 +105,7 @@ pub fn binary_is(a1: Value, a2: Value) -> ValueResult {
                 NativeFunction::Vector => a1.is_vector(),
                 _ => return TypeErrorBinaryIs(a1, Value::NativeFunction(b)).err()
             };
-            Ok(Value::Bool(ret))
+            Ok(Bool(ret))
         },
         _ => return TypeErrorBinaryIs(a1, a2).err()
     }
@@ -112,128 +113,128 @@ pub fn binary_is(a1: Value, a2: Value) -> ValueResult {
 
 pub fn binary_in(a1: Value, a2: Value) -> ValueResult {
     match (a1, a2) {
-        (Value::Str(l), Value::Str(r)) => Ok(Value::Bool(r.contains(l.as_str()))),
-        (Value::Int(l), Value::Range(r)) => Ok(Value::Bool(r.contains(l))),
-        (l, Value::List(it)) => Ok(Value::Bool(it.unbox().contains(&l))),
-        (l, Value::Set(it)) => Ok(Value::Bool(it.unbox().set.contains(&l))),
-        (l, Value::Dict(it)) => Ok(Value::Bool(it.unbox().dict.contains_key(&l))),
-        (l, Value::Heap(it)) => Ok(Value::Bool(it.unbox().heap.iter().any(|v|v.0 == l))),
-        (l, Value::Vector(it)) => Ok(Value::Bool(it.unbox().contains(&l))),
-        (l, r) => TypeErrorBinaryOp(OpIn, l, r).err()
+        (Str(l), Str(r)) => Ok(Bool(r.contains(l.as_str()))),
+        (Int(l), Range(r)) => Ok(Bool(r.contains(l))),
+        (l, List(it)) => Ok(Bool(it.unbox().contains(&l))),
+        (l, Set(it)) => Ok(Bool(it.unbox().set.contains(&l))),
+        (l, Dict(it)) => Ok(Bool(it.unbox().dict.contains_key(&l))),
+        (l, Heap(it)) => Ok(Bool(it.unbox().heap.iter().any(|v|v.0 == l))),
+        (l, Vector(it)) => Ok(Bool(it.unbox().contains(&l))),
+        (l, r) => TypeErrorBinaryOp(Opcode::OpIn, l, r).err()
     }
 }
 
 pub fn binary_add(a1: Value, a2: Value) -> ValueResult {
     match (a1, a2) {
-        (Value::Int(i1), Value::Int(i2)) => Ok(Value::Int(i1 + i2)),
-        (Value::List(l1), Value::List(l2)) => {
+        (Int(i1), Int(i2)) => Ok(Int(i1 + i2)),
+        (List(l1), List(l2)) => {
             let list1 = l1.unbox();
             let list2 = l2.unbox();
             let mut list3: VecDeque<Value> = VecDeque::with_capacity(list1.len() + list2.len());
             list3.extend(list1.iter().cloned());
             list3.extend(list2.iter().cloned());
-            Ok(Value::list(list3))
+            Ok(list3.to_value())
         },
-        (Value::Str(s1), r) => Ok(Value::Str(Box::new(format!("{}{}", s1, r.to_str())))),
-        (l, Value::Str(s2)) => Ok(Value::Str(Box::new(format!("{}{}", l.to_str(), s2)))),
-        (Value::Vector(l), Value::Vector(r)) => apply_vector_binary(l, r, binary_add),
-        (Value::Vector(l), r) => apply_vector_binary_scalar_rhs(l, r, binary_add),
-        (l, Value::Vector(r)) => apply_vector_binary_scalar_lhs(l, r, binary_add),
-        (l, r) => TypeErrorBinaryOp(OpAdd, l, r).err(),
+        (Str(s1), r) => Ok(format!("{}{}", s1, r.to_str()).to_value()),
+        (l, Str(s2)) => Ok(format!("{}{}", l.to_str(), s2).to_value()),
+        (Vector(l), Vector(r)) => apply_vector_binary(l, r, binary_add),
+        (Vector(l), r) => apply_vector_binary_scalar_rhs(l, r, binary_add),
+        (l, Vector(r)) => apply_vector_binary_scalar_lhs(l, r, binary_add),
+        (l, r) => TypeErrorBinaryOp(Opcode::OpAdd, l, r).err(),
     }
 }
 
 pub fn binary_sub(a1: Value, a2: Value) -> ValueResult {
     match (a1, a2) {
-        (Value::Int(i1), Value::Int(i2)) => Ok(Value::Int(i1 - i2)),
-        (Value::Set(s1), Value::Set(s2)) => {
+        (Int(i1), Int(i2)) => Ok(Int(i1 - i2)),
+        (Set(s1), Set(s2)) => {
             let s1 = s1.unbox();
             let s2 = s2.unbox();
-            Ok(Value::iter_set(s1.set.difference(&s2.set).cloned()))
+            Ok(s1.set.difference(&s2.set).cloned().to_set())
         },
-        (Value::Vector(l), Value::Vector(r)) => apply_vector_binary(l, r, binary_sub),
-        (Value::Vector(l), r) => apply_vector_binary_scalar_rhs(l, r, binary_sub),
-        (l, Value::Vector(r)) => apply_vector_binary_scalar_lhs(l, r, binary_sub),
-        (l, r) => TypeErrorBinaryOp(OpSub, l, r).err()
+        (Vector(l), Vector(r)) => apply_vector_binary(l, r, binary_sub),
+        (Vector(l), r) => apply_vector_binary_scalar_rhs(l, r, binary_sub),
+        (l, Vector(r)) => apply_vector_binary_scalar_lhs(l, r, binary_sub),
+        (l, r) => TypeErrorBinaryOp(Opcode::OpSub, l, r).err()
     }
 }
 
 /// Left shifts by negative values are defined as right shifts by the corresponding positive value. So (a >> -b) == (a << b)
 pub fn binary_left_shift(a1: Value, a2: Value) -> ValueResult {
     match (a1, a2) {
-        (Value::Int(i1), Value::Int(i2)) => Ok(Value::Int(if i2 >= 0 { i1 << i2 } else {i1 >> (-i2)})),
-        (Value::Vector(l), Value::Vector(r)) => apply_vector_binary(l, r, binary_left_shift),
-        (Value::Vector(l), r) => apply_vector_binary_scalar_rhs(l, r, binary_left_shift),
-        (l, Value::Vector(r)) => apply_vector_binary_scalar_lhs(l, r, binary_left_shift),
-        (l, r) => return TypeErrorBinaryOp(OpLeftShift, l, r).err(),
+        (Int(i1), Int(i2)) => Ok(Int(if i2 >= 0 { i1 << i2 } else {i1 >> (-i2)})),
+        (Vector(l), Vector(r)) => apply_vector_binary(l, r, binary_left_shift),
+        (Vector(l), r) => apply_vector_binary_scalar_rhs(l, r, binary_left_shift),
+        (l, Vector(r)) => apply_vector_binary_scalar_lhs(l, r, binary_left_shift),
+        (l, r) => return TypeErrorBinaryOp(Opcode::OpLeftShift, l, r).err(),
     }
 }
 
 /// Right shifts by negative values are defined as left shifts by the corresponding positive value. So (a >> -b) == (a << b)
 pub fn binary_right_shift(a1: Value, a2: Value) -> ValueResult {
     match (a1, a2) {
-        (Value::Int(i1), Value::Int(i2)) => Ok(Value::Int(if i2 >= 0 { i1 >> i2 } else {i1 << (-i2)})),
-        (Value::Vector(l), Value::Vector(r)) => apply_vector_binary(l, r, binary_right_shift),
-        (Value::Vector(l), r) => apply_vector_binary_scalar_rhs(l, r, binary_right_shift),
-        (l, Value::Vector(r)) => apply_vector_binary_scalar_lhs(l, r, binary_right_shift),
-        (l, r) => TypeErrorBinaryOp(OpRightShift, l, r).err(),
+        (Int(i1), Int(i2)) => Ok(Int(if i2 >= 0 { i1 >> i2 } else {i1 << (-i2)})),
+        (Vector(l), Vector(r)) => apply_vector_binary(l, r, binary_right_shift),
+        (Vector(l), r) => apply_vector_binary_scalar_rhs(l, r, binary_right_shift),
+        (l, Vector(r)) => apply_vector_binary_scalar_lhs(l, r, binary_right_shift),
+        (l, r) => TypeErrorBinaryOp(Opcode::OpRightShift, l, r).err(),
     }
 }
 
 
-pub fn binary_less_than(a1: Value, a2: Value) -> Value { Value::Bool(a1 < a2) }
-pub fn binary_less_than_or_equal(a1: Value, a2: Value) -> Value { Value::Bool(a1 <= a2) }
-pub fn binary_greater_than(a1: Value, a2: Value) -> Value { Value::Bool(a1 > a2) }
-pub fn binary_greater_than_or_equal(a1: Value, a2: Value) -> Value { Value::Bool(a1 >= a2) }
+pub fn binary_less_than(a1: Value, a2: Value) -> Value { Bool(a1 < a2) }
+pub fn binary_less_than_or_equal(a1: Value, a2: Value) -> Value { Bool(a1 <= a2) }
+pub fn binary_greater_than(a1: Value, a2: Value) -> Value { Bool(a1 > a2) }
+pub fn binary_greater_than_or_equal(a1: Value, a2: Value) -> Value { Bool(a1 >= a2) }
 
 pub fn binary_equals(a1: Value, a2: Value) -> Value {
-    Value::Bool(a1 == a2)
+    Bool(a1 == a2)
 }
-pub fn binary_not_equals(a1: Value, a2: Value) -> Value { Value::Bool(a1 != a2) }
+pub fn binary_not_equals(a1: Value, a2: Value) -> Value { Bool(a1 != a2) }
 
 
 pub fn binary_bitwise_and(a1: Value, a2: Value) -> ValueResult {
     match (a1, a2) {
-        (Value::Int(i1), Value::Int(i2)) => Ok(Value::Int(i1 & i2)),
-        (Value::Set(s1), Value::Set(s2)) => {
+        (Int(i1), Int(i2)) => Ok(Int(i1 & i2)),
+        (Set(s1), Set(s2)) => {
             let s1 = s1.unbox();
             let s2 = s2.unbox();
-            Ok(Value::iter_set(s1.set.intersection(&s2.set).cloned()))
+            Ok(s1.set.intersection(&s2.set).cloned().to_set())
         },
-        (Value::Vector(l), Value::Vector(r)) => apply_vector_binary(l, r, binary_bitwise_and),
-        (Value::Vector(l), r) => apply_vector_binary_scalar_rhs(l, r, binary_bitwise_and),
-        (l, Value::Vector(r)) => apply_vector_binary_scalar_lhs(l, r, binary_bitwise_and),
-        (l, r) => TypeErrorBinaryOp(OpBitwiseAnd, l, r).err()
+        (Vector(l), Vector(r)) => apply_vector_binary(l, r, binary_bitwise_and),
+        (Vector(l), r) => apply_vector_binary_scalar_rhs(l, r, binary_bitwise_and),
+        (l, Vector(r)) => apply_vector_binary_scalar_lhs(l, r, binary_bitwise_and),
+        (l, r) => TypeErrorBinaryOp(Opcode::OpBitwiseAnd, l, r).err()
     }
 }
 
 pub fn binary_bitwise_or(a1: Value, a2: Value) -> ValueResult {
     match (a1, a2) {
-        (Value::Int(i1), Value::Int(i2)) => Ok(Value::Int(i1 | i2)),
-        (Value::Set(s1), Value::Set(s2)) => {
+        (Int(i1), Int(i2)) => Ok(Int(i1 | i2)),
+        (Set(s1), Set(s2)) => {
             let s1 = s1.unbox();
             let s2 = s2.unbox();
-            Ok(Value::iter_set(s1.set.union(&s2.set).cloned()))
+            Ok(s1.set.union(&s2.set).cloned().to_set())
         },
-        (Value::Vector(l), Value::Vector(r)) => apply_vector_binary(l, r, binary_bitwise_or),
-        (Value::Vector(l), r) => apply_vector_binary_scalar_rhs(l, r, binary_bitwise_or),
-        (l, Value::Vector(r)) => apply_vector_binary_scalar_lhs(l, r, binary_bitwise_or),
-        (l, r) => return TypeErrorBinaryOp(OpBitwiseOr, l, r).err()
+        (Vector(l), Vector(r)) => apply_vector_binary(l, r, binary_bitwise_or),
+        (Vector(l), r) => apply_vector_binary_scalar_rhs(l, r, binary_bitwise_or),
+        (l, Vector(r)) => apply_vector_binary_scalar_lhs(l, r, binary_bitwise_or),
+        (l, r) => return TypeErrorBinaryOp(Opcode::OpBitwiseOr, l, r).err()
     }
 }
 
 pub fn binary_bitwise_xor(a1: Value, a2: Value) -> ValueResult {
     match (a1, a2) {
-        (Value::Int(i1), Value::Int(i2)) => Ok(Value::Int(i1 ^ i2)),
-        (Value::Set(s1), Value::Set(s2)) => {
+        (Int(i1), Int(i2)) => Ok(Int(i1 ^ i2)),
+        (Set(s1), Set(s2)) => {
             let s1 = s1.unbox();
             let s2 = s2.unbox();
-            Ok(Value::iter_set(s1.set.symmetric_difference(&s2.set).cloned()))
+            Ok(s1.set.symmetric_difference(&s2.set).cloned().to_set())
         },
-        (Value::Vector(l), Value::Vector(r)) => apply_vector_binary(l, r, binary_bitwise_xor),
-        (Value::Vector(l), r) => apply_vector_binary_scalar_rhs(l, r, binary_bitwise_xor),
-        (l, Value::Vector(r)) => apply_vector_binary_scalar_lhs(l, r, binary_bitwise_xor),
-        (l, r) => TypeErrorBinaryOp(OpBitwiseXor, l, r).err()
+        (Vector(l), Vector(r)) => apply_vector_binary(l, r, binary_bitwise_xor),
+        (Vector(l), r) => apply_vector_binary_scalar_rhs(l, r, binary_bitwise_xor),
+        (l, Vector(r)) => apply_vector_binary_scalar_lhs(l, r, binary_bitwise_xor),
+        (l, r) => TypeErrorBinaryOp(Opcode::OpBitwiseXor, l, r).err()
     }
 }
 
@@ -241,32 +242,36 @@ pub fn binary_bitwise_xor(a1: Value, a2: Value) -> ValueResult {
 
 /// Helpers for `Vector` operations, which all apply elementwise
 fn apply_vector_unary(vector: Mut<Vec<Value>>, unary_op: fn(Value) -> ValueResult) -> ValueResult {
-    Ok(Value::vector(vector.unbox()
+    Ok(vector.unbox()
         .iter()
         .map(|v| unary_op(v.clone()))
-        .collect::<Result<Vec<Value>, Box<RuntimeError>>>()?))
+        .collect::<Result<Vec<Value>, Box<RuntimeError>>>()?
+        .to_value())
 }
 
 fn apply_vector_binary(lhs: Mut<Vec<Value>>, rhs: Mut<Vec<Value>>, binary_op: fn(Value, Value) -> ValueResult) -> ValueResult {
-    Ok(Value::vector(lhs.unbox()
+    Ok(lhs.unbox()
         .iter()
         .zip(rhs.unbox().iter())
         .map(|(l, r)| binary_op(l.clone(), r.clone()))
-        .collect::<Result<Vec<Value>, Box<RuntimeError>>>()?))
+        .collect::<Result<Vec<Value>, Box<RuntimeError>>>()?
+        .to_value())
 }
 
 fn apply_vector_binary_scalar_lhs(scalar_lhs: Value, rhs: Mut<Vec<Value>>, binary_op: fn(Value, Value) -> ValueResult) -> ValueResult {
-    Ok(Value::vector(rhs.unbox()
+    Ok(rhs.unbox()
         .iter()
         .map(|r| binary_op(scalar_lhs.clone(), r.clone()))
-        .collect::<Result<Vec<Value>, Box<RuntimeError>>>()?))
+        .collect::<Result<Vec<Value>, Box<RuntimeError>>>()?
+        .to_value())
 }
 
 fn apply_vector_binary_scalar_rhs(lhs: Mut<Vec<Value>>, scalar_rhs: Value, binary_op: fn(Value, Value) -> ValueResult) -> ValueResult {
-    Ok(Value::vector(lhs.unbox()
+    Ok(lhs.unbox()
         .iter()
         .map(|l| binary_op(l.clone(), scalar_rhs.clone()))
-        .collect::<Result<Vec<Value>, Box<RuntimeError>>>()?))
+        .collect::<Result<Vec<Value>, Box<RuntimeError>>>()?
+        .to_value())
 }
 
 
