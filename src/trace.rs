@@ -36,7 +36,6 @@ macro_rules! trace_interpreter_stack {
     };
 }
 
-#[cfg(test)]
 pub mod test {
     use std::{env, fs};
     use std::path::PathBuf;
@@ -46,7 +45,7 @@ pub mod test {
     }
 
     pub fn get_test_resource_src(root: &PathBuf) -> String {
-        fs::read_to_string(root).unwrap()
+        fs::read_to_string(root).expect(format!("Reading: {:?}", root).as_str())
     }
 
     pub fn compare_test_resource_content(root: &PathBuf, lines: Vec<String>) {
