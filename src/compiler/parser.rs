@@ -1954,6 +1954,10 @@ impl Parser<'_> {
                 Some(RightShiftEquals) => Some(OpRightShift),
                 Some(ModEquals) => Some(OpMod),
                 Some(PowEquals) => Some(OpPow),
+
+                // `.=` is special, as it needs to emit `Swap`, then `OpFuncEval(1)`
+                Some(DotEquals) => Some(Swap),
+
                 // Special assignment operators, use their own version of a binary operator
                 // Also need to consume the extra token
                 Some(Identifier(it)) if it == "max" => match self.peek2() {
@@ -2013,28 +2017,53 @@ impl Parser<'_> {
                     _ => self.error(InvalidAssignmentTarget),
                 }
             } else if let Some(op) = maybe_op {
+
                 self.advance();
                 match self.last() {
                     Some(PushLocal(id)) => {
                         self.parse_expr_10();
-                        self.push(op);
+                        match op {
+                            Swap => {
+                                self.push(op);
+                                self.push(OpFuncEval(1));
+                            }
+                            op => self.push(op)
+                        }
                         self.push(StoreLocal(id));
                     },
                     Some(PushUpValue(id)) => {
                         self.parse_expr_10();
-                        self.push(op);
+                        match op {
+                            Swap => {
+                                self.push(op);
+                                self.push(OpFuncEval(1));
+                            }
+                            op => self.push(op)
+                        }
                         self.push(StoreUpValue(id));
                     },
                     Some(PushGlobal(id, is_local)) => {
                         self.parse_expr_10();
-                        self.push(op);
+                        match op {
+                            Swap => {
+                                self.push(op);
+                                self.push(OpFuncEval(1));
+                            }
+                            op => self.push(op)
+                        }
                         self.push(StoreGlobal(id, is_local));
                     },
                     Some(OpIndex) => {
                         self.pop();
                         self.push(OpIndexPeek);
                         self.parse_expr_10();
-                        self.push(op);
+                        match op {
+                            Swap => {
+                                self.push(op);
+                                self.push(OpFuncEval(1));
+                            }
+                            op => self.push(op)
+                        }
                         self.push(StoreArray);
                     },
                     // todo: property access

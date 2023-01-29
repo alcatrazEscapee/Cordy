@@ -1364,6 +1364,9 @@ mod test {
     #[test] fn test_annotation_named_func_with_expression() { run_str("fn par(a, f) -> (fn(x) -> f(a)) ; @par('hello') fn do(x) -> print(x) ; do('goodbye')", "hello\n"); }
     #[test] fn test_annotation_expression_func_with_expression() { run_str("fn par(a, f) -> (fn(x) -> f(a)) ; (@par('hello') fn(x) -> print(x))('goodbye')", "hello\n"); }
     #[test] fn test_annotation_iife() { run_str("fn iife(f) -> f() ; @iife fn do() -> print('hello')", "hello\n"); }
+    #[test] fn test_dot_equals() { run_str("let x = 'hello' ; x .= sort ; x .= reduce(+) ; x . print", "ehllo\n"); }
+    #[test] fn test_dot_equals_operator_function() { run_str("let x = 3 ; x .= (+4) ; x . print", "7\n"); }
+    #[test] fn test_dot_equals_anonymous_function() { run_str("let x = 'hello' ; x .= fn(x) -> x[0] * len(x) ; x . print", "hhhhh\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }
