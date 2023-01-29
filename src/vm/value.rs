@@ -688,7 +688,7 @@ impl RangeImpl {
 /// - Rust `Iterator` methods access `Mut` values which enforce that their iterator only lives as long as the borrow from `Ref<'a, T>`. This is unusable as our iterators, i.e. in `for` loops, need to live on the stack.
 /// - In native code, the borrow on the inner value must last for as long as the loop is ran, which means native functions like `map` essentially acquire a lock on their value, preventing mutation. For example the following code:
 ///
-/// ```
+/// ```cordy
 /// let a = [1, 2, 3]
 /// a . map(fn(i) -> if len(a) < 4 then a.push(4) else nil) . print
 /// ```
@@ -701,7 +701,7 @@ impl RangeImpl {
 ///
 /// Finally, this iterator is as lazy as it can be, and efficient as possible with the aforementioned restrictions. Most Cordy types support O(1) index-by-ordinal, and we use `IndexMap` and `IndexSet` for this exact purpose. The exceptions are `Heap` (which gets unboxed completely into a `Vector` before iterating), and `Str` (more on this later). This makes the following code:
 ///
-/// ```
+/// ```cordy
 /// for a in x { break }
 /// ```
 ///

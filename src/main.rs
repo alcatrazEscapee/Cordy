@@ -3,18 +3,11 @@ use std::io::Write;
 use rustyline::Editor;
 use rustyline::error::ReadlineError;
 
-use crate::reporting::ErrorReporter;
-use crate::compiler::{IncrementalCompileResult};
-use crate::compiler::parser::Locals;
-use crate::vm::{ExitType, VirtualMachine};
-
-pub mod compiler;
-pub mod stdlib;
-pub mod vm;
-
-pub mod trace;
-pub mod reporting;
-pub mod misc;
+use cordy::compiler;
+use cordy::compiler::IncrementalCompileResult;
+use cordy::compiler::parser::Locals;
+use cordy::reporting::ErrorReporter;
+use cordy::vm::{ExitType, VirtualMachine};
 
 
 fn main() {

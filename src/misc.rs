@@ -16,7 +16,7 @@ pub fn strip_line_ending(buffer: &mut String) {
 ///
 /// **Usage**
 ///
-/// ```rust
+/// ```rs
 /// let mut err = None;
 /// let ret = some_builtin_inside_a_closure(misc::yield_result(&mut err, || {
 ///     vm.invoke_func1(f, a1)
