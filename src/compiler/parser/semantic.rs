@@ -16,13 +16,13 @@ use Opcode::{*};
 
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub struct Loop {
-    pub(super) start_index: u16,
-    pub(super) scope_depth: u16,
-    pub(super) break_statements: Vec<u16>
+    pub(super) start_index: u32,
+    pub(super) scope_depth: u32,
+    pub(super) break_statements: Vec<u32>
 }
 
 impl Loop {
-    pub fn new(start_index: u16, depth: u16) -> Loop {
+    pub fn new(start_index: u32, depth: u32) -> Loop {
         Loop { start_index, scope_depth: depth, break_statements: Vec::new() }
     }
 }
@@ -64,11 +64,11 @@ pub struct UpValue {
 
     /// Either a reference to an index in the enclosing function's `locals` (which are stack offset),
     /// or a reference to the enclosing function's `upvalues` (which can be accessed via stack offset 0 -> upvalues, if it is a closure
-    pub(super) index: u16,
+    pub(super) index: u32,
 }
 
 impl UpValue {
-    pub fn new(is_local: bool, index: u16) -> UpValue {
+    pub fn new(is_local: bool, index: u32) -> UpValue {
         UpValue { is_local, index }
     }
 }
@@ -82,17 +82,17 @@ pub struct Local {
     /// The index of the local variable within it's `Locals` array.
     /// - At runtime, this matches the stack offset of this variable.
     /// - At compile time, this is used to index into `Parser.locals`
-    index: u16,
-    scope_depth: u16,
-    function_depth: u16,
+    index: u32,
+    scope_depth: u32,
+    function_depth: u32,
     initialized: bool,
     /// `true` if this local variable has been captured as an `UpValue`. This means when it is popped, the corresponding `UpValue` must also be popped.
     captured: bool,
 }
 
 impl Local {
-    pub fn new(name: String, index: usize, scope_depth: u16, function_depth: u16) -> Local {
-        Local { name, index: index as u16, scope_depth, function_depth, initialized: false, captured: false }
+    pub fn new(name: String, index: usize, scope_depth: u32, function_depth: u32) -> Local {
+        Local { name, index: index as u32, scope_depth, function_depth, initialized: false, captured: false }
     }
 
     /// Sets this local as `initialized`, meaning it is pushed onto the stack and can be referred to in expressions.
@@ -116,11 +116,11 @@ impl Local {
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub enum VariableType {
     NativeFunction(stdlib::NativeFunction),
-    Local(u16),
-    Global(u16),
-    TrueGlobal(u16),
+    Local(u32),
+    Global(u32),
+    TrueGlobal(u32),
     LateBoundGlobal(LateBoundGlobal),
-    UpValue(u16),
+    UpValue(u32),
     None,
 }
 
@@ -317,30 +317,30 @@ impl Pattern {
 
 
 impl<'a> Parser<'a> {
-    pub fn declare_string(self: &mut Self, str: String) -> u16 {
+    pub fn declare_string(self: &mut Self, str: String) -> u32 {
         if let Some(id) = self.strings.iter().position(|s| s == &str) {
-            return id as u16
+            return id as u32
         }
         self.strings.push(str);
-        (self.strings.len() - 1) as u16
+        (self.strings.len() - 1) as u32
     }
 
-    pub fn declare_constant(self: &mut Self, int: i64) -> u16 {
+    pub fn declare_constant(self: &mut Self, int: i64) -> u32 {
         if let Some(id) = self.constants.iter().position(|i| *i == int) {
-            return id as u16
+            return id as u32
         }
         self.constants.push(int);
-        (self.constants.len() - 1) as u16
+        (self.constants.len() - 1) as u32
     }
 
-    pub fn declare_function(self: &mut Self, head: usize, name: String, args: Vec<String>) -> u16 {
+    pub fn declare_function(self: &mut Self, head: usize, name: String, args: Vec<String>) -> u32 {
         self.functions.push(MaybeRc::new(FunctionImpl::new(head, name, args)));
-        (self.functions.len() - 1) as u16
+        (self.functions.len() - 1) as u32
     }
 
 
-    pub fn next_opcode(self: &Self) -> u16 {
-        self.output.len() as u16
+    pub fn next_opcode(self: &Self) -> u32 {
+        self.output.len() as u32
     }
 
     /// After a `let <name>` or `fn <name>` declaration, tries to declare this as a local variable in the current scope
@@ -391,7 +391,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Declares a local variable by the name `name` in the current scope.
-    pub fn declare_local_internal(self: &mut Self, name: String) -> usize {
+    fn declare_local_internal(self: &mut Self, name: String) -> usize {
         let local: Local = Local::new(name, self.locals.last().unwrap().locals.len(), self.scope_depth, self.function_depth);
         self.locals.last_mut().unwrap().locals.push(local);
         self.locals.last().unwrap().locals.len() - 1
@@ -422,9 +422,9 @@ impl<'a> Parser<'a> {
     /// - At the closure of a block scope, only a single scope needs to be popped, so `scope` is `Some(self.current_scope_depth)`
     /// - At a `break` or `continue` statement, this jumps multiple block scopes, so any scope above `loop.scope_depth` needs to be popped.
     /// - At a `return` statement, this jumps out of all scopes in the current function, so any scopes above that need to be popped.
-    pub fn pop_locals(self: &mut Self, scope: Option<u16>, modify_lvt: bool, emit_pop: bool, emit_lifts: bool) {
+    pub fn pop_locals(self: &mut Self, scope: Option<u32>, modify_lvt: bool, emit_pop: bool, emit_lifts: bool) {
 
-        let len = self.current_locals().locals.len() as u16;
+        let len = self.current_locals().locals.len() as u32;
         let mut pop_count = 0;
         for local_index in (0..len).rev() {
             let local = &self.current_locals().locals[local_index as usize];
@@ -533,7 +533,7 @@ impl<'a> Parser<'a> {
     /// Resolves an `UpValue` reference.
     /// For a given reference to a local, defined at a function depth `local_depth` at index `local_index`, this will
     /// bubble up the upvalue through each of the enclosing functions between here and `self.function_depth`, and ensure the variable is added as an `UpValue`.
-    pub fn resolve_upvalue(self: &mut Self, local_depth: u16, local_index: u16) -> VariableType {
+    pub fn resolve_upvalue(self: &mut Self, local_depth: u32, local_index: u32) -> VariableType {
 
         // Capture the local at index `local_index` in the function at `local_depth`
         // If it already exists (is `is_local` and has the same `index` as the target), just grab the upvalue index, otherwise add it and bubble up
@@ -547,10 +547,10 @@ impl<'a> Parser<'a> {
 
         // If we did not find it, then capture the local - add this as an upvalue to the function at this depth
         let mut index = if let Some(index) = maybe_index {
-            index as u16
+            index as u32
         } else {
             self.locals[local_depth as usize].upvalues.push(UpValue::new(true, local_index));
-            (self.locals[local_depth as usize].upvalues.len() - 1) as u16
+            (self.locals[local_depth as usize].upvalues.len() - 1) as u32
         };
 
         // For any function depths between the enclosing function (self.function_depth - 1), and the function above where we referenced the local (local_depth + 1),
@@ -570,7 +570,7 @@ impl<'a> Parser<'a> {
             // If we did not find an upvalue, then we must add one, referencing the upvalue from the outer function
             if !found {
                 self.locals[depth as usize].upvalues.push(UpValue::new(false, index));
-                index = (self.locals[depth as usize].upvalues.len() - 1) as u16
+                index = (self.locals[depth as usize].upvalues.len() - 1) as u32
             }
         }
 

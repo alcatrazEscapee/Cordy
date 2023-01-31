@@ -105,5 +105,4 @@ For a more comprehensive documentation, see the [language documentation](./docs/
 - Fix `//todo` error cases in parser
 - Allow patterns in bare expressions, i.e. `x, y = (1, 2)`
 - Allow unary minus to be evaluated with 1 or 2 args (but not partially evaluated), so `(-)(3, 1) == 2`, and `(-)(2) == -2`
-- Refactor `u16` -> `u32` in most cases.
 - Benchmarks + bytecode optimizer

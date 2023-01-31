@@ -65,17 +65,17 @@ pub fn format_runtime_error(source_lines: &Vec<&str>, source_file: &String, mut 
 }
 
 pub trait ProvidesLineNumber {
-    fn line_number(self: &Self, ip: usize) -> u16;
+    fn line_number(self: &Self, ip: usize) -> u32;
 }
 
-impl ProvidesLineNumber for Vec<u16> {
-    fn line_number(self: &Self, ip: usize) -> u16 {
+impl ProvidesLineNumber for Vec<u32> {
+    fn line_number(self: &Self, ip: usize) -> u32 {
         *self.get(ip).unwrap_or_else(|| self.last().unwrap())
     }
 }
 
 impl ProvidesLineNumber for CompileResult {
-    fn line_number(self: &Self, ip: usize) -> u16 {
+    fn line_number(self: &Self, ip: usize) -> u32 {
         self.line_numbers.line_number(ip)
     }
 }

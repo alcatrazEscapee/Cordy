@@ -46,7 +46,7 @@ pub fn compile(source: &String, text: &String) -> Result<CompileResult, Vec<Stri
 /// Performs an incremental compile, given the following input parameters.
 ///
 /// This is used for incremental REPL structure. The result will have a `Print` instead of a delayed pop (if needed), and end with a `Yield` instruction instead of `Exit`.
-pub fn incremental_compile(source: &String, text: &String, code: &mut Vec<Opcode>, locals: &mut Vec<Locals>, strings: &mut Vec<String>, constants: &mut Vec<i64>, functions: &mut Vec<Rc<FunctionImpl>>, line_numbers: &mut Vec<u16>, globals: &mut Vec<String>) -> IncrementalCompileResult {
+pub fn incremental_compile(source: &String, text: &String, code: &mut Vec<Opcode>, locals: &mut Vec<Locals>, strings: &mut Vec<String>, constants: &mut Vec<i64>, functions: &mut Vec<Rc<FunctionImpl>>, line_numbers: &mut Vec<u32>, globals: &mut Vec<String>) -> IncrementalCompileResult {
     // Stage changes, so an error or aborted compile doesn't overwrite the current valid compile state
     // Doing this for code and line numbers (since those are 1-1 ordering) is sufficient
     let code_len: usize = code.len();
@@ -73,7 +73,7 @@ pub fn incremental_compile(source: &String, text: &String, code: &mut Vec<Opcode
 /// Note that this does not insert a terminal `Pop` or `Exit`, and instead pushes a `Return` which exits `eval`'s special call frame.
 ///
 /// This is the API used to run an `eval()` statement.
-pub fn eval_compile(text: &String, code: &mut Vec<Opcode>, strings: &mut Vec<String>, constants: &mut Vec<i64>, functions: &mut Vec<Rc<FunctionImpl>>, line_numbers: &mut Vec<u16>, globals: &mut Vec<String>) -> Result<(), Box<RuntimeError>> {
+pub fn eval_compile(text: &String, code: &mut Vec<Opcode>, strings: &mut Vec<String>, constants: &mut Vec<i64>, functions: &mut Vec<Rc<FunctionImpl>>, line_numbers: &mut Vec<u32>, globals: &mut Vec<String>) -> Result<(), Box<RuntimeError>> {
 
     let mut locals: Vec<Locals> = Locals::empty();
     let ret: IncrementalCompileResult = try_incremental_compile(&String::from("<eval>"), text, code, &mut locals, strings, constants, functions, line_numbers, globals, parser::RULE_EXPRESSION, false);
@@ -89,7 +89,7 @@ pub fn eval_compile(text: &String, code: &mut Vec<Opcode>, strings: &mut Vec<Str
 
 
 
-fn try_incremental_compile(source: &String, text: &String, code: &mut Vec<Opcode>, locals: &mut Vec<Locals>, strings: &mut Vec<String>, constants: &mut Vec<i64>, functions: &mut Vec<Rc<FunctionImpl>>, line_numbers: &mut Vec<u16>, globals: &mut Vec<String>, rule: ParseRule, abort_in_eof: bool) -> IncrementalCompileResult {
+fn try_incremental_compile(source: &String, text: &String, code: &mut Vec<Opcode>, locals: &mut Vec<Locals>, strings: &mut Vec<String>, constants: &mut Vec<i64>, functions: &mut Vec<Rc<FunctionImpl>>, line_numbers: &mut Vec<u32>, globals: &mut Vec<String>, rule: ParseRule, abort_in_eof: bool) -> IncrementalCompileResult {
     let mut errors: Vec<String> = Vec::new();
 
     // Scan
@@ -130,7 +130,7 @@ pub struct CompileResult {
     pub constants: Vec<i64>,
     pub functions: Vec<Rc<FunctionImpl>>,
 
-    pub line_numbers: Vec<u16>,
+    pub line_numbers: Vec<u32>,
     pub locals: Vec<String>,
     pub globals: Vec<String>,
 }
@@ -146,7 +146,7 @@ impl CompileResult {
             longest /= 10;
         }
 
-        let mut last_line_no: u16 = 0;
+        let mut last_line_no: u32 = 0;
         let mut locals = self.locals.iter();
         for (ip, token) in self.code.iter().enumerate() {
             let line_no = self.line_number(ip);

@@ -182,7 +182,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Specialization of `push` which may push nothing, Pop, or PopN(n)
-    pub fn push_pop(self: &mut Self, n: u16) {
+    pub fn push_pop(self: &mut Self, n: u32) {
         trace::trace_parser!("push Pop/PopN {}", n);
         match n {
             0 => {},
@@ -197,11 +197,11 @@ impl<'a> Parser<'a> {
 
         let local = &self.current_locals_mut().locals[index];
         if local.is_true_global() {
-            self.push(StoreGlobal(index as u16, false))
+            self.push(StoreGlobal(index as u32, false))
         } else if local.is_global() {
-            self.push(StoreGlobal(index as u16, true))
+            self.push(StoreGlobal(index as u32, true))
         } else {
-            self.push(StoreLocal(index as u16))
+            self.push(StoreLocal(index as u32))
         }
     }
 

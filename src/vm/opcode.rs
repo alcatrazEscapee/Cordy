@@ -7,29 +7,29 @@ pub enum Opcode {
 
     // Flow Control
     // These only peek() the stack
-    JumpIfFalse(u16),
-    JumpIfFalsePop(u16),
-    JumpIfTrue(u16),
-    JumpIfTruePop(u16),
-    Jump(u16),
+    JumpIfFalse(u32),
+    JumpIfFalsePop(u32),
+    JumpIfTrue(u32),
+    JumpIfTruePop(u32),
+    Jump(u32),
     Return,
 
     // Stack Operations
     Pop,
-    PopN(u16),
+    PopN(u32),
     Dup,
     Swap,
 
     // Note: Local + Global does not, for the VM, mean in terms of block scoped
     // Rather, it means if this variable is accessed in the stack relative to the stack frame, or relative to the stack bottom
     // In this regard it refers to variables outside of functions (top level, even within block scopes), and variables within functions
-    PushLocal(u16),
-    StoreLocal(u16),
-    PushGlobal(u16, bool), // bool = is_local = !is_true_global
-    StoreGlobal(u16, bool),
+    PushLocal(u32),
+    StoreLocal(u32),
+    PushGlobal(u32, bool), // bool = is_local = !is_true_global
+    StoreGlobal(u32, bool),
 
-    PushUpValue(u16), // index
-    StoreUpValue(u16), // index
+    PushUpValue(u32), // index
+    StoreUpValue(u32), // index
 
     StoreArray,
 
@@ -41,13 +41,13 @@ pub enum Opcode {
     Closure,
 
     // Take a closure, and add the respective local or upvalue to the closure
-    CloseLocal(u16),
-    CloseUpValue(u16),
+    CloseLocal(u32),
+    CloseUpValue(u32),
 
     /// Lifts an UpValue from a stack slot (offset by the frame pointer) to the heap
     /// It does so by boxing it into a `Rc<Cell<Value>>`, stored on the closure's `environment` array. Each closure references the same `UpValue`, and hence will see all mutations.
     /// Takes a local index of an upvalue to lift.
-    LiftUpValue(u16),
+    LiftUpValue(u32),
 
     /// Converts the top of the stack to an `Value::Iter()`.
     InitIterable,
@@ -62,24 +62,24 @@ pub enum Opcode {
     Nil,
     True,
     False,
-    Int(u16),
-    Str(u16),
-    Function(u16),
+    Int(u32),
+    Str(u32),
+    Function(u32),
     NativeFunction(NativeFunction),
     // Note that `List`, `Vector`, `Set`, `Dict`, are different from invoking native functions
     // 1. They don't require a function evaluation and resolution (efficient)
     // 2. They allow zero and one element cases to be handled exactly as usual (i.e. `list('no')` is `['no'], not ['n', 'o'])
-    List(u16),
-    Vector(u16),
-    Set(u16),
-    Dict(u16),
+    List(u32),
+    Vector(u32),
+    Set(u32),
+    Dict(u32),
 
     // Runtime specific type checks
 
     /// Takes an `Int` constant, and checks that the top of the stack is an iterable with length > the provided constant
-    CheckLengthGreaterThan(u16),
+    CheckLengthGreaterThan(u32),
     /// Takes an `Int` constant, and checks that the top of the stack is an iterable with length = the provided constant
-    CheckLengthEqualTo(u16),
+    CheckLengthEqualTo(u32),
 
     /// Opcode for function evaluation (either with `()` or with `.`). The `u8` parameter is the number of arguments to the function.
     ///
@@ -143,5 +143,5 @@ pub enum Opcode {
 mod test {
     use crate::vm::opcode::Opcode;
 
-    #[test] fn test_layout() { assert_eq!(4, std::mem::size_of::<Opcode>()); }
+    #[test] fn test_layout() { assert_eq!(8, std::mem::size_of::<Opcode>()); }
 }
