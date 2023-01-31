@@ -40,7 +40,7 @@ pub fn parse(scan_result: ScanResult) -> CompileResult {
 }
 
 
-pub fn parse_incremental(scan_result: ScanResult, code: &mut Vec<Opcode>, locals: &mut Vec<Locals>, strings: &mut Vec<String>, constants: &mut Vec<i64>, functions: &mut Vec<Rc<FunctionImpl>>, line_numbers: &mut Vec<u16>, globals: &mut Vec<String>, rule: fn(Parser) -> ()) -> Vec<ParserError> {
+pub fn parse_incremental(scan_result: ScanResult, code: &mut Vec<Opcode>, locals: &mut Vec<Locals>, strings: &mut Vec<String>, constants: &mut Vec<i64>, functions: &mut Vec<Rc<FunctionImpl>>, line_numbers: &mut Vec<u32>, globals: &mut Vec<String>, rule: fn(Parser) -> ()) -> Vec<ParserError> {
 
     let mut errors: Vec<ParserError> = Vec::new();
     let mut maybe_functions: Vec<MaybeRc<FunctionImpl>> = functions.iter().map(|u| MaybeRc::Rc(u.clone())).collect();
@@ -67,11 +67,11 @@ fn parse_rule(tokens: Vec<ScanToken>, rule: fn(Parser) -> ()) -> CompileResult {
     let mut constants: Vec<i64> = vec![0, 1];
     let mut functions: Vec<MaybeRc<FunctionImpl>> = Vec::new();
 
-    let mut line_numbers: Vec<u16> = Vec::new();
+    let mut line_numbers: Vec<u32> = Vec::new();
     let mut globals: Vec<String> = Vec::new();
     let mut locals: Vec<String> = Vec::new();
 
-    rule(Parser::new(tokens, &mut code, &mut vec![Locals::new()], &mut errors, &mut strings, &mut constants, &mut functions, &mut line_numbers, &mut locals, &mut globals));
+    rule(Parser::new(tokens, &mut code, &mut Locals::empty(), &mut errors, &mut strings, &mut constants, &mut functions, &mut line_numbers, &mut locals, &mut globals));
 
     CompileResult {
         code,
@@ -96,8 +96,8 @@ pub struct Parser<'a> {
     output: &'a mut Vec<Opcode>,
     errors: &'a mut Vec<ParserError>,
 
-    lineno: u16,
-    line_numbers: &'a mut Vec<u16>,
+    lineno: u32,
+    line_numbers: &'a mut Vec<u32>,
 
     locals_reference: &'a mut Vec<String>, // A reference for local names on a per-instruction basis, used for disassembly
     globals_reference: &'a mut Vec<String>, // A reference for global names, in stack order, used for runtime errors due to invalid late bound globals
@@ -118,8 +118,8 @@ pub struct Parser<'a> {
 
     late_bound_globals: Vec<LateBoundGlobal>, // Table of all late bound globals, as they occur.
     synthetic_local_index: usize, // A counter for unique synthetic local variables (`$1`, `$2`, etc.)
-    scope_depth: u16, // Current scope depth
-    function_depth: u16,
+    scope_depth: u32, // Current scope depth
+    function_depth: u32,
 
     strings: &'a mut Vec<String>,
     constants: &'a mut Vec<i64>,
@@ -133,7 +133,7 @@ pub struct Parser<'a> {
 
 impl Parser<'_> {
 
-    fn new<'a, 'b : 'a>(tokens: Vec<ScanToken>, output: &'b mut Vec<Opcode>, locals: &'b mut Vec<Locals>, errors: &'b mut Vec<ParserError>, strings: &'b mut Vec<String>, constants: &'b mut Vec<i64>, functions: &'b mut Vec<MaybeRc<FunctionImpl>>, line_numbers: &'b mut Vec<u16>, locals_reference: &'b mut Vec<String>, globals_reference: &'b mut Vec<String>) -> Parser<'a> {
+    fn new<'a, 'b : 'a>(tokens: Vec<ScanToken>, output: &'b mut Vec<Opcode>, locals: &'b mut Vec<Locals>, errors: &'b mut Vec<ParserError>, strings: &'b mut Vec<String>, constants: &'b mut Vec<i64>, functions: &'b mut Vec<MaybeRc<FunctionImpl>>, line_numbers: &'b mut Vec<u32>, locals_reference: &'b mut Vec<String>, globals_reference: &'b mut Vec<String>) -> Parser<'a> {
         Parser {
             input: tokens.into_iter().collect::<VecDeque<ScanToken>>(),
             output,
@@ -267,7 +267,7 @@ impl Parser<'_> {
         self.expect_resync(CloseParen);
 
         // Named functions are a complicated local variable, and needs to be declared as such
-        let mut func_id: Option<u16> = None;
+        let mut func_id: Option<u32> = None;
         if let Some(name) = maybe_name {
             match self.declare_local(name.clone()) {
                 Some(index) => {
@@ -275,7 +275,7 @@ impl Parser<'_> {
                     self.push_inc_global(index);
 
                     let func_start: usize = self.next_opcode() as usize + 2; // Declare the function literal. + 2 to the head because of the leading Jump, Function()
-                    let func: u16 = self.declare_function(func_start, name, args.clone());
+                    let func: u32 = self.declare_function(func_start, name, args.clone());
                     func_id = Some(func);
                     self.push(Opcode::Function(func));  // And push the function object itself
                 },
@@ -314,7 +314,7 @@ impl Parser<'_> {
         // Expression functions don't declare themselves as a local variable that can be referenced.
         // Instead, as they're part of an expression, they just push a single function instance onto the stack
         let func_start: usize = self.next_opcode() as usize + 2; // Declare the function literal. + 2 to the head because of the leading Jump and function local
-        let func: u16 = self.declare_function(func_start, String::from("_"), args.clone());
+        let func: u32 = self.declare_function(func_start, String::from("_"), args.clone());
         self.push(Opcode::Function(func));  // And push the function object itself
 
         self.parse_function_body(args, Some(func));
@@ -357,7 +357,7 @@ impl Parser<'_> {
         args
     }
 
-    fn parse_function_body(self: &mut Self, args: Vec<String>, func_id: Option<u16>) {
+    fn parse_function_body(self: &mut Self, args: Vec<String>, func_id: Option<u32>) {
         trace::trace_parser!("rule <function-body>");
         let jump = self.reserve(); // Jump over the function itself, the first time we encounter it
         let prev_pop_status: bool = self.delay_pop_from_expression_statement; // Stack semantics for the delayed pop
@@ -432,7 +432,7 @@ impl Parser<'_> {
 
         self.push(Return); // Returns the last expression in the function
 
-        let end: u16 = self.next_opcode(); // Repair the jump, to skip the function body itself
+        let end: u32 = self.next_opcode(); // Repair the jump, to skip the function body itself
         self.output[jump] = Jump(end);
 
         // If this function has captured any upvalues, we need to emit the correct tokens for them now, including wrapping the function in a closure
@@ -508,18 +508,18 @@ impl Parser<'_> {
             Some(KeywordElif) => {
                 // Don't advance, as `parse_if_statement()` will advance the first token
                 let jump = self.reserve();
-                let after_if: u16 = self.next_opcode();
+                let after_if: u32 = self.next_opcode();
                 self.output[jump_if_false] = JumpIfFalsePop(after_if);
                 self.delay_pop_from_expression_statement = false;
                 self.parse_if_statement();
-                let after_else: u16 = self.next_opcode();
+                let after_else: u32 = self.next_opcode();
                 self.output[jump] = Jump(after_else);
             },
             Some(KeywordElse) => {
                 // `else` is present, so we first insert an unconditional jump, parse the next block, then fix the first jump
                 self.advance();
                 let jump = self.reserve();
-                let after_if: u16 = self.next_opcode();
+                let after_if: u32 = self.next_opcode();
                 self.output[jump_if_false as usize] = JumpIfFalsePop(after_if);
                 self.delay_pop_from_expression_statement = false;
                 self.parse_block_statement();
@@ -527,16 +527,16 @@ impl Parser<'_> {
                     self.delay_pop_from_expression_statement = true;
                     self.push(Nil);
                 }
-                let after_else: u16 = self.next_opcode();
+                let after_else: u32 = self.next_opcode();
                 self.output[jump] = Jump(after_else);
             },
             _ => {
                 // No `else`, but we need to wire in a fake `else` statement which just pushes `Nil` so each branch still pushes a value
                 let jump = self.reserve();
-                let after_if: u16 = self.next_opcode();
+                let after_if: u32 = self.next_opcode();
                 self.output[jump_if_false as usize] = JumpIfFalsePop(after_if);
                 self.push(Nil);
-                let after_else: u16 = self.next_opcode();
+                let after_else: u32 = self.next_opcode();
                 self.output[jump] = Jump(after_else);
             },
         }
@@ -556,8 +556,8 @@ impl Parser<'_> {
         self.push_delayed_pop();
         self.advance();
 
-        let loop_start: u16 = self.next_opcode(); // Top of the loop, push onto the loop stack
-        let loop_depth: u16 = self.scope_depth;
+        let loop_start: u32 = self.next_opcode(); // Top of the loop, push onto the loop stack
+        let loop_depth: u32 = self.scope_depth;
         self.current_locals_mut().loops.push(Loop::new(loop_start, loop_depth));
 
         self.parse_expression(); // While condition
@@ -566,8 +566,8 @@ impl Parser<'_> {
         self.push_delayed_pop(); // Inner loop expressions cannot yield out of the loop
         self.push(Jump(loop_start));
 
-        let loop_end: u16 = self.next_opcode(); // After the jump, the next opcode is 'end of loop'. Repair all break statements
-        let break_opcodes: Vec<u16> = self.current_locals_mut().loops.pop().unwrap().break_statements;
+        let loop_end: u32 = self.next_opcode(); // After the jump, the next opcode is 'end of loop'. Repair all break statements
+        let break_opcodes: Vec<u32> = self.current_locals_mut().loops.pop().unwrap().break_statements;
         for break_opcode in break_opcodes {
             self.output[break_opcode as usize] = Jump(loop_end);
         }
@@ -589,16 +589,16 @@ impl Parser<'_> {
         self.push_delayed_pop();
         self.advance();
 
-        let loop_start: u16 = self.next_opcode(); // Top of the loop, push onto the loop stack
-        let loop_depth: u16 = self.scope_depth;
+        let loop_start: u32 = self.next_opcode(); // Top of the loop, push onto the loop stack
+        let loop_depth: u32 = self.scope_depth;
         self.current_locals_mut().loops.push(Loop::new(loop_start, loop_depth));
 
         self.parse_block_statement(); // Inner loop statements, and jump back to front
         self.push_delayed_pop(); // Loops can't return a value
         self.push(Jump(loop_start));
 
-        let loop_end: u16 = self.next_opcode(); // After the jump, the next opcode is 'end of loop'. Repair all break statements
-        let break_opcodes: Vec<u16> = self.current_locals_mut().loops.pop().unwrap().break_statements;
+        let loop_end: u32 = self.next_opcode(); // After the jump, the next opcode is 'end of loop'. Repair all break statements
+        let break_opcodes: Vec<u32> = self.current_locals_mut().loops.pop().unwrap().break_statements;
         for break_opcode in break_opcodes {
             self.output[break_opcode as usize] = Jump(loop_end);
         }
@@ -631,7 +631,7 @@ impl Parser<'_> {
         self.push(InitIterable);
 
         // Test
-        let jump: u16 = self.next_opcode();
+        let jump: u32 = self.next_opcode();
         self.push(TestIterable);
         let jump_if_false_pop = self.reserve();
 
@@ -666,7 +666,7 @@ impl Parser<'_> {
             Some(loop_stmt) => {
                 self.pop_locals(Some(loop_stmt.scope_depth + 1), false, true, true);
                 let jump = self.reserve();
-                self.current_locals_mut().loops.last_mut().unwrap().break_statements.push(jump as u16);
+                self.current_locals_mut().loops.last_mut().unwrap().break_statements.push(jump as u32);
             },
             None => self.semantic_error(BreakOutsideOfLoop),
         }
@@ -678,7 +678,7 @@ impl Parser<'_> {
         self.advance();
         match self.current_locals().loops.last() {
             Some(loop_stmt) => {
-                let jump_to: u16 = loop_stmt.start_index;
+                let jump_to: u32 = loop_stmt.start_index;
                 self.pop_locals(Some(loop_stmt.scope_depth + 1), false, true, true);
                 self.push(Jump(jump_to));
             },
@@ -942,7 +942,7 @@ impl Parser<'_> {
             Some(KeywordFalse) => self.advance_push(False),
             Some(ScanToken::Int(_)) => {
                 let int: i64 = self.take_int();
-                let cid: u16 = self.declare_constant(int);
+                let cid: u32 = self.declare_constant(int);
                 self.push(Opcode::Int(cid));
             },
             Some(Identifier(_)) => {
@@ -962,7 +962,7 @@ impl Parser<'_> {
             },
             Some(StringLiteral(_)) => {
                 let string: String = self.take_str();
-                let sid: u16 = self.declare_string(string);
+                let sid: u32 = self.declare_string(string);
                 self.push(Opcode::Str(sid));
             },
             Some(OpenParen) => {
@@ -1182,7 +1182,7 @@ impl Parser<'_> {
                 None => break,
             }
         }
-        let length: u16 = self.declare_constant(length);
+        let length: u32 = self.declare_constant(length);
         self.push(Opcode::List(length));
         self.expect(CloseSquareBracket);
     }
@@ -1242,7 +1242,7 @@ impl Parser<'_> {
                 None => break,
             }
         }
-        let length: u16 = self.declare_constant(length);
+        let length: u32 = self.declare_constant(length);
         self.push(if is_dict { Opcode::Dict(length) } else { Opcode::Set(length) });
         self.expect(CloseBrace);
     }
@@ -1574,7 +1574,7 @@ impl Parser<'_> {
                     let jump_if_false = self.reserve();
                     self.push(Opcode::Pop);
                     self.parse_expr_8();
-                    let jump_to: u16 = self.next_opcode();
+                    let jump_to: u32 = self.next_opcode();
                     self.output[jump_if_false] = JumpIfFalse(jump_to);
                 },
                 Some(OpBitwiseOr) => {
@@ -1582,7 +1582,7 @@ impl Parser<'_> {
                     let jump_if_true = self.reserve();
                     self.push(Opcode::Pop);
                     self.parse_expr_8();
-                    let jump_to: u16 = self.next_opcode();
+                    let jump_to: u32 = self.next_opcode();
                     self.output[jump_if_true] = JumpIfTrue(jump_to);
                 },
                 _ => break
@@ -1728,12 +1728,6 @@ impl Parser<'_> {
             }
         }
     }
-
-
-    // ===== Semantic Analysis ===== //
-
-
-    // ===== Parser Core ===== //
 }
 
 
@@ -1869,7 +1863,7 @@ mod tests {
         let constants: Vec<i64> = compile.constants;
         let mut actual: Vec<Opcode> = compile.code.into_iter()
             .map(|t| match t {
-                Int(i) => Int(constants[i as usize] as u16),
+                Int(i) => Int(constants[i as usize] as u32),
                 t => t
             })
             .collect::<Vec<Opcode>>();

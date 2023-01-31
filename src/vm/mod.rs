@@ -37,7 +37,7 @@ pub struct VirtualMachine<R, W> {
     globals: Vec<String>,
     constants: Vec<i64>,
     functions: Vec<Rc<FunctionImpl>>,
-    line_numbers: Vec<u16>,
+    line_numbers: Vec<u32>,
 
     read: R,
     write: W,
@@ -206,7 +206,7 @@ impl<R, W> VirtualMachine<R, W> where
 
             // Flow Control
             // All jumps are absolute (because we don't have variable length instructions and it's easy to do so)
-            // todo: relative jumps? theoretically allows us more than u16.max instructions ~ 65k
+            // todo: relative jumps? theoretically allows us more than u32.max instructions ~ 65k
             JumpIfFalse(ip) => {
                 trace::trace_interpreter!("jump if false {} -> {}", self.stack.last().unwrap().as_debug_str(), ip);
                 let jump: usize = ip as usize;

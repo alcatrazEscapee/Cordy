@@ -82,12 +82,12 @@ pub struct StackTraceFrame {
 }
 
 impl StackTraceFrame {
-    fn new(ip: usize, lineno: u16) -> StackTraceFrame {
+    fn new(ip: usize, lineno: u32) -> StackTraceFrame {
         StackTraceFrame { ip, lineno: lineno as usize, src: None }
     }
 }
 
-pub fn detail_runtime_error(error: RuntimeError, ip: usize, call_stack: &Vec<CallFrame>, functions: &Vec<Rc<FunctionImpl>>, line_numbers: &Vec<u16>) -> DetailRuntimeError {
+pub fn detail_runtime_error(error: RuntimeError, ip: usize, call_stack: &Vec<CallFrame>, functions: &Vec<Rc<FunctionImpl>>, line_numbers: &Vec<u32>) -> DetailRuntimeError {
 
     // Top level stack frame refers to the code being executed
     let mut stack: Vec<StackTraceFrame> = vec![StackTraceFrame::new(ip, line_numbers.line_number(ip))];
