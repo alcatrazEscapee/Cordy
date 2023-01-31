@@ -42,7 +42,7 @@ This language is inspired by parts from Python, Rust, Haskell, Java, and JavaScr
 - Along with some basic library collections:
     - `list`: A ring buffer with O(1) index, pop/push front and back.
     - `set`: A collection with unique elements and O(1) `contains` checks, along with insertion-order iteration.
-    - `dict`: A `LinkedHashMap`, a mapping from keys to values with O(1) lookups, along with insertion-order iteration.
+    - `dict`: A mapping from keys to values with O(1) lookups, along with insertion-order iteration.
     - `heap`: A min-heap.
     - `vector`: A `list` variant which behaves elementwise with all basic operators.
 - Expressions should be familiar from most imperative programming languages, as should be operator precedence.
@@ -102,3 +102,8 @@ For a more comprehensive documentation, see the [language documentation](./docs/
 - Make dict/set literals take priority over bare block statements (prevent bare block statements entirely?)
 - Investigate making a separate `Queue` type and making `List` a `Vec`? Benchmarks...
 - Fix `dict.default` to, if given a function, invoke and insert on getting a default value. goal is making `d[x].push(y)` work, while `d[x]` does not insert in general (i.e. if default is `0`).
+- Fix `//todo` error cases in parser
+- Allow patterns in bare expressions, i.e. `x, y = (1, 2)`
+- Allow unary minus to be evaluated with 1 or 2 args (but not partially evaluated), so `(-)(3, 1) == 2`, and `(-)(2) == -2`
+- Refactor `u16` -> `u32` in most cases.
+- Benchmarks + bytecode optimizer
