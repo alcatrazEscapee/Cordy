@@ -1,5 +1,5 @@
-L1: 0000 Nil
-    0001 IncGlobalCount
+L1: 0000 IncGlobalCount
+    0001 Nil
 L3: 0002 Nil
 L5: 0003 Nil
 L6: 0004 PopN(2)

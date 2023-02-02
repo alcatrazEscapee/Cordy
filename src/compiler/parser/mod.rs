@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 use std::rc::Rc;
 
 use crate::compiler::scanner::{ScanResult, ScanToken};
-use crate::compiler::parser::semantic::{LateBoundGlobal, Loop, Pattern, VariableBinding, VariableType};
+use crate::compiler::parser::semantic::{LateBoundGlobal, Loop, LValue, LValueReference, Pattern, VariableBinding, VariableType};
 use crate::compiler::CompileResult;
 use crate::stdlib::NativeFunction;
 use crate::vm::opcode::Opcode;
@@ -269,19 +269,14 @@ impl Parser<'_> {
         // Named functions are a complicated local variable, and needs to be declared as such
         let mut func_id: Option<u32> = None;
         if let Some(name) = maybe_name {
-            match self.declare_local(name.clone()) {
-                Some(index) => {
-                    self.current_locals_mut().locals[index].initialize();  // Functions are always initialized, as they can be recursive
-                    self.push_inc_global(index);
+            if let Some(index) = self.declare_local(name.clone()) {
+                self.current_locals_mut().locals[index].initialize();  // Functions are always initialized, as they can be recursive
+                self.push_inc_global(index);
 
-                    let func_start: usize = self.next_opcode() as usize + 2; // Declare the function literal. + 2 to the head because of the leading Jump, Function()
-                    let func: u32 = self.declare_function(func_start, name, args.clone());
-                    func_id = Some(func);
-                    self.push(Opcode::Function(func));  // And push the function object itself
-                },
-                None => {
-                    // todo: error case
-                }
+                let func_start: usize = self.next_opcode() as usize + 2; // Declare the function literal. + 2 to the head because of the leading Jump, Function()
+                let func: u32 = self.declare_function(func_start, name, args.clone());
+                func_id = Some(func);
+                self.push(Opcode::Function(func));  // And push the function object itself
             }
         }
 
@@ -333,7 +328,6 @@ impl Parser<'_> {
 
     fn parse_function_parameters(self: &mut Self) -> Vec<String> {
         trace::trace_parser!("rule <function-parameters>");
-        // Parameters
         let mut args: Vec<String> = Vec::new();
         loop {
             match self.peek() {
@@ -371,15 +365,10 @@ impl Parser<'_> {
         self.scope_depth += 1;
 
         for arg in args {
-            match self.declare_local(arg) {
-                Some(index) => {
-                    // They are automatically initialized, and we don't need to push `Nil` for them, since they're provided from the stack due to call semantics
-                    self.current_locals_mut().locals[index].initialize();
-                    self.push_inc_global(index);
-                },
-                None => {
-                    // todo: error case, parameter conflict
-                }
+            if let Some(index) = self.declare_local(arg) {
+                // They are automatically initialized, and we don't need to push `Nil` for them, since they're provided from the stack due to call semantics
+                self.current_locals_mut().locals[index].initialize();
+                self.push_inc_global(index);
             }
         }
 
@@ -694,74 +683,35 @@ impl Parser<'_> {
         self.advance(); // Consume `let`
 
         loop {
-            let variable: VariableBinding = match self.parse_variable_binding() {
-                // Note that `let _` is rather silly but we can emit perfectly legal code for it, so we allow it
-                Some(v) => v,
-                None => break
-            };
-
-            let expression_present = match self.peek() {
-                Some(Equals) => { // x = <expr>, so parse the expression
-                    self.advance();
-                    self.prevent_expression_statement = true;
-
-                    // Before we parse an expression, if we're declaring a pattern variable, then emit the pattern's locals
-                    // We need the expression to be on the top of the stack to do destructuring
-                    if let VariableBinding::Pattern(pattern) = &variable {
-                        pattern.emit_local_default_values(self)
-                    }
-
-                    self.parse_expression();
-                    true
-                },
-                _ => {
-                    match &variable {
-                        VariableBinding::Pattern(pattern) => {
-                            // If the pattern is a simple pattern (just `x, y, z, ...`), then this is actually legal - and we need to push the respective amount of `Nil`, which we assumed was a pattern instead of a sequence of `let` declarations.
-                            if let Some(n) = pattern.is_simple() {
-                                for _ in 0..n {
-                                    self.push(Nil)
-                                }
-                            } else {
-                                self.semantic_error(LetWithPatternBindingNoExpression);
-                            }
+            match self.parse_lvalue_terms() {
+                Some(mut lvalue) => {
+                    match self.peek() {
+                        Some(Equals) => {
+                            // `let` <lvalue> `=` <expression>
+                            self.advance(); // Consume `=`
+                            lvalue.declare_locals(self); // Declare local variables first, so we prepare local indices
+                            lvalue.emit_default_values(self, true); // Then emit `Nil`
+                            self.parse_expression(); // So the expression ends up on top of the stack
+                            lvalue.initialize_locals(self); // Initialize them, before we emit store opcodes, but after the expression is parsed.
+                            lvalue.emit_destructuring(self, true); // Emit destructuring to assign to all locals
                         },
                         _ => {
-                            self.push(Nil); // Initialize to 'nil'
-                        }
+                            // `let` <lvalue>
+                            lvalue.declare_locals(self);
+                            lvalue.initialize_locals(self);
+                            lvalue.emit_default_values(self, false); // `in_place = false` causes us to emit *all* `Nil` values, which is what we want.
+                        },
                     }
-                    false
-                },
-            };
 
-            match &variable {
-                VariableBinding::Pattern(pattern) => {
-                    // A pattern binding needs to emit a sequence of code that takes the top operand on the stack, and initializes all local variables
-                    // This sequence requires the variables to already have stack slots, which we setup before parsing the expression
-                    // So, we just need to emit code for the destructuring, and initialize all local variables
-                    pattern.init_all_locals(self);
-                    if pattern.is_simple().is_none() || expression_present {
-                        pattern.emit_destructuring(self);
+                    match self.peek() {
+                        Some(Comma) => {
+                            self.advance(); // Consume `,`
+                            self.prevent_expression_statement = false;
+                        },
+                        _ => break,
                     }
                 },
-                VariableBinding::Named(local) => {
-                    // Local declarations don't have an explicit `store` opcode
-                    // They just push their value onto the stack, and we know the location will equal that of the Local's index
-                    // However, after we initialize a local we need to mark it initialized, so we can refer to it in expressions
-                    self.current_locals_mut().locals[*local].initialize();
-                    self.push_inc_global(*local);
-                },
-                VariableBinding::Empty => {
-                    self.push(Opcode::Pop); // No variable to bind to, so just pop the expression (or `Nil`, if we emitted it)
-                },
-            }
-
-            match self.peek() {
-                Some(Comma) => { // Multiple declarations
-                    self.advance();
-                    self.prevent_expression_statement = false;
-                },
-                _ => break,
+                None => break,
             }
         }
     }
@@ -781,6 +731,78 @@ impl Parser<'_> {
     fn parse_expression(self: &mut Self) {
         trace::trace_parser!("rule <expression>");
         self.parse_expr_10();
+    }
+
+    /// Returns an `LValue`, or `None`. If this returns `None`, an error will already have been raised.
+    fn parse_lvalue(self: &mut Self) -> Option<LValue> {
+        trace::trace_parser!("rule <lvalue>");
+
+        match self.peek() {
+            Some(Identifier(_)) => {
+                let name = self.take_identifier();
+                Some(LValue::Named(LValueReference::Named(name)))
+            },
+            Some(Underscore) => {
+                self.advance();
+                Some(LValue::Empty)
+            },
+            Some(Mul) => {
+                self.advance();
+                match self.peek() {
+                    Some(Identifier(_)) => {
+                        let name = self.take_identifier();
+                        Some(LValue::VarNamed(LValueReference::Named(name)))
+                    },
+                    Some(Underscore) => {
+                        self.advance();
+                        Some(LValue::VarEmpty)
+                    },
+                    _ => {
+                        self.error_with(|t| ExpectedUnderscoreOrVariableNameAfterVariadicInPattern(t));
+                        None
+                    }
+                }
+            },
+            Some(OpenParen) => {
+                self.advance();
+                let terms = self.parse_lvalue_terms();
+                self.expect(CloseParen);
+                terms
+            },
+            _ => {
+                self.error_with(|t| ExpectedUnderscoreOrVariableNameOrPattern(t));
+                None
+            }
+        }
+    }
+
+    /// Parses a 'bare' `LValue`, so a `LValue::Terms` without any surrounding `,`. Always returns a `LValue::Terms`.
+    /// If `None` is returned, an error will have already been raised.
+    fn parse_lvalue_terms(self: &mut Self) -> Option<LValue> {
+        trace::trace_parser!("rule <lvalue-terms>");
+
+        let mut terms: Vec<LValue> = Vec::new();
+        let mut found_variadic_term: bool = false;
+        loop {
+            match self.parse_lvalue() {
+                Some(lvalue) => {
+                    if lvalue.is_variadic_term() {
+                        if found_variadic_term {
+                            self.semantic_error(MultipleVariadicTermsInPattern);
+                        } else {
+                            found_variadic_term = true;
+                        }
+                    }
+                    terms.push(lvalue)
+                },
+                None => return None,
+            }
+
+            match self.peek() {
+                Some(Comma) => self.skip(), // Expect more terms
+                _ => return Some(LValue::Terms(terms)),
+            }
+        }
     }
 
 

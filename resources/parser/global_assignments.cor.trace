@@ -1,9 +1,9 @@
-L1: 0000 Nil
-    0001 Nil
-    0002 Nil
-    0003 IncGlobalCount
-    0004 IncGlobalCount
-    0005 IncGlobalCount
+L1: 0000 IncGlobalCount
+    0001 IncGlobalCount
+    0002 IncGlobalCount
+    0003 Nil
+    0004 Nil
+    0005 Nil
 L2: 0006 Int(1) -> 1
     0007 StoreGlobal(0, false) -> x
     0008 Pop

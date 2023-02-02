@@ -1,5 +1,5 @@
-L1: 0000 Nil
-    0001 IncGlobalCount
+L1: 0000 IncGlobalCount
+    0001 Nil
 L2: 0002 Int(1) -> 1
     0003 OpAdd
     0004 StoreGlobal(0, false) -> x

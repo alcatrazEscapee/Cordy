@@ -1,11 +1,11 @@
-L1: 0000 Nil
-    0001 IncGlobalCount
-L2: 0002 Nil
-    0003 IncGlobalCount
-L3: 0004 Nil
-    0005 Nil
-    0006 IncGlobalCount
-    0007 IncGlobalCount
+L1: 0000 IncGlobalCount
+    0001 Nil
+L2: 0002 IncGlobalCount
+    0003 Nil
+L3: 0004 IncGlobalCount
+    0005 IncGlobalCount
+    0006 Nil
+    0007 Nil
 L4: 0008 Int(2) -> 3
     0009 IncGlobalCount
 L5: 0010 Nil
