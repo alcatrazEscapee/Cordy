@@ -67,13 +67,28 @@ pub enum Value {
 impl Value {
 
     // Constructors
-    pub fn iter_list(iter: impl Iterator<Item=Value>) -> Value { iter.to_list() }
-    pub fn iter_set(iter: impl Iterator<Item=Value>) -> Value { iter.to_set() }
-    pub fn iter_heap(iter: impl Iterator<Item=Value>) -> Value { iter.to_heap() }
-    pub fn iter_vector(iter: impl Iterator<Item=Value>) -> Value { iter.to_vector() }
 
     pub fn partial(func: Value, args: Vec<Value>) -> Value { PartialFunction(Box::new(PartialFunctionImpl { func, args: args.into_iter().map(|v| Box::new(v)).collect() }))}
     pub fn closure(func: Rc<FunctionImpl>) -> Value { Closure(Box::new(ClosureImpl { func, environment: Vec::new() })) }
+
+    /// Creates a memoized `PartialNativeFunction`, which wraps the provided function `func`, as a memoized function.
+    pub fn memoized(func: Value) -> Value {
+        PartialNativeFunction(NativeFunction::SyntheticMemoizedFunction, Box::new(vec![Memoized(Box::new(MemoizedImpl::new(func)))]))
+    }
+
+    /// Creates a new `Range()` value from a given set of integer parameters.
+    /// Raises an error if `step == 0`
+    ///
+    /// Note: this implementation internally replaces all empty range values with the single `range(0, 0, 0)` instance. This means that `range(1, 2, -1) . str` will have to handle this case as it will not be representative.
+    pub fn range(start: i64, stop: i64, step: i64) -> ValueResult {
+        if step == 0 {
+            ValueErrorStepCannotBeZero.err()
+        } else if (stop > start && step > 0) || (stop < start && step < 0) {
+            Ok(Range(Box::new(RangeImpl { start, stop, step }))) // Non-empty range
+        } else {
+            Ok(Range(Box::new(RangeImpl { start: 0, stop: 0, step: 0 }))) // Empty range
+        }
+    }
 
     /// Converts the `Value` to a `String`. This is equivalent to the stdlib function `str()`
     pub fn to_str(self: &Self) -> String {
@@ -644,20 +659,6 @@ pub struct RangeImpl {
 }
 
 impl RangeImpl {
-    /// Creates a new `Range()` value from a given set of integer parameters.
-    /// Raises an error if `step == 0`
-    ///
-    /// Note: this implementation internally replaces all empty range values with the single `range(0, 0, 0)` instance. This means that `range(1, 2, -1) . str` will have to handle this case as it will not be representative.
-    pub fn new(start: i64, stop: i64, step: i64) -> ValueResult {
-        if step == 0 {
-            ValueErrorStepCannotBeZero.err()
-        } else if (stop > start && step > 0) || (stop < start && step < 0) {
-            Ok(Range(Box::new(RangeImpl { start, stop, step }))) // Non-empty range
-        } else {
-            Ok(Range(Box::new(RangeImpl { start: 0, stop: 0, step: 0 }))) // Empty range
-        }
-    }
-
     /// Used by `operator in`, to check if a value is in this range.
     pub fn contains(&self, value: i64) -> bool {
         if self.step == 0 {
@@ -996,7 +997,7 @@ mod test {
     use indexmap::{IndexMap, IndexSet};
     use crate::stdlib::NativeFunction;
     use crate::vm::error::RuntimeError;
-    use crate::vm::value::{FunctionImpl, IntoIterableValue, IntoValue, RangeImpl, Value};
+    use crate::vm::value::{FunctionImpl, IntoIterableValue, IntoValue, Value};
 
     #[test] fn test_layout() { assert_eq!(16, std::mem::size_of::<Value>()); }
     #[test] fn test_result_box_layout() { assert_eq!(16, std::mem::size_of::<Result<Value, Box<RuntimeError>>>()); }
@@ -1031,7 +1032,7 @@ mod test {
             dict.to_value(),
             iter.to_heap(),
             vec2.to_value(),
-            RangeImpl::new(0, 1, 1).unwrap(),
+            Value::range(0, 1, 1).unwrap(),
             Value::Enumerate(Box::new(vec1.to_value())),
             Value::Function(rc.clone()),
             Value::partial(Value::Function(rc.clone()), vec![]),

@@ -1,21 +1,21 @@
 use std::collections::VecDeque;
 use std::rc::Rc;
 
-use crate::compiler::scanner::{ScanResult, ScanToken};
-use crate::compiler::parser::semantic::{LateBoundGlobal, Loop, LValue, LValueReference, VariableType};
 use crate::compiler::CompileResult;
+use crate::compiler::parser::semantic::{LateBoundGlobal, Loop, LValue, LValueReference, VariableType};
+use crate::compiler::scanner::{ScanResult, ScanToken};
+use crate::misc::MaybeRc;
 use crate::stdlib::NativeFunction;
-use crate::vm::{FunctionImpl, Opcode};
 use crate::trace;
-use crate::misc::{MaybeRc};
+use crate::vm::{FunctionImpl, Opcode};
 
 pub use crate::compiler::parser::errors::{ParserError, ParserErrorType};
 pub use crate::compiler::parser::semantic::Locals;
 
-use ScanToken::{*};
-use ParserErrorType::{*};
-use Opcode::{*};
 use NativeFunction::{*};
+use Opcode::{*};
+use ParserErrorType::{*};
+use ScanToken::{*};
 
 pub const RULE_INCREMENTAL: ParseRule = |mut parser| parser.parse_incremental();
 pub const RULE_EXPRESSION: ParseRule = |mut parser| parser.parse_expression();
@@ -1642,16 +1642,16 @@ impl Parser<'_> {
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
-    use crate::compiler::{parser, CompileResult, scanner};
+
+    use NativeFunction::{OperatorAdd, OperatorDiv, OperatorMul, Print, ReadText};
+    use Opcode::{*};
+
+    use crate::compiler::{CompileResult, parser, scanner};
     use crate::compiler::scanner::ScanResult;
     use crate::reporting;
     use crate::stdlib::NativeFunction;
-    use crate::vm::Opcode;
     use crate::trace;
-
-    use NativeFunction::{Print, ReadText, OperatorAdd, OperatorDiv, OperatorMul};
-    use Opcode::{*};
-
+    use crate::vm::Opcode;
 
     #[test] fn test_int() { run_expr("123", vec![Int(123)]); }
     #[test] fn test_str() { run_expr("'abc'", vec![Str(1)]); }

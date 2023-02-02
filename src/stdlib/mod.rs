@@ -3,7 +3,7 @@ use std::fs;
 use indexmap::{IndexMap, IndexSet};
 use lazy_static::lazy_static;
 
-use crate::vm::{operator, IntoIterableValue, IntoValue, RangeImpl, Value, VirtualInterface, RuntimeError};
+use crate::vm::{operator, IntoIterableValue, IntoValue, Value, VirtualInterface, RuntimeError};
 use crate::trace;
 
 use NativeFunction::{*};
@@ -577,7 +577,7 @@ pub fn invoke<VM>(native: NativeFunction, nargs: u8, vm: &mut VM) -> ValueResult
 
         // collections
         Len => dispatch!(a1, a1.len().map(|u| Value::Int(u as i64))),
-        Range => dispatch!(a1, RangeImpl::new(0, a1.as_int()?, 1), a2, RangeImpl::new(a1.as_int()?, a2.as_int()?, 1), a3, RangeImpl::new(a1.as_int()?, a2.as_int()?, a3.as_int()?)),
+        Range => dispatch!(a1, Value::range(0, a1.as_int()?, 1), a2, Value::range(a1.as_int()?, a2.as_int()?, 1), a3, Value::range(a1.as_int()?, a2.as_int()?, a3.as_int()?)),
         Enumerate => dispatch!(a1, Ok(Value::Enumerate(Box::new(a1)))),
         Sum => dispatch_varargs!(an, collections::sum(an)),
         Min => dispatch_varargs!(an, collections::min(an)),
