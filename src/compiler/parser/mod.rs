@@ -263,7 +263,7 @@ impl Parser<'_> {
         self.advance();
         let maybe_name: Option<String> = self.parse_function_name();
         self.expect(OpenParen);
-        let args: Vec<String> = self.parse_function_parameters();
+        let args: Vec<LValue> = self.parse_function_parameters();
         self.expect_resync(CloseParen);
 
         // Named functions are a complicated local variable, and needs to be declared as such
@@ -274,7 +274,7 @@ impl Parser<'_> {
                 self.push_inc_global(index);
 
                 let func_start: usize = self.next_opcode() as usize + 2; // Declare the function literal. + 2 to the head because of the leading Jump, Function()
-                let func: u32 = self.declare_function(func_start, name, args.clone());
+                let func: u32 = self.declare_function(func_start, name, &args);
                 func_id = Some(func);
                 self.push(Opcode::Function(func));  // And push the function object itself
             }
@@ -303,13 +303,13 @@ impl Parser<'_> {
         // Function header - `fn` (<arg>, ...)
         self.advance();
         self.expect(OpenParen);
-        let args: Vec<String> = self.parse_function_parameters();
+        let args: Vec<LValue> = self.parse_function_parameters();
         self.expect_resync(CloseParen);
 
         // Expression functions don't declare themselves as a local variable that can be referenced.
         // Instead, as they're part of an expression, they just push a single function instance onto the stack
         let func_start: usize = self.next_opcode() as usize + 2; // Declare the function literal. + 2 to the head because of the leading Jump and function local
-        let func: u32 = self.declare_function(func_start, String::from("_"), args.clone());
+        let func: u32 = self.declare_function(func_start, String::from("_"), &args);
         self.push(Opcode::Function(func));  // And push the function object itself
 
         self.parse_function_body(args, Some(func));
@@ -326,13 +326,16 @@ impl Parser<'_> {
         }
     }
 
-    fn parse_function_parameters(self: &mut Self) -> Vec<String> {
+    fn parse_function_parameters(self: &mut Self) -> Vec<LValue> {
         trace::trace_parser!("rule <function-parameters>");
-        let mut args: Vec<String> = Vec::new();
+        let mut args: Vec<LValue> = Vec::new();
+        if let Some(CloseParen) = self.peek() {
+            return args; // Special case for no parameters, don't enter the loop
+        }
+
         loop {
-            match self.peek() {
-                Some(Identifier(_)) => args.push(self.take_identifier()),
-                Some(CloseParen) => break,
+            match self.parse_lvalue() {
+                Some(lvalue) => args.push(lvalue),
                 _ => {
                     self.error_with(|t| ExpectedParameterOrEndOfList(t));
                     break
@@ -351,7 +354,7 @@ impl Parser<'_> {
         args
     }
 
-    fn parse_function_body(self: &mut Self, args: Vec<String>, func_id: Option<u32>) {
+    fn parse_function_body(self: &mut Self, args: Vec<LValue>, func_id: Option<u32>) {
         trace::trace_parser!("rule <function-body>");
         let jump = self.reserve(); // Jump over the function itself, the first time we encounter it
         let prev_pop_status: bool = self.delay_pop_from_expression_statement; // Stack semantics for the delayed pop
@@ -364,11 +367,33 @@ impl Parser<'_> {
         self.function_depth += 1;
         self.scope_depth += 1;
 
-        for arg in args {
-            if let Some(index) = self.declare_local(arg) {
-                // They are automatically initialized, and we don't need to push `Nil` for them, since they're provided from the stack due to call semantics
-                self.current_locals_mut().locals[index].initialize();
-                self.push_inc_global(index);
+        // Collect arguments into pairs of the lvalue, and associated synthetic
+        let mut args_with_synthetics: Vec<(LValue, Option<usize>)> = args.into_iter()
+            .map(|mut arg| {
+                let local = arg.declare_single_local(self);
+                (arg, local)
+            })
+            .collect::<Vec<(LValue, Option<usize>)>>();
+
+        // Declare pattern locals as locals immediately after arguments.
+        // Once declared, initialize all (referencable) locals - so not synthetics.
+        for (arg, _) in &mut args_with_synthetics {
+            arg.declare_pattern_locals(self);
+            arg.initialize_locals(self);
+        }
+
+        // Push initial values **only for pattern locals**
+        for (arg, synthetic) in &mut args_with_synthetics {
+            if synthetic.is_some() {
+                arg.emit_default_values(self, false);
+            }
+        }
+
+        // Destructure locals, if necessary
+        for (arg, synthetic) in &args_with_synthetics {
+            if let Some(local) = synthetic {
+                self.push(PushLocal(*local as u32)); // Push the iterable to be destructured onto the stack
+                arg.emit_destructuring(self, false); // Emit destructuring
             }
         }
 

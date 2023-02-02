@@ -39,8 +39,8 @@ pub fn unary_bitwise_not(a1: Value) -> ValueResult {
 pub fn binary_mul(a1: Value, a2: Value) -> ValueResult {
     match (a1, a2) {
         (Int(i1), Int(i2)) => Ok(Int(i1 * i2)),
-        (Str(s1), Int(i2)) if i2 > 0 => Ok(s1.repeat(i2 as usize).to_value()),
-        (Int(i1), Str(s2)) if i1 > 0 => Ok(s2.repeat(i1 as usize).to_value()),
+        (Str(s1), Int(i2)) if i2 >= 0 => Ok(s1.repeat(i2 as usize).to_value()),
+        (Int(i1), Str(s2)) if i1 >= 0 => Ok(s2.repeat(i1 as usize).to_value()),
         (List(l1), Int(i1)) if i1 > 0 => {
             let l1 = l1.unbox();
             let len: usize = l1.len();

@@ -102,7 +102,6 @@ For a more comprehensive documentation, see the [language documentation](./docs/
 - Make dict/set literals take priority over bare block statements (prevent bare block statements entirely?)
 - Investigate making a separate `Queue` type and making `List` a `Vec`? Benchmarks...
 - Fix `dict.default` to, if given a function, invoke and insert on getting a default value. goal is making `d[x].push(y)` work, while `d[x]` does not insert in general (i.e. if default is `0`).
-- Fix `//todo` error cases in parser
 - Allow patterns in bare expressions, i.e. `x, y = (1, 2)`
 - Allow unary minus to be evaluated with 1 or 2 args (but not partially evaluated), so `(-)(3, 1) == 2`, and `(-)(2) == -2`
 - Benchmarks + bytecode optimizer
