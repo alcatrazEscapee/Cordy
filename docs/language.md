@@ -327,6 +327,19 @@ let a, (b, c), d = [[1, 2], [3, 4], [5, 6]]
 let _, _, x, _ = [1, 2, 3, 4]
 ```
 
+Pattern matching is also supported within function arguments:
+
+```rust
+// This function:
+fn flip((x, y)) -> (y, x)
+
+// Is semantically identical to this one
+fn flip(pair) {
+    let x, y = pair
+    return (y, x)
+}
+```
+
 ### Decorators
 
 Functions can optionally be *decorated*, which is a way to modify the function in-place, without having to reassign to it. A decorator consists of a `@` followed by an expression, before the function is declared:
