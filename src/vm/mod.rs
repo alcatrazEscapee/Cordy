@@ -1186,6 +1186,17 @@ mod test {
     #[test] fn test_pattern_in_let_with_complex_patterns_1() { run_str("let *_, (_, x, _), _ = [[1, 2, 3], [4, 5, 6], [7, 8, 9]] ; x . print", "5\n"); }
     #[test] fn test_pattern_in_let_with_complex_patterns_2() { run_str("let _, (_, (_, (_, (x, *_)))) = [1, [2, [3, [4, [5, [6, [7, [8, [9, nil]]]]]]]]] ; x . print", "5\n"); }
     #[test] fn test_pattern_in_let_with_complex_patterns_3() { run_str("let ((*x, _), (_, (*y, _), _), *_) = [[[1, 2, 3], [[1, 2, 3], [2, 3, 4], [3, 4, 5]], [[1], [2], [3]]]] ; [x, y] . print", "[[1, 2], [2, 3]]\n"); }
+    #[test] fn test_pattern_in_function() { run_str("fn f((a, b)) -> [b, a] . print ; f([1, 2])", "[2, 1]\n"); }
+    #[test] fn test_multiple_patterns_in_function() { run_str("fn f((a, b), (c, d)) -> [a, b, c, d] . print ; f([1, 2], [3, 4])", "[1, 2, 3, 4]\n"); }
+    #[test] fn test_pattern_in_function_before_args() { run_str("fn f((a, b, c), d, e) -> [a, b, c, d, e] . print ; f([1, 2, 3], 4, 5)", "[1, 2, 3, 4, 5]\n"); }
+    #[test] fn test_pattern_in_function_between_args() { run_str("fn f(a, (b, c, d), e) -> [a, b, c, d, e] . print ; f(1, [2, 3, 4], 5)", "[1, 2, 3, 4, 5]\n"); }
+    #[test] fn test_pattern_in_function_after_args() { run_str("fn f(a, b, (c, d, e)) -> [a, b, c, d, e] . print ; f(1, 2, [3, 4, 5])", "[1, 2, 3, 4, 5]\n"); }
+    #[test] fn test_pattern_with_empty_in_function_before_args() { run_str("fn f((_, b, _), d, e) -> [1, b, 3, d, e] . print ; f([1, 2, 3], 4, 5)", "[1, 2, 3, 4, 5]\n"); }
+    #[test] fn test_pattern_with_empty_in_function_between_args() { run_str("fn f(a, (_, _, d), e) -> [a, 2, 3, d, e] . print ; f(1, [2, 3, 4], 5)", "[1, 2, 3, 4, 5]\n"); }
+    #[test] fn test_pattern_with_empty_in_function_after_args() { run_str("fn f(a, b, (c, _, _)) -> [a, b, c, 4, 5] . print ; f(1, 2, [3, 4, 5])", "[1, 2, 3, 4, 5]\n"); }
+    #[test] fn test_pattern_with_var_in_function_before_args() { run_str("fn f((a, *_), d, e) -> [a, d, e] . print ; f([1, 2, 3], 4, 5)", "[1, 4, 5]\n"); }
+    #[test] fn test_pattern_with_var_in_function_between_args() { run_str("fn f(a, (*_, d), e) -> [a, d, e] . print ; f(1, [2, 3, 4], 5)", "[1, 4, 5]\n"); }
+    #[test] fn test_pattern_with_var_in_function_after_args() { run_str("fn f(a, b, (*c, _, _)) -> [a, b, c] . print ; f(1, 2, [3, 4, 5])", "[1, 2, [3]]\n"); }
     #[test] fn test_index_in_strings() { run_str("'hello'[1] . print", "e\n"); }
     #[test] fn test_slice_in_strings_start() { run_str("'hello'[1:] . print", "ello\n"); }
     #[test] fn test_slice_in_strings_stop() { run_str("'hello'[:3] . print", "hel\n"); }
