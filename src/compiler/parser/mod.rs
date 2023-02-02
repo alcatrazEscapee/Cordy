@@ -5,8 +5,7 @@ use crate::compiler::scanner::{ScanResult, ScanToken};
 use crate::compiler::parser::semantic::{LateBoundGlobal, Loop, LValue, LValueReference, VariableType};
 use crate::compiler::CompileResult;
 use crate::stdlib::NativeFunction;
-use crate::vm::opcode::Opcode;
-use crate::vm::value::FunctionImpl;
+use crate::vm::{FunctionImpl, Opcode};
 use crate::trace;
 use crate::misc::{MaybeRc};
 
@@ -1647,7 +1646,7 @@ mod tests {
     use crate::compiler::scanner::ScanResult;
     use crate::reporting;
     use crate::stdlib::NativeFunction;
-    use crate::vm::opcode::Opcode;
+    use crate::vm::Opcode;
     use crate::trace;
 
     use NativeFunction::{Print, ReadText, OperatorAdd, OperatorDiv, OperatorMul};

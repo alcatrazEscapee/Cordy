@@ -8,6 +8,7 @@ use std::mem;
 use std::rc::Rc;
 use std::str::Chars;
 use indexmap::{IndexMap, IndexSet};
+use itertools::Itertools;
 
 use crate::stdlib::NativeFunction;
 use crate::vm::error::RuntimeError;
@@ -97,11 +98,11 @@ impl Value {
                 format!("'{}'", &escaped[1..escaped.len() - 1])
             },
 
-            List(v) => format!("[{}]", v.unbox().iter().map(|t| t.to_repr_str()).collect::<Vec<String>>().join(", ")),
-            Set(v) => format!("{{{}}}", v.unbox().set.iter().map(|t| t.to_repr_str()).collect::<Vec<String>>().join(", ")),
-            Dict(v) => format!("{{{}}}", v.unbox().dict.iter().map(|(k, v)| format!("{}: {}", k.to_repr_str(), v.to_repr_str())).collect::<Vec<String>>().join(", ")),
-            Heap(v) => format!("[{}]", v.unbox().heap.iter().map(|t| t.0.to_repr_str()).collect::<Vec<String>>().join(", ")),
-            Vector(v) => format!("({})", v.unbox().iter().map(|t| t.to_repr_str()).collect::<Vec<String>>().join(", ")),
+            List(v) => format!("[{}]", v.unbox().iter().map(|t| t.to_repr_str()).join(", ")),
+            Set(v) => format!("{{{}}}", v.unbox().set.iter().map(|t| t.to_repr_str()).join(", ")),
+            Dict(v) => format!("{{{}}}", v.unbox().dict.iter().map(|(k, v)| format!("{}: {}", k.to_repr_str(), v.to_repr_str())).join(", ")),
+            Heap(v) => format!("[{}]", v.unbox().heap.iter().map(|t| t.0.to_repr_str()).join(", ")),
+            Vector(v) => format!("({})", v.unbox().iter().map(|t| t.to_repr_str()).join(", ")),
 
             Range(r) => if r.step == 0 { String::from("range(empty)") } else { format!("range({}, {}, {})", r.start, r.stop, r.step) },
             Enumerate(v) => format!("enumerate({})", v.to_repr_str()),

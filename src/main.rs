@@ -4,8 +4,7 @@ use rustyline::Editor;
 use rustyline::error::ReadlineError;
 
 use cordy::compiler;
-use cordy::compiler::IncrementalCompileResult;
-use cordy::compiler::parser::Locals;
+use cordy::compiler::{IncrementalCompileResult, Locals};
 use cordy::reporting::ErrorReporter;
 use cordy::vm::{ExitType, VirtualMachine};
 

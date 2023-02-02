@@ -1,14 +1,14 @@
-use itertools::Itertools;
 /// This module contains core semantic analysis related functions in the parser, as we merge the parse and semantic phases of the compiler into a single pass.
 /// This also contains core structures that are used by the parser for semantic analysis.
 ///
 /// The functions declared in this module are public to be used by `parser/mod.rs`, but the module `semantic` is not exported itself.
 
+use itertools::Itertools;
+
 use crate::compiler::parser::{Parser, ParserError, ParserErrorType};
 use crate::misc::MaybeRc;
 use crate::stdlib;
-use crate::vm::value::FunctionImpl;
-use crate::vm::opcode::Opcode;
+use crate::vm::{FunctionImpl, Opcode};
 
 use ParserErrorType::{*};
 use Opcode::{*};

@@ -6,7 +6,7 @@ use crate::compiler::parser::{Parser, ParserError};
 use crate::compiler::parser::ParserErrorType;
 use crate::compiler::scanner::ScanToken;
 use crate::trace;
-use crate::vm::opcode::Opcode;
+use crate::vm::Opcode;
 
 use ParserErrorType::{*};
 use ScanToken::{*};

@@ -1,16 +1,17 @@
 use std::rc::Rc;
 
-use crate::compiler::parser::{Locals, ParserError, ParseRule};
+use crate::compiler::parser::ParseRule;
 use crate::compiler::scanner::ScanResult;
 use crate::reporting::{ErrorReporter, ProvidesLineNumber};
-use crate::vm::opcode::Opcode;
-use crate::vm::value::FunctionImpl;
-use crate::vm::error::RuntimeError;
+use crate::vm::{FunctionImpl, Opcode, RuntimeError};
+
+pub use crate::compiler::parser::{Locals, ParserError, ParserErrorType};
+pub use crate::compiler::scanner::{ScanError, ScanErrorType, ScanToken};
 
 use Opcode::{*};
 
-pub mod scanner;
-pub mod parser;
+mod scanner;
+mod parser;
 
 pub fn default() -> CompileResult {
     parser::default()
