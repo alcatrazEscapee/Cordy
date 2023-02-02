@@ -181,14 +181,7 @@ impl LValue {
     /// Returns `true` if the `LValue` is a top-level variadic, such as `* <name>` or `*_`
     pub fn is_variadic_term(self: &Self) -> bool { match self { LValue::VarEmpty | LValue::VarNamed(_) => true, _ => false } }
 
-    fn is_named(self: &Self) -> bool { match self { LValue::Named(_) => true, _ => false } }
-    fn is_empty(self: &Self) -> bool { match self { LValue::Empty => true, _ => false } }
-
-    fn is_single_named_term(self: &Self) -> bool { match self { LValue::Terms(it) if it.len() == 1 => it[0].is_named(), _ => false } }
-    fn is_single_empty_term(self: &Self) -> bool { match self { LValue::Terms(it) if it.len() == 1 => it[0].is_empty(), _ => false } }
-
     fn as_terms(self: &Self) -> &Vec<LValue> { match self { LValue::Terms(it) => it, _ => panic!("Expected LValue::Terms") } }
-
 
     /// Declares all variables associated with this `LValue` as locals in the current scope.
     /// Will panic if the `LValue` has terms which are not `LValueReference::Named`.
@@ -234,37 +227,32 @@ impl LValue {
     /// - Instead of emitting `Nil`, we don't emit anything as part of default value initialization.
     /// - Instead of destructuring, we either leave the value in-place (for a `<name>` `LValue`), or immediately pop (for a `_` `LValue`)
     pub fn emit_default_values(self: &Self, parser: &mut Parser, in_place: bool) {
-        if in_place {
-            if self.is_single_empty_term() || self.is_single_named_term() {
-                return;
-            }
-        }
         match self {
             LValue::Terms(terms) => {
                 for term in terms {
-                    term.emit_default_values(parser, true);
+                    term.emit_default_values(parser, false);
                 }
             },
-            LValue::Named(_) | LValue::VarNamed(_) => parser.push(Nil),
+            LValue::Named(_) | LValue::VarNamed(_) if !in_place => parser.push(Nil),
             _ => {},
         }
     }
 
     /// Emits destructuring code for this `LValue`. Assumes the `RValue` is present on top of the stack, and all variables
+    ///
+    /// If `in_place` is `true`, this will use an optimized destructuring for specific `LValue`s:
+    ///
+    /// - `_` `LValue`s will emit a single `Pop`, rather than destructuring.
+    /// - `<name>` `LValue`s will assume their value is constructed in place, and not emit any destructuring code.
     pub fn emit_destructuring(self: &Self, parser: &mut Parser, in_place: bool) {
-        if in_place {
-            if self.is_single_named_term() {
-                return; // Emit nothing - the value is already in-place
-            }
-            if self.is_single_empty_term() {
-                parser.push(Pop);
-                return;
-            }
-        }
         match self {
             LValue::Empty | LValue::VarEmpty => parser.push(Pop),
-            LValue::Named(_) | LValue::VarNamed(_) => {},
-            LValue::Terms(_) => self.emit_terms_destructuring(parser)
+            LValue::Named(LValueReference::Local(index)) | LValue::VarNamed(LValueReference::Local(index)) if !in_place => {
+                parser.push_store_local(*index as usize);
+                parser.push(Pop);
+            }
+            LValue::Terms(_) => self.emit_terms_destructuring(parser),
+            _ => {},
         }
     }
 
@@ -333,6 +321,10 @@ impl LValue {
     }
 }
 
+impl Default for LValue {
+    fn default() -> Self { LValue::Empty }
+}
+
 impl LValueReference {
     fn as_named(self) -> String {
         match self { LValueReference::Named(it) => it, _ => panic!("Expected LValueReference::Named") }
@@ -345,172 +337,6 @@ impl Default for LValueReference {
     }
 }
 
-
-
-/// A `VariableBinding` represents a possible binding for a value. It may be a single identifier, a empty binding (`_`), or a more complex pattern.
-/// Without context, a `VariableBinding` makes no assumptions that any of it's named variables have been declared.
-///
-/// Examples:
-///
-/// - `let <variable-binding>`
-/// - `fn <name> ( <variable-binding> ...`
-#[derive(Debug, Clone)]
-pub enum VariableBinding {
-    Pattern(Pattern),
-    Named(usize),
-    Empty
-}
-
-impl VariableBinding {
-
-    /// Initializes all local variables used in this pattern, or named variable binding.
-    pub fn init_all_locals(self: &Self, parser: &mut Parser) {
-        match self {
-            VariableBinding::Pattern(it) => it.init_all_locals(parser),
-            VariableBinding::Named(local) => parser.current_locals_mut().locals[*local].initialize(),
-            VariableBinding::Empty => {},
-        }
-    }
-
-    /// Pushes default values for all local variables used in this pattern or named variable binding
-    pub fn push_local_default_values(self: &Self, parser: &mut Parser) {
-        match self {
-            VariableBinding::Pattern(it) => it.emit_local_default_values(parser),
-            VariableBinding::Named(_) => parser.push(Nil),
-            VariableBinding::Empty => {},
-        }
-    }
-
-    /// Emits code for store local variables associated to this pattern or named variable binding, and then pops the value being stored.
-    pub fn push_store_locals_and_pop(self: &Self, parser: &mut Parser) {
-        match self {
-            VariableBinding::Pattern(it) => it.emit_destructuring(parser),
-            VariableBinding::Named(local) => {
-                parser.push_store_local(*local);
-                parser.push(Pop);
-            },
-            VariableBinding::Empty => parser.push(Pop),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum Pattern {
-    TermEmpty,
-    TermVarEmpty,
-    Term(usize),
-    TermVar(usize),
-    Terms(Vec<Pattern>)
-}
-
-impl Pattern {
-
-    /// Emits code for initializing all local variables (to `Nil`) as part of this pattern.
-    pub fn emit_local_default_values(self: &Self, parser: &mut Parser) {
-        match self {
-            Pattern::TermEmpty | Pattern::TermVarEmpty => {},
-            Pattern::Term(_) | Pattern::TermVar(_) => parser.push(Nil),
-            Pattern::Terms(terms) => {
-                for term in terms {
-                    term.emit_local_default_values(parser);
-                }
-            }
-        }
-    }
-
-    /// Initializes all local variables used in this pattern
-    pub fn init_all_locals(self: &Self, parser: &mut Parser) {
-        match self {
-            Pattern::TermEmpty | Pattern::TermVarEmpty => {},
-            Pattern::Term(local) | Pattern::TermVar(local) => {
-                parser.current_locals_mut().locals[*local].initialize();
-                parser.push_inc_global(*local);
-            },
-            Pattern::Terms(terms) => {
-                for term in terms {
-                    term.init_all_locals(parser);
-                }
-            }
-        }
-    }
-
-    /// Emits code for destructuring this pattern
-    /// Assumes the variable containing the to-be-destructured iterable sits atop the stack, and that all local variables are already present (and initialized to `Nil`) in their respective stack slots.
-    /// This will ultimately pop the iterable on top of the stack, once all variables have been assigned from this pattern.
-    pub fn emit_destructuring(self: &Self, parser: &mut Parser) {
-        let terms = match self {
-            Pattern::Terms(v) => v,
-            _ => panic!("Top level pattern must be a `Pattern::Terms`")
-        };
-
-        let is_variadic = terms.iter()
-            .any(|t| t.is_variadic_term());
-        let len: i64 = if is_variadic { terms.len() - 1 } else { terms.len() } as i64;
-        let constant_len = parser.declare_constant(len);
-
-        parser.push(if is_variadic { CheckLengthGreaterThan(constant_len) } else { CheckLengthEqualTo(constant_len) });
-
-        let mut index: i64 = 0;
-        for term in terms {
-            match term {
-                Pattern::TermEmpty => {
-                    // Just advance the index
-                    index += 1;
-                },
-                Pattern::TermVarEmpty => {
-                    // Advance the index by the missing elements (start indexing in reverse)
-                    index = -(len - index);
-                },
-                Pattern::Term(local) => {
-                    let constant_index = parser.declare_constant(index);
-
-                    parser.push(Int(constant_index));
-                    parser.push(OpIndexPeek); // [ it[index], index, it, ...]
-                    parser.push_store_local(*local); // stores it[index]
-                    parser.push(PopN(2)); // [it, ...]
-
-                    index += 1;
-                },
-                Pattern::TermVar(local) => {
-                    // index = the next index in the iterable to take = the number of elements already accessed
-                    // therefor, len - index = the number of elements left we need to access exactly, which must be indices -1, -2, ... -(len - index)
-                    // so our slice excludes these, so the 'high' value must be -(len - index)
-                    // this is then also exactly what we set our index to next
-                    let constant_low = parser.declare_constant(index);
-                    index = -(len - index);
-                    let constant_high = parser.declare_constant(index);
-
-                    parser.push(Dup); // [it, it, ...]
-                    parser.push(Int(constant_low)); // [low, it, it, ...]
-                    parser.push(if index == 0 { Nil } else { Int(constant_high) }); // [high, low, it, it, ...]
-                    parser.push(OpSlice); // [it[low:high], it, ...]
-                    parser.push_store_local(*local); // stores it[low:high]
-                    parser.push(Pop); // [it, ...]
-                },
-                terms @ Pattern::Terms(_) => {
-                    // Index as if this was a `Term`, but then invoke the emit recursively, with the value still on the stack, treating it as the iterable.
-                    let constant_index = parser.declare_constant(index);
-
-                    parser.push(Int(constant_index));
-                    parser.push(OpIndexPeek); // [ it[index], index, it, ...]
-                    terms.emit_destructuring(parser); // [ index, it, ...]
-                    parser.push(Pop); // [it, ...]
-
-                    index += 1;
-                }
-            }
-        }
-
-        parser.push(Pop); // Pop the iterable
-    }
-
-    pub fn is_variadic_term(self: &Self) -> bool {
-        match self {
-            Pattern::TermVarEmpty | Pattern::TermVar(_) => true,
-            _ => false
-        }
-    }
-}
 
 
 impl<'a> Parser<'a> {

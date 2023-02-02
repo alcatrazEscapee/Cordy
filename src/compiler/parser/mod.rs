@@ -2,13 +2,13 @@ use std::collections::VecDeque;
 use std::rc::Rc;
 
 use crate::compiler::scanner::{ScanResult, ScanToken};
-use crate::compiler::parser::semantic::{LateBoundGlobal, Loop, LValue, LValueReference, Pattern, VariableBinding, VariableType};
+use crate::compiler::parser::semantic::{LateBoundGlobal, Loop, LValue, LValueReference, VariableType};
 use crate::compiler::CompileResult;
 use crate::stdlib::NativeFunction;
 use crate::vm::opcode::Opcode;
 use crate::vm::value::FunctionImpl;
 use crate::trace;
-use crate::misc::MaybeRc;
+use crate::misc::{MaybeRc};
 
 pub use crate::compiler::parser::errors::{ParserError, ParserErrorType};
 pub use crate::compiler::parser::semantic::Locals;
@@ -602,15 +602,16 @@ impl Parser<'_> {
         // `for` loops have declared (including synthetic) variables within their own scope
         // the variable binding of a `for` can also support pattern expressions.
         self.scope_depth += 1;
-        let local_x: VariableBinding = self.parse_variable_binding().unwrap_or(VariableBinding::Empty);
+        let mut lvalue: LValue = self.parse_bare_lvalue().unwrap_or_default();
 
         self.expect(KeywordIn);
 
-        local_x.push_local_default_values(self);
+        lvalue.declare_locals(self);
+        lvalue.emit_default_values(self, false);
 
         self.parse_expression();
 
-        local_x.init_all_locals(self);
+        lvalue.initialize_locals(self);
 
         // At the beginning and end of the loop, this local sits on the top of the stack.
         // We still need to declare it's stack slot space, even though we don't reference it via load/store local opcodes
@@ -625,7 +626,7 @@ impl Parser<'_> {
         let jump_if_false_pop = self.reserve();
 
         // Initialize locals
-        local_x.push_store_locals_and_pop(self);
+        lvalue.emit_destructuring(self, false);
 
         // Parse the body of the loop, and emit the delayed pop - the stack is restored to the same state as the top of the loop.
         // So, we jump to the top of the loop, where we test/increment
@@ -683,7 +684,7 @@ impl Parser<'_> {
         self.advance(); // Consume `let`
 
         loop {
-            match self.parse_lvalue_terms() {
+            match self.parse_bare_lvalue() {
                 Some(mut lvalue) => {
                     match self.peek() {
                         Some(Equals) => {
@@ -765,7 +766,7 @@ impl Parser<'_> {
             },
             Some(OpenParen) => {
                 self.advance();
-                let terms = self.parse_lvalue_terms();
+                let terms = self.parse_bare_lvalue();
                 self.expect(CloseParen);
                 terms
             },
@@ -776,10 +777,10 @@ impl Parser<'_> {
         }
     }
 
-    /// Parses a 'bare' `LValue`, so a `LValue::Terms` without any surrounding `,`. Always returns a `LValue::Terms`.
+    /// Parses a 'bare' `LValue`, so a `LValue::Terms` without any surrounding `,`. Promotes the top level `LValue::Terms` into a single term, if possible.
     /// If `None` is returned, an error will have already been raised.
-    fn parse_lvalue_terms(self: &mut Self) -> Option<LValue> {
-        trace::trace_parser!("rule <lvalue-terms>");
+    fn parse_bare_lvalue(self: &mut Self) -> Option<LValue> {
+        trace::trace_parser!("rule <bare-lvalue>");
 
         let mut terms: Vec<LValue> = Vec::new();
         let mut found_variadic_term: bool = false;
@@ -800,156 +801,17 @@ impl Parser<'_> {
 
             match self.peek() {
                 Some(Comma) => self.skip(), // Expect more terms
-                _ => return Some(LValue::Terms(terms)),
-            }
-        }
-    }
-
-
-    // ===== Pattern Parsing ===== //
-
-    /// Parses a variable binding.
-    /// A variable binding may be a named variable (like in `let x`), an empty binding (`let _`, although in this context this is useless), or a pattern (`let x, (_, y), *z = `
-    /// All local variables named in either the named variable or pattern will be defined as locals by this method, and the variable binding is returned, if present. Otherwise, `None` is returned and an error will have been raised already.
-    fn parse_variable_binding(self: &mut Self) -> Option<VariableBinding> {
-        trace::trace_parser!("rule <variable-binding>");
-
-        if let Some(p) = self.parse_pattern() {
-
-            // Recognize special patterns, which we do not want to emit pattern-like declarations for
-            // These are single non-variadic terms, which can either be a local variable or empty binding
-            let terms = match &p {
-                Pattern::Terms(terms) => terms,
-                _ => panic!("Should always be top-level Pattern::Terms")
-            };
-
-            trace::trace_parser!("pattern {:?}", p);
-
-            if terms.len() == 1 {
-                match &terms[0] {
-                    Pattern::Term(local) => return Some(VariableBinding::Named(*local)),
-                    Pattern::TermEmpty => return Some(VariableBinding::Empty),
-                    _ => {} // Single, non-simple term
-                }
-            }
-
-            Some(VariableBinding::Pattern(p))
-        } else {
-            match self.peek() {
-                Some(Identifier(_)) => {
-                    let name: String = self.take_identifier();
-                    match self.declare_local(name) {
-                        Some(local) => Some(VariableBinding::Named(local)),
-                        None => None
-                    }
-                }
-                Some(Underscore) => {
-                    self.advance();
-                    Some(VariableBinding::Empty)
-                },
-                _ => {
-                    self.error_with(|t| ExpectedUnderscoreOrVariableNameOrPattern(t));
-                    None
-                }
-            }
-        }
-    }
-
-    /// Optionally parses a `Pattern`, which will always be a top level `Pattern::Terms`
-    /// If this does not parse a pattern (i.e. returns `None`), the parser state will not be modified.
-    fn parse_pattern(self: &mut Self) -> Option<Pattern> {
-        if self.detect_pattern() {
-            trace::trace_parser!("rule <pattern>");
-            let mut terms: Vec<Pattern> = Vec::new();
-            let mut found_variadic_term: bool = false;
-
-            terms.push(self.parse_pattern_term());
-            loop {
-                match self.peek() {
-                    Some(Comma) => {
-                        self.advance();
-                        let term = self.parse_pattern_term();
-                        if term.is_variadic_term() {
-                            if found_variadic_term {
-                                self.error(MultipleVariadicTermsInPattern);
-                            } else {
-                                found_variadic_term = true;
-                            }
+                _ => return Some({
+                    if terms.len() == 1 {
+                        match &terms[0] {
+                            LValue::Terms(_) => LValue::Terms(terms),
+                            _ => terms.into_iter().next().unwrap()
                         }
-                        trace::trace_parser!("pattern term {:?}", term);
-                        terms.push(term)
-                    },
-                    _ => break
-                }
+                    } else {
+                        LValue::Terms(terms)
+                    }
+                }),
             }
-
-            Some(Pattern::Terms(terms))
-        } else {
-            None
-        }
-    }
-
-    fn parse_pattern_term(self: &mut Self) -> Pattern {
-        trace::trace_parser!("rule <pattern-term>");
-        match self.peek() {
-            Some(Identifier(_)) => {
-                let name: String = self.take_identifier();
-                match self.declare_local(name) {
-                    Some(local) => Pattern::Term(local),
-                    _ => Pattern::TermEmpty,
-                }
-            },
-            Some(Underscore) => {
-                self.advance();
-                Pattern::TermEmpty
-            },
-            Some(Mul) => {
-                self.advance();
-                match self.peek() {
-                    Some(Identifier(_)) => {
-                        let name: String = self.take_identifier();
-                        match self.declare_local(name) {
-                            Some(local) => Pattern::TermVar(local),
-                            _ => Pattern::TermEmpty,
-                        }
-                    },
-                    Some(Underscore) => {
-                        self.advance();
-                        Pattern::TermVarEmpty
-                    },
-                    _ => {
-                        self.error_with(|t| ExpectedUnderscoreOrVariableNameAfterVariadicInPattern(t));
-                        Pattern::TermEmpty
-                    }
-                }
-            },
-            Some(OpenParen) => {
-                self.advance();
-                let term = match self.parse_pattern() {
-                    Some(t) => t,
-                    None => {
-                        self.error_with(|t| ExpectedPatternTerm(t));
-                        Pattern::TermEmpty
-                    }
-                };
-                self.expect(CloseParen);
-                term
-            },
-            _ => {
-                self.error_with(|t| ExpectedPatternTerm(t));
-                Pattern::TermEmpty
-            },
-        }
-    }
-
-    fn detect_pattern(self: &mut Self) -> bool {
-        match self.peek() {
-            Some(Identifier(_)) => match self.peek2() {
-                Some(Comma) => true,
-                _ => false
-            },
-            Some(Underscore) | Some(OpenParen) | Some(Mul) => true,
-            _ => false
         }
     }
 
