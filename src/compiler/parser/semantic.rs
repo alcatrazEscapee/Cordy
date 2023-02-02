@@ -113,6 +113,7 @@ impl Local {
     }
 }
 
+
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub enum VariableType {
     NativeFunction(stdlib::NativeFunction),
@@ -137,6 +138,222 @@ impl LateBoundGlobal {
     }
 }
 
+
+/// An `LValue` is a value used on the left hand side (hence `L`) of an expression. It may be declared, or undeclared.
+///
+/// Examples of possible `<lvalue>`s:
+///
+/// - `_` : An empty `LValue`, which simply discards it's associated `RValue`
+/// - `x` : A named `LValue`, which assigns it's associated `RValue` to the variable `x` (which may be any type of assignable variable, including a yet-undeclared variable)
+/// - `(x, y)` : A pattern `LValue`, which destructures it's input and assigns them to `x` and `y`.
+/// - `x, *y, _` : A complex pattern `LValue`.
+///
+/// An `LValue` can be used in a number of different situations:
+///
+/// - In a `let <lvalue>` statement, the `LValue` immediately follows the `let`, and declares all it's contents. `LValue`s used here must be non-variadic, non-nested. Variables must be undeclared, and will be declared by the statement.
+/// - In a `let <lvalue> = <expression>` statement, the `LValue` must be undeclared and will be declared by the statement.
+/// - In a `fn <name> ? ( <lvalue> )` statement, the single `LValue` represents all arguments to the function. Variables are declared as new locals to the function, and relevant destructuring code is emitted if needed.
+#[derive(Debug, Clone)]
+pub enum LValue {
+    /// A `_` term.
+    Empty,
+    /// A `*_` term.
+    VarEmpty,
+    /// A `<name>` term.
+    Named(LValueReference),
+    /// A `* <name>` term.
+    VarNamed(LValueReference),
+    /// A pattern `LValue` with at least one top-level `( <lvalue> )`
+    Terms(Vec<LValue>),
+}
+
+#[derive(Debug, Clone)]
+pub enum LValueReference {
+    Named(String),
+    Local(u32),
+    Invalid,
+}
+
+
+
+impl LValue {
+
+    /// Returns `true` if the `LValue` is a top-level variadic, such as `* <name>` or `*_`
+    pub fn is_variadic_term(self: &Self) -> bool { match self { LValue::VarEmpty | LValue::VarNamed(_) => true, _ => false } }
+
+    fn is_named(self: &Self) -> bool { match self { LValue::Named(_) => true, _ => false } }
+    fn is_empty(self: &Self) -> bool { match self { LValue::Empty => true, _ => false } }
+
+    fn is_single_named_term(self: &Self) -> bool { match self { LValue::Terms(it) if it.len() == 1 => it[0].is_named(), _ => false } }
+    fn is_single_empty_term(self: &Self) -> bool { match self { LValue::Terms(it) if it.len() == 1 => it[0].is_empty(), _ => false } }
+
+    fn as_terms(self: &Self) -> &Vec<LValue> { match self { LValue::Terms(it) => it, _ => panic!("Expected LValue::Terms") } }
+
+
+    /// Declares all variables associated with this `LValue` as locals in the current scope.
+    /// Will panic if the `LValue` has terms which are not `LValueReference::Named`.
+    pub fn declare_locals(self: &mut Self, parser: &mut Parser) {
+        match self {
+            LValue::Named(it) | LValue::VarNamed(it) => {
+                let name = std::mem::take(it).as_named();
+                if let Some(local) = parser.declare_local(name) {
+                    *it = LValueReference::Local(local as u32);
+                }
+            },
+            LValue::Terms(lvalue) => {
+                for term in lvalue {
+                    term.declare_locals(parser);
+                }
+            },
+            _ => {},
+        }
+    }
+
+    /// Initializes all local variables associated with this `LValue`. This allows them to be referenced in expressions.
+    /// Also emits `IncGlobalCount` opcodes for globally declared variables.
+    pub fn initialize_locals(self: &mut Self, parser: &mut Parser) {
+        match self {
+            LValue::Named(LValueReference::Local(local)) | LValue::VarNamed(LValueReference::Local(local)) => {
+                parser.current_locals_mut().locals[*local as usize].initialize();
+                parser.push_inc_global(*local as usize);
+            },
+            LValue::Terms(lvalue) => {
+                for term in lvalue {
+                    term.initialize_locals(parser);
+                }
+            },
+            _ => {},
+        }
+    }
+
+    /// Emits default values (`Nil`) for all newly declared local variables for this `LValue`.
+    ///
+    /// If `in_place` is `true`, this (and the associated function `emit_destructuring()`, will assume the value is constructed **in-place**, i.e. the result
+    /// variables are to be placed on top of the stack once finished. This enables a few minor bytecode optimizations for specific `LValue`s:
+    ///
+    /// - Instead of emitting `Nil`, we don't emit anything as part of default value initialization.
+    /// - Instead of destructuring, we either leave the value in-place (for a `<name>` `LValue`), or immediately pop (for a `_` `LValue`)
+    pub fn emit_default_values(self: &Self, parser: &mut Parser, in_place: bool) {
+        if in_place {
+            if self.is_single_empty_term() || self.is_single_named_term() {
+                return;
+            }
+        }
+        match self {
+            LValue::Terms(terms) => {
+                for term in terms {
+                    term.emit_default_values(parser, true);
+                }
+            },
+            LValue::Named(_) | LValue::VarNamed(_) => parser.push(Nil),
+            _ => {},
+        }
+    }
+
+    /// Emits destructuring code for this `LValue`. Assumes the `RValue` is present on top of the stack, and all variables
+    pub fn emit_destructuring(self: &Self, parser: &mut Parser, in_place: bool) {
+        if in_place {
+            if self.is_single_named_term() {
+                return; // Emit nothing - the value is already in-place
+            }
+            if self.is_single_empty_term() {
+                parser.push(Pop);
+                return;
+            }
+        }
+        match self {
+            LValue::Empty | LValue::VarEmpty => parser.push(Pop),
+            LValue::Named(_) | LValue::VarNamed(_) => {},
+            LValue::Terms(_) => self.emit_terms_destructuring(parser)
+        }
+    }
+
+    fn emit_terms_destructuring(self: &Self, parser: &mut Parser) {
+        let terms = self.as_terms();
+
+        let is_variadic = terms.iter().any(|t| t.is_variadic_term());
+        let len: i64 = if is_variadic { terms.len() - 1 } else { terms.len() } as i64;
+        let constant_len = parser.declare_constant(len);
+
+        parser.push(if is_variadic { CheckLengthGreaterThan(constant_len) } else { CheckLengthEqualTo(constant_len) });
+
+        let mut index: i64 = 0;
+        for term in terms {
+            match term {
+                LValue::Empty => {
+                    // Just advance the index
+                    index += 1;
+                },
+                LValue::VarEmpty => {
+                    // Advance the index by the missing elements (start indexing in reverse)
+                    index = -(len - index);
+                },
+                LValue::Named(LValueReference::Local(local)) => {
+                    let constant_index = parser.declare_constant(index);
+
+                    parser.push(Int(constant_index));
+                    parser.push(OpIndexPeek); // [ it[index], index, it, ...]
+                    parser.push_store_local(*local as usize); // stores it[index]
+                    parser.push(PopN(2)); // [it, ...]
+
+                    index += 1;
+                },
+                LValue::VarNamed(LValueReference::Local(local)) => {
+                    // index = the next index in the iterable to take = the number of elements already accessed
+                    // therefor, len - index = the number of elements left we need to access exactly, which must be indices -1, -2, ... -(len - index)
+                    // so our slice excludes these, so the 'high' value must be -(len - index)
+                    // this is then also exactly what we set our index to next
+                    let constant_low = parser.declare_constant(index);
+                    index = -(len - index);
+                    let constant_high = parser.declare_constant(index);
+
+                    parser.push(Dup); // [it, it, ...]
+                    parser.push(Int(constant_low)); // [low, it, it, ...]
+                    parser.push(if index == 0 { Nil } else { Int(constant_high) }); // [high, low, it, it, ...]
+                    parser.push(OpSlice); // [it[low:high], it, ...]
+                    parser.push_store_local(*local as usize); // stores it[low:high]
+                    parser.push(Pop); // [it, ...]
+                },
+                terms @ LValue::Terms(_) => {
+                    // Index as if this was a `Term`, but then invoke the emit recursively, with the value still on the stack, treating it as the iterable.
+                    let constant_index = parser.declare_constant(index);
+
+                    parser.push(Int(constant_index));
+                    parser.push(OpIndexPeek); // [ it[index], index, it, ...]
+                    terms.emit_destructuring(parser, false); // [ index, it, ...]
+                    parser.push(Pop); // [it, ...]
+
+                    index += 1;
+                },
+                _ => {},
+            }
+        }
+
+        parser.push(Pop); // Pop the iterable
+    }
+}
+
+impl LValueReference {
+    fn as_named(self) -> String {
+        match self { LValueReference::Named(it) => it, _ => panic!("Expected LValueReference::Named") }
+    }
+}
+
+impl Default for LValueReference {
+    fn default() -> Self {
+        LValueReference::Invalid
+    }
+}
+
+
+
+/// A `VariableBinding` represents a possible binding for a value. It may be a single identifier, a empty binding (`_`), or a more complex pattern.
+/// Without context, a `VariableBinding` makes no assumptions that any of it's named variables have been declared.
+///
+/// Examples:
+///
+/// - `let <variable-binding>`
+/// - `fn <name> ( <variable-binding> ...`
 #[derive(Debug, Clone)]
 pub enum VariableBinding {
     Pattern(Pattern),
@@ -287,29 +504,9 @@ impl Pattern {
         parser.push(Pop); // Pop the iterable
     }
 
-    pub fn is_simple(self: &Self) -> Option<usize> {
-        let terms = match self {
-            Pattern::Terms(v) => v,
-            _ => panic!("Top level pattern must be a `Pattern::Terms`")
-        };
-
-        if terms.iter().all(|t| t.is_simple_term()) {
-            Some(terms.len())
-        } else {
-            None
-        }
-    }
-
     pub fn is_variadic_term(self: &Self) -> bool {
         match self {
             Pattern::TermVarEmpty | Pattern::TermVar(_) => true,
-            _ => false
-        }
-    }
-
-    pub fn is_simple_term(self: &Self) -> bool {
-        match self {
-            Pattern::Term(_) => true,
             _ => false
         }
     }
@@ -343,8 +540,9 @@ impl<'a> Parser<'a> {
         self.output.len() as u32
     }
 
-    /// After a `let <name>` or `fn <name>` declaration, tries to declare this as a local variable in the current scope
-    /// Returns the index of the local variable in `self.current_locals().locals`
+    /// After a `let <name>` or `fn <name>` declaration, tries to declare this as a local variable in the current scope.
+    /// Returns the index of the local variable in `self.current_locals().locals`, or `None` if the variable could not be declared.
+    /// Note that if `None` is returned, a semantic error will already have been raised.
     pub fn declare_local(self: &mut Self, name: String) -> Option<usize> {
 
         // Lookup the name as a binding - if it is, it will be denied as we don't allow shadowing global native functions

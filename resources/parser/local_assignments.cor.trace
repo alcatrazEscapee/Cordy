@@ -1,5 +1,5 @@
-L01: 0000 Nil
-     0001 IncGlobalCount
+L01: 0000 IncGlobalCount
+     0001 Nil
 L03: 0002 Nil
 L05: 0003 Int(2) -> 3
      0004 StoreGlobal(1, true) -> x
