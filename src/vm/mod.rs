@@ -2,16 +2,17 @@ use std::cell::Cell;
 use std::collections::HashMap;
 use std::io::{BufRead, Write};
 use std::rc::Rc;
+
 use itertools::Itertools;
 
 use crate::{compiler, stdlib, trace};
 use crate::compiler::{CompileResult, IncrementalCompileResult, Locals};
 use crate::stdlib::NativeFunction;
-use crate::vm::value::{UpValue, PartialFunctionImpl};
+use crate::vm::value::{PartialFunctionImpl, UpValue};
 
+pub use crate::vm::error::{DetailRuntimeError, RuntimeError, StackTraceFrame};
 pub use crate::vm::opcode::Opcode;
-pub use crate::vm::value::{IntoIterableValue, IntoValue, Iterable, MemoizedImpl, RangeImpl, FunctionImpl, IntoDictValue, Value};
-pub use crate::vm::error::{RuntimeError, DetailRuntimeError, StackTraceFrame};
+pub use crate::vm::value::{FunctionImpl, IntoDictValue, IntoIterableValue, IntoValue, Iterable, Value};
 
 use Opcode::{*};
 use RuntimeError::{*};
@@ -871,6 +872,7 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
 #[cfg(test)]
 mod test {
     use std::path::PathBuf;
+
     use crate::{compiler, reporting, trace};
     use crate::reporting::ErrorReporter;
     use crate::vm::{ExitType, VirtualMachine};

@@ -1,10 +1,10 @@
 use std::cmp::{Ordering, Reverse};
 use std::collections::VecDeque;
+
 use itertools::Itertools;
 
-use crate::stdlib::NativeFunction::{SyntheticMemoizedFunction};
-use crate::vm::{IntoIterableValue, IntoDictValue, IntoValue, Iterable, MemoizedImpl, Value, RuntimeError, VirtualInterface};
 use crate::misc;
+use crate::vm::{IntoDictValue, IntoIterableValue, IntoValue, Iterable, RuntimeError, Value, VirtualInterface};
 
 use RuntimeError::{*};
 use Value::{*};
@@ -492,7 +492,7 @@ pub fn right_find<VM>(vm: &mut VM, a1: Value, a2: Value, return_index: bool) -> 
 
 pub fn create_memoized(f: Value) -> ValueResult {
     match &f.is_function() {
-        true => Ok(PartialNativeFunction(SyntheticMemoizedFunction, Box::new(vec![Memoized(Box::new(MemoizedImpl::new(f)))]))),
+        true => Ok(Value::memoized(f)),
         false => TypeErrorArgMustBeFunction(f).err()
     }
 }
