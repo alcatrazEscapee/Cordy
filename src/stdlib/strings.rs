@@ -1,7 +1,7 @@
 use std::iter::Peekable;
 use std::str::Chars;
-use crate::vm::error::RuntimeError;
-use crate::vm::value::{IntoIterableValue, IntoValue, Iterable, Value};
+
+use crate::vm::{IntoIterableValue, IntoValue, Iterable, Value, RuntimeError};
 
 use Value::{*};
 use RuntimeError::{*};

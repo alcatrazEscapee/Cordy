@@ -3,9 +3,7 @@ use std::fs;
 use indexmap::{IndexMap, IndexSet};
 use lazy_static::lazy_static;
 
-use crate::vm::{operator, VirtualInterface};
-use crate::vm::value::{IntoIterableValue, IntoValue, RangeImpl, Value};
-use crate::vm::error::RuntimeError;
+use crate::vm::{operator, IntoIterableValue, IntoValue, RangeImpl, Value, VirtualInterface, RuntimeError};
 use crate::trace;
 
 use NativeFunction::{*};

@@ -1,12 +1,8 @@
 use std::rc::Rc;
 
-use crate::compiler::parser::{ParserError, ParserErrorType};
-use crate::compiler::CompileResult;
-use crate::compiler::scanner::{ScanError, ScanErrorType, ScanToken};
+use crate::compiler::{CompileResult, ParserError, ParserErrorType, ScanError, ScanErrorType, ScanToken};
 use crate::stdlib::NativeFunction;
-use crate::vm::error::{RuntimeError, DetailRuntimeError, StackTraceFrame};
-use crate::vm::opcode::Opcode;
-use crate::vm::value::{FunctionImpl, Value};
+use crate::vm::{FunctionImpl, Value, Opcode, RuntimeError, DetailRuntimeError, StackTraceFrame};
 use crate::misc;
 
 pub struct ErrorReporter<'a> {

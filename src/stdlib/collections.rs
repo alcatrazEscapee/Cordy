@@ -2,14 +2,12 @@ use std::cmp::{Ordering, Reverse};
 use std::collections::VecDeque;
 use itertools::Itertools;
 
-use crate::vm::error::RuntimeError;
-use crate::vm::value::{IntoIterableValue, IntoDictValue, IntoValue, Iterable, MemoizedImpl, Value};
-use crate::vm::VirtualInterface;
+use crate::stdlib::NativeFunction::{SyntheticMemoizedFunction};
+use crate::vm::{IntoIterableValue, IntoDictValue, IntoValue, Iterable, MemoizedImpl, Value, RuntimeError, VirtualInterface};
+use crate::misc;
 
 use RuntimeError::{*};
 use Value::{*};
-use crate::misc;
-use crate::stdlib::NativeFunction::{SyntheticMemoizedFunction};
 
 type ValueResult = Result<Value, Box<RuntimeError>>;
 

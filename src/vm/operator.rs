@@ -1,12 +1,13 @@
 use std::collections::VecDeque;
-use Value::{*};
+
 use crate::stdlib;
 use crate::stdlib::NativeFunction;
 use crate::vm::error::RuntimeError;
+use crate::vm::opcode::Opcode;
 use crate::vm::value::{IntoIterableValue, IntoValue, Mut, Value};
 
-use crate::vm::error::RuntimeError::{*};
-use crate::vm::opcode::Opcode;
+use RuntimeError::{*};
+use Value::{*};
 
 type ValueResult = Result<Value, Box<RuntimeError>>;
 

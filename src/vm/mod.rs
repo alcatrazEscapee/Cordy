@@ -3,15 +3,15 @@ use std::collections::HashMap;
 use std::io::{BufRead, Write};
 use std::rc::Rc;
 use itertools::Itertools;
-use error::{DetailRuntimeError, RuntimeError};
 
 use crate::{compiler, stdlib, trace};
-use crate::compiler::{CompileResult, IncrementalCompileResult};
-use crate::compiler::parser::Locals;
+use crate::compiler::{CompileResult, IncrementalCompileResult, Locals};
 use crate::stdlib::NativeFunction;
-use crate::vm::opcode::Opcode;
-use crate::vm::value::{IntoIterableValue, IntoDictValue, UpValue, Value, IntoValue};
-use crate::vm::value::{FunctionImpl, PartialFunctionImpl};
+use crate::vm::value::{UpValue, PartialFunctionImpl};
+
+pub use crate::vm::opcode::Opcode;
+pub use crate::vm::value::{IntoIterableValue, IntoValue, Iterable, MemoizedImpl, RangeImpl, FunctionImpl, IntoDictValue, Value};
+pub use crate::vm::error::{RuntimeError, DetailRuntimeError, StackTraceFrame};
 
 use Opcode::{*};
 use RuntimeError::{*};
@@ -19,10 +19,11 @@ use RuntimeError::{*};
 type ValueResult = Result<Value, Box<RuntimeError>>;
 type AnyResult = Result<(), Box<RuntimeError>>;
 
-pub mod value;
-pub mod opcode;
-pub mod error;
 pub mod operator;
+
+mod value;
+mod opcode;
+mod error;
 
 
 pub struct VirtualMachine<R, W> {
