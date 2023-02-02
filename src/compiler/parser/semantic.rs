@@ -1,3 +1,4 @@
+use itertools::Itertools;
 /// This module contains core semantic analysis related functions in the parser, as we merge the parse and semantic phases of the compiler into a single pass.
 /// This also contains core structures that are used by the parser for semantic analysis.
 ///
@@ -183,6 +184,18 @@ impl LValue {
 
     fn as_terms(self: &Self) -> &Vec<LValue> { match self { LValue::Terms(it) => it, _ => panic!("Expected LValue::Terms") } }
 
+    /// Converts this `LValue` into a code-representation string.
+    pub fn to_code_str(self: &Self) -> String {
+        match self {
+            LValue::Empty => String::from("_"),
+            LValue::VarEmpty => String::from("*_"),
+            LValue::Named(LValueReference::Named(it)) => it.clone(),
+            LValue::VarNamed(LValueReference::Named(it)) => format!("*{}", it),
+            LValue::Terms(it) => format!("({})", it.iter().map(|u| u.to_code_str()).join(", ")),
+            _ => panic!("Cannot convert a {:?} to a code string", self),
+        }
+    }
+
     /// Declares all variables associated with this `LValue` as locals in the current scope.
     /// Will panic if the `LValue` has terms which are not `LValueReference::Named`.
     pub fn declare_locals(self: &mut Self, parser: &mut Parser) {
@@ -193,6 +206,32 @@ impl LValue {
                     *it = LValueReference::Local(local as u32);
                 }
             },
+            LValue::Terms(lvalue) => {
+                for term in lvalue {
+                    term.declare_locals(parser);
+                }
+            },
+            _ => {},
+        }
+    }
+
+    /// This is meant to be paired with `declare_pattern_locals()`, together which will declare all local variables used by this `LValue`.
+    /// This method will **always** declare a single local variable in the current scope, which is meant to be the input to the pattern.
+    /// If the pattern needs more or less, which would normally be handled via destructuring, this will declare a synthetic variable instead.
+    ///
+    /// If a synthetic local was needed, returns the index of the local as `Some(local)`. Otherwise returns `None`
+    pub fn declare_single_local(self: &mut Self, parser: &mut Parser) -> Option<usize> {
+        match self {
+            LValue::Named(_) | LValue::VarNamed(_) => {
+                self.declare_locals(parser);
+                return None;
+            },
+            LValue::Terms(_) | LValue::Empty | LValue::VarEmpty => Some(parser.declare_synthetic_local()),
+        }
+    }
+
+    pub fn declare_pattern_locals(self: &mut Self, parser: &mut Parser) {
+        match self {
             LValue::Terms(lvalue) => {
                 for term in lvalue {
                     term.declare_locals(parser);
@@ -356,8 +395,8 @@ impl<'a> Parser<'a> {
         (self.constants.len() - 1) as u32
     }
 
-    pub fn declare_function(self: &mut Self, head: usize, name: String, args: Vec<String>) -> u32 {
-        self.functions.push(MaybeRc::new(FunctionImpl::new(head, name, args)));
+    pub fn declare_function(self: &mut Self, head: usize, name: String, args: &Vec<LValue>) -> u32 {
+        self.functions.push(MaybeRc::new(FunctionImpl::new(head, name, args.iter().map(|u| u.to_code_str()).collect())));
         (self.functions.len() - 1) as u32
     }
 
