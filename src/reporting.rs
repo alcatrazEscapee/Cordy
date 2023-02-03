@@ -268,6 +268,7 @@ impl AsError for ScanToken {
             ScanToken::KeywordNot => String::from("'not' keyword"),
             ScanToken::KeywordBreak => String::from("'break' keyword"),
             ScanToken::KeywordContinue => String::from("'continue' keyword"),
+            ScanToken::KeywordDo => String::from("'do' keyword"),
             ScanToken::KeywordTrue => String::from("'true' keyword"),
             ScanToken::KeywordFalse => String::from("'false' keyword"),
             ScanToken::KeywordNil => String::from("'nil' keyword"),

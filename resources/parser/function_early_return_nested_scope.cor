@@ -1,8 +1,8 @@
 fn foo() {
     let x
-    {
+    do {
         let y
-        {
+        do {
             let z
             return
         }

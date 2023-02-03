@@ -1,7 +1,7 @@
 let x
-{
+do {
     let x
-    {
+    do {
         x = 3
         let x
         x = 5
