@@ -71,7 +71,7 @@ fn main() {
             }
 
             match vm.run_until_completion() {
-                ExitType::Exit => return,
+                ExitType::Exit | ExitType::Return => return,
                 ExitType::Yield => {},
                 ExitType::Error(e) => println!("{}", ErrorReporter::new(&buffer, source).format_runtime_error(e)),
             }

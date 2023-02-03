@@ -52,13 +52,13 @@ pub enum FunctionType {
 
 #[derive(Debug, Clone)]
 pub enum ExitType {
-    Exit, Yield, Error(DetailRuntimeError)
+    Exit, Return, Yield, Error(DetailRuntimeError)
 }
 
 impl ExitType {
-    pub fn is_err(self: &Self) -> bool {
+    pub fn is_early_exit(self: &Self) -> bool {
         match self {
-            ExitType::Error(_) => true,
+            ExitType::Exit | ExitType::Error(_) => true,
             _ => false,
         }
     }
@@ -134,10 +134,11 @@ impl<R, W> VirtualMachine<R, W> where
     }
 
     pub fn run_until_completion(self: &mut Self) -> ExitType {
-        match *self.run().err().unwrap() {
-            RuntimeExit => ExitType::Exit,
-            RuntimeYield => ExitType::Yield,
-            e => ExitType::Error(error::detail_runtime_error(e, self.ip - 1, &self.call_stack, &self.functions, &self.line_numbers)),
+        match self.run().map_err(|u| *u) {
+            Ok(_) => ExitType::Return,
+            Err(RuntimeExit) => ExitType::Exit,
+            Err(RuntimeYield) => ExitType::Yield,
+            Err(e) => ExitType::Error(error::detail_runtime_error(e, self.ip - 1, &self.call_stack, &self.functions, &self.line_numbers)),
         }
     }
 
@@ -1381,6 +1382,8 @@ mod test {
     #[test] fn test_dot_equals() { run_str("let x = 'hello' ; x .= sort ; x .= reduce(+) ; x . print", "ehllo\n"); }
     #[test] fn test_dot_equals_operator_function() { run_str("let x = 3 ; x .= (+4) ; x . print", "7\n"); }
     #[test] fn test_dot_equals_anonymous_function() { run_str("let x = 'hello' ; x .= fn(x) -> x[0] * len(x) ; x . print", "hhhhh\n"); }
+    #[test] fn test_exit_in_expression() { run_str("'this will not print' + exit . print", ""); }
+    #[test] fn test_exit_in_ternary() { run_str("print(if 3 > 2 then exit else 'hello')", ""); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }
@@ -1435,7 +1438,7 @@ mod test {
         let mut vm = VirtualMachine::new(compile.ok().unwrap(), &b""[..], &mut buf);
 
         let result: ExitType = vm.run_until_completion();
-        assert!(vm.stack.is_empty() || result.is_err());
+        assert!(vm.stack.is_empty() || result.is_early_exit());
 
         let mut output: String = String::from_utf8(buf).unwrap();
 
@@ -1463,7 +1466,7 @@ mod test {
         let mut vm = VirtualMachine::new(compile, &b""[..], &mut buf);
 
         let result: ExitType = vm.run_until_completion();
-        assert!(vm.stack.is_empty() || result.is_err());
+        assert!(vm.stack.is_empty() || result.is_early_exit());
 
         let mut output: String = String::from_utf8(buf).unwrap();
 
