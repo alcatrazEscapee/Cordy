@@ -1384,6 +1384,11 @@ mod test {
     #[test] fn test_dot_equals_anonymous_function() { run_str("let x = 'hello' ; x .= fn(x) -> x[0] * len(x) ; x . print", "hhhhh\n"); }
     #[test] fn test_exit_in_expression() { run_str("'this will not print' + exit . print", ""); }
     #[test] fn test_exit_in_ternary() { run_str("print(if 3 > 2 then exit else 'hello')", ""); }
+    #[test] fn test_iterables_is_iterable() { run_str("[[], '123', set(), dict()] . all(is iterable) . print", "true\n"); }
+    #[test] fn test_non_iterables_is_iterable() { run_str("[true, false, nil, 123, fn() -> {}] . any(is iterable) . print", "false\n"); }
+    #[test] fn test_any_is_any() { run_str("[[], '123', set(), dict(), 123, true, false, nil, fn() -> nil] . all(is any) . print", "true\n"); }
+    #[test] fn test_function_is_function() { run_str("(fn() -> nil) is function . print", "true\n"); }
+    #[test] fn test_non_function_is_function() { run_str("[nil, true, 123, '123', [], set()] . any(is function) . print", "false\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }

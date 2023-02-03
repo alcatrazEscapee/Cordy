@@ -94,8 +94,6 @@ For a more comprehensive documentation, see the [language documentation](./docs/
 - sensible comparison operator chaining like Python? `a < b < c` -> `a < b and b < c`
   - this requires hacky parsing, hacky non-stack-semantics VM, and is in general a pain to recognize
 - `assert` statement?
-- `iterable` as a type, so `is iterable` works
-  - Now that `any` is a function, figure out what to do about the `any` type
 - Even MORE standard library functions
   - regex match, find, and replace -> just on normal strings. Make `\` less required for escaping (only escape if needed)
 - Make dict/set literals take priority over bare block statements (prevent bare block statements entirely?)

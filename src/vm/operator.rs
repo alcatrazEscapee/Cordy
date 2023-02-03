@@ -104,6 +104,8 @@ pub fn binary_is(a1: Value, a2: Value) -> ValueResult {
                 NativeFunction::Set => a1.is_set(),
                 NativeFunction::Dict => a1.is_dict(),
                 NativeFunction::Vector => a1.is_vector(),
+                NativeFunction::Iterable => a1.is_iter(),
+                NativeFunction::Any => true,
                 _ => return TypeErrorBinaryIs(a1, Value::NativeFunction(b)).err()
             };
             Ok(Bool(ret))

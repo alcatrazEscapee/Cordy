@@ -143,12 +143,27 @@ The keyword `vector` can also be used in an `is` expression, to check if a value
 
 The keyword `function` can be used in an `is` expression, to check if a value is of the type `function`.
 
+**Example**
+
 ```
 >>> fn() {} is function
 true
 >>> print is function
 true
 >>> 'hello' is function
+false
+```
+
+### Iterable `iterable`
+
+The keyword `iterable` can be used in an `is` expression, to check if a value is of any `iterable` type.
+
+**Example**
+
+```
+>>> '123' is iterable
+true
+>>> 123 is iterable
 false
 ```
 
