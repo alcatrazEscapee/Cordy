@@ -1092,7 +1092,7 @@ mod test {
     #[test] fn test_bare_operator_compose_and_eval() { run_str("2 . (+)(1) . print", "3\n"); }
     #[test] fn test_bare_operator_compose() { run_str("1 . (2 . (+)) . print", "3\n"); }
     #[test] fn test_reduce_list_1() { run_str("[1, 2, 3] . reduce (+) . print", "6\n"); }
-    #[test] fn test_reduce_list_2() { run_str("[1, 2, 3] . reduce (-) . print", "Function '(-)' requires 2 parameters but 1 were present.\n    at: `[1, 2, 3] . reduce (-) . print` (line 1)\n    at: execution of script '<test>'\n"); }
+    #[test] fn test_reduce_list_2() { run_str("[1, 2, 3] . reduce (!) . print", "Function '(!)' requires 2 parameters but 1 were present.\n    at: `[1, 2, 3] . reduce (!) . print` (line 1)\n    at: execution of script '<test>'\n"); }
     #[test] fn test_str_to_list() { run_str("'funny beans' . list . print", "['f', 'u', 'n', 'n', 'y', ' ', 'b', 'e', 'a', 'n', 's']\n"); }
     #[test] fn test_str_to_set() { run_str("'funny beans' . set . print", "{'f', 'u', 'n', 'y', ' ', 'b', 'e', 'a', 's'}\n"); }
     #[test] fn test_str_to_set_to_sorted() { run_str("'funny' . set . sort . print", "['f', 'n', 'u', 'y']\n"); }
@@ -1389,6 +1389,9 @@ mod test {
     #[test] fn test_any_is_any() { run_str("[[], '123', set(), dict(), 123, true, false, nil, fn() -> nil] . all(is any) . print", "true\n"); }
     #[test] fn test_function_is_function() { run_str("(fn() -> nil) is function . print", "true\n"); }
     #[test] fn test_non_function_is_function() { run_str("[nil, true, 123, '123', [], set()] . any(is function) . print", "false\n"); }
+    #[test] fn test_operator_sub_as_unary() { run_str("(-)(3) . print", "-3\n"); }
+    #[test] fn test_operator_sub_as_binary() { run_str("(-)(5, 2) . print", "3\n"); }
+    #[test] fn test_operator_sub_as_partial_not_allowed() { run_str("(-3) . print", "-3\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }
