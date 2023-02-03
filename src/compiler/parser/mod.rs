@@ -848,6 +848,7 @@ impl Parser<'_> {
             Some(KeywordNil) => self.advance_push(Nil),
             Some(KeywordTrue) => self.advance_push(True),
             Some(KeywordFalse) => self.advance_push(False),
+            Some(KeywordExit) => self.advance_push(Exit),
             Some(ScanToken::Int(_)) => {
                 let int: i64 = self.take_int();
                 let cid: u32 = self.declare_constant(int);
