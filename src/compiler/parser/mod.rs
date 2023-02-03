@@ -209,8 +209,13 @@ impl Parser<'_> {
                 Some(KeywordFor) => self.parse_for_statement(),
                 Some(KeywordBreak) => self.parse_break_statement(),
                 Some(KeywordContinue) => self.parse_continue_statement(),
-                Some(OpenBrace) => self.parse_block_statement(),
-                Some(CloseBrace) => break, // Don't consume, but break if we're in an error mode
+                Some(KeywordDo) => {
+                    // For now, this is just a bridge (almost undocumented) keyword, in order to trigger a scoped block
+                    // Maybe later we can expand it to a `do {} while` loop, but probably not.
+                    self.advance();
+                    self.parse_block_statement();
+                }
+                Some(CloseBrace) => break,
                 Some(KeywordExit) => {
                     self.push_delayed_pop();
                     self.advance();

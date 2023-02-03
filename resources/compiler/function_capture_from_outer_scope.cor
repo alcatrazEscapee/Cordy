@@ -1,5 +1,5 @@
 let f
-{
+do {
     let x = 'hello', y  = 'world'
     f = fn() -> y
 }

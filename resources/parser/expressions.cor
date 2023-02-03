@@ -1,4 +1,4 @@
 let x, foo, bar, baz, three, four, z
-{ x = 1 + 2 * 3 - 4 / 5 }
-{ x = foo . bar (1 + 2) . baz (x) . z }
-{ x = three . four and 1 > 2 or 6 >= 7 }
+do { x = 1 + 2 * 3 - 4 / 5 }
+do { x = foo . bar (1 + 2) . baz (x) . z }
+do { x = three . four and 1 > 2 or 6 >= 7 }

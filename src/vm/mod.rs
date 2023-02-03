@@ -982,19 +982,19 @@ mod test {
     #[test] fn test_str_sum_values() { run_str("sum(1, 3, 5, 7) . print", "16\n"); }
     #[test] fn test_str_sum_no_arg() { run_str("sum()", "Function 'sum' requires at least 1 parameter but none were present.\n    at: `sum()` (line 1)\n    at: execution of script '<test>'\n"); }
     #[test] fn test_str_sum_empty_list() { run_str("[] . sum . print", "0\n"); }
-    #[test] fn test_local_vars_01() { run_str("let x=0 { x.print }", "0\n"); }
-    #[test] fn test_local_vars_02() { run_str("let x=0 { let x=1; x.print }", "1\n"); }
-    #[test] fn test_local_vars_03() { run_str("let x=0 { x.print let x=1 }", "0\n"); }
-    #[test] fn test_local_vars_04() { run_str("let x=0 { let x=1 } x.print", "0\n"); }
-    #[test] fn test_local_vars_05() { run_str("let x=0 { x=1 } x.print", "1\n"); }
-    #[test] fn test_local_vars_06() { run_str("let x=0 { x=1 { x=2; x.print } }", "2\n"); }
-    #[test] fn test_local_vars_07() { run_str("let x=0 { x=1 { x=2 } x.print }", "2\n"); }
-    #[test] fn test_local_vars_08() { run_str("let x=0 { let x=1 { x=2 } x.print }", "2\n"); }
-    #[test] fn test_local_vars_09() { run_str("let x=0 { let x=1 { let x=2 } x.print }", "1\n"); }
-    #[test] fn test_local_vars_10() { run_str("let x=0 { x=1 { let x=2 } x.print }", "1\n"); }
-    #[test] fn test_local_vars_11() { run_str("let x=0 { x=1 { let x=2 } } x.print", "1\n"); }
-    #[test] fn test_local_vars_12() { run_str("let x=0 { let x=1 { let x=2 } } x.print", "0\n"); }
-    #[test] fn test_local_vars_14() { run_str("let x=3 { let x=x; x.print }", "3\n"); }
+    #[test] fn test_local_vars_01() { run_str("let x=0 do { x.print }", "0\n"); }
+    #[test] fn test_local_vars_02() { run_str("let x=0 do { let x=1; x.print }", "1\n"); }
+    #[test] fn test_local_vars_03() { run_str("let x=0 do { x.print let x=1 }", "0\n"); }
+    #[test] fn test_local_vars_04() { run_str("let x=0 do { let x=1 } x.print", "0\n"); }
+    #[test] fn test_local_vars_05() { run_str("let x=0 do { x=1 } x.print", "1\n"); }
+    #[test] fn test_local_vars_06() { run_str("let x=0 do { x=1 do { x=2; x.print } }", "2\n"); }
+    #[test] fn test_local_vars_07() { run_str("let x=0 do { x=1 do { x=2 } x.print }", "2\n"); }
+    #[test] fn test_local_vars_08() { run_str("let x=0 do { let x=1 do { x=2 } x.print }", "2\n"); }
+    #[test] fn test_local_vars_09() { run_str("let x=0 do { let x=1 do { let x=2 } x.print }", "1\n"); }
+    #[test] fn test_local_vars_10() { run_str("let x=0 do { x=1 do { let x=2 } x.print }", "1\n"); }
+    #[test] fn test_local_vars_11() { run_str("let x=0 do { x=1 do { let x=2 } } x.print", "1\n"); }
+    #[test] fn test_local_vars_12() { run_str("let x=0 do { let x=1 do { let x=2 } } x.print", "0\n"); }
+    #[test] fn test_local_vars_14() { run_str("let x=3 do { let x=x; x.print }", "3\n"); }
     #[test] fn test_functions_01() { run_str("fn foo() { 'hello' . print } ; foo();", "hello\n"); }
     #[test] fn test_functions_02() { run_str("fn foo() { 'hello' . print } ; foo() ; foo()", "hello\nhello\n"); }
     #[test] fn test_functions_03() { run_str("fn foo(a) { 'hello' . print } ; foo(1)", "hello\n"); }
@@ -1005,9 +1005,9 @@ mod test {
     #[test] fn test_functions_08() { run_str("fn foo(a) { a . print } ; fn bar(a, b, c) { foo(a + b + c) } bar(1, 2, 3)", "6\n"); }
     #[test] fn test_functions_09() { run_str("fn foo(h, w) { h + ' ' + w . print } ; fn bar(w) { foo('hello', w) } bar('world')", "hello world\n"); }
     #[test] fn test_functions_10() { run_str("let x = 'hello' ; fn foo(x) { x . print } foo(x)", "hello\n"); }
-    #[test] fn test_functions_11() { run_str("{ let x = 'hello' ; fn foo(x) { x . print } foo(x) }", "hello\n"); }
-    #[test] fn test_functions_12() { run_str("{ let x = 'hello' ; { fn foo(x) { x . print } foo(x) } }", "hello\n"); }
-    #[test] fn test_functions_13() { run_str("let x = 'hello' ; { fn foo() { x . print } foo() }", "hello\n"); }
+    #[test] fn test_functions_11() { run_str("do { let x = 'hello' ; fn foo(x) { x . print } foo(x) }", "hello\n"); }
+    #[test] fn test_functions_12() { run_str("do { let x = 'hello' ; do { fn foo(x) { x . print } foo(x) } }", "hello\n"); }
+    #[test] fn test_functions_13() { run_str("let x = 'hello' ; do { fn foo() { x . print } foo() }", "hello\n"); }
     #[test] fn test_functions_14() { run_str("fn foo(x) { 'hello ' + x . print } 'world' . foo", "hello world\n"); }
     #[test] fn test_function_implicit_return_01() { run_str("fn foo() { } foo() . print", "nil\n"); }
     #[test] fn test_function_implicit_return_02() { run_str("fn foo() { 'hello' } foo() . print", "hello\n"); }
@@ -1025,12 +1025,12 @@ mod test {
     #[test] fn test_function_implicit_return_14() { run_str("fn foo(x) { loop { if x > 1 { break } } } foo(2) . print", "nil\n"); }
     #[test] fn test_function_implicit_return_15() { run_str("fn foo(x) { loop { if x > 1 { continue } else { break } } } foo(0) . print", "nil\n"); }
     #[test] fn test_closures_01() { run_str("fn foo() { let x = 'hello' ; fn bar() { x . print } bar() } foo()", "hello\n"); }
-    #[test] fn test_closures_02() { run_str("{ fn foo() { 'hello' . print } ; fn bar() { foo() } bar() }", "hello\n"); }
-    #[test] fn test_closures_03() { run_str("{ fn foo() { 'hello' . print } ; { fn bar() { foo() } bar() } }", "hello\n"); }
-    #[test] fn test_closures_04() { run_str("{ fn foo() { 'hello' . print } ; fn bar(a) { foo() } bar(1) }", "hello\n"); }
-    #[test] fn test_closures_05() { run_str("{ fn foo() { 'hello' . print } ; { fn bar(a) { foo() } bar(1) } }", "hello\n"); }
-    #[test] fn test_closures_06() { run_str("{ let x = 'hello' ; { fn foo() { x . print } foo() } }", "hello\n"); }
-    #[test] fn test_closures_07() { run_str("{ let x = 'hello' ; { { fn foo() { x . print } foo() } } }", "hello\n"); }
+    #[test] fn test_closures_02() { run_str("do { fn foo() { 'hello' . print } ; fn bar() { foo() } bar() }", "hello\n"); }
+    #[test] fn test_closures_03() { run_str("do { fn foo() { 'hello' . print } ; do { fn bar() { foo() } bar() } }", "hello\n"); }
+    #[test] fn test_closures_04() { run_str("do { fn foo() { 'hello' . print } ; fn bar(a) { foo() } bar(1) }", "hello\n"); }
+    #[test] fn test_closures_05() { run_str("do { fn foo() { 'hello' . print } ; do { fn bar(a) { foo() } bar(1) } }", "hello\n"); }
+    #[test] fn test_closures_06() { run_str("do { let x = 'hello' ; do { fn foo() { x . print } foo() } }", "hello\n"); }
+    #[test] fn test_closures_07() { run_str("do { let x = 'hello' ; do { do { fn foo() { x . print } foo() } } }", "hello\n"); }
     #[test] fn test_closures_08() { run_str("fn foo() { let x = 'before' ; (fn() -> x = 'hello')() ; x } foo() . print", "hello\n"); }
     #[test] fn test_closures_09() { run_str("fn foo() { let x = 'before' ; (fn() -> x = 'hello')() ; (fn() -> x = 'goodbye')() ; x } foo() . print", "goodbye\n"); }
     #[test] fn test_closures_10() { run_str("fn foo() { let x = 'before' ; (fn() -> x = 'hello')() ; let y = (fn() -> x)() ; y } foo() . print", "hello\n"); }
@@ -1038,9 +1038,9 @@ mod test {
     #[test] fn test_closures_12() { run_str("fn foo() { let x = 'hello' ; (fn() -> x += ' world')() ; (fn() -> x)() } foo() . print", "hello world\n"); }
     #[test] fn test_function_return_1() { run_str("fn foo() { return 3 } foo() . print", "3\n"); }
     #[test] fn test_function_return_2() { run_str("fn foo() { let x = 3; return x } foo() . print", "3\n"); }
-    #[test] fn test_function_return_3() { run_str("fn foo() { let x = 3; { return x } } foo() . print", "3\n"); }
-    #[test] fn test_function_return_4() { run_str("fn foo() { let x = 3; { let x; } return x } foo() . print", "3\n"); }
-    #[test] fn test_function_return_5() { run_str("fn foo() { let x; { let x = 3; return x } } foo() . print", "3\n"); }
+    #[test] fn test_function_return_3() { run_str("fn foo() { let x = 3; do { return x } } foo() . print", "3\n"); }
+    #[test] fn test_function_return_4() { run_str("fn foo() { let x = 3; do { let x; } return x } foo() . print", "3\n"); }
+    #[test] fn test_function_return_5() { run_str("fn foo() { let x; do { let x = 3; return x } } foo() . print", "3\n"); }
     #[test] fn test_partial_function_composition_1() { run_str("fn foo(a, b, c) { c . print } (3 . (2 . (1 . foo)))", "3\n"); }
     #[test] fn test_partial_function_composition_2() { run_str("fn foo(a, b, c) { c . print } (2 . (1 . foo)) (3)", "3\n"); }
     #[test] fn test_partial_function_composition_3() { run_str("fn foo(a, b, c) { c . print } (1 . foo) (2) (3)", "3\n"); }
@@ -1374,11 +1374,11 @@ mod test {
     #[test] fn test_set_peek() { run_str("let x = {1, 2, 3}, y = x . peek ; (x, y) . print", "({1, 2, 3}, 1)\n"); }
     #[test] fn test_dict_peek() { run_str("let x = {1: 'a', 2: 'b', 3: 'c'}, y = x . peek ; (x, y) . print", "({1: 'a', 2: 'b', 3: 'c'}, (1, 'a'))\n"); }
     #[test] fn test_vector_set_index() { run_str("let x = (1, 2, 3) ; x[0] = 3 ; x . print", "(3, 2, 3)\n"); }
-    #[test] fn test_annotation_named_func_with_name() { run_str("fn par(f) -> (fn(x) -> f('hello')) ; @par fn do(x) -> print(x) ; do('goodbye')", "hello\n"); }
+    #[test] fn test_annotation_named_func_with_name() { run_str("fn par(f) -> (fn(x) -> f('hello')) ; @par fn foo(x) -> print(x) ; foo('goodbye')", "hello\n"); }
     #[test] fn test_annotation_expression_func_with_name() { run_str("fn par(f) -> (fn(x) -> f('hello')) ; (@par fn(x) -> print(x))('goodbye')", "hello\n"); }
-    #[test] fn test_annotation_named_func_with_expression() { run_str("fn par(a, f) -> (fn(x) -> f(a)) ; @par('hello') fn do(x) -> print(x) ; do('goodbye')", "hello\n"); }
+    #[test] fn test_annotation_named_func_with_expression() { run_str("fn par(a, f) -> (fn(x) -> f(a)) ; @par('hello') fn foo(x) -> print(x) ; foo('goodbye')", "hello\n"); }
     #[test] fn test_annotation_expression_func_with_expression() { run_str("fn par(a, f) -> (fn(x) -> f(a)) ; (@par('hello') fn(x) -> print(x))('goodbye')", "hello\n"); }
-    #[test] fn test_annotation_iife() { run_str("fn iife(f) -> f() ; @iife fn do() -> print('hello')", "hello\n"); }
+    #[test] fn test_annotation_iife() { run_str("fn iife(f) -> f() ; @iife fn foo() -> print('hello')", "hello\n"); }
     #[test] fn test_dot_equals() { run_str("let x = 'hello' ; x .= sort ; x .= reduce(+) ; x . print", "ehllo\n"); }
     #[test] fn test_dot_equals_operator_function() { run_str("let x = 3 ; x .= (+4) ; x . print", "7\n"); }
     #[test] fn test_dot_equals_anonymous_function() { run_str("let x = 'hello' ; x .= fn(x) -> x[0] * len(x) ; x . print", "hhhhh\n"); }
@@ -1392,6 +1392,8 @@ mod test {
     #[test] fn test_operator_sub_as_unary() { run_str("(-)(3) . print", "-3\n"); }
     #[test] fn test_operator_sub_as_binary() { run_str("(-)(5, 2) . print", "3\n"); }
     #[test] fn test_operator_sub_as_partial_not_allowed() { run_str("(-3) . print", "-3\n"); }
+    #[test] fn test_bare_set_statement() { run_str("{ 1 } . print", "{1}\n"); }
+    #[test] fn test_bare_dict_statement() { run_str("{ 1: 2 } . print", "{1: 2}\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }

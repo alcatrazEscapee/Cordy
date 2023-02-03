@@ -96,7 +96,6 @@ For a more comprehensive documentation, see the [language documentation](./docs/
 - `assert` statement?
 - Even MORE standard library functions
   - regex match, find, and replace -> just on normal strings. Make `\` less required for escaping (only escape if needed)
-- Make dict/set literals take priority over bare block statements (prevent bare block statements entirely?)
 - Investigate making a separate `Queue` type and making `List` a `Vec`? Benchmarks...
 - Fix `dict.default` to, if given a function, invoke and insert on getting a default value. goal is making `d[x].push(y)` work, while `d[x]` does not insert in general (i.e. if default is `0`).
 - Allow patterns in bare expressions, i.e. `x, y = (1, 2)`
