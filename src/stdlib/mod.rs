@@ -38,6 +38,7 @@ pub enum NativeFunction {
     Heap,
     Vector,
     Function,
+    Iterable,
     Repr,
     Eval,
 
@@ -198,7 +199,8 @@ fn load_native_functions() -> Vec<NativeFunctionInfo> {
     declare!(Dict, "dict", "...");
     declare!(Heap, "heap", "...");
     declare!(Vector, "vector", "...");
-    declare!(Function, "function", "", None, true);
+    declare!(Function, "function", "", None, false);
+    declare!(Iterable, "iterable", "", None, false);
     declare!(Repr, "repr", "x", 1);
     declare!(Eval, "eval", "expr", 1);
 
