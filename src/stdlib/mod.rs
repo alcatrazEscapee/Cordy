@@ -532,7 +532,7 @@ pub fn invoke<VM>(native: NativeFunction, nargs: u8, vm: &mut VM) -> ValueResult
         Eval => dispatch!(a1, vm.invoke_eval(a1.as_str()?)),
 
         // operator
-        OperatorUnarySub => dispatch!(a1, operator::unary_sub(a1)),
+        OperatorUnarySub => dispatch!(a1, operator::unary_sub(a1), a2, operator::binary_sub(a1, a2)),
         OperatorUnaryLogicalNot => dispatch!(a1, operator::unary_logical_not(a1)),
         OperatorUnaryBitwiseNot => dispatch!(a1, operator::unary_bitwise_not(a1)),
         OperatorMul => dispatch!(a1, a2, operator::binary_mul(a1, a2)),
