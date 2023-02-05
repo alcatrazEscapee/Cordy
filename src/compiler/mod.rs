@@ -158,11 +158,11 @@ impl CompileResult {
                 " ".repeat(width + 3)
             };
             let asm: String = match token {
-                Int(cid) => format!("Int({}) -> {}", cid, self.constants[*cid as usize]),
+                t @ (Int(cid) | CheckLengthEqualTo(cid) | CheckLengthGreaterThan(cid)) => format!("{:?} -> {}", t, self.constants[*cid as usize]),
                 Str(sid) => format!("Str({}) -> {:?}", sid, self.strings[*sid as usize]),
                 List(cid) => format!("List({}) -> {}", cid, self.constants[*cid as usize]),
                 Function(fid) => format!("Function({}) -> {:?}", fid, self.functions[*fid as usize]),
-                t @ (PushGlobal(_, _) | StoreGlobal(_, _) | PushLocal(_) | StoreLocal(_)) => {
+                t @ (PushGlobal(_) | StoreGlobal(_) | PushLocal(_) | StoreLocal(_)) => {
                     if let Some(local) = locals.next() {
                         format!("{:?} -> {}", t, local)
                     } else {

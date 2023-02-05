@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 use std::rc::Rc;
 
 use crate::compiler::CompileResult;
-use crate::compiler::parser::semantic::{LateBoundGlobal, Loop, LValue, LValueReference, VariableType};
+use crate::compiler::parser::semantic::{LateBoundGlobal, Reference, Loop, LValue, LValueReference};
 use crate::compiler::scanner::{ScanResult, ScanToken};
 use crate::misc::MaybeRc;
 use crate::stdlib::NativeFunction;
@@ -16,6 +16,7 @@ use NativeFunction::{*};
 use Opcode::{*};
 use ParserErrorType::{*};
 use ScanToken::{*};
+use crate::compiler::parser::core::ParserState;
 
 pub const RULE_INCREMENTAL: ParseRule = |mut parser| parser.parse_incremental();
 pub const RULE_EXPRESSION: ParseRule = |mut parser| parser.parse_expression();
@@ -87,9 +88,6 @@ fn parse_rule(tokens: Vec<ScanToken>, rule: fn(Parser) -> ()) -> CompileResult {
 }
 
 
-// ===== Parser Data Structures ===== //
-
-
 pub struct Parser<'a> {
     input: VecDeque<ScanToken>,
     output: &'a mut Vec<Opcode>,
@@ -111,11 +109,14 @@ pub struct Parser<'a> {
     /// If this flag is `true`, then we need to emit a `Pop` or risk mangling the stack.
     delay_pop_from_expression_statement: bool,
 
+    /// A restore state for when backtracking rejects it's attempt.
+    restore_state: Option<ParserState>,
+
     /// A stack of nested functions, each of which have their own table of locals.
     /// While this mirrors the call stack it may not be representative. The only thing we can assume is that when a function is declared, all locals in the enclosing function are accessible.
     locals: &'a mut Vec<Locals>,
 
-    late_bound_globals: Vec<LateBoundGlobal>, // Table of all late bound globals, as they occur.
+    late_bound_globals: Vec<Reference<LateBoundGlobal>>, // Table of all late bound globals, as they occur.
     synthetic_local_index: usize, // A counter for unique synthetic local variables (`$1`, `$2`, etc.)
     scope_depth: u32, // Current scope depth
     function_depth: u32,
@@ -124,10 +125,6 @@ pub struct Parser<'a> {
     constants: &'a mut Vec<i64>,
     functions: &'a mut Vec<MaybeRc<FunctionImpl>>,
 }
-
-
-// ===== Main Parser Implementation ===== //
-
 
 
 impl Parser<'_> {
@@ -146,6 +143,7 @@ impl Parser<'_> {
             error_recovery: false,
             prevent_expression_statement: false,
             delay_pop_from_expression_statement: false,
+            restore_state: None,
 
             locals,
             late_bound_globals: Vec::new(),
@@ -187,7 +185,7 @@ impl Parser<'_> {
             self.error(UnexpectedTokenAfterEoF(token));
         }
         for global in self.late_bound_globals.drain(..) {
-            if let Some(error) = global.error {
+            if let Some(error) = global.into().error {
                 self.errors.push(error);
             }
         }
@@ -274,9 +272,7 @@ impl Parser<'_> {
         let mut func_id: Option<u32> = None;
         if let Some(name) = maybe_name {
             if let Some(index) = self.declare_local(name.clone()) {
-                self.current_locals_mut().locals[index].initialize();  // Functions are always initialized, as they can be recursive
-                self.push_inc_global(index);
-
+                self.init_local(index);
                 let func_start: usize = self.next_opcode() as usize + 2; // Declare the function literal. + 2 to the head because of the leading Jump, Function()
                 let func: u32 = self.declare_function(func_start, name, &args);
                 func_id = Some(func);
@@ -394,10 +390,10 @@ impl Parser<'_> {
         }
 
         // Destructure locals, if necessary
-        for (arg, synthetic) in &args_with_synthetics {
+        for (arg, synthetic) in args_with_synthetics {
             if let Some(local) = synthetic {
-                self.push(PushLocal(*local as u32)); // Push the iterable to be destructured onto the stack
-                arg.emit_destructuring(self, false); // Emit destructuring
+                self.push(PushLocal(local as u32)); // Push the iterable to be destructured onto the stack
+                arg.emit_destructuring(self, false, false); // Emit destructuring
             }
         }
 
@@ -655,7 +651,7 @@ impl Parser<'_> {
         let jump_if_false_pop = self.reserve();
 
         // Initialize locals
-        lvalue.emit_destructuring(self, false);
+        lvalue.emit_destructuring(self, false, false);
 
         // Parse the body of the loop, and emit the delayed pop - the stack is restored to the same state as the top of the loop.
         // So, we jump to the top of the loop, where we test/increment
@@ -723,7 +719,7 @@ impl Parser<'_> {
                             lvalue.emit_default_values(self, true); // Then emit `Nil`
                             self.parse_expression(); // So the expression ends up on top of the stack
                             lvalue.initialize_locals(self); // Initialize them, before we emit store opcodes, but after the expression is parsed.
-                            lvalue.emit_destructuring(self, true); // Emit destructuring to assign to all locals
+                            lvalue.emit_destructuring(self, true, false); // Emit destructuring to assign to all locals
                         },
                         _ => {
                             // `let` <lvalue>
@@ -860,19 +856,9 @@ impl Parser<'_> {
                 self.push(Opcode::Int(cid));
             },
             Some(Identifier(_)) => {
-                let string: String = self.take_identifier();
-                match self.resolve_identifier(&string) {
-                    VariableType::NativeFunction(b) => self.push(NativeFunction(b)),
-                    VariableType::Local(local) => self.push(PushLocal(local)),
-                    VariableType::Global(local) => self.push(PushGlobal(local, true)),
-                    VariableType::TrueGlobal(local) => self.push(PushGlobal(local, false)),
-                    VariableType::LateBoundGlobal(global) => {
-                        self.late_bound_globals.push(global);
-                        self.push(Noop) // Push `Noop` for now, fix it later
-                    },
-                    VariableType::UpValue(index) => self.push(PushUpValue(index)),
-                    _ => self.semantic_error(UndeclaredIdentifier(string))
-                };
+                let name: String = self.take_identifier();
+                let lvalue: LValueReference = self.resolve_identifier(name);
+                self.push_load_lvalue(lvalue);
             },
             Some(StringLiteral(_)) => {
                 let string: String = self.take_str();
@@ -1506,7 +1492,7 @@ impl Parser<'_> {
 
     fn parse_expr_10(self: &mut Self) {
         trace::trace_parser!("rule <expr-10>");
-        self.parse_expr_9();
+        self.parse_expr_10_pattern_lvalue();
         loop {
             let maybe_op: Option<Opcode> = match self.peek() {
                 Some(Equals) => Some(OpEqual), // Fake operator
@@ -1570,10 +1556,10 @@ impl Parser<'_> {
                         self.parse_expr_10();
                         self.push(StoreUpValue(id));
                     },
-                    Some(PushGlobal(id, local)) => {
+                    Some(PushGlobal(id)) => {
                         self.pop();
                         self.parse_expr_10();
-                        self.push(StoreGlobal(id, local));
+                        self.push(StoreGlobal(id));
                     },
                     Some(OpIndex) => {
                         self.pop();
@@ -1609,7 +1595,7 @@ impl Parser<'_> {
                         }
                         self.push(StoreUpValue(id));
                     },
-                    Some(PushGlobal(id, is_local)) => {
+                    Some(PushGlobal(id)) => {
                         self.parse_expr_10();
                         match op {
                             Swap => {
@@ -1618,7 +1604,7 @@ impl Parser<'_> {
                             }
                             op => self.push(op)
                         }
-                        self.push(StoreGlobal(id, is_local));
+                        self.push(StoreGlobal(id));
                     },
                     Some(OpIndex) => {
                         self.pop();
@@ -1641,6 +1627,31 @@ impl Parser<'_> {
                 break
             }
         }
+    }
+
+    fn parse_expr_10_pattern_lvalue(self: &mut Self) {
+        // A subset of `<lvalue> = <rvalue>` get parsed as patterns. These are for non-trivial <lvalue>s, which cannot involve array or property access, and cannot involve operator-assignment statements.
+        // We use backtracking as for these cases, we want to parse the `lvalue` separately.
+
+        trace::trace_parser!("rule <expr-10-pattern-lvalue>");
+        if self.begin() {
+            if let Some(mut lvalue) = self.parse_bare_lvalue() {
+                if !lvalue.is_named() {
+                    if let Some(Equals) = self.peek() {
+                        // At this point, we know enough that this is the only possible parse
+                        // We have a nontrivial `<lvalue>`, followed by an assignment statement, so this must be a pattern assignment.
+                        self.advance(); // Accept `=`
+                        self.accept(); // First and foremost, accept the query.
+                        lvalue.resolve_locals(self); // Resolve each local, raising an error if need be.
+                        self.parse_expr_10(); // Recursively parse, since this is left associative, call <expr-10>
+                        lvalue.emit_destructuring(self, false, true); // Emit the destructuring code, which cleans up everything
+                        return; // And exit this rule
+                    }
+                }
+            }
+        }
+        self.reject();
+        self.parse_expr_9();
     }
 }
 
@@ -1750,6 +1761,8 @@ mod tests {
     #[test] fn test_loop_3() { run("loop_3"); }
     #[test] fn test_loop_4() { run("loop_4"); }
     #[test] fn test_multiple_undeclared_variables() { run("multiple_undeclared_variables"); }
+    #[test] fn test_pattern_expression() { run("pattern_expression"); }
+    #[test] fn test_pattern_expression_nested() { run("pattern_expression_nested"); }
     #[test] fn test_weird_expression_statements() { run("weird_expression_statements"); }
     #[test] fn test_weird_closure_not_a_closure() { run("weird_closure_not_a_closure"); }
     #[test] fn test_weird_locals() { run("weird_locals"); }
