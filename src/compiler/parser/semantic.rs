@@ -3,6 +3,8 @@
 ///
 /// The functions declared in this module are public to be used by `parser/mod.rs`, but the module `semantic` is not exported itself.
 
+use std::fmt::Debug;
+
 use itertools::Itertools;
 
 use crate::compiler::parser::{Parser, ParserError, ParserErrorType};
@@ -92,39 +94,15 @@ pub struct Local {
 }
 
 impl Local {
-    pub fn new(name: String, index: usize, scope_depth: u32, function_depth: u32) -> Local {
+    fn new(name: String, index: usize, scope_depth: u32, function_depth: u32) -> Local {
         Local { name, index: index as u32, scope_depth, function_depth, initialized: false, captured: false }
     }
 
-    /// Sets this local as `initialized`, meaning it is pushed onto the stack and can be referred to in expressions.
-    pub fn initialize(self: &mut Self) { self.initialized = true; }
-
-    pub fn is_global(self: &Self) -> bool { self.function_depth == 0 }
-    pub fn is_true_global(self: &Self) -> bool { self.function_depth == 0 && self.scope_depth == 0 }
-
-    /// Resolves the `local` as a `VariableType`, based on the function and scope depth of the local.
-    pub fn resolve_type(self: &Self) -> VariableType {
-        if self.is_true_global() {
-            VariableType::TrueGlobal(self.index)
-        } else if self.is_global() {
-            VariableType::Global(self.index)
-        } else {
-            VariableType::Local(self.index)
-        }
+    fn is_global(self: &Self) -> bool {
+        self.function_depth == 0 && self.scope_depth == 0
     }
 }
 
-
-#[derive(Eq, PartialEq, Debug, Clone)]
-pub enum VariableType {
-    NativeFunction(stdlib::NativeFunction),
-    Local(u32),
-    Global(u32),
-    TrueGlobal(u32),
-    LateBoundGlobal(LateBoundGlobal),
-    UpValue(u32),
-    None,
-}
 
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub struct LateBoundGlobal {
@@ -172,7 +150,13 @@ pub enum LValue {
 pub enum LValueReference {
     Named(String),
     Local(u32),
+    Global(u32),
+    LateBoundGlobal(LateBoundGlobal),
+    UpValue(u32),
     Invalid,
+
+    /// `NativeFunction()` is not an `LValue`, however it is included as it is a possible resolution for a declared variable.
+    NativeFunction(stdlib::NativeFunction),
 }
 
 
@@ -182,7 +166,10 @@ impl LValue {
     /// Returns `true` if the `LValue` is a top-level variadic, such as `* <name>` or `*_`
     pub fn is_variadic_term(self: &Self) -> bool { match self { LValue::VarEmpty | LValue::VarNamed(_) => true, _ => false } }
 
-    fn as_terms(self: &Self) -> &Vec<LValue> { match self { LValue::Terms(it) => it, _ => panic!("Expected LValue::Terms") } }
+    /// Returns `true` if the `LValue` is a top-level `LValue::Named`, i.e. `<name>`.
+    pub fn is_named(self: &Self) -> bool { match self { LValue::Named(_) => true, _ => false } }
+
+    fn as_terms(self: Self) -> Vec<LValue> { match self { LValue::Terms(it) => it, _ => panic!("Expected LValue::Terms") } }
 
     /// Converts this `LValue` into a code-representation string.
     pub fn to_code_str(self: &Self) -> String {
@@ -196,12 +183,29 @@ impl LValue {
         }
     }
 
+    /// Resolves each identifier as a local variable that is currently declared.
+    /// This will raise semantic errors for undeclared variables.
+    pub fn resolve_locals(self: &mut Self, parser: &mut Parser) {
+        match self {
+            LValue::Named(it) | LValue::VarNamed(it) => {
+                let name: String = it.as_named();
+                *it = parser.resolve_identifier(name);
+            },
+            LValue::Terms(lvalue) => {
+                for term in lvalue {
+                    term.resolve_locals(parser);
+                }
+            },
+            _ => {},
+        };
+    }
+
     /// Declares all variables associated with this `LValue` as locals in the current scope.
     /// Will panic if the `LValue` has terms which are not `LValueReference::Named`.
     pub fn declare_locals(self: &mut Self, parser: &mut Parser) {
         match self {
             LValue::Named(it) | LValue::VarNamed(it) => {
-                let name = std::mem::take(it).as_named();
+                let name: String = it.as_named();
                 if let Some(local) = parser.declare_local(name) {
                     *it = LValueReference::Local(local as u32);
                 }
@@ -245,10 +249,8 @@ impl LValue {
     /// Also emits `IncGlobalCount` opcodes for globally declared variables.
     pub fn initialize_locals(self: &mut Self, parser: &mut Parser) {
         match self {
-            LValue::Named(LValueReference::Local(local)) | LValue::VarNamed(LValueReference::Local(local)) => {
-                parser.current_locals_mut().locals[*local as usize].initialize();
-                parser.push_inc_global(*local as usize);
-            },
+            LValue::Named(LValueReference::Local(local)) |
+            LValue::VarNamed(LValueReference::Local(local)) => parser.init_local(*local as usize),
             LValue::Terms(lvalue) => {
                 for term in lvalue {
                     term.initialize_locals(parser);
@@ -280,22 +282,30 @@ impl LValue {
     /// Emits destructuring code for this `LValue`. Assumes the `RValue` is present on top of the stack, and all variables
     ///
     /// If `in_place` is `true`, this will use an optimized destructuring for specific `LValue`s:
+    ///   - `<name>` `LValue`s will assume their value is constructed in place, and not emit any destructuring code.
     ///
-    /// - `_` `LValue`s will emit a single `Pop`, rather than destructuring.
-    /// - `<name>` `LValue`s will assume their value is constructed in place, and not emit any destructuring code.
-    pub fn emit_destructuring(self: &Self, parser: &mut Parser, in_place: bool) {
+    /// If `in_expr` is `true`, this will assume the top level destructuring is part of an expression, and the last `Pop` token won't be emitted.
+    /// This leaves the stack untouched after destructuring, with the iterable still on top.
+    pub fn emit_destructuring(self: Self, parser: &mut Parser, in_place: bool, in_expression: bool) {
         match self {
-            LValue::Empty | LValue::VarEmpty => parser.push(Pop),
-            LValue::Named(LValueReference::Local(index)) | LValue::VarNamed(LValueReference::Local(index)) if !in_place => {
-                parser.push_store_local(*index as usize);
-                parser.push(Pop);
+            LValue::Empty | LValue::VarEmpty => {
+                if !in_expression {
+                    parser.push(Pop)
+                }
+            },
+            LValue::Named(local) | LValue::VarNamed(local) => {
+                if !in_place {
+                    parser.push_store_lvalue(local);
+                    if !in_expression {
+                        parser.push(Pop);
+                    }
+                }
             }
-            LValue::Terms(_) => self.emit_terms_destructuring(parser),
-            _ => {},
+            LValue::Terms(_) => self.emit_terms_destructuring(parser, in_expression),
         }
     }
 
-    fn emit_terms_destructuring(self: &Self, parser: &mut Parser) {
+    fn emit_terms_destructuring(self: Self, parser: &mut Parser, in_expression: bool) {
         let terms = self.as_terms();
 
         let is_variadic = terms.iter().any(|t| t.is_variadic_term());
@@ -315,17 +325,17 @@ impl LValue {
                     // Advance the index by the missing elements (start indexing in reverse)
                     index = -(len - index);
                 },
-                LValue::Named(LValueReference::Local(local)) => {
+                LValue::Named(lvalue) => {
                     let constant_index = parser.declare_constant(index);
 
                     parser.push(Int(constant_index));
                     parser.push(OpIndexPeek); // [ it[index], index, it, ...]
-                    parser.push_store_local(*local as usize); // stores it[index]
+                    parser.push_store_lvalue(lvalue); // stores it[index]
                     parser.push(PopN(2)); // [it, ...]
 
                     index += 1;
                 },
-                LValue::VarNamed(LValueReference::Local(local)) => {
+                LValue::VarNamed(lvalue) => {
                     // index = the next index in the iterable to take = the number of elements already accessed
                     // therefor, len - index = the number of elements left we need to access exactly, which must be indices -1, -2, ... -(len - index)
                     // so our slice excludes these, so the 'high' value must be -(len - index)
@@ -338,25 +348,25 @@ impl LValue {
                     parser.push(Int(constant_low)); // [low, it, it, ...]
                     parser.push(if index == 0 { Nil } else { Int(constant_high) }); // [high, low, it, it, ...]
                     parser.push(OpSlice); // [it[low:high], it, ...]
-                    parser.push_store_local(*local as usize); // stores it[low:high]
+                    parser.push_store_lvalue(lvalue); // stores it[low:high]
                     parser.push(Pop); // [it, ...]
-                },
+                }
                 terms @ LValue::Terms(_) => {
                     // Index as if this was a `Term`, but then invoke the emit recursively, with the value still on the stack, treating it as the iterable.
                     let constant_index = parser.declare_constant(index);
 
                     parser.push(Int(constant_index));
                     parser.push(OpIndexPeek); // [ it[index], index, it, ...]
-                    terms.emit_destructuring(parser, false); // [ index, it, ...]
+                    terms.emit_destructuring(parser, false, false); // [ index, it, ...]
                     parser.push(Pop); // [it, ...]
 
                     index += 1;
                 },
-                _ => {},
             }
         }
-
-        parser.push(Pop); // Pop the iterable
+        if !in_expression {
+            parser.push(Pop); // Pop the iterable
+        }
     }
 }
 
@@ -365,8 +375,12 @@ impl Default for LValue {
 }
 
 impl LValueReference {
-    fn as_named(self) -> String {
-        match self { LValueReference::Named(it) => it, _ => panic!("Expected LValueReference::Named") }
+
+    fn as_named(&mut self) -> String {
+        match std::mem::take(self) {
+            LValueReference::Named(it) => it,
+            _ => panic!("Expected LValueReference::Named"),
+        }
     }
 }
 
@@ -374,6 +388,19 @@ impl Default for LValueReference {
     fn default() -> Self {
         LValueReference::Invalid
     }
+}
+
+
+#[derive(Eq, PartialEq, Debug, Clone)]
+pub enum Reference<T> where T : Eq + PartialEq + Debug + Clone {
+    Load(T), Store(T)
+}
+
+impl<T : Eq + PartialEq + Debug + Clone> Reference<T> {
+    pub fn into_ref(&self) -> &T { match self { Reference::Load(it) | Reference::Store(it) => it } }
+    pub fn into(self) -> T { match self { Reference::Load(it) | Reference::Store(it) => it } }
+
+    pub fn is_load(&self) -> bool { match self { Reference::Load(_) => true, _ => false } }
 }
 
 
@@ -427,17 +454,21 @@ impl<'a> Parser<'a> {
         let index = self.declare_local_internal(name);
         let local = &self.locals.last().unwrap().locals[index];
 
-        if local.is_true_global() {
+        if local.is_global() {
 
             // Fix references to this global
             for global in &self.late_bound_globals {
-                if global.name == local.name {
-                    self.output[global.opcode] = PushGlobal(local.index, false);
+                if global.into_ref().name == local.name {
+                    self.output[global.into_ref().opcode] = if global.is_load() {
+                        PushGlobal(local.index)
+                    } else {
+                        StoreGlobal(local.index)
+                    };
                 }
             }
 
             // And remove them
-            self.late_bound_globals.retain(|global| global.name != local.name);
+            self.late_bound_globals.retain(|global| global.into_ref().name != local.name);
 
             // Declare this global variable's name
             self.globals_reference.push(local.name.clone());
@@ -540,16 +571,22 @@ impl<'a> Parser<'a> {
     /// 4. Late Bound Globals:
     ///     - If we are in a >0 function depth, we *do* allow late binding globals.
     ///     - Note: we have to use a special opcode which checks if the global actually exists first. *And*, we need to fix it later if the global does not end up being bound by the end of compilation.
-    pub fn resolve_identifier(self: &mut Self, name: &String) -> VariableType {
-        if let Some(b) = stdlib::find_native_function(name) {
-            return VariableType::NativeFunction(b);
+    ///
+    /// **Note:** If this returns `LValueReference::Invalid`, a semantic error will have already been raised.
+    pub fn resolve_identifier(self: &mut Self, name: String) -> LValueReference {
+        if let Some(b) = stdlib::find_native_function(&name) {
+            return LValueReference::NativeFunction(b);
         }
 
-        // 1. Search for locals in the current function. This may return `Local`, `Global`, or `TrueGlobal` based on the scope of the variable.
+        // 1. Search for locals in the current function. This may return `Local`, or `Global` based on the scope of the variable.
         //   - Locals that are captured as upvalues, but are now being referenced as locals again, emit upvalue references, as the stack stops getting updated after a value is lifted into an upvalue.
         for local in self.current_locals().locals.iter().rev() {
-            if &local.name == name && local.initialized {
-                return local.resolve_type()
+            if local.name == name && local.initialized {
+                return if local.is_global() {
+                    LValueReference::Global(local.index)
+                } else {
+                    LValueReference::Local(local.index)
+                }
             }
         }
 
@@ -559,7 +596,7 @@ impl<'a> Parser<'a> {
         if self.function_depth > 0 {
             for depth in (0..self.function_depth).rev() { // Iterate through the range of [function_depth - 1, ... 0]
                 for local in self.locals[depth as usize].locals.iter().rev() { // In reverse, as we go inner -> outer scopes
-                    if &local.name == name && local.initialized && !local.is_true_global() { // Note that it must **not** be a true global, anything else can be captured as an upvalue
+                    if local.name == name && local.initialized && !local.is_global() { // Note that it must **not** be a true global, anything else can be captured as an upvalue
                         let index = local.index;
                         self.locals[depth as usize].locals[index as usize].captured = true;
                         return self.resolve_upvalue(depth, index);
@@ -572,9 +609,9 @@ impl<'a> Parser<'a> {
         // If we are in function depth == 0, any true globals will be caught and resolved as locals by (1.) (but the opcodes for global load/store will still be emitted)
         if self.function_depth > 0 {
             for local in self.locals[0].locals.iter().rev() {
-                if &local.name == name && local.initialized {
-                    if local.is_true_global() {
-                        return VariableType::TrueGlobal(local.index)
+                if local.name == name && local.initialized {
+                    if local.is_global() {
+                        return LValueReference::Global(local.index)
                     }
                 }
             }
@@ -585,18 +622,19 @@ impl<'a> Parser<'a> {
         if self.function_depth > 0 {
             // Assume a late bound global
             let error = self.deferred_error(UndeclaredIdentifier(name.clone()));
-            let global = LateBoundGlobal::new(name.clone(), self.next_opcode() as usize, error);
-            return VariableType::LateBoundGlobal(global);
+            let global = LateBoundGlobal::new(name, self.next_opcode() as usize, error);
+            return LValueReference::LateBoundGlobal(global);
         }
 
         // In global scope if we still could not resolve a variable, we return `None`
-        VariableType::None
+        self.semantic_error(UndeclaredIdentifier(name));
+        LValueReference::Invalid
     }
 
     /// Resolves an `UpValue` reference.
     /// For a given reference to a local, defined at a function depth `local_depth` at index `local_index`, this will
     /// bubble up the upvalue through each of the enclosing functions between here and `self.function_depth`, and ensure the variable is added as an `UpValue`.
-    pub fn resolve_upvalue(self: &mut Self, local_depth: u32, local_index: u32) -> VariableType {
+    fn resolve_upvalue(self: &mut Self, local_depth: u32, local_index: u32) -> LValueReference {
 
         // Capture the local at index `local_index` in the function at `local_depth`
         // If it already exists (is `is_local` and has the same `index` as the target), just grab the upvalue index, otherwise add it and bubble up
@@ -639,6 +677,16 @@ impl<'a> Parser<'a> {
 
         // Finally, the last value of `index` will be one set from the directly enclosing function
         // We can thus return a `UpValue` reference, which contains the index of the upvalue in the enclosing function
-        return VariableType::UpValue(index)
+        return LValueReference::UpValue(index)
+    }
+
+    /// Initializes a local, so it can be referenced.
+    /// Marks the corresponding `Local` as initialized, and also (if necessary), pushes a `IncGlobalCount` opcode.
+    pub fn init_local(self: &mut Self, index: usize) {
+        let local = &mut self.current_locals_mut().locals[index];
+        local.initialized = true;
+        if local.is_global() {
+            self.push(IncGlobalCount);
+        }
     }
 }

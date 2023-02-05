@@ -7,9 +7,9 @@ L1: 0000 Nil
     0006 InitIterable
     0007 TestIterable
     0008 JumpIfFalsePop(17)
-    0009 StoreGlobal(0, true) -> i
+    0009 StoreLocal(0) -> i
     0010 Pop
-L2: 0011 PushGlobal(0, true) -> i
+L2: 0011 PushLocal(0) -> i
     0012 NativeFunction(Print)
     0013 Swap
     0014 OpFuncEval(1)

@@ -1,13 +1,13 @@
 L1: 0000 Int(0) -> 0
     0001 IncGlobalCount
-L2: 0002 PushGlobal(0, false) -> x
+L2: 0002 PushGlobal(0) -> x
     0003 Int(2) -> 10
     0004 OpGreaterThan
     0005 JumpIfFalsePop(12)
-L3: 0006 PushGlobal(0, false) -> x
+L3: 0006 PushGlobal(0) -> x
     0007 Int(1) -> 1
     0008 OpAdd
-    0009 StoreGlobal(0, false) -> x
+    0009 StoreGlobal(0) -> x
 L4: 0010 Pop
     0011 Jump(2)
     0012 Pop

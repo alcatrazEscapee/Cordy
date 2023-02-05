@@ -5,6 +5,7 @@
 use crate::compiler::parser::{Parser, ParserError};
 use crate::compiler::parser::ParserErrorType;
 use crate::compiler::scanner::ScanToken;
+use crate::compiler::parser::semantic::{LValueReference, Reference};
 use crate::trace;
 use crate::vm::Opcode;
 
@@ -12,8 +13,67 @@ use ParserErrorType::{*};
 use ScanToken::{*};
 use Opcode::{*};
 
+/// A state to restore to while backtracking.
+/// Only stores enough state to be necessary, as we don't need to backtrack through output tokens.
+pub struct ParserState {
+    input: Vec<ScanToken>,
+
+    output_len: usize, // Validity check
+    error_len: usize,
+
+    lineno: u32,
+    prevent_expression_statement: bool,
+}
+
+impl ParserState {
+    fn store(parser: &Parser) -> ParserState {
+        ParserState {
+            input: Vec::new(),
+            output_len: parser.output.len(),
+            error_len: parser.errors.len(),
+            lineno: parser.lineno,
+            prevent_expression_statement: parser.prevent_expression_statement,
+        }
+    }
+
+    fn restore(self: Self, parser: &mut Parser) {
+        assert_eq!(self.output_len, parser.output.len(), "Output modified while backtracking!");
+        trace::trace_parser!("restoring input {:?} -> [{:?}, ...]", self.input, parser.input.front());
+
+        for token in self.input.into_iter().rev() {
+            parser.input.push_front(token);
+        }
+
+        parser.errors.truncate(self.error_len);
+        parser.error_recovery = false;
+        parser.lineno = self.lineno;
+        parser.prevent_expression_statement = self.prevent_expression_statement;
+    }
+}
+
 
 impl<'a> Parser<'a> {
+
+    pub fn begin(self: &mut Self) -> bool {
+        trace::trace_parser!("begin backtracking");
+        assert!(self.restore_state.is_none(), "Recursive backtracking attempt");
+
+        self.restore_state = Some(ParserState::store(self));
+        !self.error_recovery
+    }
+
+    pub fn accept(self: &mut Self) {
+        trace::trace_parser!("accept backtracking");
+        self.restore_state = None;
+    }
+
+    pub fn reject(self: &mut Self) {
+        trace::trace_parser!("reject backtracking");
+        match (&mut self.restore_state).take() {
+            Some(state) => state.restore(self),
+            _ => panic!("reject() without begin()"),
+        }
+    }
 
     /// If the given token is present, accept it. Otherwise, flag an error and enter error recovery mode.
     pub fn expect(self: &mut Self, token: ScanToken) {
@@ -155,12 +215,21 @@ impl<'a> Parser<'a> {
         }
         while let Some(NewLine) = self.input.front() {
             trace::trace_parser!("newline {} at opcode {}, last = {:?}", self.lineno + 1, self.next_opcode(), self.line_numbers.last());
-            self.input.pop_front();
+            let token = self.input.pop_front().unwrap();
+            if let Some(state) = &mut self.restore_state {
+                state.input.push(token);
+            }
             self.lineno += 1;
             self.prevent_expression_statement = false;
         }
         trace::trace_parser!("advance {:?}", self.input.front());
-        self.input.pop_front()
+        let ret = self.input.pop_front();
+        if let Some(token) = &ret {
+            if let Some(state) = &mut self.restore_state {
+                state.input.push(token.clone());
+            }
+        }
+        ret
     }
 
     /// Reserves a space in the output code by inserting a `Noop` token
@@ -191,25 +260,32 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Specialization of `push` which pushes either `StoreLocal` or `StoreGlobal` for a given local
-    pub fn push_store_local(self: &mut Self, index: usize) {
-        trace::trace_parser!("push StoreLocal/StoreGlobal {}", index);
-
-        let local = &self.current_locals_mut().locals[index];
-        if local.is_true_global() {
-            self.push(StoreGlobal(index as u32, false))
-        } else if local.is_global() {
-            self.push(StoreGlobal(index as u32, true))
-        } else {
-            self.push(StoreLocal(index as u32))
+    pub fn push_load_lvalue(self: &mut Self, lvalue: LValueReference) {
+        match lvalue {
+            LValueReference::Local(index) => self.push(PushLocal(index)),
+            LValueReference::Global(index) => self.push(PushGlobal(index)),
+            LValueReference::LateBoundGlobal(global) => {
+                self.late_bound_globals.push(Reference::Load(global));
+                self.push(Noop); // Will be fixed when the global is declared, or caught at EoF as an error
+            }
+            LValueReference::UpValue(index) => self.push(PushUpValue(index)),
+            LValueReference::Invalid => {},
+            LValueReference::NativeFunction(native) => self.push(NativeFunction(native)),
+            _ => panic!("Invalid load: {:?}", lvalue),
         }
     }
 
-    /// Specialization of `push` which pushes a `IncGlobalCount` if we need to, for the given local
-    /// Called immediately after a local `initialized` is set to `true
-    pub fn push_inc_global(self: &mut Self, local: usize) {
-        if self.current_locals_mut().locals[local].is_true_global() {
-            self.push(IncGlobalCount);
+    pub fn push_store_lvalue(self: &mut Self, lvalue: LValueReference) {
+        match lvalue {
+            LValueReference::Local(index) => self.push(StoreLocal(index)),
+            LValueReference::Global(index) => self.push(StoreGlobal(index)),
+            LValueReference::LateBoundGlobal(global) => {
+                self.late_bound_globals.push(Reference::Store(global));
+                self.push(Noop); // Will be fixed when the global is declared, or caught at EoF as an error
+            },
+            LValueReference::UpValue(index) => self.push(StoreUpValue(index)),
+            LValueReference::Invalid => {},
+            _ => panic!("Invalid store: {:?}", lvalue),
         }
     }
 
@@ -218,7 +294,7 @@ impl<'a> Parser<'a> {
     pub fn push(self: &mut Self, token: Opcode) {
         trace::trace_parser!("push {:?} at L{:?}", token, self.lineno + 1);
         match &token {
-            PushGlobal(id, _) | StoreGlobal(id, _) => self.locals_reference.push(self.locals[0].locals[*id as usize].name.clone()),
+            PushGlobal(id) | StoreGlobal(id) => self.locals_reference.push(self.locals[0].locals[*id as usize].name.clone()),
             PushLocal(id) | StoreLocal(id) => self.locals_reference.push(self.locals[self.function_depth as usize].locals[*id as usize].name.clone()),
             _ => {},
         }
@@ -229,7 +305,7 @@ impl<'a> Parser<'a> {
     /// Pops the last emitted token
     pub fn pop(self: &mut Self) {
         match self.output.pop().unwrap() {
-            PushGlobal(_, _) | StoreGlobal(_, _) | PushLocal(_) | StoreLocal(_) => {
+            PushGlobal(_) | StoreGlobal(_) | PushLocal(_) | StoreLocal(_) => {
                 self.locals_reference.pop();
             },
             _ => {},

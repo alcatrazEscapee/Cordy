@@ -2,28 +2,28 @@ L1: 0000 IncGlobalCount
     0001 Nil
 L2: 0002 Int(1) -> 1
     0003 OpAdd
-    0004 StoreGlobal(0, false) -> x
+    0004 StoreGlobal(0) -> x
     0005 Pop
 L3: 0006 UnarySub
-    0007 StoreGlobal(0, false) -> x
+    0007 StoreGlobal(0) -> x
     0008 Pop
     0009 NativeFunction(Print)
 L4: 0010 Swap
     0011 OpFuncEval(1)
-    0012 StoreGlobal(0, false) -> x
+    0012 StoreGlobal(0) -> x
     0013 Pop
     0014 NativeFunction(Print)
-    0015 StoreGlobal(0, false) -> x
+    0015 StoreGlobal(0) -> x
 L5: 0016 Pop
     0017 NativeFunction(Print)
     0018 Int(2) -> 4
     0019 OpFuncEval(2)
-L6: 0020 StoreGlobal(0, false) -> x
+L6: 0020 StoreGlobal(0) -> x
     0021 Pop
     0022 NativeFunction(Print)
     0023 Int(3) -> 5
     0024 OpFuncEval(1)
-    0025 StoreGlobal(0, false) -> x
+    0025 StoreGlobal(0) -> x
 L7: 0026 Pop
     0027 Pop
     0028 Exit

@@ -22,7 +22,7 @@ L09: 0020 PushLocal(1) -> bar
      0021 OpFuncEval(0)
 L10: 0022 LiftUpValue(0)
      0023 Return
-L11: 0024 PushGlobal(0, false) -> foo
+L11: 0024 PushGlobal(0) -> foo
      0025 OpFuncEval(0)
      0026 Pop
      0027 Pop

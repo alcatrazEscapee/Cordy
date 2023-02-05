@@ -18,7 +18,7 @@ L4: 0011 Function(2) -> FunctionImpl { head: 13, tail: 14, nargs: 0, name: "_", 
     0017 OpFuncEval(0)
 L5: 0018 LiftUpValue(1)
     0019 Return
-L6: 0020 PushGlobal(0, false) -> problem
+L6: 0020 PushGlobal(0) -> problem
     0021 Nil
     0022 OpFuncEval(1)
     0023 Pop

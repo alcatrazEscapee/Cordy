@@ -298,22 +298,22 @@ impl<R, W> VirtualMachine<R, W> where
                 trace::trace_interpreter!("store local {} : {} -> {}", local, self.stack.last().unwrap().as_debug_str(), self.stack[local].as_debug_str());
                 self.stack[local] = self.peek(0).clone();
             },
-            PushGlobal(local, is_local) => {
+            PushGlobal(local) => {
                 // Globals are fancy locals that don't use the frame pointer to offset their local variable ID
                 // 'global' just means a variable declared outside of an enclosing function
                 // As we allow late binding for globals, we need to check that this has been declared first, based on the globals count.
                 let local: usize = local as usize;
                 trace::trace_interpreter!("push global {} : {}", local, self.stack[local].as_debug_str());
-                if local < self.global_count || is_local {
+                if local < self.global_count {
                     self.push(self.stack[local].clone());
                 } else {
                     return ValueErrorVariableNotDeclaredYet(self.globals[local].clone()).err()
                 }
             },
-            StoreGlobal(local, is_local) => {
+            StoreGlobal(local) => {
                 let local: usize = local as usize;
                 trace::trace_interpreter!("store global {} : {} -> {}", local, self.stack.last().unwrap().as_debug_str(), self.stack[local].as_debug_str());
-                if local < self.global_count || is_local {
+                if local < self.global_count {
                     self.stack[local] = self.peek(0).clone();
                 } else {
                     return ValueErrorVariableNotDeclaredYet(self.globals[local].clone()).err()
@@ -1394,6 +1394,14 @@ mod test {
     #[test] fn test_operator_sub_as_partial_not_allowed() { run_str("(-3) . print", "-3\n"); }
     #[test] fn test_bare_set_statement() { run_str("{ 1 } . print", "{1}\n"); }
     #[test] fn test_bare_dict_statement() { run_str("{ 1: 2 } . print", "{1: 2}\n"); }
+    #[test] fn test_pattern_in_expression() { run_str("let x, y, z ; x, y, z = 'abc' ; print(x, y, z)", "a b c\n"); }
+    #[test] fn test_pattern_in_expression_nested() { run_str("let x, y, z ; z = x, y = (1, 2) ; print(x, y, z)", "1 2 (1, 2)\n"); }
+    #[test] fn test_pattern_in_expression_locals() { run_str("do { let x, y, z ; z = x, y = (1, 2) ; print(x, y, z) }", "1 2 (1, 2)\n"); }
+    #[test] fn test_pattern_in_expression_return_value() { run_str("let x, y, z ; print(x, y, z = 'abc') ; print(x, y, z)", "abc\na b c\n"); }
+    #[test] fn test_pattern_in_expression_with_variadic() { run_str("let x, y ; *x, y = 'hello' ; print(x, y)", "hell o\n"); }
+    #[test] fn test_pattern_in_expression_with_nested_and_empty() { run_str("let x, y ; (x, *_), (*_, y) = ('hello', 'world') ; print(x, y)", "h d\n"); }
+    #[test] fn test_pattern_in_expression_empty() { run_str("_ = nil ; _, _, _ = (1, 2, 3)", ""); }
+    #[test] fn test_pattern_in_expression_empty_variadic() { run_str("*_ = 'hello world'", ""); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }

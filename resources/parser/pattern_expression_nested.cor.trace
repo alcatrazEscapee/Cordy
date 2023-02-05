@@ -1,0 +1,22 @@
+L1: 0000 IncGlobalCount
+    0001 IncGlobalCount
+    0002 IncGlobalCount
+    0003 Nil
+    0004 Nil
+    0005 Nil
+L2: 0006 Int(1) -> 1
+    0007 Int(2) -> 2
+    0008 Vector(2)
+    0009 CheckLengthEqualTo(2) -> 2
+    0010 Int(0) -> 0
+    0011 OpIndexPeek
+    0012 StoreGlobal(1) -> y
+    0013 PopN(2)
+    0014 Int(1) -> 1
+    0015 OpIndexPeek
+    0016 StoreGlobal(2) -> z
+    0017 PopN(2)
+    0018 StoreGlobal(0) -> x
+    0019 Pop
+    0020 PopN(3)
+    0021 Exit

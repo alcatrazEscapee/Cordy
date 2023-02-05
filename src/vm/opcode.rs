@@ -25,8 +25,8 @@ pub enum Opcode {
     // In this regard it refers to variables outside of functions (top level, even within block scopes), and variables within functions
     PushLocal(u32),
     StoreLocal(u32),
-    PushGlobal(u32, bool), // bool = is_local = !is_true_global
-    StoreGlobal(u32, bool),
+    PushGlobal(u32),
+    StoreGlobal(u32),
 
     PushUpValue(u32), // index
     StoreUpValue(u32), // index
