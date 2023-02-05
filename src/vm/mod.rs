@@ -68,6 +68,7 @@ impl ExitType {
 pub trait VirtualInterface {
     // Invoking Functions
 
+    fn invoke_func0(self: &mut Self, f: Value) -> ValueResult;
     fn invoke_func1(self: &mut Self, f: Value, a1: Value) -> ValueResult;
     fn invoke_func2(self: &mut Self, f: Value, a1: Value, a2: Value) -> ValueResult;
     fn invoke_func(self: &mut Self, f: Value, args: &Vec<Value>) -> ValueResult;
@@ -567,14 +568,14 @@ impl<R, W> VirtualMachine<R, W> where
                 trace::trace_interpreter!("op []");
                 let a2: Value = self.pop();
                 let a1: Value = self.pop();
-                let ret = stdlib::get_index(&a1, &a2)?;
+                let ret = stdlib::get_index(self, a1, a2)?;
                 self.push(ret);
             },
             OpIndexPeek => {
                 trace::trace_interpreter!("op [] peek");
-                let a2: &Value = self.peek(0);
-                let a1: &Value = self.peek(1);
-                let ret = stdlib::get_index(a1, a2)?;
+                let a2: Value = self.peek(0).clone();
+                let a1: Value = self.peek(1).clone();
+                let ret = stdlib::get_index(self, a1, a2)?;
                 self.push(ret);
             },
             OpSlice => {
@@ -794,6 +795,11 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
     W : Write
 {
     // ===== Calling Functions External Interface ===== //
+
+    fn invoke_func0(self: &mut Self, f: Value) -> ValueResult {
+        self.push(f);
+        self.invoke_func_and_spin(0)
+    }
 
     fn invoke_func1(self: &mut Self, f: Value, a1: Value) -> ValueResult {
         self.push(f);
@@ -1402,6 +1408,11 @@ mod test {
     #[test] fn test_pattern_in_expression_with_nested_and_empty() { run_str("let x, y ; (x, *_), (*_, y) = ('hello', 'world') ; print(x, y)", "h d\n"); }
     #[test] fn test_pattern_in_expression_empty() { run_str("_ = nil ; _, _, _ = (1, 2, 3)", ""); }
     #[test] fn test_pattern_in_expression_empty_variadic() { run_str("*_ = 'hello world'", ""); }
+    #[test] fn test_dict_default_with_query() { run_str("let d = dict() . default(3) ; d[0] ; d.print", "{0: 3}\n"); }
+    #[test] fn test_dict_default_with_function() { run_str("let d = dict() . default(list) ; d[0].push(2) ; d[1].push(3) ; d.print", "{0: [2], 1: [3]}\n"); }
+    #[test] fn test_dict_default_with_mutable_default() { run_str("let d = dict() . default([]) ; d[0].push(2) ; d[1].push(3) ; d.print", "{0: [2, 3], 1: [2, 3]}\n"); }
+    #[test] fn test_dict_default_with_self_entry() { run_str("let d ; d = dict() . default(fn() { d['count'] += 1 ; d['hello'] = 'special' ; 'otherwise' }) ; d['count'] = 0 ; d['hello'] ; d['world'] ; d.print", "{'count': 2, 'hello': 'special', 'world': 'otherwise'}\n"); }
+    #[test] fn test_dict_increment() { run_str("let d = dict() . default(fn() -> 3) ; d[0] . print ; d[0] += 1 ; d . print ; d[0] += 1 ; d . print", "3\n{0: 4}\n{0: 5}\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }

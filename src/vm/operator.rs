@@ -189,10 +189,7 @@ pub fn binary_less_than(a1: Value, a2: Value) -> Value { Bool(a1 < a2) }
 pub fn binary_less_than_or_equal(a1: Value, a2: Value) -> Value { Bool(a1 <= a2) }
 pub fn binary_greater_than(a1: Value, a2: Value) -> Value { Bool(a1 > a2) }
 pub fn binary_greater_than_or_equal(a1: Value, a2: Value) -> Value { Bool(a1 >= a2) }
-
-pub fn binary_equals(a1: Value, a2: Value) -> Value {
-    Bool(a1 == a2)
-}
+pub fn binary_equals(a1: Value, a2: Value) -> Value { Bool(a1 == a2) }
 pub fn binary_not_equals(a1: Value, a2: Value) -> Value { Bool(a1 != a2) }
 
 

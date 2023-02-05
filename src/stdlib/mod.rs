@@ -629,22 +629,51 @@ pub fn invoke<VM>(native: NativeFunction, nargs: u8, vm: &mut VM) -> ValueResult
 }
 
 
-pub fn get_index(a1: &Value, a2: &Value) -> ValueResult {
+pub fn get_index<VM>(vm: &mut VM, dict: Value, key: Value) -> ValueResult where VM : VirtualInterface {
+    if dict.is_dict() {
+        return get_dict_index(vm, dict, key);
+    }
 
+    let indexable = dict.as_index()?;
+    let index: usize = collections::get_checked_index(indexable.len(), key.as_int()?)?;
+
+    Ok(indexable.get_index(index))
+}
+
+fn get_dict_index<VM>(vm: &mut VM, dict: Value, key: Value) -> ValueResult where VM : VirtualInterface {
     // Dict objects have their own overload of indexing to mean key-value lookups, that doesn't fit with ValueAsIndex (as it doesn't take integer keys, always)
-    if let Value::Dict(it) = a1 {
-        let it = it.unbox();
-        return if let Some(v) = it.dict.get(a2).or(it.default.as_ref()) {
-            Ok(v.clone())
-        } else {
-            ValueErrorKeyNotPresent(a2.clone()).err()
+    // The handling for this is a bit convoluted due to `clone()` issues, and possible cases of default / no default / functional default
+
+    // Initially unbox (non mutable) to clone out the default value.
+    // If the default is a function, we can't have a reference out of the dict while we're accessing the default.
+
+    let dict = match dict { Value::Dict(it) => it, _ => panic!() };
+    let default_factory: Value;
+    {
+        let mut dict = dict.unbox_mut(); // mutable as we might insert in the immutable default case
+        match dict.default.clone() {
+            Some(default) if default.is_function() => match dict.dict.get(&key) {
+                Some(existing_value) => return Ok(existing_value.clone()),
+                None => {
+                    // We need to insert, so fallthrough as we need to drop the borrow on `dict`
+                    default_factory = default;
+                },
+            },
+            Some(default_value) => {
+                return Ok(dict.dict.entry(key).or_insert(default_value).clone())
+            }
+            None => return match dict.dict.get(&key) {
+                Some(existing_value) => Ok(existing_value.clone()),
+                None => ValueErrorKeyNotPresent(key).err()
+            },
         }
     }
 
-    let indexable = a1.as_index()?;
-    let index: usize = collections::get_checked_index(indexable.len(), a2.as_int()?)?;
-
-    Ok(indexable.get_index(index))
+    // Invoke the new value supplier - this might modify the dict
+    // We go through the `.entry()` API again in this case
+    let new_value: Value = vm.invoke_func0(default_factory)?;
+    let mut dict = dict.unbox_mut();
+    Ok(dict.dict.entry(key).or_insert(new_value).clone())
 }
 
 pub fn get_slice(a1: Value, a2: Value, a3: Value, a4: Value) -> ValueResult {
