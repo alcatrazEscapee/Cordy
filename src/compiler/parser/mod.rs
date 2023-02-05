@@ -2,6 +2,7 @@ use std::collections::VecDeque;
 use std::rc::Rc;
 
 use crate::compiler::CompileResult;
+use crate::compiler::parser::core::ParserState;
 use crate::compiler::parser::semantic::{LateBoundGlobal, Reference, Loop, LValue, LValueReference};
 use crate::compiler::scanner::{ScanResult, ScanToken};
 use crate::misc::MaybeRc;
@@ -16,7 +17,6 @@ use NativeFunction::{*};
 use Opcode::{*};
 use ParserErrorType::{*};
 use ScanToken::{*};
-use crate::compiler::parser::core::ParserState;
 
 pub const RULE_INCREMENTAL: ParseRule = |mut parser| parser.parse_incremental();
 pub const RULE_EXPRESSION: ParseRule = |mut parser| parser.parse_expression();

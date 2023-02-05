@@ -118,10 +118,6 @@ impl AsError for RuntimeError {
             RuntimeError::TypeErrorArgMustBeDict(v) => format!("TypeError: Expected {} to be a dict", v.format_error()),
             RuntimeError::TypeErrorArgMustBeFunction(v) => format!("TypeError: Expected {} to be a function", v.format_error()),
             RuntimeError::TypeErrorArgMustBeCmpOrKeyFunction(v) => format!("TypeError: Expected {} to be a '<A, B> fn key(A) -> B' or '<A> cmp(A, A) -> int' function", v.format_error()),
-
-            RuntimeError::TypeErrorFunc1(e, v1) => format!("TypeError: incorrect arguments for {}, got {} instead", e, v1.format_error()),
-            RuntimeError::TypeErrorFunc2(e, v1, v2) => format!("TypeError: incorrect arguments for {}, got '{}, {} instead", e, v1.format_error(), v2.format_error()),
-            RuntimeError::TypeErrorFunc3(e, v1, v2, v3) => format!("TypeError: incorrect arguments for {}, got {}, {}, {} instead", e, v1.format_error(), v2.format_error(), v3.format_error()),
         }
     }
 }

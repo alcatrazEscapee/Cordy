@@ -95,5 +95,4 @@ For a more comprehensive documentation, see the [language documentation](./docs/
 - Even MORE standard library functions
   - regex match, find, and replace -> just on normal strings. Make `\` less required for escaping (only escape if needed)
 - Investigate making a separate `Queue` type and making `List` a `Vec`? Benchmarks...
-- Fix `dict.default` to, if given a function, invoke and insert on getting a default value. goal is making `d[x].push(y)` work, while `d[x]` does not insert in general (i.e. if default is `0`).
 - Benchmarks + bytecode optimizer

@@ -48,11 +48,6 @@ pub enum RuntimeError {
     TypeErrorArgMustBeDict(Value),
     TypeErrorArgMustBeFunction(Value),
     TypeErrorArgMustBeCmpOrKeyFunction(Value),
-
-    // Deprecated - find a better generic way to do this
-    TypeErrorFunc1(&'static str, Value),
-    TypeErrorFunc2(&'static str, Value, Value),
-    TypeErrorFunc3(&'static str, Value, Value, Value),
 }
 
 impl RuntimeError {
