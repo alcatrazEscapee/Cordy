@@ -44,8 +44,7 @@ pub enum NativeFunction {
 
     // Native Operators
     OperatorUnarySub,
-    OperatorUnaryLogicalNot,
-    OperatorUnaryBitwiseNot,
+    OperatorUnaryNot,
 
     OperatorMul,
     OperatorDiv,
@@ -206,8 +205,7 @@ fn load_native_functions() -> Vec<NativeFunctionInfo> {
 
     // operator
     declare!(OperatorUnarySub, "(-)", "x", Some(1), true);
-    declare!(OperatorUnaryLogicalNot, "(!)", "x", Some(1), true);
-    declare!(OperatorUnaryBitwiseNot, "(~)", "x", Some(1), true);
+    declare!(OperatorUnaryNot, "(!)", "x", Some(1), true);
 
     declare!(OperatorMul, "(*)", "lhs, rhs", Some(2), true);
     declare!(OperatorDiv, "(/)", "lhs, rhs", Some(2), true);
@@ -533,8 +531,7 @@ pub fn invoke<VM>(native: NativeFunction, nargs: u8, vm: &mut VM) -> ValueResult
 
         // operator
         OperatorUnarySub => dispatch!(a1, operator::unary_sub(a1), a2, operator::binary_sub(a1, a2)),
-        OperatorUnaryLogicalNot => dispatch!(a1, operator::unary_logical_not(a1)),
-        OperatorUnaryBitwiseNot => dispatch!(a1, operator::unary_bitwise_not(a1)),
+        OperatorUnaryNot => dispatch!(a1, operator::unary_not(a1)),
         OperatorMul => dispatch!(a1, a2, operator::binary_mul(a1, a2)),
         OperatorDiv => dispatch!(a1, a2, operator::binary_div(a1, a2)),
         OperatorDivSwap => dispatch!(a1, a2, operator::binary_div(a2, a1)),

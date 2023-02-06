@@ -100,8 +100,7 @@ pub enum Opcode {
 
     // Unary Operators
     UnarySub,
-    UnaryLogicalNot,
-    UnaryBitwiseNot,
+    UnaryNot,
 
     // Binary Operators
     // Ordered by precedence, highest to lowest

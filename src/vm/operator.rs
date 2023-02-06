@@ -20,26 +20,19 @@ pub fn unary_sub(a1: Value) -> ValueResult {
     }
 }
 
-pub fn unary_logical_not(a1: Value) -> ValueResult {
+pub fn unary_not(a1: Value) -> ValueResult {
     match a1 {
         Bool(b1) => Ok(Bool(!b1)),
-        Vector(it) => apply_vector_unary(it, unary_logical_not),
-        v => TypeErrorUnaryOp(Opcode::UnaryLogicalNot, v).err(),
-    }
-}
-
-pub fn unary_bitwise_not(a1: Value) -> ValueResult {
-    match a1 {
         Int(i1) => Ok(Int(!i1)),
-        Vector(it) => apply_vector_unary(it, unary_bitwise_not),
-        v => TypeErrorUnaryOp(Opcode::UnaryBitwiseNot, v).err(),
+        Vector(it) => apply_vector_unary(it, unary_not),
+        v => TypeErrorUnaryOp(Opcode::UnaryNot, v).err(),
     }
 }
 
 
 pub fn binary_mul(a1: Value, a2: Value) -> ValueResult {
     match (a1, a2) {
-        (Int(i1), Int(i2)) => Ok(Int(i1 * i2)),
+        (l @ (Bool(_) | Int(_)), r @ (Bool(_) | Int(_))) => Ok(Int(l.as_int()? * r.as_int()?)),
         (Str(s1), Int(i2)) if i2 >= 0 => Ok(s1.repeat(i2 as usize).to_value()),
         (Int(i1), Str(s2)) if i1 >= 0 => Ok(s2.repeat(i1 as usize).to_value()),
         (List(l1), Int(i1)) if i1 > 0 => {
@@ -59,7 +52,15 @@ pub fn binary_mul(a1: Value, a2: Value) -> ValueResult {
 /// The sign will be treated independently of the division, so if a, b > 0, then a / b == -a / -b, and -a / b = a / -b = -(a / b)
 pub fn binary_div(a1: Value, a2: Value) -> ValueResult {
     match (a1, a2) {
-        (Int(i1), Int(i2)) if i2 != 0 => Ok(Int(if i2 < 0 { -(-i1).div_euclid(i2) } else { i1.div_euclid(i2) })),
+        (l @ (Bool(_) | Int(_)), r @ (Bool(_) | Int(_))) => {
+            let i1 = l.as_int()?;
+            let i2 = r.as_int()?;
+            if i2 == 0 {
+                ValueErrorValueMustBeNonZero.err()
+            } else {
+                Ok(Int(if i2 < 0 { -(-i1).div_euclid(i2) } else { i1.div_euclid(i2) }))
+            }
+        },
         (Vector(l), Vector(r)) => apply_vector_binary(l, r, binary_div),
         (Vector(l), r) => apply_vector_binary_scalar_rhs(l, r, binary_div),
         (l, Vector(r)) => apply_vector_binary_scalar_lhs(l, r, binary_div),
@@ -72,7 +73,15 @@ pub fn binary_div(a1: Value, a2: Value) -> ValueResult {
 /// Unlike Python, we don't define the behavior for negative modulus.
 pub fn binary_mod(a1: Value, a2: Value) -> ValueResult {
     match (a1, a2) {
-        (Int(i1), Int(i2)) if i2 > 0 => Ok(Int(i1.rem_euclid(i2))),
+        (l @ (Bool(_) | Int(_)), r @ (Bool(_) | Int(_))) => {
+            let i1 = l.as_int()?;
+            let i2 = r.as_int()?;
+            if i2 > 0 {
+                Ok(Int(i1.rem_euclid(i2)))
+            } else {
+                ValueErrorValueMustBePositive(i2).err()
+            }
+        }
         (Str(l), r) => stdlib::format_string(&*l, r),
         (Vector(l), Vector(r)) => apply_vector_binary(l, r, binary_mod),
         (Vector(l), r) => apply_vector_binary_scalar_rhs(l, r, binary_mod),
@@ -83,7 +92,15 @@ pub fn binary_mod(a1: Value, a2: Value) -> ValueResult {
 
 pub fn binary_pow(a1: Value, a2: Value) -> ValueResult {
     match (a1, a2) {
-        (Int(i1), Int(i2)) if i2 > 0 => Ok(Int(i1.pow(i2 as u32))),
+        (l @ (Bool(_) | Int(_)), r @ (Bool(_) | Int(_))) => {
+            let i1 = l.as_int()?;
+            let i2 = r.as_int()?;
+            if i2 >= 0 {
+                Ok(Int(i1.pow(i2 as u32)))
+            } else {
+                ValueErrorValueMustBeNonNegative(i2).err()
+            }
+        },
         (Vector(l), Vector(r)) => apply_vector_binary(l, r, binary_pow),
         (Vector(l), r) => apply_vector_binary_scalar_rhs(l, r, binary_pow),
         (l, Vector(r)) => apply_vector_binary_scalar_lhs(l, r, binary_pow),
@@ -129,7 +146,7 @@ pub fn binary_in(a1: Value, a2: Value) -> ValueResult {
 
 pub fn binary_add(a1: Value, a2: Value) -> ValueResult {
     match (a1, a2) {
-        (Int(i1), Int(i2)) => Ok(Int(i1 + i2)),
+        (l @ (Bool(_) | Int(_)), r @ (Bool(_) | Int(_))) => Ok(Int(l.as_int()? + r.as_int()?)),
         (List(l1), List(l2)) => {
             let list1 = l1.unbox();
             let list2 = l2.unbox();
@@ -149,7 +166,7 @@ pub fn binary_add(a1: Value, a2: Value) -> ValueResult {
 
 pub fn binary_sub(a1: Value, a2: Value) -> ValueResult {
     match (a1, a2) {
-        (Int(i1), Int(i2)) => Ok(Int(i1 - i2)),
+        (l @ (Bool(_) | Int(_)), r @ (Bool(_) | Int(_))) => Ok(Int(l.as_int()? - r.as_int()?)),
         (Set(s1), Set(s2)) => {
             let s1 = s1.unbox();
             let s2 = s2.unbox();
@@ -165,7 +182,11 @@ pub fn binary_sub(a1: Value, a2: Value) -> ValueResult {
 /// Left shifts by negative values are defined as right shifts by the corresponding positive value. So (a >> -b) == (a << b)
 pub fn binary_left_shift(a1: Value, a2: Value) -> ValueResult {
     match (a1, a2) {
-        (Int(i1), Int(i2)) => Ok(Int(if i2 >= 0 { i1 << i2 } else {i1 >> (-i2)})),
+        (l @ (Bool(_) | Int(_)), r @ (Bool(_) | Int(_))) => {
+            let i1 = l.as_int()?;
+            let i2 = r.as_int()?;
+            Ok(Int(if i2 >= 0 { i1 << i2 } else { i1 >> (-i2) }))
+        },
         (Vector(l), Vector(r)) => apply_vector_binary(l, r, binary_left_shift),
         (Vector(l), r) => apply_vector_binary_scalar_rhs(l, r, binary_left_shift),
         (l, Vector(r)) => apply_vector_binary_scalar_lhs(l, r, binary_left_shift),
@@ -176,7 +197,11 @@ pub fn binary_left_shift(a1: Value, a2: Value) -> ValueResult {
 /// Right shifts by negative values are defined as left shifts by the corresponding positive value. So (a >> -b) == (a << b)
 pub fn binary_right_shift(a1: Value, a2: Value) -> ValueResult {
     match (a1, a2) {
-        (Int(i1), Int(i2)) => Ok(Int(if i2 >= 0 { i1 >> i2 } else {i1 << (-i2)})),
+        (l @ (Bool(_) | Int(_)), r @ (Bool(_) | Int(_))) => {
+            let i1 = l.as_int()?;
+            let i2 = r.as_int()?;
+            Ok(Int(if i2 >= 0 { i1 >> i2 } else { i1 << (-i2) }))
+        },
         (Vector(l), Vector(r)) => apply_vector_binary(l, r, binary_right_shift),
         (Vector(l), r) => apply_vector_binary_scalar_rhs(l, r, binary_right_shift),
         (l, Vector(r)) => apply_vector_binary_scalar_lhs(l, r, binary_right_shift),
@@ -195,6 +220,7 @@ pub fn binary_not_equals(a1: Value, a2: Value) -> Value { Bool(a1 != a2) }
 
 pub fn binary_bitwise_and(a1: Value, a2: Value) -> ValueResult {
     match (a1, a2) {
+        (Bool(b1), Bool(b2)) => Ok(Bool(b1 & b2)),
         (Int(i1), Int(i2)) => Ok(Int(i1 & i2)),
         (Set(s1), Set(s2)) => {
             let s1 = s1.unbox();
@@ -210,6 +236,7 @@ pub fn binary_bitwise_and(a1: Value, a2: Value) -> ValueResult {
 
 pub fn binary_bitwise_or(a1: Value, a2: Value) -> ValueResult {
     match (a1, a2) {
+        (Bool(b1), Bool(b2)) => Ok(Bool(b1 | b2)),
         (Int(i1), Int(i2)) => Ok(Int(i1 | i2)),
         (Set(s1), Set(s2)) => {
             let s1 = s1.unbox();
@@ -225,6 +252,7 @@ pub fn binary_bitwise_or(a1: Value, a2: Value) -> ValueResult {
 
 pub fn binary_bitwise_xor(a1: Value, a2: Value) -> ValueResult {
     match (a1, a2) {
+        (Bool(b1), Bool(b2)) => Ok(Bool(b1 ^ b2)),
         (Int(i1), Int(i2)) => Ok(Int(i1 ^ i2)),
         (Set(s1), Set(s2)) => {
             let s1 = s1.unbox();

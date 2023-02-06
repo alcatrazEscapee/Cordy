@@ -98,6 +98,8 @@ impl AsError for RuntimeError {
             RuntimeError::ValueErrorCannotUnpackLengthMustBeGreaterThan(e, a, v) => format!("ValueError: Cannot unpack {} with length {}, expected at least {} elements", v.format_error(), a, e),
             RuntimeError::ValueErrorCannotUnpackLengthMustBeEqual(e, a, v) => format!("ValueError: Cannot unpack {} with length {}, expected exactly {} elements", v.format_error(), a, e),
             RuntimeError::ValueErrorValueMustBeNonNegative(v) => format!("ValueError: Expected value '{}: int' to be non-negative", v),
+            RuntimeError::ValueErrorValueMustBePositive(v) => format!("ValueError: Expected value '{}: int' to be positive", v),
+            RuntimeError::ValueErrorValueMustBeNonZero => format!("ValueError: Expected value to be non-zero"),
             RuntimeError::ValueErrorCannotCollectIntoDict(v) => format!("ValueError: Cannot collect key-value pair {} into a dict", v.format_error()),
             RuntimeError::ValueErrorKeyNotPresent(v) => format!("ValueError: Key {} not found in dictionary", v.format_error()),
             RuntimeError::ValueErrorInvalidCharacterOrdinal(i) => format!("ValueError: Cannot convert int {} to a character", i),
@@ -147,8 +149,7 @@ impl AsError for Opcode {
     fn format_error(self: &Self) -> String {
         String::from(match self {
             Opcode::UnarySub => "-",
-            Opcode::UnaryLogicalNot => "!",
-            Opcode::UnaryBitwiseNot => "~",
+            Opcode::UnaryNot => "!",
             Opcode::OpDiv => "divide",
             Opcode::OpMul => "multiply",
             Opcode::OpMod => "modulo",
@@ -297,8 +298,7 @@ impl AsError for ScanToken {
             ScanToken::LeftShift => String::from("'<<' token"),
             ScanToken::RightShift => String::from("'>>' token"),
 
-            ScanToken::LogicalNot => String::from("'!' token"),
-            ScanToken::BitwiseNot => String::from("'~' token"),
+            ScanToken::Not => String::from("'!' token"),
 
             ScanToken::LogicalAnd => String::from("'&&' token"),
             ScanToken::LogicalOr => String::from("'||' token"),

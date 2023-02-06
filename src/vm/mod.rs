@@ -210,7 +210,6 @@ impl<R, W> VirtualMachine<R, W> where
 
             // Flow Control
             // All jumps are absolute (because we don't have variable length instructions and it's easy to do so)
-            // todo: relative jumps? theoretically allows us more than u32.max instructions ~ 65k
             JumpIfFalse(ip) => {
                 trace::trace_interpreter!("jump if false {} -> {}", self.stack.last().unwrap().as_debug_str(), ip);
                 let jump: usize = ip as usize;
@@ -598,8 +597,7 @@ impl<R, W> VirtualMachine<R, W> where
 
             // Unary Operators
             UnarySub => operator!(operator::unary_sub(a1), a1, "-"),
-            UnaryLogicalNot => operator!(operator::unary_logical_not(a1), a1, "!"),
-            UnaryBitwiseNot => operator!(operator::unary_bitwise_not(a1), a1, "~"),
+            UnaryNot => operator!(operator::unary_not(a1), a1, "!"),
 
             // Binary Operators
             OpMul => operator!(operator::binary_mul, a1, a2, "*"),
@@ -889,13 +887,13 @@ mod test {
     #[test] fn test_str_empty_print() { run_str("print()", "\n"); }
     #[test] fn test_str_strings() { run_str("print('first', 'second', 'third')", "first second third\n"); }
     #[test] fn test_str_other_args() { run_str("print(nil, -1, 1, true, false, 'test', print)", "nil -1 1 true false test print\n"); }
-    #[test] fn test_str_unary_ops() { run_str("print(-1, --1, ---1, ~3, ~~3, !true, !!true)", "-1 1 -1 -4 3 false true\n"); }
+    #[test] fn test_str_unary_ops() { run_str("print(-1, --1, ---1, !3, !!3, !true, !!true)", "-1 1 -1 -4 3 false true\n"); }
     #[test] fn test_str_add_str() { run_str("print(('a' + 'b') + (3 + 4) + (' hello' + 3) + (' and' + true + nil))", "ab7 hello3 andtruenil\n"); }
     #[test] fn test_str_mul_str() { run_str("print('abc' * 3)", "abcabcabc\n"); }
     #[test] fn test_str_add_sub_mul_div_int() { run_str("print(5 - 3, 12 + 5, 3 * 9, 16 / 3)", "2 17 27 5\n"); }
     #[test] fn test_str_div_mod_int() { run_str("print(3 / 2, 3 / 3, -3 / 2, 10 % 3, 11 % 3, 12 % 3)", "1 1 -2 1 2 0\n"); }
-    #[test] fn test_str_div_by_zero() { run_str("print(15 / 0)", "TypeError: Cannot divide '15' of type 'int' and '0' of type 'int'\n    at: `print(15 / 0)` (line 1)\n    at: execution of script '<test>'\n"); }
-    #[test] fn test_str_mod_by_zero() { run_str("print(15 % 0)", "TypeError: Cannot modulo '15' of type 'int' and '0' of type 'int'\n    at: `print(15 % 0)` (line 1)\n    at: execution of script '<test>'\n"); }
+    #[test] fn test_str_div_by_zero() { run_str("print(15 / 0)", "ValueError: Expected value to be non-zero\n    at: `print(15 / 0)` (line 1)\n    at: execution of script '<test>'\n"); }
+    #[test] fn test_str_mod_by_zero() { run_str("print(15 % 0)", "ValueError: Expected value '0: int' to be positive\n    at: `print(15 % 0)` (line 1)\n    at: execution of script '<test>'\n"); }
     #[test] fn test_str_left_right_shift() { run_str("print(1 << 10, 16 >> 1, 16 << -1, 1 >> -10)", "1024 8 8 1024\n"); }
     #[test] fn test_str_compare_ints_1() { run_str("print(1 < 3, -5 < -10, 6 > 7, 6 > 4)", "true false false true\n"); }
     #[test] fn test_str_compare_ints_2() { run_str("print(1 <= 3, -5 < -10, 3 <= 3, 2 >= 2, 6 >= 7, 6 >= 4, 6 <= 6, 8 >= 8)", "true false true true false true true true\n"); }
@@ -1416,6 +1414,9 @@ mod test {
     #[test] fn test_while_else_no_loop() { run_str("while false { break } else { print('hello') }", "hello\n"); }
     #[test] fn test_while_else_break() { run_str("while true { break } else { print('hello') } print('world')", "world\n"); }
     #[test] fn test_while_else_no_break() { run_str("let x = true ; while x { x = false } else { print('hello') }", "hello\n"); }
+    #[test] fn test_sum_booleans() { run_str("range(10) . map(>3) . sum . print", "6\n"); }
+    #[test] fn test_add_booleans() { run_str("true + true + false + false . print", "2\n"); }
+    #[test] fn test_reduce_plus_booleans() { run_str("range(10) . map(>3) . reduce(+) . print", "6\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }

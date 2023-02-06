@@ -24,6 +24,8 @@ pub enum RuntimeError {
     ValueErrorStepCannotBeZero,
     ValueErrorVariableNotDeclaredYet(String),
     ValueErrorValueMustBeNonNegative(i64),
+    ValueErrorValueMustBePositive(i64),
+    ValueErrorValueMustBeNonZero,
     ValueErrorValueMustBeNonEmpty,
     ValueErrorCannotUnpackLengthMustBeGreaterThan(usize, usize, Value), // expected, actual
     ValueErrorCannotUnpackLengthMustBeEqual(usize, usize, Value), // expected, actual

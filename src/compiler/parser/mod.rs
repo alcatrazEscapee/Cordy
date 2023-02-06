@@ -899,8 +899,7 @@ impl Parser<'_> {
             // Unary operators *can* be present at the start of an expression, but we would see something after
             // So, we peek ahead again and see if the next token is a `)` - that's the only way you evaluate unary operators as functions
             Some(Minus) => unary = Some(OperatorUnarySub),
-            Some(LogicalNot) => unary = Some(OperatorUnaryLogicalNot),
-            Some(BitwiseNot) => unary = Some(OperatorUnaryBitwiseNot),
+            Some(Not) => unary = Some(OperatorUnaryNot),
 
             Some(Mul) => binary = Some(OperatorMul),
             Some(Div) => binary = Some(OperatorDiv),
@@ -1165,8 +1164,7 @@ impl Parser<'_> {
         loop {
             let maybe_op: Option<Opcode> = match self.peek() {
                 Some(Minus) => Some(UnarySub),
-                Some(BitwiseNot) => Some(UnaryBitwiseNot),
-                Some(LogicalNot) => Some(UnaryLogicalNot),
+                Some(Not) => Some(UnaryNot),
                 _ => None
             };
             match maybe_op {
@@ -1312,7 +1310,7 @@ impl Parser<'_> {
                 Some(KeywordIs) => Some(OpIs),
                 Some(KeywordIn) => Some(OpIn),
                 Some(KeywordNot) => match self.peek2() {
-                    Some(KeywordIn) => Some(UnaryLogicalNot), // Special flag for `not in`, which desugars to `!(x in y)
+                    Some(KeywordIn) => Some(UnaryNot), // Special flag for `not in`, which desugars to `!(x in y)
                     _ => None,
                 }
                 _ => None
@@ -1321,12 +1319,12 @@ impl Parser<'_> {
                 break
             }
             match maybe_op {
-                Some(UnaryLogicalNot) => {
+                Some(UnaryNot) => {
                     self.advance();
                     self.advance();
                     self.parse_expr_2_unary();
                     self.push(OpIn);
-                    self.push(UnaryLogicalNot)
+                    self.push(UnaryNot)
                 }
                 Some(op) => {
                     self.advance();
@@ -1682,7 +1680,7 @@ mod tests {
     #[test] fn test_function_no_args() { run_expr("print", vec![NativeFunction(Print)]); }
     #[test] fn test_function_one_arg() { run_expr("print(1)", vec![NativeFunction(Print), Int(1), OpFuncEval(1)]); }
     #[test] fn test_function_many_args() { run_expr("print(1,2,3)", vec![NativeFunction(Print), Int(1), Int(2), Int(3), OpFuncEval(3)]); }
-    #[test] fn test_multiple_unary_ops() { run_expr("- ~ ! 1", vec![Int(1), UnaryLogicalNot, UnaryBitwiseNot, UnarySub]); }
+    #[test] fn test_multiple_unary_ops() { run_expr("- ! 1", vec![Int(1), UnaryNot, UnarySub]); }
     #[test] fn test_multiple_function_calls() { run_expr("print (1) (2) (3)", vec![NativeFunction(Print), Int(1), OpFuncEval(1), Int(2), OpFuncEval(1), Int(3), OpFuncEval(1)]); }
     #[test] fn test_multiple_function_calls_some_args() { run_expr("print () (1) (2, 3)", vec![NativeFunction(Print), OpFuncEval(0), Int(1), OpFuncEval(1), Int(2), Int(3), OpFuncEval(2)]); }
     #[test] fn test_multiple_function_calls_no_args() { run_expr("print () () ()", vec![NativeFunction(Print), OpFuncEval(0), OpFuncEval(0), OpFuncEval(0)]); }
