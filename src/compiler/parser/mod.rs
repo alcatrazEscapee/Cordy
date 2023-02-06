@@ -570,13 +570,19 @@ impl Parser<'_> {
         self.push_delayed_pop(); // Inner loop expressions cannot yield out of the loop
         self.push(Jump(loop_start));
 
-        // After the jump, the next opcode is 'end of loop'. Repair all break statements
+        self.fix_jump(jump_if_false, JumpIfFalsePop); // Fix the initial conditional jump
+
+        if let Some(KeywordElse) = self.peek() { // Parse `while {} else {}`
+            self.advance();
+            self.parse_block_statement();
+            self.push_delayed_pop();
+        }
+
+        // Repair all break statements to jump after the `else`
         let break_opcodes: Vec<usize> = self.current_locals_mut().loops.pop().unwrap().break_statements;
         for break_opcode in break_opcodes {
             self.fix_jump(break_opcode, Jump);
         }
-
-        self.fix_jump(jump_if_false, JumpIfFalsePop); // Fix the initial conditional jump
     }
 
     fn parse_loop_statement(self: &mut Self) {
@@ -1760,6 +1766,7 @@ mod tests {
     #[test] fn test_while_2() { run("while_2"); }
     #[test] fn test_while_3() { run("while_3"); }
     #[test] fn test_while_4() { run("while_4"); }
+    #[test] fn test_while_else() { run("while_else"); }
     #[test] fn test_while_false_if_false() { run("while_false_if_false"); }
 
 
