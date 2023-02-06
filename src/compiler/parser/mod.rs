@@ -273,8 +273,7 @@ impl Parser<'_> {
         if let Some(name) = maybe_name {
             if let Some(index) = self.declare_local(name.clone()) {
                 self.init_local(index);
-                let func_start: usize = self.next_opcode() as usize + 2; // Declare the function literal. + 2 to the head because of the leading Jump, Function()
-                let func: u32 = self.declare_function(func_start, name, &args);
+                let func: u32 = self.declare_function(name, &args);
                 func_id = Some(func);
                 self.push(Opcode::Function(func));  // And push the function object itself
             }
@@ -308,8 +307,7 @@ impl Parser<'_> {
 
         // Expression functions don't declare themselves as a local variable that can be referenced.
         // Instead, as they're part of an expression, they just push a single function instance onto the stack
-        let func_start: usize = self.next_opcode() as usize + 2; // Declare the function literal. + 2 to the head because of the leading Jump and function local
-        let func: u32 = self.declare_function(func_start, String::from("_"), &args);
+        let func: u32 = self.declare_function(String::from("_"), &args);
         self.push(Opcode::Function(func));  // And push the function object itself
 
         self.parse_function_body(args, Some(func));
@@ -429,7 +427,7 @@ impl Parser<'_> {
         // Update the function, if present, with the tail of the function
         // This makes tracking ownership in containing functions easier during error reporting
         if let Some(func_id) = func_id {
-            self.functions[func_id as usize].unbox_mut().tail = self.next_opcode() as usize;
+            self.fix_function_tail(func_id);
         }
 
         // Since `Return` cleans up all function locals, we just discard them from the parser without emitting any `Pop` tokens.
@@ -445,9 +443,7 @@ impl Parser<'_> {
         self.scope_depth -= 1;
 
         self.push(Return); // Returns the last expression in the function
-
-        let end: u32 = self.next_opcode(); // Repair the jump, to skip the function body itself
-        self.output[jump] = Jump(end);
+        self.fix_jump(jump, Jump); // Repair the jump, to skip the function body itself
 
         // If this function has captured any upvalues, we need to emit the correct tokens for them now, including wrapping the function in a closure
         if !self.current_locals().upvalues.is_empty() {
@@ -522,36 +518,30 @@ impl Parser<'_> {
             Some(KeywordElif) => {
                 // Don't advance, as `parse_if_statement()` will advance the first token
                 let jump = self.reserve();
-                let after_if: u32 = self.next_opcode();
-                self.output[jump_if_false] = JumpIfFalsePop(after_if);
+                self.fix_jump(jump_if_false, JumpIfFalsePop);
                 self.delay_pop_from_expression_statement = false;
                 self.parse_if_statement();
-                let after_else: u32 = self.next_opcode();
-                self.output[jump] = Jump(after_else);
+                self.fix_jump(jump, Jump);
             },
             Some(KeywordElse) => {
                 // `else` is present, so we first insert an unconditional jump, parse the next block, then fix the first jump
                 self.advance();
                 let jump = self.reserve();
-                let after_if: u32 = self.next_opcode();
-                self.output[jump_if_false as usize] = JumpIfFalsePop(after_if);
+                self.fix_jump(jump_if_false, JumpIfFalsePop);
                 self.delay_pop_from_expression_statement = false;
                 self.parse_block_statement();
                 if !self.delay_pop_from_expression_statement {
                     self.delay_pop_from_expression_statement = true;
                     self.push(Nil);
                 }
-                let after_else: u32 = self.next_opcode();
-                self.output[jump] = Jump(after_else);
+                self.fix_jump(jump, Jump);
             },
             _ => {
                 // No `else`, but we need to wire in a fake `else` statement which just pushes `Nil` so each branch still pushes a value
                 let jump = self.reserve();
-                let after_if: u32 = self.next_opcode();
-                self.output[jump_if_false as usize] = JumpIfFalsePop(after_if);
+                self.fix_jump(jump_if_false, JumpIfFalsePop);
                 self.push(Nil);
-                let after_else: u32 = self.next_opcode();
-                self.output[jump] = Jump(after_else);
+                self.fix_jump(jump, Jump);
             },
         }
     }
@@ -580,13 +570,13 @@ impl Parser<'_> {
         self.push_delayed_pop(); // Inner loop expressions cannot yield out of the loop
         self.push(Jump(loop_start));
 
-        let loop_end: u32 = self.next_opcode(); // After the jump, the next opcode is 'end of loop'. Repair all break statements
-        let break_opcodes: Vec<u32> = self.current_locals_mut().loops.pop().unwrap().break_statements;
+        // After the jump, the next opcode is 'end of loop'. Repair all break statements
+        let break_opcodes: Vec<usize> = self.current_locals_mut().loops.pop().unwrap().break_statements;
         for break_opcode in break_opcodes {
-            self.output[break_opcode as usize] = Jump(loop_end);
+            self.fix_jump(break_opcode, Jump);
         }
 
-        self.output[jump_if_false] = JumpIfFalsePop(loop_end); // Fix the initial conditional jump
+        self.fix_jump(jump_if_false, JumpIfFalsePop); // Fix the initial conditional jump
     }
 
     fn parse_loop_statement(self: &mut Self) {
@@ -611,10 +601,10 @@ impl Parser<'_> {
         self.push_delayed_pop(); // Loops can't return a value
         self.push(Jump(loop_start));
 
-        let loop_end: u32 = self.next_opcode(); // After the jump, the next opcode is 'end of loop'. Repair all break statements
-        let break_opcodes: Vec<u32> = self.current_locals_mut().loops.pop().unwrap().break_statements;
+        // After the jump, the next opcode is 'end of loop'. Repair all break statements
+        let break_opcodes: Vec<usize> = self.current_locals_mut().loops.pop().unwrap().break_statements;
         for break_opcode in break_opcodes {
-            self.output[break_opcode as usize] = Jump(loop_end);
+            self.fix_jump(break_opcode, Jump);
         }
     }
 
@@ -666,7 +656,7 @@ impl Parser<'_> {
         self.push(Jump(jump));
 
         // Fix the jump
-        self.output[jump_if_false_pop] = JumpIfFalsePop(self.next_opcode());
+        self.fix_jump(jump_if_false_pop, JumpIfFalsePop);
 
         // Cleanup the `for` loop locals, but don't emit lifts as we do them per-iteration.
         self.pop_locals(Some(self.scope_depth), true, true, false);
@@ -681,7 +671,7 @@ impl Parser<'_> {
             Some(loop_stmt) => {
                 self.pop_locals(Some(loop_stmt.scope_depth + 1), false, true, true);
                 let jump = self.reserve();
-                self.current_locals_mut().loops.last_mut().unwrap().break_statements.push(jump as u32);
+                self.current_locals_mut().loops.last_mut().unwrap().break_statements.push(jump);
             },
             None => self.semantic_error(BreakOutsideOfLoop),
         }
@@ -1156,11 +1146,10 @@ impl Parser<'_> {
         self.expect(KeywordThen);
         self.parse_expression(); // Value if true
         let jump = self.reserve();
-        self.output[jump_if_false_pop] = JumpIfFalsePop(self.next_opcode());
+        self.fix_jump(jump_if_false_pop, JumpIfFalsePop);
         self.expect(KeywordElse);
         self.parse_expression(); // Value if false
-        self.output[jump] = Jump(self.next_opcode());
-
+        self.fix_jump(jump, Jump);
     }
 
     fn parse_expr_2_unary(self: &mut Self) {
@@ -1474,16 +1463,14 @@ impl Parser<'_> {
                     let jump_if_false = self.reserve();
                     self.push(Opcode::Pop);
                     self.parse_expr_8();
-                    let jump_to: u32 = self.next_opcode();
-                    self.output[jump_if_false] = JumpIfFalse(jump_to);
+                    self.fix_jump(jump_if_false, JumpIfFalse)
                 },
                 Some(OpBitwiseOr) => {
                     self.advance();
                     let jump_if_true = self.reserve();
                     self.push(Opcode::Pop);
                     self.parse_expr_8();
-                    let jump_to: u32 = self.next_opcode();
-                    self.output[jump_if_true] = JumpIfTrue(jump_to);
+                    self.fix_jump(jump_if_true, JumpIfTrue);
                 },
                 _ => break
             }

@@ -21,7 +21,7 @@ use Opcode::{*};
 pub struct Loop {
     pub(super) start_index: u32,
     pub(super) scope_depth: u32,
-    pub(super) break_statements: Vec<u32>
+    pub(super) break_statements: Vec<usize>
 }
 
 impl Loop {
@@ -422,14 +422,11 @@ impl<'a> Parser<'a> {
         (self.constants.len() - 1) as u32
     }
 
-    pub fn declare_function(self: &mut Self, head: usize, name: String, args: &Vec<LValue>) -> u32 {
+    pub fn declare_function(self: &mut Self, name: String, args: &Vec<LValue>) -> u32 {
+        // When we declare a function, the head will point to two instructions forward (past the fn, and jump past opcodes)
+        let head = self.output.len() + 2;
         self.functions.push(MaybeRc::new(FunctionImpl::new(head, name, args.iter().map(|u| u.to_code_str()).collect())));
         (self.functions.len() - 1) as u32
-    }
-
-
-    pub fn next_opcode(self: &Self) -> u32 {
-        self.output.len() as u32
     }
 
     /// After a `let <name>` or `fn <name>` declaration, tries to declare this as a local variable in the current scope.

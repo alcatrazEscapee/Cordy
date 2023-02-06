@@ -241,6 +241,23 @@ impl<'a> Parser<'a> {
         self.output.len() - 1
     }
 
+    /// Returns an index to the next opcode to be emitted, to be used to emit a jump to this location.
+    pub fn next_opcode(self: &Self) -> u32 {
+        self.output.len() as u32
+    }
+
+    /// Given a `usize` index, which is obtained from `self.reserve()`, this fixes the jump instruction at that location to point to the next opcode.
+    pub fn fix_jump<F : FnOnce(u32) -> Opcode>(self: &mut Self, reserved: usize, jump: F) {
+        let jump_opcode = jump(self.next_opcode());
+        trace::trace_parser!("fixing jump at {} -> {:?}", reserved, jump_opcode);
+        self.output[reserved] = jump_opcode;
+    }
+
+    /// Given an ID for a function retrieved via `declare_function()`, this fixes the `tail` pointer of the function to point to the next opcode.
+    pub fn fix_function_tail(self: &mut Self, func_id: u32) {
+        self.functions[func_id as usize].unbox_mut().tail = self.output.len();
+    }
+
     /// If we previously delayed a `Pop` opcode from being omitted, push it now and reset the flag
     pub fn push_delayed_pop(self: &mut Self) {
         if self.delay_pop_from_expression_statement {
