@@ -28,7 +28,7 @@ Expressions in Cordy are similar to C style languages. Cordy has a number of mat
 - `a % b` computes the mathematical modulo `a mod b`, and will always return a value in `[0, b)`.
 - `&`, `|`, and `^` are bitwise AND, OR, and XOR, respectively. `<<` and `>>` are left and right shifts.
   - Shifts be negative values shift in reverse, so `1 >> -3` is `8`.
-- `!` computes a logical (boolean) not, `~` computes a bitwise not.
+- `!` computes a logical not of boolean inputs, or a bitwise not of integer inputs.
 - `and` and `or` are short-circuiting, logical operators.
 - `<`, `>`, `>=`, `<=`, `==`, and `!=` compare values. Any values, regardless of types, can be compared for equality or ordering.
   - Note: different types will always compare as equal ordering.

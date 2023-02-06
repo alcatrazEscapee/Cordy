@@ -111,8 +111,7 @@ pub enum ScanToken {
     LeftShift,
     RightShift,
 
-    LogicalNot,
-    BitwiseNot,
+    Not,
 
     LogicalAnd,
     LogicalOr,
@@ -262,9 +261,8 @@ impl<'a> Scanner<'a> {
 
                        '!' => match self.peek() {
                            Some('=') => self.push_skip(NotEquals),
-                           _ => self.push(LogicalNot)
+                           _ => self.push(Not)
                        },
-                       '~' => self.push(BitwiseNot),
 
                        '=' => match self.peek() {
                            Some('=') => self.push_skip(DoubleEquals),
@@ -474,12 +472,13 @@ impl<'a> Scanner<'a> {
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
+
     use crate::compiler::{scanner};
     use crate::compiler::scanner::{ScanResult, ScanToken};
     use crate::reporting;
     use crate::trace;
 
-    use crate::compiler::scanner::ScanToken::{*};
+    use ScanToken::{*};
 
 
     #[test] fn test_str_empty() { run_str("", vec![]); }
@@ -489,13 +488,13 @@ mod tests {
     #[test] fn test_str_ints() { run_str("1234 654 10_00_00 0 1", vec![Int(1234), Int(654), Int(100000), Int(0), Int(1)]); }
     #[test] fn test_str_binary_ints() { run_str("0b11011011 0b0 0b1 0b1_01", vec![Int(0b11011011), Int(0b0), Int(0b1), Int(0b101)]); }
     #[test] fn test_str_hex_ints() { run_str("0x12345678 0xabcdef90 0xABCDEF 0xF_f", vec![Int(0x12345678), Int(0xabcdef90), Int(0xABCDEF), Int(0xFF)])}
-    #[test] fn test_str_unary_operators() { run_str("! ~", vec![LogicalNot, BitwiseNot]); }
+    #[test] fn test_str_unary_operators() { run_str("- !", vec![Minus, Not]); }
     #[test] fn test_str_comparison_operators() { run_str("> < >= > = <= < =", vec![GreaterThan, LessThan, GreaterThanEquals, GreaterThan, Equals, LessThanEquals, LessThan, Equals]); }
-    #[test] fn test_str_equality_operators() { run_str("!= ! = == =", vec![NotEquals, LogicalNot, Equals, DoubleEquals, Equals]); }
+    #[test] fn test_str_equality_operators() { run_str("!= ! = == =", vec![NotEquals, Not, Equals, DoubleEquals, Equals]); }
     #[test] fn test_str_binary_logical_operators() { run_str("and & or |", vec![LogicalAnd, BitwiseAnd, LogicalOr, BitwiseOr]); }
     #[test] fn test_str_arithmetic_operators() { run_str("+ - += -= * = *= / = /=", vec![Plus, Minus, PlusEquals, MinusEquals, Mul, Equals, MulEquals, Div, Equals, DivEquals]); }
     #[test] fn test_str_other_arithmetic_operators() { run_str("% %= ** *= **= * *=", vec![Mod, ModEquals, Pow, MulEquals, PowEquals, Mul, MulEquals]); }
-    #[test] fn test_str_bitwise_operators() { run_str("| ^ ~ & &= |= ^=", vec![BitwiseOr, BitwiseXor, BitwiseNot, BitwiseAnd, AndEquals, OrEquals, XorEquals]); }
+    #[test] fn test_str_bitwise_operators() { run_str("| ^ & &= |= ^=", vec![BitwiseOr, BitwiseXor, BitwiseAnd, AndEquals, OrEquals, XorEquals]); }
     #[test] fn test_str_groupings() { run_str("( [ { } ] )", vec![OpenParen, OpenSquareBracket, OpenBrace, CloseBrace, CloseSquareBracket, CloseParen]); }
     #[test] fn test_str_syntax() { run_str(". .= , -> - > : @", vec![Dot, DotEquals, Comma, Arrow, Minus, GreaterThan, Colon, At]); }
 
