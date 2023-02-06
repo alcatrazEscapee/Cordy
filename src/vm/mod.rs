@@ -326,13 +326,10 @@ impl<R, W> VirtualMachine<R, W> where
                     _ => panic!("Malformed bytecode"),
                 };
 
-                // Reasons why this is convoluted:
-                // - We cannot use `.get()` (as it requires `Value` to be `Copy`)
-                // - We cannot use `get_mut()` (as even if we have `&mut ClosureImpl`, unboxing the `Rc<>` only gives us `&Cell`)
-                let unboxed: UpValue = (*upvalue).replace(UpValue::Open(0));
-                (*upvalue).replace(unboxed.clone());
+                let interior = (*upvalue).take();
+                upvalue.set(interior.clone()); // Replace back the original value
 
-                let value: Value = match unboxed {
+                let value: Value = match interior {
                     UpValue::Open(index) => self.stack[index].clone(),
                     UpValue::Closed(value) => value,
                 };
@@ -351,7 +348,7 @@ impl<R, W> VirtualMachine<R, W> where
                 // Reasons why this is convoluted:
                 // - We cannot use `.get()` (as it requires `Value` to be `Copy`)
                 // - We cannot use `get_mut()` (as even if we have `&mut ClosureImpl`, unboxing the `Rc<>` only gives us `&Cell`)
-                let unboxed: UpValue = (*upvalue).replace(UpValue::Open(0));
+                let unboxed: UpValue = (*upvalue).take();
                 let modified: UpValue = match unboxed {
                     UpValue::Open(stack_index) => {
                         let ret = UpValue::Open(stack_index); // And return the upvalue, unmodified
@@ -360,7 +357,7 @@ impl<R, W> VirtualMachine<R, W> where
                     },
                     UpValue::Closed(_) => UpValue::Closed(value), // Mutate on the heap
                 };
-                (*upvalue).replace(modified);
+                (*upvalue).set(modified);
             },
 
             StoreArray => {
@@ -1417,6 +1414,9 @@ mod test {
     #[test] fn test_sum_booleans() { run_str("range(10) . map(>3) . sum . print", "6\n"); }
     #[test] fn test_add_booleans() { run_str("true + true + false + false . print", "2\n"); }
     #[test] fn test_reduce_plus_booleans() { run_str("range(10) . map(>3) . reduce(+) . print", "6\n"); }
+    #[test] fn test_for_else_no_loop() { run_str("for _ in [] { print('hello') ; break } else { print('world') }", "world\n"); }
+    #[test] fn test_for_else_break() { run_str("for c in 'abcd' { if c == 'b' { break } } else { print('hello') } print('world')", "world\n"); }
+    #[test] fn test_for_else_no_break() { run_str("for c in 'abcd' { if c == 'B' { break } } else { print('hello') }", "hello\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }

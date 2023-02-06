@@ -25,7 +25,7 @@ pub struct Loop {
 }
 
 impl Loop {
-    pub fn new(start_index: u32, depth: u32) -> Loop {
+    fn new(start_index: u32, depth: u32) -> Loop {
         Loop { start_index, scope_depth: depth, break_statements: Vec::new() }
     }
 }
@@ -406,6 +406,26 @@ impl<T : Eq + PartialEq + Debug + Clone> Reference<T> {
 
 
 impl<'a> Parser<'a> {
+
+    // ===== Loops ===== //
+
+    /// Marks the beginning of a loop type statement, for the purposes of tracking `break` and `continue` statements.
+    pub fn begin_loop(self: &mut Self) -> u32 {
+        let loop_start: u32 = self.next_opcode(); // Top of the loop, push onto the loop stack
+        let loop_depth: u32 = self.scope_depth;
+        self.current_locals_mut().loops.push(Loop::new(loop_start, loop_depth));
+        loop_start
+    }
+
+    /// Marks the end of a loop, at the point where `break` statements should jump to (so after any `else` statements attached to the loop)
+    pub fn end_loop(self: &mut Self) {
+        let break_opcodes: Vec<usize> = self.current_locals_mut().loops.pop().unwrap().break_statements;
+        for break_opcode in break_opcodes {
+            self.fix_jump(break_opcode, Jump);
+        }
+    }
+
+
     pub fn declare_string(self: &mut Self, str: String) -> u32 {
         if let Some(id) = self.strings.iter().position(|s| s == &str) {
             return id as u32
@@ -494,7 +514,7 @@ impl<'a> Parser<'a> {
     ///    This is required when the variable goes out of scope, as we can no longer reference it.
     ///    Note however, if we're using this to emit pop tokens for non-sequential code (i.e. a `break` or `return`), we want to keep these variables around.
     ///
-    ///    This behavior is thus controlled by `modify_lvt` parameter.
+    ///    This behavior is controlled by `modify_lvt` parameter.
     ///
     /// 2. Emit `Pop` tokens for the local variables that would be caught by (1.). This is required without (1.) when we are in non-sequential code, (i.e. a `break` or `return`), as we need to make sure the runtime stack is correct.
     ///    Note that this is also not required after a `return`, as the `Return` opcode will clear everything above the current frame pointer, hence not needing explicit `Pop` opcodes.

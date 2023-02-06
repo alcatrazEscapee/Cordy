@@ -1,0 +1,6 @@
+for x in nil {
+    'hello'
+    break
+} else {
+    'world'
+}

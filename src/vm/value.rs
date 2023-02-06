@@ -537,6 +537,13 @@ pub enum UpValue {
     Closed(Value)
 }
 
+/// Implement `Default` to have access to `.take()`
+impl Default for UpValue {
+    fn default() -> Self {
+        UpValue::Open(0)
+    }
+}
+
 impl PartialEq for ClosureImpl {
     fn eq(&self, other: &Self) -> bool {
         self.func == other.func

@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use crate::compiler::CompileResult;
 use crate::compiler::parser::core::ParserState;
-use crate::compiler::parser::semantic::{LateBoundGlobal, Reference, Loop, LValue, LValueReference};
+use crate::compiler::parser::semantic::{LateBoundGlobal, Reference, LValue, LValueReference};
 use crate::compiler::scanner::{ScanResult, ScanToken};
 use crate::misc::MaybeRc;
 use crate::stdlib::NativeFunction;
@@ -560,15 +560,13 @@ impl Parser<'_> {
         self.push_delayed_pop();
         self.advance();
 
-        let loop_start: u32 = self.next_opcode(); // Top of the loop, push onto the loop stack
-        let loop_depth: u32 = self.scope_depth;
-        self.current_locals_mut().loops.push(Loop::new(loop_start, loop_depth));
+        let jump: u32 = self.begin_loop();
 
         self.parse_expression(); // While condition
         let jump_if_false = self.reserve(); // Jump to the end
         self.parse_block_statement(); // Inner loop statements, and jump back to front
         self.push_delayed_pop(); // Inner loop expressions cannot yield out of the loop
-        self.push(Jump(loop_start));
+        self.push(Jump(jump));
 
         self.fix_jump(jump_if_false, JumpIfFalsePop); // Fix the initial conditional jump
 
@@ -578,11 +576,7 @@ impl Parser<'_> {
             self.push_delayed_pop();
         }
 
-        // Repair all break statements to jump after the `else`
-        let break_opcodes: Vec<usize> = self.current_locals_mut().loops.pop().unwrap().break_statements;
-        for break_opcode in break_opcodes {
-            self.fix_jump(break_opcode, Jump);
-        }
+        self.end_loop();
     }
 
     fn parse_loop_statement(self: &mut Self) {
@@ -599,19 +593,13 @@ impl Parser<'_> {
         self.push_delayed_pop();
         self.advance();
 
-        let loop_start: u32 = self.next_opcode(); // Top of the loop, push onto the loop stack
-        let loop_depth: u32 = self.scope_depth;
-        self.current_locals_mut().loops.push(Loop::new(loop_start, loop_depth));
+        let jump: u32 = self.begin_loop(); // Top of the loop
 
         self.parse_block_statement(); // Inner loop statements, and jump back to front
         self.push_delayed_pop(); // Loops can't return a value
-        self.push(Jump(loop_start));
+        self.push(Jump(jump));
 
-        // After the jump, the next opcode is 'end of loop'. Repair all break statements
-        let break_opcodes: Vec<usize> = self.current_locals_mut().loops.pop().unwrap().break_statements;
-        for break_opcode in break_opcodes {
-            self.fix_jump(break_opcode, Jump);
-        }
+        self.end_loop();
     }
 
     fn parse_for_statement(self: &mut Self) {
@@ -642,7 +630,7 @@ impl Parser<'_> {
         self.push(InitIterable);
 
         // Test
-        let jump: u32 = self.next_opcode();
+        let jump: u32 = self.begin_loop();
         self.push(TestIterable);
         let jump_if_false_pop = self.reserve();
 
@@ -667,6 +655,14 @@ impl Parser<'_> {
         // Cleanup the `for` loop locals, but don't emit lifts as we do them per-iteration.
         self.pop_locals(Some(self.scope_depth), true, true, false);
         self.scope_depth -= 1;
+
+        if let Some(KeywordElse) = self.peek() { // Parse `for {} else {}`
+            self.advance();
+            self.parse_block_statement();
+            self.push_delayed_pop();
+        }
+
+        self.end_loop();
     }
 
     fn parse_break_statement(self: &mut Self) {
@@ -1723,6 +1719,7 @@ mod tests {
     #[test] fn test_continue_past_locals() { run("continue_past_locals"); }
     #[test] fn test_empty() { run("empty"); }
     #[test] fn test_expressions() { run("expressions"); }
+    #[test] fn test_for_else() { run("for_else"); }
     #[test] fn test_for_range_start_stop() { run("for_range_start_stop"); }
     #[test] fn test_for_range_start_stop_no_var() { run("for_range_start_stop_no_var"); }
     #[test] fn test_for_range_start_stop_step() { run("for_range_start_stop_step"); }
