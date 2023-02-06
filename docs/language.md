@@ -226,6 +226,16 @@ while condition {
 }
 ```
 
+Like in Python, it can have an optional `else`, which will only be entered if a `break` statement was **not** encountered.
+
+```rust
+while condition {
+    // statements
+} else {
+    // only if no `break`
+}
+```
+
 `for-in` is a loop which iterates through a collection or string, yielding elements from the collection each iteration.
 
 ```rust
@@ -338,6 +348,14 @@ fn flip(pair) {
     let x, y = pair
     return (y, x)
 }
+```
+
+And within expressions, if all the variables are declared:
+
+```rust
+let a, b, c
+
+a = b, c = (1, 2) // assigns a = (1, 2), b = 1, c = 2
 ```
 
 ### Decorators

@@ -1413,6 +1413,9 @@ mod test {
     #[test] fn test_dict_default_with_mutable_default() { run_str("let d = dict() . default([]) ; d[0].push(2) ; d[1].push(3) ; d.print", "{0: [2, 3], 1: [2, 3]}\n"); }
     #[test] fn test_dict_default_with_self_entry() { run_str("let d ; d = dict() . default(fn() { d['count'] += 1 ; d['hello'] = 'special' ; 'otherwise' }) ; d['count'] = 0 ; d['hello'] ; d['world'] ; d.print", "{'count': 2, 'hello': 'special', 'world': 'otherwise'}\n"); }
     #[test] fn test_dict_increment() { run_str("let d = dict() . default(fn() -> 3) ; d[0] . print ; d[0] += 1 ; d . print ; d[0] += 1 ; d . print", "3\n{0: 4}\n{0: 5}\n"); }
+    #[test] fn test_while_else_no_loop() { run_str("while false { break } else { print('hello') }", "hello\n"); }
+    #[test] fn test_while_else_break() { run_str("while true { break } else { print('hello') } print('world')", "world\n"); }
+    #[test] fn test_while_else_no_break() { run_str("let x = true ; while x { x = false } else { print('hello') }", "hello\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }

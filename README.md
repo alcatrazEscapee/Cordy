@@ -88,7 +88,7 @@ For a more comprehensive documentation, see the [language documentation](./docs/
 
 - implement basic structs: compile time verified access with `->`, type-dispatched at runtime.
 - `continue` and `break` in `for` statements
-- `else` on `while` and `for` statements, like Python
+- `else` on `for` statements, like Python
 - Let top level `if`-`then`-`else` get parsed in `parse_if_statement()`
 - some kind of `switch` expression statement?
 - `assert` statement?
