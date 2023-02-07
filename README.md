@@ -87,7 +87,6 @@ For a more comprehensive documentation, see the [language documentation](./docs/
 ### To-Do
 
 - implement basic structs: compile time verified access with `->`, type-dispatched at runtime.
-- Let top level `if`-`then`-`else` get parsed in `parse_if_statement()`
 - some kind of `switch` expression statement?
 - `assert` statement?
 - Even MORE standard library functions
