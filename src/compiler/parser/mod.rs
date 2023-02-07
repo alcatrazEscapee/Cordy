@@ -501,6 +501,15 @@ impl Parser<'_> {
         self.advance();
         self.push_delayed_pop();
         self.parse_expression();
+
+        if let Some(KeywordThen) = self.peek() {
+            // If we see a top-level `if <expression> then`, we want to consider this an expression, with a top level `if-then-else` statement
+            // So here, we shortcut into expression parsing.
+            self.parse_expr_1_inline_if_then_else(false);
+            return;
+        }
+
+
         let jump_if_false = self.reserve(); // placeholder for jump to the beginning of an if branch, if it exists
         self.parse_block_statement();
 
@@ -875,7 +884,7 @@ impl Parser<'_> {
             Some(OpenBrace) => self.parse_expr_1_dict_or_set_literal(),
             Some(At) => self.parse_annotated_expression_function(),
             Some(KeywordFn) => self.parse_expression_function(),
-            Some(KeywordIf) => self.parse_expr_1_inline_if_then_else(),
+            Some(KeywordIf) => self.parse_expr_1_inline_if_then_else(true),
             _ => self.error_with(|t| ExpectedExpressionTerminal(t)),
         }
     }
@@ -1138,11 +1147,14 @@ impl Parser<'_> {
         self.expect(CloseBrace);
     }
 
-    fn parse_expr_1_inline_if_then_else(self: &mut Self) {
+    /// If `parse_prefix` is `false`, this will not parse the leading `if <condition>`
+    fn parse_expr_1_inline_if_then_else(self: &mut Self, parse_prefix: bool) {
         trace::trace_parser!("rule <expr-1-inline-if-then-else>");
 
-        self.advance(); // Consume `if`
-        self.parse_expression(); // condition
+        if parse_prefix {
+            self.advance(); // Consume `if`
+            self.parse_expression(); // condition
+        }
         let jump_if_false_pop = self.reserve();
         self.expect(KeywordThen);
         self.parse_expression(); // Value if true
