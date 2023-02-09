@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use itertools::Itertools;
 
-use crate::{compiler, stdlib, trace};
+use crate::{compiler, misc, stdlib, trace};
 use crate::compiler::{CompileResult, IncrementalCompileResult, Locals};
 use crate::stdlib::NativeFunction;
 use crate::vm::value::{PartialFunctionImpl, UpValue};
@@ -79,6 +79,9 @@ pub trait VirtualInterface {
     fn println0(self: &mut Self);
     fn println(self: &mut Self, str: String);
     fn print(self: &mut Self, str: String);
+
+    fn read_line(self: &mut Self) -> String;
+    fn read(self: &mut Self) -> String;
 
     // Stack Manipulation
     fn peek(self: &Self, offset: usize) -> &Value;
@@ -834,6 +837,19 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
     fn println(self: &mut Self, str: String) { writeln!(&mut self.write, "{}", str).unwrap(); }
     fn print(self: &mut Self, str: String) { write!(&mut self.write, "{}", str).unwrap(); }
 
+    fn read_line(self: &mut Self) -> String {
+        let mut buf = String::new();
+        self.read.read_line(&mut buf).unwrap();
+        misc::strip_line_ending(&mut buf);
+        buf
+    }
+
+    fn read(self: &mut Self) -> String {
+        let mut buf = String::new();
+        self.read.read_to_string(&mut buf).unwrap();
+        buf
+    }
+
 
     // ===== Stack Manipulations ===== //
 
@@ -1042,6 +1058,7 @@ mod test {
     #[test] fn test_function_return_3() { run_str("fn foo() { let x = 3; do { return x } } foo() . print", "3\n"); }
     #[test] fn test_function_return_4() { run_str("fn foo() { let x = 3; do { let x; } return x } foo() . print", "3\n"); }
     #[test] fn test_function_return_5() { run_str("fn foo() { let x; do { let x = 3; return x } } foo() . print", "3\n"); }
+    #[test] fn test_function_return_no_value() { run_str("fn foo() { print('hello') ; return ; print('world') } foo() . print", "hello\nnil\n"); }
     #[test] fn test_partial_function_composition_1() { run_str("fn foo(a, b, c) { c . print } (3 . (2 . (1 . foo)))", "3\n"); }
     #[test] fn test_partial_function_composition_2() { run_str("fn foo(a, b, c) { c . print } (2 . (1 . foo)) (3)", "3\n"); }
     #[test] fn test_partial_function_composition_3() { run_str("fn foo(a, b, c) { c . print } (1 . foo) (2) (3)", "3\n"); }

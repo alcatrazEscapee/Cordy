@@ -26,6 +26,8 @@ pub fn find_native_function(name: &String) -> Option<NativeFunction> {
 
 #[derive(Eq, PartialEq, Debug, Clone, Copy, Hash)]
 pub enum NativeFunction {
+    Read,
+    ReadLine,
     Print,
     ReadText,
     WriteText,
@@ -187,6 +189,8 @@ fn load_native_functions() -> Vec<NativeFunctionInfo> {
     }
 
     // core
+    declare!(Read, "read", "", 0);
+    declare!(ReadLine, "read_line", "", 0);
     declare!(Print, "print", "...");
     declare!(ReadText, "read_text", "file", 1);
     declare!(WriteText, "write_text", "file, text", 2);
@@ -491,6 +495,8 @@ pub fn invoke<VM>(native: NativeFunction, nargs: u8, vm: &mut VM) -> ValueResult
     }
 
     match native {
+        Read => dispatch!(Ok(vm.read().to_value())),
+        ReadLine => dispatch!(Ok(vm.read_line().to_value())),
         Print => {
             dispatch_varargs!(vm.println0(), a1, vm.println(a1.to_str()), an, {
                 vm.print(an.next().unwrap().to_str());

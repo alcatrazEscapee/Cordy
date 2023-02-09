@@ -827,10 +827,7 @@ impl Iterator for Iterable {
             }
             Iterable::Range(it, range) => range.next(it),
             Iterable::Enumerate(index, it) => {
-                let ret = (*it).next().map(|u| {
-                    let vec = vec![Int(*index as i64), u];
-                    vec.to_value()
-                });
+                let ret = (*it).next().map(|u| vec![Int(*index as i64), u].to_value());
                 *index += 1;
                 ret
             },
