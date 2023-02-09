@@ -53,7 +53,7 @@ pub enum MaybeRc<T> where T : Sized {
 
 impl<T> MaybeRc<T> {
 
-    pub fn new(t : T) -> MaybeRc<T> {
+    pub fn new(t: T) -> MaybeRc<T> {
         MaybeRc::Raw(t)
     }
 

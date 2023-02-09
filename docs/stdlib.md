@@ -25,6 +25,26 @@ When called with no arguments, prints a single `\n` character.
 
 Returns `nil`
 
+### Read `read() -> str`
+
+Reads from `stdin` until end of file. Returns the result as a string.
+
+N.B When reading from external sources, newline `\r\n` sequences will be replaced with a single `\n`.
+
+### Read Line `read_line() -> str`
+
+Reads a single line from `stdin`. Returns the result as a string, with the newline suffix removed.
+
+### Read Text `read_text(path: str) -> str`
+
+Reads from a text file, located at `path`. Any error reading the file will cause the program to exit. Returns the result as a string. 
+
+N.B When reading from external sources, newline `\r\n` sequences will be replaced with a single `\n`.
+
+### Write Text `write_text(path: str, content: str) -> str`
+
+Writes the string `content` to the file at `path`, in overwrite mode. A file will be created if it does not exist, and if it does it will be overwritten.
+
 ### Bool `bool(x: any) -> bool`
 
 Returns the argument as a boolean. `nil`, `0`, `false`, `''`, and empty collections, will return `false`, everything else will return `true`.
