@@ -209,6 +209,27 @@ Compiles and evaluates the Cordy expression represented by the string `x`. This 
 3
 ```
 
+### Type Of `typeof(x: any) -> any`
+
+Returns the *type* of the argument. This returns either the value, or a function representing the type for each individual input. For example, `typeof(3)` will return the function `int`, `typeof([1, 2, 3])` will return the native function `list`. The `typeof` function has a few fundamental guarantees:
+
+1. The return value of this function will **always** be comparable using `==` to distinguish different types. That is, if `typeof(x) == typeof(y)`, these objects are of the exact same underlying type.
+2. The expression `x is typeof(x)` will **always** be `true`, for any value of `x`.
+3. Note that `x is y` **does not** imply that `typeof(x) == y`, as there are unique type names such as `any` and `iterable`, which will break this assumption (`[] is iterable` is `true`, but `typeof(x) != iterable`).
+
+**Example**
+
+```
+>>> typeof(nil)
+nil
+>>> typeof('hello')
+str
+>>> typeof([1, 2, 3])
+list
+>>> typeof(fn() -> nil)
+function
+```
+
 ### Len `len(x: iterable) -> int`
 
 Returns the length of `x`. For strings, this returns the number of Unicode Scalar Values. It is `O(1)` except for `str`, which is `O(n)`.

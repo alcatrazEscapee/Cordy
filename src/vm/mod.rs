@@ -1435,6 +1435,12 @@ mod test {
     #[test] fn test_for_else_break() { run_str("for c in 'abcd' { if c == 'b' { break } } else { print('hello') } print('world')", "world\n"); }
     #[test] fn test_for_else_no_break() { run_str("for c in 'abcd' { if c == 'B' { break } } else { print('hello') }", "hello\n"); }
     #[test] fn test_top_level_if_then_else() { run_str("if true then print('hello') else print('goodbye')", "hello\n"); }
+    #[test] fn test_weird_pattern_function_arg() { run_str("(1, 2) . (fn(_, *_) -> 'hello') (3) . print", "hello\n"); }
+    #[test] fn test_repr_of_function() { run_str("(fn(_, *_, x) -> nil) . repr . print", "fn _(_, *_, x)\n"); }
+    #[test] fn test_repr_of_partial_function() { run_str("(fn(_, *_, x) -> nil)(1) . repr . print", "fn _(_, *_, x)\n"); }
+    #[test] fn test_repr_of_closure() { run_str("fn box(x) -> fn(_, *_, y) -> x ; box(nil) . repr . print", "fn _(_, *_, y)\n"); }
+    #[test] fn test_typeof_of_basic_types() { run_str("[nil, 0, false, 'test', [], {1}, {1: 2}, heap(), (1, 2), range(30), enumerate([])] . map(typeof) . map(print)", "nil\nint\nbool\nstr\nlist\nset\ndict\nheap\nvector\nrange\nenumerate\n"); }
+    #[test] fn test_typeof_functions() { run_str("[range, fn() -> nil, push(3), ((fn(a, b) -> nil)(1))] . map(typeof) . all(==function) . print", "true\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }
