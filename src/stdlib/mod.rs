@@ -43,6 +43,7 @@ pub enum NativeFunction {
     Iterable,
     Repr,
     Eval,
+    TypeOf,
 
     // Native Operators
     OperatorUnarySub,
@@ -206,6 +207,7 @@ fn load_native_functions() -> Vec<NativeFunctionInfo> {
     declare!(Iterable, "iterable", "", None, false);
     declare!(Repr, "repr", "x", 1);
     declare!(Eval, "eval", "expr", 1);
+    declare!(TypeOf, "typeof", "x", 1);
 
     // operator
     declare!(OperatorUnarySub, "(-)", "x", Some(1), true);
@@ -534,6 +536,7 @@ pub fn invoke<VM>(native: NativeFunction, nargs: u8, vm: &mut VM) -> ValueResult
         Vector => dispatch_varargs!(Ok(vec![].to_value()), an, Ok(an.to_vector())),
         Repr => dispatch!(a1, Ok(a1.to_repr_str().to_value())),
         Eval => dispatch!(a1, vm.invoke_eval(a1.as_str()?)),
+        TypeOf => dispatch!(a1, Ok(type_of(a1))),
 
         // operator
         OperatorUnarySub => dispatch!(a1, operator::unary_sub(a1), a2, operator::binary_sub(a1, a2)),
@@ -711,4 +714,27 @@ fn wrap_as_partial<VM>(native: NativeFunction, nargs: u8, vm: &mut VM) -> Value 
         args.push(vm.pop().clone());
     }
     Value::PartialNativeFunction(native, Box::new(args))
+}
+
+fn type_of(value: Value) -> Value {
+    // This function is here because we don't want `Value::{*}` to be imported, rather `NativeFunction::{*}` due to shadowing issues.
+    match value {
+        Value::Nil => Value::Nil,
+        Value::Bool(_) => Bool.to_value(),
+        Value::Int(_) => Int.to_value(),
+        Value::Str(_) => Str.to_value(),
+
+        Value::List(_) => List.to_value(),
+        Value::Set(_) => Set.to_value(),
+        Value::Dict(_) => Dict.to_value(),
+        Value::Heap(_) => Heap.to_value(),
+        Value::Vector(_) => Vector.to_value(),
+
+        Value::Range(_) => Range.to_value(),
+        Value::Enumerate(_) => Enumerate.to_value(),
+
+        x @ (Value::Iter(_) | Value::Memoized(_)) => panic!("{:?} is synthetic and cannot have type_of() called on it", x),
+
+        Value::Function(_) | Value::PartialFunction(_) | Value::NativeFunction(_) | Value::PartialNativeFunction(_, _) | Value::Closure(_) => Function.to_value(),
+    }
 }

@@ -1088,7 +1088,7 @@ impl Parser<'_> {
     }
 
     fn parse_expr_1_dict_or_set_literal(self: &mut Self) {
-        trace::trace_interpreter!("rule <expr-1-dict-or-set-literal>");
+        trace::trace_parser!("rule <expr-1-dict-or-set-literal>");
         self.advance(); // Consume `{`
 
         // As dict and set literals both start the same, we initially parse empty `{}` as a empty dict, and use the first argument to determine if it is a dict or set

@@ -98,6 +98,7 @@ impl Value {
             PartialFunction(f) => f.func.to_str(),
             NativeFunction(b) => String::from(b.name()),
             PartialNativeFunction(b, _) => String::from(b.name()),
+            Closure(c) => (*c).func.as_ref().name.clone(),
             _ => self.to_repr_str(),
         }
     }
@@ -126,7 +127,7 @@ impl Value {
             Memoized(_) => format!("<synthetic> memoized"),
 
             Function(f) => (*f).as_ref().borrow().as_str(),
-            PartialFunction(f) => (*f).as_ref().borrow().func.to_str(),
+            PartialFunction(f) => (*f).as_ref().borrow().func.to_repr_str(),
             NativeFunction(b) => format!("fn {}({})", b.name(), b.args()),
             PartialNativeFunction(b, _) => format!("fn {}({})", b.name(), b.args()),
             Closure(c) => (*c).func.as_ref().borrow().as_str(),
@@ -381,6 +382,7 @@ impl IntoValue for bool { fn to_value(self) -> Value { Bool(self) } }
 impl IntoValue for i64 { fn to_value(self) -> Value { Int(self) } }
 impl IntoValue for char { fn to_value(self) -> Value { Str(Rc::new(String::from(self))) } }
 impl<'a> IntoValue for &'a str { fn to_value(self) -> Value { Str(Rc::new(String::from(self))) } }
+impl IntoValue for NativeFunction { fn to_value(self) -> Value { NativeFunction(self) } }
 impl IntoValue for String { fn to_value(self) -> Value { Str(Rc::new(self)) } }
 impl IntoValue for VecDeque<Value> { fn to_value(self) -> Value { List(Mut::new(self)) } }
 impl IntoValue for Vec<Value> { fn to_value(self) -> Value { Vector(Mut::new(self)) } }
