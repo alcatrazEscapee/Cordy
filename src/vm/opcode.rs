@@ -1,17 +1,26 @@
 use crate::stdlib::NativeFunction;
+use crate::misc::OffsetAdd;
+
+use Opcode::{*};
 
 #[derive(Eq, PartialEq, Debug, Clone, Copy)]
 pub enum Opcode {
 
     Noop,
 
-    // Flow Control
-    // These only peek() the stack
-    JumpIfFalse(u32),
-    JumpIfFalsePop(u32),
-    JumpIfTrue(u32),
-    JumpIfTruePop(u32),
-    Jump(u32),
+    /// The parameter is an offset value, based on the IP *after* the instruction is executed. So an instruction:
+    ///
+    /// `005: Jump(-2)`
+    ///
+    /// will jump to 005 + 1 (since we finish executing this instruction) - 2 = 004
+    ///
+    /// `Jump(-1)` is a no-op.
+    JumpIfFalse(i32),
+    JumpIfFalsePop(i32),
+    JumpIfTrue(i32),
+    JumpIfTruePop(i32),
+    Jump(i32),
+
     Return,
 
     // Stack Operations
@@ -135,6 +144,20 @@ pub enum Opcode {
     // Special
     Exit,
     Yield,
+}
+
+impl Opcode {
+    /// Replaces the parameter of a relative jump, with an absolute offset. Only used for debugging, i.e. disassembly purposes.
+    pub fn to_absolute_jump(self: Self, ip: usize) -> Opcode {
+        match self {
+            JumpIfFalse(offset) => JumpIfFalse(ip.add_offset(offset) as i32 + 1),
+            JumpIfFalsePop(offset) => JumpIfFalsePop(ip.add_offset(offset) as i32 + 1),
+            JumpIfTrue(offset) => JumpIfTrue(ip.add_offset(offset) as i32 + 1),
+            JumpIfTruePop(offset) => JumpIfTruePop(ip.add_offset(offset) as i32 + 1),
+            Jump(offset) => Jump(ip.add_offset(offset) as i32 + 1),
+            _ => self,
+        }
+    }
 }
 
 

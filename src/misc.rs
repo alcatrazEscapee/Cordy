@@ -78,3 +78,13 @@ impl<T> MaybeRc<T> {
         }
     }
 }
+
+pub trait OffsetAdd<F> {
+    fn add_offset(self, offset: F) -> Self;
+}
+
+impl OffsetAdd<i32> for usize {
+    fn add_offset(self, offset: i32) -> Self {
+        (self as isize + offset as isize) as usize
+    }
+}

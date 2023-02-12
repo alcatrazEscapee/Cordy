@@ -569,14 +569,13 @@ impl Parser<'_> {
         self.push_delayed_pop();
         self.advance();
 
-        let jump: u32 = self.begin_loop();
+        let jump: usize = self.begin_loop();
 
         self.parse_expression(); // While condition
         let jump_if_false = self.reserve(); // Jump to the end
         self.parse_block_statement(); // Inner loop statements, and jump back to front
         self.push_delayed_pop(); // Inner loop expressions cannot yield out of the loop
-        self.push(Jump(jump));
-
+        self.push_jump(jump, Jump);
         self.fix_jump(jump_if_false, JumpIfFalsePop); // Fix the initial conditional jump
 
         if let Some(KeywordElse) = self.peek() { // Parse `while {} else {}`
@@ -602,11 +601,11 @@ impl Parser<'_> {
         self.push_delayed_pop();
         self.advance();
 
-        let jump: u32 = self.begin_loop(); // Top of the loop
+        let jump: usize = self.begin_loop(); // Top of the loop
 
         self.parse_block_statement(); // Inner loop statements, and jump back to front
         self.push_delayed_pop(); // Loops can't return a value
-        self.push(Jump(jump));
+        self.push_jump(jump, Jump);
 
         self.end_loop();
     }
@@ -639,7 +638,7 @@ impl Parser<'_> {
         self.push(InitIterable);
 
         // Test
-        let jump: u32 = self.begin_loop();
+        let jump: usize = self.begin_loop();
         self.push(TestIterable);
         let jump_if_false_pop = self.reserve();
 
@@ -656,7 +655,7 @@ impl Parser<'_> {
         // In order to do this, we just need to emit the proper `LiftUpValue` opcodes each iteration of the loop
         self.pop_locals(Some(self.scope_depth), false, false, true);
 
-        self.push(Jump(jump));
+        self.push_jump(jump, Jump);
 
         // Fix the jump
         self.fix_jump(jump_if_false_pop, JumpIfFalsePop);
@@ -694,9 +693,9 @@ impl Parser<'_> {
         self.advance();
         match self.current_locals().loops.last() {
             Some(loop_stmt) => {
-                let jump_to: u32 = loop_stmt.start_index;
+                let jump_to: usize = loop_stmt.start_index;
                 self.pop_locals(Some(loop_stmt.scope_depth + 1), false, true, true);
-                self.push(Jump(jump_to));
+                self.push_jump(jump_to, Jump);
             },
             None => self.semantic_error(ContinueOutsideOfLoop),
         }
@@ -1784,15 +1783,16 @@ mod tests {
         let compile = parser::parse(result);
         assert!(compile.errors.is_empty(), "Found parser errors: {:?}", compile.errors);
 
-        // Tokens will contain int values as exact values, as it's easier to read as a test DSL
-        // However, the parser will give us constant IDs
-        // So, index each one to produce what it looks like
-        // We also want to also trim the trailing `Pop`, `Exit`, as the parser will insert that
+        // For the purposes of the test, we perform some transformations on the 'expected' opcodes
+        // - Int tokens use the actual value, as opposed to a constant ID
+        // - Jump opcodes replace relative jumps with absolute jumps
+        // - The trailing `Pop`, `Exit` tokens are removed.
         let constants: Vec<i64> = compile.constants;
         let mut actual: Vec<Opcode> = compile.code.into_iter()
-            .map(|t| match t {
+            .enumerate()
+            .map(|(ip, t)| match t {
                 Int(i) => Int(constants[i as usize] as u32),
-                t => t
+                _ => t.to_absolute_jump(ip),
             })
             .collect::<Vec<Opcode>>();
 

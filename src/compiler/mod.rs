@@ -157,19 +157,15 @@ impl CompileResult {
             } else {
                 " ".repeat(width + 3)
             };
-            let asm: String = match token {
-                t @ (Int(cid) | CheckLengthEqualTo(cid) | CheckLengthGreaterThan(cid)) => format!("{:?} -> {}", t, self.constants[*cid as usize]),
-                Str(sid) => format!("Str({}) -> {:?}", sid, self.strings[*sid as usize]),
-                List(cid) => format!("List({}) -> {}", cid, self.constants[*cid as usize]),
-                Function(fid) => format!("Function({}) -> {:?}", fid, self.functions[*fid as usize]),
-                t @ (PushGlobal(_) | StoreGlobal(_) | PushLocal(_) | StoreLocal(_)) => {
-                    if let Some(local) = locals.next() {
-                        format!("{:?} -> {}", t, local)
-                    } else {
-                        format!("{:?}", t)
-                    }
+            let asm: String = match *token {
+                Int(cid) | CheckLengthEqualTo(cid) | CheckLengthGreaterThan(cid) | List(cid) => format!("{:?} -> {}", token, self.constants[cid as usize]),
+                Str(sid) => format!("Str({}) -> {:?}", sid, self.strings[sid as usize]),
+                Function(fid) => format!("Function({}) -> {:?}", fid, self.functions[fid as usize]),
+                PushGlobal(_) | StoreGlobal(_) | PushLocal(_) | StoreLocal(_) => match locals.next() {
+                    Some(local) => format!("{:?} -> {}", token, local),
+                    None => format!("{:?}", token),
                 },
-                t => format!("{:?}", t),
+                _ => format!("{:?}", token.to_absolute_jump(ip)),
             };
             lines.push(format!("{}{:0>4} {}", label, ip % 10_000, asm));
         }

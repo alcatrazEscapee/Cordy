@@ -9,6 +9,7 @@ use crate::{compiler, misc, stdlib, trace};
 use crate::compiler::{CompileResult, IncrementalCompileResult, Locals};
 use crate::stdlib::NativeFunction;
 use crate::vm::value::{PartialFunctionImpl, UpValue};
+use crate::misc::OffsetAdd;
 
 pub use crate::vm::error::{DetailRuntimeError, RuntimeError, StackTraceFrame};
 pub use crate::vm::opcode::Opcode;
@@ -214,40 +215,41 @@ impl<R, W> VirtualMachine<R, W> where
             // Flow Control
             // All jumps are absolute (because we don't have variable length instructions and it's easy to do so)
             JumpIfFalse(ip) => {
-                trace::trace_interpreter!("jump if false {} -> {}", self.stack.last().unwrap().as_debug_str(), ip);
-                let jump: usize = ip as usize;
+                let jump: usize = self.ip.add_offset(ip);
+                trace::trace_interpreter!("jump if false {} -> {}", self.stack.last().unwrap().as_debug_str(), jump);
                 let a1: &Value = self.peek(0);
                 if !a1.as_bool() {
                     self.ip = jump;
                 }
             },
             JumpIfFalsePop(ip) => {
-                trace::trace_interpreter!("jump if false pop {} -> {}", self.stack.last().unwrap().as_debug_str(), ip);
-                let jump: usize = ip as usize;
+                let jump: usize = self.ip.add_offset(ip);
+                trace::trace_interpreter!("jump if false pop {} -> {}", self.stack.last().unwrap().as_debug_str(), jump);
                 let a1: Value = self.pop();
                 if !a1.as_bool() {
                     self.ip = jump;
                 }
             },
             JumpIfTrue(ip) => {
-                trace::trace_interpreter!("jump if true {} -> {}", self.stack.last().unwrap().as_debug_str(), ip);
-                let jump: usize = ip as usize;
+                let jump: usize = self.ip.add_offset(ip);
+                trace::trace_interpreter!("jump if true {} -> {}", self.stack.last().unwrap().as_debug_str(), jump);
                 let a1: &Value = self.peek(0);
                 if a1.as_bool() {
                     self.ip = jump;
                 }
             },
             JumpIfTruePop(ip) => {
-                trace::trace_interpreter!("jump if true pop {} -> {}", self.stack.last().unwrap().as_debug_str(), ip);
-                let jump: usize = ip as usize;
+                let jump: usize = self.ip.add_offset(ip);
+                trace::trace_interpreter!("jump if true pop {} -> {}", self.stack.last().unwrap().as_debug_str(), jump);
                 let a1: Value = self.pop();
                 if a1.as_bool() {
                     self.ip = jump;
                 }
             },
             Jump(ip) => {
-                trace::trace_interpreter!("jump -> {}", ip);
-                self.ip = ip as usize;
+                let jump: usize = self.ip.add_offset(ip);
+                trace::trace_interpreter!("jump -> {}", jump);
+                self.ip = jump;
             },
             Return => {
                 trace::trace_interpreter!("return -> {}", self.return_ip());
@@ -1491,8 +1493,14 @@ mod test {
             return
         }
 
+        let compile = compile.unwrap();
+        println!("[-d] === Compiled ===");
+        for line in compile.disassemble() {
+            println!("[-d] {}", line);
+        }
+
         let mut buf: Vec<u8> = Vec::new();
-        let mut vm = VirtualMachine::new(compile.ok().unwrap(), &b""[..], &mut buf);
+        let mut vm = VirtualMachine::new(compile, &b""[..], &mut buf);
 
         let result: ExitType = vm.run_until_completion();
         assert!(vm.stack.is_empty() || result.is_early_exit());
@@ -1518,6 +1526,10 @@ mod test {
         }
 
         let compile = compile.unwrap();
+        println!("[-d] === Compiled ===");
+        for line in compile.disassemble() {
+            println!("[-d] {}", line);
+        }
 
         let mut buf: Vec<u8> = Vec::new();
         let mut vm = VirtualMachine::new(compile, &b""[..], &mut buf);
