@@ -242,13 +242,20 @@ impl<'a> Parser<'a> {
     }
 
     /// Returns an index to the next opcode to be emitted, to be used to emit a jump to this location.
-    pub fn next_opcode(self: &Self) -> u32 {
-        self.output.len() as u32
+    pub fn next_opcode(self: &Self) -> usize {
+        self.output.len()
+    }
+
+    /// Given a `usize` index, pushes a jump instruction that jumps *back* to the target index.
+    pub fn push_jump<F: FnOnce(i32) -> Opcode>(self: &mut Self, origin: usize, jump: F) {
+        let jump_opcode: Opcode = jump(origin as i32 - self.next_opcode() as i32 - 1);
+        trace::trace_parser!("push jump at {} -> {:?}", self.next_opcode(), jump_opcode);
+        self.push(jump_opcode);
     }
 
     /// Given a `usize` index, which is obtained from `self.reserve()`, this fixes the jump instruction at that location to point to the next opcode.
-    pub fn fix_jump<F : FnOnce(u32) -> Opcode>(self: &mut Self, reserved: usize, jump: F) {
-        let jump_opcode = jump(self.next_opcode());
+    pub fn fix_jump<F : FnOnce(i32) -> Opcode>(self: &mut Self, reserved: usize, jump: F) {
+        let jump_opcode: Opcode = jump(self.next_opcode() as i32 - reserved as i32 - 1);
         trace::trace_parser!("fixing jump at {} -> {:?}", reserved, jump_opcode);
         self.output[reserved] = jump_opcode;
     }

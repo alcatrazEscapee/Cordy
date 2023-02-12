@@ -19,13 +19,13 @@ use Opcode::{*};
 
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub struct Loop {
-    pub(super) start_index: u32,
+    pub(super) start_index: usize,
     pub(super) scope_depth: u32,
     pub(super) break_statements: Vec<usize>
 }
 
 impl Loop {
-    fn new(start_index: u32, depth: u32) -> Loop {
+    fn new(start_index: usize, depth: u32) -> Loop {
         Loop { start_index, scope_depth: depth, break_statements: Vec::new() }
     }
 }
@@ -410,8 +410,8 @@ impl<'a> Parser<'a> {
     // ===== Loops ===== //
 
     /// Marks the beginning of a loop type statement, for the purposes of tracking `break` and `continue` statements.
-    pub fn begin_loop(self: &mut Self) -> u32 {
-        let loop_start: u32 = self.next_opcode(); // Top of the loop, push onto the loop stack
+    pub fn begin_loop(self: &mut Self) -> usize {
+        let loop_start: usize = self.next_opcode(); // Top of the loop, push onto the loop stack
         let loop_depth: u32 = self.scope_depth;
         self.current_locals_mut().loops.push(Loop::new(loop_start, loop_depth));
         loop_start
