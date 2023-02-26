@@ -635,13 +635,13 @@ pub fn invoke<VM>(native: NativeFunction, nargs: u8, vm: &mut VM) -> ValueResult
 }
 
 
-pub fn get_index<VM>(vm: &mut VM, dict: Value, key: Value) -> ValueResult where VM : VirtualInterface {
-    if dict.is_dict() {
-        return get_dict_index(vm, dict, key);
+pub fn get_index<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : VirtualInterface {
+    if a1.is_dict() {
+        return get_dict_index(vm, a1, a2);
     }
 
-    let indexable = dict.as_index()?;
-    let index: usize = collections::get_checked_index(indexable.len(), key.as_int()?)?;
+    let indexable = a1.as_index()?;
+    let index: usize = collections::get_checked_index(indexable.len(), a2.as_int()?)?;
 
     Ok(indexable.get_index(index))
 }

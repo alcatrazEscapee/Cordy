@@ -762,6 +762,27 @@ impl<R, W> VirtualMachine<R, W> where
                 }
                 Ok(FunctionType::Native)
             },
+            ls @ Value::List(_) => {
+                // This is somewhat horrifying, but it could be optimized in constant cases later, in all cases where this syntax is actually used
+                // As a result this code should almost never enter as it should be optimized away.
+                trace::trace_interpreter!("invoke_list -> {}, nargs = {}, ", ls.as_debug_str(), nargs);
+                if nargs != 1 {
+                    return ValueIsNotFunctionEvaluable(ls.clone()).err();
+                }
+                let arg = self.pop();
+                let list = match self.pop() {
+                    Value::List(it) => it,
+                    _ => panic!("Stack corruption"),
+                };
+                let list = list.unbox();
+                if list.len() != 1 {
+                    return ValueErrorEvalListMustHaveUnitLength(list.len()).err()
+                }
+                let index = list[0].clone();
+                let result = stdlib::get_index(self, arg, index)?;
+                self.push(result);
+                Ok(FunctionType::Native)
+            },
             _ => return ValueIsNotFunctionEvaluable(f.clone()).err(),
         }
     }
@@ -1443,6 +1464,8 @@ mod test {
     #[test] fn test_repr_of_closure() { run_str("fn box(x) -> fn(_, *_, y) -> x ; box(nil) . repr . print", "fn _(_, *_, y)\n"); }
     #[test] fn test_typeof_of_basic_types() { run_str("[nil, 0, false, 'test', [], {1}, {1: 2}, heap(), (1, 2), range(30), enumerate([])] . map(typeof) . map(print)", "nil\nint\nbool\nstr\nlist\nset\ndict\nheap\nvector\nrange\nenumerate\n"); }
     #[test] fn test_typeof_functions() { run_str("[range, fn() -> nil, push(3), ((fn(a, b) -> nil)(1))] . map(typeof) . all(==function) . print", "true\n"); }
+    #[test] fn test_compose_with_single_element_list() { run_str("'hello' . [0] . print", "h\n"); }
+    #[test] fn test_eval_single_element_list() { run_str("[-1]('hello') . print", "o\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }
