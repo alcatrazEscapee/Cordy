@@ -35,6 +35,7 @@ pub enum RuntimeError {
     ValueErrorInvalidFormatCharacter(Option<char>),
     ValueErrorNotAllArgumentsUsedInStringFormatting(Value),
     ValueErrorMissingRequiredArgumentInStringFormatting,
+    ValueErrorEvalListMustHaveUnitLength(usize),
 
     TypeErrorUnaryOp(Opcode, Value),
     TypeErrorBinaryOp(Opcode, Value, Value),

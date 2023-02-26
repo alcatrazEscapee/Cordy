@@ -106,6 +106,7 @@ impl AsError for RuntimeError {
             RuntimeError::ValueErrorInvalidFormatCharacter(c) => format!("ValueError: Invalid format character '{}' in format string", c.format_error()),
             RuntimeError::ValueErrorNotAllArgumentsUsedInStringFormatting(v) => format!("ValueError: Not all arguments consumed in format string, next: {}", v.format_error()),
             RuntimeError::ValueErrorMissingRequiredArgumentInStringFormatting => format!("ValueError: Not enough arguments for format string"),
+            RuntimeError::ValueErrorEvalListMustHaveUnitLength(len) => format!("ValueError: Evaluating an index must have len = 1, got len = {}", len),
 
             RuntimeError::TypeErrorUnaryOp(op, v) => format!("TypeError: Argument to unary '{}' must be an int, got {}", op.format_error(), v.format_error()),
             RuntimeError::TypeErrorBinaryOp(op, l, r) => format!("TypeError: Cannot {} {} and {}", op.format_error(), l.format_error(), r.format_error()),
