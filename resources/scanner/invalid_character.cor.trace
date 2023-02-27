@@ -9,40 +9,40 @@ NewLine
 
 === Scan Errors ===
 
-ScanError { error: InvalidCharacter('$'), lineno: 1 }
-ScanError { error: InvalidCharacter('#'), lineno: 2 }
-ScanError { error: InvalidCharacter('#'), lineno: 3 }
-ScanError { error: InvalidCharacter('$'), lineno: 5 }
-ScanError { error: InvalidCharacter('$'), lineno: 6 }
+ScanError { error: InvalidCharacter('$'), loc: Location { start: 41, end: 41 } }
+ScanError { error: InvalidCharacter('#'), loc: Location { start: 44, end: 44 } }
+ScanError { error: InvalidCharacter('#'), loc: Location { start: 74, end: 74 } }
+ScanError { error: InvalidCharacter('$'), loc: Location { start: 101, end: 101 } }
+ScanError { error: InvalidCharacter('$'), loc: Location { start: 179, end: 179 } }
 
 === Formatted Scan Errors ===
 
 Invalid character: '$'
-  at: line 2 (invalid_character.cor)
-  at:
+  at: line 2 (invalid_character)
 
-$
-
-Invalid character: '#'
-  at: line 3 (invalid_character.cor)
-  at:
-
-#
+2 | $
+3 | ^
 
 Invalid character: '#'
-  at: line 4 (invalid_character.cor)
-  at:
+  at: line 3 (invalid_character)
 
-/* this one is fine $#@ */ # /* that one is not */
+3 | #
+4 | ^
+
+Invalid character: '#'
+  at: line 4 (invalid_character)
+
+4 | /* this one is fine $#@ */ # /* that one is not */
+5 |                            ^
 
 Invalid character: '$'
-  at: line 6 (invalid_character.cor)
-  at:
+  at: line 6 (invalid_character)
 
-$ // at the beginning of a line
+6 | $ // at the beginning of a line
+7 | ^
 
 Invalid character: '$'
-  at: line 7 (invalid_character.cor)
-  at:
+  at: line 7 (invalid_character)
 
-/* and as the last character of a line -> */ $
+7 | /* and as the last character of a line -> */ $
+8 |                                              ^

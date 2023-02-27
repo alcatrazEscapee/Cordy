@@ -11,12 +11,15 @@ StringLiteral("... this doesn't end\n\nbut it continues...\n\n")
 
 === Scan Errors ===
 
-ScanError { error: UnterminatedStringLiteral, lineno: 0 }
+ScanError { error: UnterminatedStringLiteral, loc: Location { start: 9, end: 57 } }
 
 === Formatted Scan Errors ===
 
 Unterminated string literal (missing a closing single quote)
-  at: line 1 (unterminated_string_literal.cor)
-  at:
+  at: line 1 - 4 (unterminated_string_literal)
 
-let x = '... this doesn\'t end
+1 | let x = '... this doesn\'t end
+2 |
+3 | but it continues...
+4 |
+5 | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

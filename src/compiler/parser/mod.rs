@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use crate::compiler::CompileResult;
 use crate::compiler::parser::core::ParserState;
-use crate::compiler::parser::semantic::{LateBoundGlobal, Reference, LValue, LValueReference};
+use crate::compiler::parser::semantic::{LateBoundGlobal, LValue, LValueReference, Reference};
 use crate::compiler::scanner::{ScanResult, ScanToken};
 use crate::misc::MaybeRc;
 use crate::stdlib::NativeFunction;
@@ -17,6 +17,7 @@ use NativeFunction::{*};
 use Opcode::{*};
 use ParserErrorType::{*};
 use ScanToken::{*};
+use crate::reporting::Location;
 
 pub const RULE_INCREMENTAL: ParseRule = |mut parser| parser.parse_incremental();
 pub const RULE_EXPRESSION: ParseRule = |mut parser| parser.parse_expression();
@@ -58,7 +59,7 @@ pub fn parse_incremental(scan_result: ScanResult, code: &mut Vec<Opcode>, locals
 }
 
 
-fn parse_rule(tokens: Vec<ScanToken>, rule: fn(Parser) -> ()) -> CompileResult {
+fn parse_rule(tokens: Vec<(Location, ScanToken)>, rule: fn(Parser) -> ()) -> CompileResult {
 
     let mut code: Vec<Opcode> = Vec::new();
     let mut errors: Vec<ParserError> = Vec::new();
@@ -89,7 +90,7 @@ fn parse_rule(tokens: Vec<ScanToken>, rule: fn(Parser) -> ()) -> CompileResult {
 
 
 pub struct Parser<'a> {
-    input: VecDeque<ScanToken>,
+    input: VecDeque<(Location, ScanToken)>,
     output: &'a mut Vec<Opcode>,
     errors: &'a mut Vec<ParserError>,
 
@@ -129,9 +130,9 @@ pub struct Parser<'a> {
 
 impl Parser<'_> {
 
-    fn new<'a, 'b : 'a>(tokens: Vec<ScanToken>, output: &'b mut Vec<Opcode>, locals: &'b mut Vec<Locals>, errors: &'b mut Vec<ParserError>, strings: &'b mut Vec<String>, constants: &'b mut Vec<i64>, functions: &'b mut Vec<MaybeRc<FunctionImpl>>, line_numbers: &'b mut Vec<u32>, locals_reference: &'b mut Vec<String>, globals_reference: &'b mut Vec<String>) -> Parser<'a> {
+    fn new<'a, 'b : 'a>(tokens: Vec<(Location, ScanToken)>, output: &'b mut Vec<Opcode>, locals: &'b mut Vec<Locals>, errors: &'b mut Vec<ParserError>, strings: &'b mut Vec<String>, constants: &'b mut Vec<i64>, functions: &'b mut Vec<MaybeRc<FunctionImpl>>, line_numbers: &'b mut Vec<u32>, locals_reference: &'b mut Vec<String>, globals_reference: &'b mut Vec<String>) -> Parser<'a> {
         Parser {
-            input: tokens.into_iter().collect::<VecDeque<ScanToken>>(),
+            input: tokens.into_iter().collect::<VecDeque<(Location, ScanToken)>>(),
             output,
             errors,
 

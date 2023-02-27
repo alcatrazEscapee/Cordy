@@ -2,8 +2,124 @@ use std::rc::Rc;
 
 use crate::compiler::{CompileResult, ParserError, ParserErrorType, ScanError, ScanErrorType, ScanToken};
 use crate::stdlib::NativeFunction;
-use crate::vm::{FunctionImpl, Value, Opcode, RuntimeError, DetailRuntimeError, StackTraceFrame};
+use crate::vm::{DetailRuntimeError, FunctionImpl, Opcode, RuntimeError, StackTraceFrame, Value};
 use crate::misc;
+
+
+/// A closed interval of a source code location.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct Location {
+    /// Start character index, inclusive
+    start: usize,
+    /// End character index, inclusive
+    end: usize,
+}
+
+/// Indexed source code information.
+/// This is used to report errors in a readable fashion, by resolving `Location` references to a line and column number.
+#[derive(Debug, Clone)]
+pub struct SourceFormatter<'a> {
+    name: &'a String,
+    lines: Vec<&'a str>,
+    starts: Vec<usize>,
+}
+
+impl<'a> SourceFormatter<'a> {
+
+    pub fn new(name: &'a String, src: &'a String) -> SourceFormatter<'a> {
+        let mut lines: Vec<&'a str> = Vec::new();
+        let mut starts: Vec<usize> = Vec::new();
+        let mut start = 0;
+
+        for line in src.split('\n') {
+            lines.push(line.strip_suffix('\r').unwrap_or(line));
+            starts.push(start);
+            start += line.len() + 1;
+        }
+
+        starts.push(start);
+
+        SourceFormatter {
+            name,
+            lines,
+            starts,
+        }
+    }
+
+    pub fn format_scan_error(self: &Self, error: &ScanError) -> String {
+        let mut text = error.format_error();
+        self.add_context(&mut text, &error.loc);
+        text
+    }
+
+
+
+    fn add_context(self: &Self, text: &mut String, loc: &Location) {
+        let start_lineno = self.starts.partition_point(|u| u <= &loc.start) - 1;
+        let mut end_lineno = start_lineno;
+        while self.starts[end_lineno + 1] < loc.end {
+            end_lineno += 1;
+        }
+
+        debug_assert!(start_lineno < self.lines.len());
+        debug_assert!(end_lineno >= start_lineno && end_lineno < self.lines.len());
+
+        let lineno = if start_lineno == end_lineno {
+            format!("{}", start_lineno + 1)
+        } else {
+            format!("{} - {}", start_lineno + 1, end_lineno + 1)
+        };
+
+        let width: usize = format!("{}", end_lineno + 2).len();
+
+        text.push_str(format!("\n  at: line {} ({})\n\n", lineno, self.name).as_str());
+
+        for i in start_lineno..=end_lineno {
+            let line = self.lines[i];
+            text.push_str(format!("{:width$} |", i + 1, width = width).as_str());
+            if !line.is_empty() {
+                text.push(' ');
+                text.push_str(line);
+            }
+            text.push('\n');
+        }
+
+        let start_col = loc.start - self.starts[start_lineno];
+        let end_col = loc.end - self.starts[end_lineno];
+
+        text.push_str(format!("{:width$} |", end_lineno + 2, width = width).as_str());
+
+        if start_lineno == end_lineno {
+            // Single line error, so point to the exact column start + end
+            for _ in 0..=start_col { text.push(' '); }
+            for _ in start_col..=end_col { text.push('^'); }
+        } else {
+            // For multi-line errors, just point directly up across the entire bottom line
+            let longest_line_len: usize = (start_lineno..=end_lineno)
+                .map(|u| self.lines[u].len())
+                .max()
+                .unwrap();
+            if longest_line_len > 0 {
+                text.push(' ');
+                for _ in 0..longest_line_len { text.push('^'); }
+            }
+        }
+        text.push('\n');
+    }
+}
+
+impl Location {
+    pub fn from_width(cursor: usize, width: usize) -> Location {
+        Location { start: cursor - width, end: cursor - 1 }
+    }
+
+    pub fn from_range(start: usize, end: usize) -> Location {
+        Location { start, end }
+    }
+}
+
+
+
 
 pub struct ErrorReporter<'a> {
     lines: Vec<&'a str>,
@@ -18,10 +134,6 @@ impl<'a> ErrorReporter<'a> {
         }
     }
 
-    pub fn format_scan_error(self: &Self, error: &ScanError) -> String {
-        format_scan_error(&self.lines, self.src, error)
-    }
-
     pub fn format_parse_error(self: &Self, error: &ParserError) -> String {
         format_parse_error(&self.lines, self.src, error)
     }
@@ -29,14 +141,6 @@ impl<'a> ErrorReporter<'a> {
     pub fn format_runtime_error(self: &Self, error: DetailRuntimeError) -> String {
         format_runtime_error(&self.lines, self.src, error)
     }
-}
-
-pub fn format_scan_error(source_lines: &Vec<&str>, source_file: &String, error: &ScanError) -> String {
-    let mut text: String = error.format_error();
-    text.push_str(format!("\n  at: line {} ({})\n  at:\n\n", error.lineno + 1, source_file).as_str());
-    text.push_str(source_lines.get(error.lineno).map(|t| *t).unwrap_or(""));
-    text.push('\n');
-    text
 }
 
 pub fn format_parse_error(source_lines: &Vec<&str>, source_file: &String, error: &ParserError) -> String {
@@ -328,5 +432,113 @@ impl AsError for ScanToken {
 
             ScanToken::NewLine => String::from("new line"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::reporting::{Location, SourceFormatter};
+
+    #[test]
+    fn test_error_first_word_first_line() {
+        run(0, 4, "Error
+  at: line 1 (<test>)
+
+1 | first += line
+2 | ^^^^^
+")
+    }
+
+    #[test]
+    fn test_error_second_word_first_line() {
+        run(6, 7, "Error
+  at: line 1 (<test>)
+
+1 | first += line
+2 |       ^^
+")
+    }
+
+    #[test]
+    fn test_error_third_word_first_line() {
+        run(9, 12, "Error
+  at: line 1 (<test>)
+
+1 | first += line
+2 |          ^^^^
+")
+    }
+
+    #[test]
+    fn test_error_first_word_second_line() {
+        run(14, 19, "Error
+  at: line 2 (<test>)
+
+2 | second line?
+3 | ^^^^^^
+")
+    }
+
+    #[test]
+    fn test_error_across_first_and_second_line() {
+        run(9, 19, "Error
+  at: line 1 - 2 (<test>)
+
+1 | first += line
+2 | second line?
+3 | ^^^^^^^^^^^^^
+")
+    }
+
+    #[test]
+    fn test_error_after_windows_line() {
+        run(39, 45, "Error
+  at: line 4 (<test>)
+
+4 | windows line
+5 | ^^^^^^^
+")
+    }
+
+    #[test]
+    fn test_error_after_empty_lines() {
+        run(53, 57, "Error
+  at: line 6 (<test>)
+
+6 | empty
+7 | ^^^^^
+")
+    }
+
+    #[test]
+    fn test_error_after_empty_windows_lines() {
+        run(62, 65, "Error
+  at: line 8 (<test>)
+
+8 | more empty
+9 | ^^^^
+")
+    }
+
+    #[test]
+    fn test_error_last_word_last_line() {
+        run(67, 71, "Error
+  at: line 8 (<test>)
+
+8 | more empty
+9 |      ^^^^^
+")
+    }
+
+
+    fn run(start: usize, end: usize, expected: &'static str) {
+        let name = String::from("<test>");
+        let text = String::from("first += line\nsecond line?\nthird line\r\nwindows line\n\nempty\r\n\r\nmore empty");
+        let src = SourceFormatter::new(&name, &text);
+
+        let mut error = String::from("Error");
+        src.add_context(&mut error, &Location::from_range(start, end));
+
+        assert_eq!(error.as_str(), expected);
     }
 }

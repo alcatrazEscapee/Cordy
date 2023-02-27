@@ -6,6 +6,7 @@ use crate::compiler::parser::{Parser, ParserError};
 use crate::compiler::parser::ParserErrorType;
 use crate::compiler::scanner::ScanToken;
 use crate::compiler::parser::semantic::{LValueReference, Reference};
+use crate::reporting::Location;
 use crate::trace;
 use crate::vm::Opcode;
 
@@ -16,7 +17,7 @@ use Opcode::{*};
 /// A state to restore to while backtracking.
 /// Only stores enough state to be necessary, as we don't need to backtrack through output tokens.
 pub struct ParserState {
-    input: Vec<ScanToken>,
+    input: Vec<(Location, ScanToken)>,
 
     output_len: usize, // Validity check
     error_len: usize,
@@ -158,7 +159,7 @@ impl<'a> Parser<'a> {
         if self.error_recovery {
             return None
         }
-        for token in &self.input {
+        for (loc, token) in &self.input {
             return Some(token)
         }
         None
@@ -172,7 +173,7 @@ impl<'a> Parser<'a> {
         if self.error_recovery {
             return None
         }
-        for token in &self.input {
+        for (loc, token) in &self.input {
             if token != &NewLine {
                 return Some(token)
             } else {
@@ -188,7 +189,7 @@ impl<'a> Parser<'a> {
             return None
         }
         let mut first: bool = false;
-        for token in &self.input {
+        for (loc, token) in &self.input {
             if token != &NewLine {
                 if !first {
                     first = true;
@@ -213,7 +214,7 @@ impl<'a> Parser<'a> {
         if self.error_recovery {
             return None
         }
-        while let Some(NewLine) = self.input.front() {
+        while let Some((_, NewLine)) = self.input.front() {
             trace::trace_parser!("newline {} at opcode {}, last = {:?}", self.lineno + 1, self.next_opcode(), self.line_numbers.last());
             let token = self.input.pop_front().unwrap();
             if let Some(state) = &mut self.restore_state {
@@ -229,7 +230,7 @@ impl<'a> Parser<'a> {
                 state.input.push(token.clone());
             }
         }
-        ret
+        ret.map(|u| u.1)
     }
 
     /// Reserves a space in the output code by inserting a `Noop` token

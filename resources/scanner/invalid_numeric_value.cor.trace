@@ -6,12 +6,12 @@ Equals
 
 === Scan Errors ===
 
-ScanError { error: InvalidNumericValue(ParseIntError { kind: PosOverflow }), lineno: 0 }
+ScanError { error: InvalidNumericValue(ParseIntError { kind: PosOverflow }), loc: Location { start: 8, end: 28 } }
 
 === Formatted Scan Errors ===
 
 Invalid numeric value: number too large to fit in target type
-  at: line 1 (invalid_numeric_value.cor)
-  at:
+  at: line 1 (invalid_numeric_value)
 
-let x = 999999999999999999999 // too large
+1 | let x = 999999999999999999999 // too large
+2 |         ^^^^^^^^^^^^^^^^^^^^^
