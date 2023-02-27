@@ -3,6 +3,8 @@ use std::iter::Peekable;
 use std::num::ParseIntError;
 use std::str::Chars;
 
+use crate::reporting::Location;
+
 use self::ScanErrorType::{*};
 use self::ScanToken::{*};
 
@@ -12,8 +14,7 @@ pub fn scan(text: &String) -> ScanResult {
         chars: text.chars().peekable(),
         tokens: Vec::new(),
         errors: Vec::new(),
-
-        lineno: 0
+        cursor: 0,
     };
     scanner.scan();
     ScanResult {
@@ -25,7 +26,7 @@ pub fn scan(text: &String) -> ScanResult {
 
 #[derive(Debug, Clone)]
 pub struct ScanResult {
-    pub tokens: Vec<ScanToken>,
+    pub tokens: Vec<(Location, ScanToken)>,
     pub errors: Vec<ScanError>
 }
 
@@ -33,7 +34,7 @@ pub struct ScanResult {
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub struct ScanError {
     pub error: ScanErrorType,
-    pub lineno: usize,
+    pub loc: Location,
 }
 
 impl ScanError {
@@ -144,10 +145,9 @@ pub enum ScanToken {
 
 struct Scanner<'a> {
     chars: Peekable<Chars<'a>>,
-    tokens: Vec<ScanToken>,
+    tokens: Vec<(Location, ScanToken)>,
     errors: Vec<ScanError>,
-
-    lineno: usize,
+    cursor: usize,
 }
 
 
@@ -197,15 +197,15 @@ impl<'a> Scanner<'a> {
                                     }
                                     self.screen_int(buffer, 2);
                                 },
-                                Some(e @ ('a'..='z' | 'A'..='Z' | '0'..='9' | '_')) => self.push_err(InvalidNumericPrefix(e)),
+                                Some(e @ ('a'..='z' | 'A'..='Z' | '0'..='9' | '_')) => self.push_err(1, InvalidNumericPrefix(e)),
                                 Some(_) => {
                                     // Don't consume, as this isn't part of the number, just a '0' literal followed by some other syntax
-                                    self.push(Int(0));
+                                    self.push(1, Int(0));
                                 },
                                 None => {
                                     // The last element in the input is `0`, so still emit `Int(0)`
                                     self.advance();
-                                    self.push(Int(0));
+                                    self.push(1, Int(0));
                                 },
                             }
                        }
@@ -225,7 +225,7 @@ impl<'a> Scanner<'a> {
                        '\'' => {
                            let mut buffer: Vec<char> = Vec::new();
                            let mut escaped: bool = false;
-                           let lineno: usize = self.lineno;
+                           let start: usize = self.cursor;
                            loop {
                                match self.advance() {
                                    Some('\'') if !escaped => break,
@@ -250,57 +250,57 @@ impl<'a> Scanner<'a> {
                                        // It makes it much easier to read.
                                        self.errors.push(ScanError {
                                            error: UnterminatedStringLiteral,
-                                           lineno,
+                                           loc: Location::from_range(start, self.cursor)
                                        });
                                        break
                                    }
                                }
                            }
-                           self.push(StringLiteral(buffer.iter().collect()))
+                           self.push(self.cursor - start + 1, StringLiteral(buffer.iter().collect()))
                        },
 
                        '!' => match self.peek() {
-                           Some('=') => self.push_skip(NotEquals),
-                           _ => self.push(Not)
+                           Some('=') => self.push_skip(2, NotEquals),
+                           _ => self.push(1, Not)
                        },
 
                        '=' => match self.peek() {
-                           Some('=') => self.push_skip(DoubleEquals),
-                           _ => self.push(Equals)
+                           Some('=') => self.push_skip(2, DoubleEquals),
+                           _ => self.push(1, Equals)
                        },
                        '>' => match self.peek() {
                            Some('>') => match self.advance_peek() {
-                               Some('=') => self.push_skip(RightShiftEquals),
-                               _ => self.push(RightShift)
+                               Some('=') => self.push_skip(3, RightShiftEquals),
+                               _ => self.push(2, RightShift)
                            }
-                           Some('=') => self.push_skip(GreaterThanEquals),
-                           _ => self.push(GreaterThan)
+                           Some('=') => self.push_skip(2, GreaterThanEquals),
+                           _ => self.push(1, GreaterThan)
                        },
                        '<' => match self.peek() {
                            Some('<') => match self.advance_peek() {
-                               Some('=') => self.push_skip(LeftShiftEquals),
-                               _ => self.push(LeftShift)
+                               Some('=') => self.push_skip(3, LeftShiftEquals),
+                               _ => self.push(2, LeftShift)
                            },
-                           Some('=') => self.push_skip(LessThanEquals),
-                           _ => self.push(LessThan)
+                           Some('=') => self.push_skip(2, LessThanEquals),
+                           _ => self.push(1, LessThan)
                        },
 
                        '+' => match self.peek() {
-                           Some('=') => self.push_skip(PlusEquals),
-                           _ => self.push(Plus)
+                           Some('=') => self.push_skip(2, PlusEquals),
+                           _ => self.push(1, Plus)
                        },
                        '-' => match self.peek() {
-                           Some('=') => self.push_skip(MinusEquals),
-                           Some('>') => self.push_skip(Arrow),
-                           _ => self.push(Minus)
+                           Some('=') => self.push_skip(2, MinusEquals),
+                           Some('>') => self.push_skip(2, Arrow),
+                           _ => self.push(1, Minus)
                        },
                        '*' => match self.peek() {
-                           Some('=') => self.push_skip(MulEquals),
+                           Some('=') => self.push_skip(2, MulEquals),
                            Some('*') => match self.advance_peek() {
-                               Some('=') => self.push_skip(PowEquals),
-                               _ => self.push(Pow)
+                               Some('=') => self.push_skip(3, PowEquals),
+                               _ => self.push(2, Pow)
                            },
-                           _ => self.push(Mul)
+                           _ => self.push(1, Mul)
                        },
                        '/' => match self.peek() {
                            Some('/') => {
@@ -328,46 +328,46 @@ impl<'a> Scanner<'a> {
                                    }
                                }
                            }
-                           Some('=') => self.push_skip(DivEquals),
-                           _ => self.push(Div)
+                           Some('=') => self.push_skip(2, DivEquals),
+                           _ => self.push(1, Div)
                        },
                        '|' => match self.peek() {
-                           Some('=') => self.push_skip(OrEquals),
-                           _ => self.push(BitwiseOr)
+                           Some('=') => self.push_skip(2, OrEquals),
+                           _ => self.push(1, BitwiseOr)
                        },
                        '&' => match self.peek() {
-                           Some('=') => self.push_skip(AndEquals),
-                           _ => self.push(BitwiseAnd)
+                           Some('=') => self.push_skip(2, AndEquals),
+                           _ => self.push(1, BitwiseAnd)
                        },
                        '^' => match self.peek() {
-                           Some('=') => self.push_skip(XorEquals),
-                           _ => self.push(BitwiseXor)
+                           Some('=') => self.push_skip(2, XorEquals),
+                           _ => self.push(1, BitwiseXor)
                        },
                        '%' => match self.peek() {
-                           Some('=') => self.push_skip(ModEquals),
-                           _ => self.push(Mod)
+                           Some('=') => self.push_skip(2, ModEquals),
+                           _ => self.push(1, Mod)
                        },
                        '.' => match self.peek() {
-                           Some('=') => self.push_skip(DotEquals),
-                           _ => self.push(Dot)
+                           Some('=') => self.push_skip(2, DotEquals),
+                           _ => self.push(1, Dot)
                        }
 
 
-                       '(' => self.push(OpenParen),
-                       ')' => self.push(CloseParen),
-                       '[' => self.push(OpenSquareBracket),
-                       ']' => self.push(CloseSquareBracket),
-                       '{' => self.push(OpenBrace),
-                       '}' => self.push(CloseBrace),
+                       '(' => self.push(1, OpenParen),
+                       ')' => self.push(1, CloseParen),
+                       '[' => self.push(1, OpenSquareBracket),
+                       ']' => self.push(1 , CloseSquareBracket),
+                       '{' => self.push(1, OpenBrace),
+                       '}' => self.push(1, CloseBrace),
 
-                       ',' => self.push(Comma),
-                       ':' => self.push(Colon),
-                       '_' => self.push(Underscore),
-                       ';' => self.push(Semicolon),
-                       '@' => self.push(At),
+                       ',' => self.push(1, Comma),
+                       ':' => self.push(1, Colon),
+                       '_' => self.push(1, Underscore),
+                       ';' => self.push(1, Semicolon),
+                       '@' => self.push(1, At),
                        '\\' => {}, // Discard backslashes... like a ninja
 
-                       e => self.push_err(InvalidCharacter(e))
+                       e => self.push_err(1, InvalidCharacter(e))
                    }
                }
                None => break // eof
@@ -377,6 +377,7 @@ impl<'a> Scanner<'a> {
 
     fn screen_identifier(self: &mut Self, buffer: Vec<char>) {
         let string: String = buffer.iter().collect();
+        let len: usize = string.len();
         let token: ScanToken = match string.as_str() {
             "let" => KeywordLet,
             "fn" => KeywordFn,
@@ -403,31 +404,32 @@ impl<'a> Scanner<'a> {
             "or" => LogicalOr,
              _ => Identifier(string)
         };
-        self.push(token);
+        self.push(len, token);
     }
 
     fn screen_int(self: &mut Self, buffer: Vec<char>, radix: u32) {
         let string: String = buffer.iter().collect();
+        let len: usize = string.len();
         match i64::from_str_radix(string.as_str(), radix) {
-            Ok(value) => self.push(Int(value)),
-            Err(e) => self.push_err(InvalidNumericValue(e))
+            Ok(value) => self.push(len, Int(value)),
+            Err(e) => self.push_err(len, InvalidNumericValue(e))
         }
     }
 
 
-    fn push(self: &mut Self, token: ScanToken) {
-        self.tokens.push(token);
+    fn push(self: &mut Self, width: usize, token: ScanToken) {
+        self.tokens.push((Location::from_width(self.cursor, width), token));
     }
 
-    fn push_skip(self: &mut Self, token: ScanToken) {
-        self.push(token);
+    fn push_skip(self: &mut Self, width: usize, token: ScanToken) {
         self.skip();
+        self.push(width, token);
     }
 
-    fn push_err(self: &mut Self, error: ScanErrorType) {
+    fn push_err(self: &mut Self, width: usize, error: ScanErrorType) {
         self.errors.push(ScanError {
             error,
-            lineno: self.lineno,
+            loc: Location::from_width(self.cursor, width)
         });
     }
 
@@ -455,9 +457,11 @@ impl<'a> Scanner<'a> {
     /// Also see `advance()`
     fn advance(self: &mut Self) -> Option<char> {
         let c: Option<char> = self.chars.next();
+        if c.is_some() {
+            self.cursor += 1;
+        }
         if let Some('\n') = c {
-            self.lineno += 1;
-            self.push(NewLine);
+            self.push(1, NewLine);
         }
         c
     }
@@ -473,9 +477,9 @@ impl<'a> Scanner<'a> {
 mod tests {
     use std::path::PathBuf;
 
-    use crate::compiler::{scanner};
+    use crate::compiler::scanner;
     use crate::compiler::scanner::{ScanResult, ScanToken};
-    use crate::reporting;
+    use crate::reporting::SourceFormatter;
     use crate::trace;
 
     use ScanToken::{*};
@@ -498,12 +502,15 @@ mod tests {
     #[test] fn test_str_groupings() { run_str("( [ { } ] )", vec![OpenParen, OpenSquareBracket, OpenBrace, CloseBrace, CloseSquareBracket, CloseParen]); }
     #[test] fn test_str_syntax() { run_str(". .= , -> - > : @", vec![Dot, DotEquals, Comma, Arrow, Minus, GreaterThan, Colon, At]); }
 
-    fn run_str(text: &str, tokens: Vec<ScanToken>) {
+    fn run_str(text: &str, expected: Vec<ScanToken>) {
         let result: ScanResult = scanner::scan(&String::from(text));
-        assert!(result.errors.is_empty());
-        assert_eq!(result.tokens
+        let actual: Vec<ScanToken> = result.tokens
             .into_iter()
-            .collect::<Vec<ScanToken>>(), tokens);
+            .map(|c| c.1)
+            .collect();
+
+        assert!(result.errors.is_empty());
+        assert_eq!(expected, actual);
     }
 
 
@@ -519,12 +526,14 @@ mod tests {
         let root: PathBuf = trace::test::get_test_resource_path("scanner", path);
         let text: String = trace::test::get_test_resource_src(&root);
         let result: ScanResult = scanner::scan(&text);
+        let name: String = String::from(path);
+        let formatter: SourceFormatter = SourceFormatter::new(&name, &text);
 
         let mut lines: Vec<String> = Vec::new();
         if !result.tokens.is_empty() {
             lines.push(String::from("=== Scan Tokens ===\n"));
             for token in result.tokens {
-                lines.push(format!("{:?}", token));
+                lines.push(format!("{:?}", token.1));
             }
         }
         if !result.errors.is_empty() {
@@ -533,11 +542,8 @@ mod tests {
                 lines.push(format!("{:?}", error));
             }
             lines.push(String::from("\n=== Formatted Scan Errors ===\n"));
-            let mut source: String = String::from(path);
-            source.push_str(".cor");
-            let src_lines: Vec<&str> = text.lines().collect();
             for error in &result.errors {
-                lines.push(reporting::format_scan_error(&src_lines, &source, error))
+                lines.push(formatter.format_scan_error(error))
             }
         }
 

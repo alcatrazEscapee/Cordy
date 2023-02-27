@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use crate::compiler::parser::ParseRule;
 use crate::compiler::scanner::ScanResult;
-use crate::reporting::{ErrorReporter, ProvidesLineNumber};
+use crate::reporting::{ErrorReporter, ProvidesLineNumber, SourceFormatter};
 use crate::vm::{FunctionImpl, Opcode, RuntimeError};
 
 pub use crate::compiler::parser::{Locals, ParserError, ParserErrorType};
@@ -19,13 +19,13 @@ pub fn default() -> CompileResult {
 
 pub fn compile(source: &String, text: &String) -> Result<CompileResult, Vec<String>> {
     let mut errors: Vec<String> = Vec::new();
+    let formatter: SourceFormatter = SourceFormatter::new(source, text);
 
     // Scan
     let scan_result: ScanResult = scanner::scan(text);
     if !scan_result.errors.is_empty() {
-        let rpt: ErrorReporter = ErrorReporter::new(text, source);
         for error in &scan_result.errors {
-            errors.push(rpt.format_scan_error(&error));
+            errors.push(formatter.format_scan_error(error));
         }
         return Err(errors);
     }
@@ -92,16 +92,16 @@ pub fn eval_compile(text: &String, code: &mut Vec<Opcode>, strings: &mut Vec<Str
 
 fn try_incremental_compile(source: &String, text: &String, code: &mut Vec<Opcode>, locals: &mut Vec<Locals>, strings: &mut Vec<String>, constants: &mut Vec<i64>, functions: &mut Vec<Rc<FunctionImpl>>, line_numbers: &mut Vec<u32>, globals: &mut Vec<String>, rule: ParseRule, abort_in_eof: bool) -> IncrementalCompileResult {
     let mut errors: Vec<String> = Vec::new();
+    let formatter: SourceFormatter = SourceFormatter::new(source, text);
 
     // Scan
     let scan_result: ScanResult = scanner::scan(text);
     if !scan_result.errors.is_empty() {
-        let rpt: ErrorReporter = ErrorReporter::new(text, source);
         for error in &scan_result.errors {
             if error.is_eof() && abort_in_eof && errors.is_empty() {
                 return IncrementalCompileResult::Aborted;
             }
-            errors.push(rpt.format_scan_error(&error));
+            errors.push(formatter.format_scan_error(&error));
         }
         return IncrementalCompileResult::Errors(errors);
     }
