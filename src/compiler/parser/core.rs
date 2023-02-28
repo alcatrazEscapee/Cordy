@@ -203,12 +203,21 @@ impl<'a> Parser<'a> {
 
     /// Like `advance()` but discards the result.
     pub fn skip(self: &mut Self) {
-        self.advance();
+        self.advance_both();
+    }
+
+    /// Like `advance()` but returns the location of the advanced-by token.
+    pub fn advance_with(self: &mut Self) -> Location {
+        self.advance_both().map(|(loc, _)| loc).unwrap_or_else(Location::empty)
+    }
+
+    pub fn advance(self: &mut Self) -> Option<ScanToken> {
+        self.advance_both().map(|(_, t)| t)
     }
 
     /// Advances and returns the next incoming token.
     /// Will also advance past any newline tokens, and so the advanced token will be the next token _after_ any newlines between the last token and the next.
-    pub fn advance(self: &mut Self) -> Option<ScanToken> {
+    pub fn advance_both(self: &mut Self) -> Option<(Location, ScanToken)> {
         if self.error_recovery {
             return None
         }
@@ -226,13 +235,10 @@ impl<'a> Parser<'a> {
                 state.input.push(token.clone());
             }
         }
-        match ret {
-            Some((loc, token)) => {
-                self.last_location = Some(loc);
-                Some(token)
-            },
-            _ => None
+        if let Some((loc, _)) = ret {
+            self.last_location = Some(loc)
         }
+        ret
     }
 
     /// Reserves a space in the output code by inserting a `Noop` token
@@ -319,6 +325,10 @@ impl<'a> Parser<'a> {
     /// Pushes a new token into the output stream.
     /// Returns the index of the token pushed, which allows callers to later mutate that token if they need to.
     pub fn push(self: &mut Self, token: Opcode) {
+        self.push_with(token, self.prev_location());
+    }
+
+    pub fn push_with(self: &mut Self, token: Opcode, location: Location) {
         trace::trace_parser!("push {:?}", token);
         match &token {
             PushGlobal(id) | StoreGlobal(id) => self.locals_reference.push(self.locals[0].locals[*id as usize].name.clone()),
@@ -326,7 +336,7 @@ impl<'a> Parser<'a> {
             _ => {},
         }
         self.output.push(token);
-        self.locations.push(self.prev_location());
+        self.locations.push(location);
     }
 
     /// Pops the last emitted token
@@ -376,6 +386,12 @@ impl<'a> Parser<'a> {
         } else {
             Some(ParserError::new(error, self.prev_location()))
         }
+    }
+
+    pub fn with_location<F : FnOnce(&mut Parser) -> ()>(self: &mut Self, parse: F) -> Location {
+        let loc = self.next_location();
+        parse(self);
+        loc | self.prev_location()
     }
 
     /// Returns the source location of the previous token, aka the one just accepted.

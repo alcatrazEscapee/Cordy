@@ -1,3 +1,4 @@
+use std::ops::{BitOr, BitOrAssign};
 use std::rc::Rc;
 
 use crate::compiler::{ParserError, ParserErrorType, ScanError, ScanErrorType, ScanToken};
@@ -8,7 +9,7 @@ pub type Locations = Vec<Location>;
 
 
 /// A closed interval of a source code location.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct Location {
     /// Start character index, inclusive
     start: usize,
@@ -30,6 +31,27 @@ impl Location {
     }
     pub fn end(self: &Self) -> usize { self.start + self.width - 1 }
 }
+
+impl BitOr for Location {
+    type Output = Location;
+
+    fn bitor(self, rhs: Self) -> Self::Output {
+        let start = self.start.min(rhs.start);
+        let end = self.end().max(rhs.end());
+        Location::new(start, end - start + 1)
+    }
+}
+
+impl BitOrAssign for Location {
+    fn bitor_assign(&mut self, rhs: Self) {
+        let start = self.start.min(rhs.start);
+        let end = self.end().max(rhs.end());
+
+        self.start = start;
+        self.width = end - start + 1;
+    }
+}
+
 
 
 /// Indexed source code information.
@@ -417,6 +439,19 @@ impl AsError for ScanToken {
 #[cfg(test)]
 mod tests {
     use crate::reporting::{AsError, AsErrorWithContext, Location, SourceView};
+
+    #[test]
+    fn test_or_location() {
+        let l1 = Location::new(0, 5);
+        let l2 = Location::new(8, 2);
+
+        assert_eq!(l1 | l2, Location::new(0, 10));
+
+        let mut l3 = Location::new(2, 4);
+        l3 |= l1;
+
+        assert_eq!(l3, Location::new(0, 6));
+    }
 
     #[test]
     fn test_error_first_word_first_line() {

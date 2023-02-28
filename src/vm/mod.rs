@@ -1126,7 +1126,7 @@ mod test {
     #[test] fn test_builtin_reduce() { run_str("[1, 2, 3, 4, 5, 6] . reduce (*) . print", "720\n"); }
     #[test] fn test_builtin_reduce_lambda() { run_str("[1, 2, 3, 4, 5, 6] . reduce (fn(a, b) -> a * b) . print", "720\n"); }
     #[test] fn test_builtin_reduce_with_builtin() { run_str("[1, 2, 3, 4, 5, 6] . reduce (sum) . print", "21\n"); }
-    #[test] fn test_builtin_reduce_with_empty() { run_str("[] . reduce(+) . print", "ValueError: Expected value to be a non empty iterable\n  at: line 1 (<test>)\n\n1 | [] . reduce(+) . print\n2 |              ^\n"); }
+    #[test] fn test_builtin_reduce_with_empty() { run_str("[] . reduce(+) . print", "ValueError: Expected value to be a non empty iterable\n  at: line 1 (<test>)\n\n1 | [] . reduce(+) . print\n2 |    ^^^^^^^^^^^\n"); }
     #[test] fn test_builtin_sorted() { run_str("[6, 2, 3, 7, 2, 1] . sort . print", "[1, 2, 2, 3, 6, 7]\n"); }
     #[test] fn test_builtin_reversed() { run_str("[8, 1, 2, 6, 3, 2, 3] . reverse . print", "[3, 2, 3, 6, 2, 1, 8]\n"); }
     #[test] fn test_bare_operator_eval() { run_str("(+)(1, 2) . print", "3\n"); }
@@ -1134,7 +1134,7 @@ mod test {
     #[test] fn test_bare_operator_compose_and_eval() { run_str("2 . (+)(1) . print", "3\n"); }
     #[test] fn test_bare_operator_compose() { run_str("1 . (2 . (+)) . print", "3\n"); }
     #[test] fn test_reduce_list_1() { run_str("[1, 2, 3] . reduce (+) . print", "6\n"); }
-    #[test] fn test_reduce_list_2() { run_str("[1, 2, 3] . reduce (!) . print", "Function '(!)' requires 2 parameters but 1 were present.\n  at: line 1 (<test>)\n\n1 | [1, 2, 3] . reduce (!) . print\n2 |                      ^\n"); }
+    #[test] fn test_reduce_list_2() { run_str("[1, 2, 3] . reduce (!) . print", "Function '(!)' requires 2 parameters but 1 were present.\n  at: line 1 (<test>)\n\n1 | [1, 2, 3] . reduce (!) . print\n2 |           ^^^^^^^^^^^^\n"); }
     #[test] fn test_str_to_list() { run_str("'funny beans' . list . print", "['f', 'u', 'n', 'n', 'y', ' ', 'b', 'e', 'a', 'n', 's']\n"); }
     #[test] fn test_str_to_set() { run_str("'funny beans' . set . print", "{'f', 'u', 'n', 'y', ' ', 'b', 'e', 'a', 's'}\n"); }
     #[test] fn test_str_to_set_to_sorted() { run_str("'funny' . set . sort . print", "['f', 'n', 'u', 'y']\n"); }
@@ -1325,13 +1325,13 @@ mod test {
     #[test] fn test_not_in_no() { run_str("3 not in [1, 5, 8] . print", "true\n"); }
     #[test] fn test_min_by_key() { run_str("[[1, 5], [2, 3], [6, 4]] . min_by(fn(i) -> i[1]) . print", "[2, 3]\n"); }
     #[test] fn test_min_by_cmp() { run_str("[[1, 5], [2, 3], [6, 4]] . min_by(fn(a, b) -> a[1] - b[1]) . print", "[2, 3]\n"); }
-    #[test] fn test_min_by_wrong_fn() { run_str("[[1, 5], [2, 3], [6, 4]] . min_by(fn() -> 1) . print", "TypeError: Expected '_' of type 'function' to be a '<A, B> fn key(A) -> B' or '<A> cmp(A, A) -> int' function\n  at: line 1 (<test>)\n\n1 | [[1, 5], [2, 3], [6, 4]] . min_by(fn() -> 1) . print\n2 |                                            ^\n"); }
+    #[test] fn test_min_by_wrong_fn() { run_str("[[1, 5], [2, 3], [6, 4]] . min_by(fn() -> 1) . print", "TypeError: Expected '_' of type 'function' to be a '<A, B> fn key(A) -> B' or '<A> cmp(A, A) -> int' function\n  at: line 1 (<test>)\n\n1 | [[1, 5], [2, 3], [6, 4]] . min_by(fn() -> 1) . print\n2 |                          ^^^^^^^^^^^^^^^^^^^\n"); }
     #[test] fn test_max_by_key() { run_str("[[1, 5], [2, 3], [6, 4]] . max_by(fn(i) -> i[1]) . print", "[1, 5]\n"); }
     #[test] fn test_max_by_cmp() { run_str("[[1, 5], [2, 3], [6, 4]] . max_by(fn(a, b) -> a[1] - b[1]) . print", "[1, 5]\n"); }
-    #[test] fn test_max_by_wrong_fn() { run_str("[[1, 5], [2, 3], [6, 4]] . max_by(fn() -> 1) . print", "TypeError: Expected '_' of type 'function' to be a '<A, B> fn key(A) -> B' or '<A> cmp(A, A) -> int' function\n  at: line 1 (<test>)\n\n1 | [[1, 5], [2, 3], [6, 4]] . max_by(fn() -> 1) . print\n2 |                                            ^\n"); }
+    #[test] fn test_max_by_wrong_fn() { run_str("[[1, 5], [2, 3], [6, 4]] . max_by(fn() -> 1) . print", "TypeError: Expected '_' of type 'function' to be a '<A, B> fn key(A) -> B' or '<A> cmp(A, A) -> int' function\n  at: line 1 (<test>)\n\n1 | [[1, 5], [2, 3], [6, 4]] . max_by(fn() -> 1) . print\n2 |                          ^^^^^^^^^^^^^^^^^^^\n"); }
     #[test] fn test_sort_by_key() { run_str("[[1, 5], [2, 3], [6, 4]] . sort_by(fn(i) -> i[1]) . print", "[[2, 3], [6, 4], [1, 5]]\n"); }
     #[test] fn test_sort_by_cmp() { run_str("[[1, 5], [2, 3], [6, 4]] . sort_by(fn(a, b) -> a[1] - b[1]) . print", "[[2, 3], [6, 4], [1, 5]]\n"); }
-    #[test] fn test_sort_by_wrong_fn() { run_str("[[1, 5], [2, 3], [6, 4]] . sort_by(fn() -> 1) . print", "TypeError: Expected '_' of type 'function' to be a '<A, B> fn key(A) -> B' or '<A> cmp(A, A) -> int' function\n  at: line 1 (<test>)\n\n1 | [[1, 5], [2, 3], [6, 4]] . sort_by(fn() -> 1) . print\n2 |                                             ^\n"); }
+    #[test] fn test_sort_by_wrong_fn() { run_str("[[1, 5], [2, 3], [6, 4]] . sort_by(fn() -> 1) . print", "TypeError: Expected '_' of type 'function' to be a '<A, B> fn key(A) -> B' or '<A> cmp(A, A) -> int' function\n  at: line 1 (<test>)\n\n1 | [[1, 5], [2, 3], [6, 4]] . sort_by(fn() -> 1) . print\n2 |                          ^^^^^^^^^^^^^^^^^^^^\n"); }
     #[test] fn test_ord() { run_str("'a' . ord . print", "97\n"); }
     #[test] fn test_char() { run_str("97 . char . repr . print", "'a'\n"); }
     #[test] fn test_eval_nil() { run_str("'nil' . eval . print", "nil\n"); }
@@ -1385,13 +1385,13 @@ mod test {
     #[test] fn test_format_too_few_args() { run_str("'%d %d %d' % (1, 2, 3, 4)", "ValueError: Not all arguments consumed in format string, next: '4' of type 'int'\n  at: line 1 (<test>)\n\n1 | '%d %d %d' % (1, 2, 3, 4)\n2 |                         ^\n"); }
     #[test] fn test_format_incorrect_character() { run_str("'%g' % (1,)", "ValueError: Invalid format character 'g' in format string\n  at: line 1 (<test>)\n\n1 | '%g' % (1,)\n2 |           ^\n"); }
     #[test] fn test_format_incorrect_width() { run_str("'%00' % (1,)", "ValueError: Invalid format character '0' in format string\n  at: line 1 (<test>)\n\n1 | '%00' % (1,)\n2 |            ^\n"); }
-    #[test] fn test_list_pop_empty() { run_str("let x = [] , y = x . pop ; (x, y) . print", "ValueError: Expected value to be a non empty iterable\n  at: line 1 (<test>)\n\n1 | let x = [] , y = x . pop ; (x, y) . print\n2 |                      ^^^\n"); }
+    #[test] fn test_list_pop_empty() { run_str("let x = [] , y = x . pop ; (x, y) . print", "ValueError: Expected value to be a non empty iterable\n  at: line 1 (<test>)\n\n1 | let x = [] , y = x . pop ; (x, y) . print\n2 |                    ^^^^^\n"); }
     #[test] fn test_list_pop() { run_str("let x = [1, 2, 3] , y = x . pop ; (x, y) . print", "([1, 2], 3)\n"); }
-    #[test] fn test_set_pop_empty() { run_str("let x = set() , y = x . pop ; (x, y) . print", "ValueError: Expected value to be a non empty iterable\n  at: line 1 (<test>)\n\n1 | let x = set() , y = x . pop ; (x, y) . print\n2 |                         ^^^\n"); }
+    #[test] fn test_set_pop_empty() { run_str("let x = set() , y = x . pop ; (x, y) . print", "ValueError: Expected value to be a non empty iterable\n  at: line 1 (<test>)\n\n1 | let x = set() , y = x . pop ; (x, y) . print\n2 |                       ^^^^^\n"); }
     #[test] fn test_set_pop() { run_str("let x = {1, 2, 3} , y = x . pop ; (x, y) . print", "({1, 2}, 3)\n"); }
-    #[test] fn test_dict_pop_empty() { run_str("let x = dict() , y = x . pop ; (x, y) . print", "ValueError: Expected value to be a non empty iterable\n  at: line 1 (<test>)\n\n1 | let x = dict() , y = x . pop ; (x, y) . print\n2 |                          ^^^\n"); }
+    #[test] fn test_dict_pop_empty() { run_str("let x = dict() , y = x . pop ; (x, y) . print", "ValueError: Expected value to be a non empty iterable\n  at: line 1 (<test>)\n\n1 | let x = dict() , y = x . pop ; (x, y) . print\n2 |                        ^^^^^\n"); }
     #[test] fn test_dict_pop() { run_str("let x = {1: 'a', 2: 'b', 3: 'c'} , y = x . pop ; (x, y) . print", "({1: 'a', 2: 'b'}, (3, 'c'))\n"); }
-    #[test] fn test_list_pop_front_empty() { run_str("let x = [], y = x . pop_front ; (x, y) . print", "ValueError: Expected value to be a non empty iterable\n  at: line 1 (<test>)\n\n1 | let x = [], y = x . pop_front ; (x, y) . print\n2 |                     ^^^^^^^^^\n"); }
+    #[test] fn test_list_pop_front_empty() { run_str("let x = [], y = x . pop_front ; (x, y) . print", "ValueError: Expected value to be a non empty iterable\n  at: line 1 (<test>)\n\n1 | let x = [], y = x . pop_front ; (x, y) . print\n2 |                   ^^^^^^^^^^^\n"); }
     #[test] fn test_list_pop_front() { run_str("let x = [1, 2, 3], y = x . pop_front ; (x, y) . print", "([2, 3], 1)\n"); }
     #[test] fn test_list_push() { run_str("let x = [1, 2, 3] ; x . push(4) ; x . print", "[1, 2, 3, 4]\n"); }
     #[test] fn test_set_push() { run_str("let x = {1, 2, 3} ; x . push(4) ; x . print", "{1, 2, 3, 4}\n"); }
@@ -1399,7 +1399,7 @@ mod test {
     #[test] fn test_list_insert_front() { run_str("let x = [1, 2, 3] ; x . insert(0, 4) ; x . print", "[4, 1, 2, 3]\n"); }
     #[test] fn test_list_insert_middle() { run_str("let x = [1, 2, 3] ; x . insert(1, 4) ; x . print", "[1, 4, 2, 3]\n"); }
     #[test] fn test_list_insert_end() { run_str("let x = [1, 2, 3] ; x . insert(2, 4) ; x . print", "[1, 2, 4, 3]\n"); }
-    #[test] fn test_list_insert_out_of_bounds() { run_str("let x = [1, 2, 3] ; x . insert(4, 4) ; x . print", "Index '4' is out of bounds for list of length [0, 3)\n  at: line 1 (<test>)\n\n1 | let x = [1, 2, 3] ; x . insert(4, 4) ; x . print\n2 |                                    ^\n"); }
+    #[test] fn test_list_insert_out_of_bounds() { run_str("let x = [1, 2, 3] ; x . insert(4, 4) ; x . print", "Index '4' is out of bounds for list of length [0, 3)\n  at: line 1 (<test>)\n\n1 | let x = [1, 2, 3] ; x . insert(4, 4) ; x . print\n2 |                       ^^^^^^^^^^^^^^\n"); }
     #[test] fn test_dict_insert() { run_str("let x = {1: 'a', 2: 'b', 3: 'c'} ; x . insert(4, 'd') ; x . print", "{1: 'a', 2: 'b', 3: 'c', 4: 'd'}\n"); }
     #[test] fn test_list_remove_front() { run_str("let x = [1, 2, 3] , y = x . remove(0) ; (x, y) . print", "([2, 3], 1)\n"); }
     #[test] fn test_list_remove_middle() { run_str("let x = [1, 2, 3] , y = x . remove(1) ; (x, y) . print", "([1, 3], 2)\n"); }

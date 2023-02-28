@@ -1422,10 +1422,10 @@ impl Parser<'_> {
         loop {
             match self.peek() {
                 Some(Dot) => {
-                    self.advance();
-                    self.parse_expr_6();
+                    let mut rhs = self.advance_with();
+                    rhs |= self.with_location(|p| p.parse_expr_6());
                     self.push(Swap);
-                    self.push(OpFuncEval(1));
+                    self.push_with(OpFuncEval(1), rhs);
                 },
                 _ => break
             }
