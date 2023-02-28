@@ -1,18 +1,18 @@
 use crate::compiler::scanner::ScanToken;
+use crate::reporting::{AsErrorWithLocation, Location};
 
 use ParserErrorType::{*};
-
 
 
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub struct ParserError {
     pub error: ParserErrorType,
-    pub lineno: usize,
+    pub loc: Option<Location>,
 }
 
 impl ParserError {
-    pub fn new(error: ParserErrorType, lineno: usize) -> ParserError {
-        ParserError { error, lineno }
+    pub fn new(error: ParserErrorType, loc: Option<Location>) -> ParserError {
+        ParserError { error, loc }
     }
 
     /// Returns `true` if the error is due to encountering an EoF (end of input) while expecting another token.
@@ -52,6 +52,12 @@ impl ParserError {
             BreakOutsideOfLoop |
             ContinueOutsideOfLoop => false,
         }
+    }
+}
+
+impl AsErrorWithLocation for ParserError {
+    fn location(self: &Self) -> &Option<Location> {
+        &self.loc
     }
 }
 

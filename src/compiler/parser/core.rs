@@ -22,7 +22,6 @@ pub struct ParserState {
     output_len: usize, // Validity check
     error_len: usize,
 
-    lineno: u32,
     prevent_expression_statement: bool,
 }
 
@@ -32,7 +31,6 @@ impl ParserState {
             input: Vec::new(),
             output_len: parser.output.len(),
             error_len: parser.errors.len(),
-            lineno: parser.lineno,
             prevent_expression_statement: parser.prevent_expression_statement,
         }
     }
@@ -47,7 +45,6 @@ impl ParserState {
 
         parser.errors.truncate(self.error_len);
         parser.error_recovery = false;
-        parser.lineno = self.lineno;
         parser.prevent_expression_statement = self.prevent_expression_statement;
     }
 }
@@ -121,7 +118,8 @@ impl<'a> Parser<'a> {
     }
 
     /// Advances the token stream and pushes the provided token to the output stream.
-    pub fn advance_push(self: &mut Self, token: Opcode) {
+    /// The output token will be associated with the input token that was advanced.
+    pub fn push_advance(self: &mut Self, token: Opcode) {
         self.advance();
         self.push(token);
     }
@@ -159,7 +157,7 @@ impl<'a> Parser<'a> {
         if self.error_recovery {
             return None
         }
-        for (loc, token) in &self.input {
+        for (_, token) in &self.input {
             return Some(token)
         }
         None
@@ -173,7 +171,7 @@ impl<'a> Parser<'a> {
         if self.error_recovery {
             return None
         }
-        for (loc, token) in &self.input {
+        for (_, token) in &self.input {
             if token != &NewLine {
                 return Some(token)
             } else {
@@ -189,7 +187,7 @@ impl<'a> Parser<'a> {
             return None
         }
         let mut first: bool = false;
-        for (loc, token) in &self.input {
+        for (_, token) in &self.input {
             if token != &NewLine {
                 if !first {
                     first = true;
@@ -215,12 +213,10 @@ impl<'a> Parser<'a> {
             return None
         }
         while let Some((_, NewLine)) = self.input.front() {
-            trace::trace_parser!("newline {} at opcode {}, last = {:?}", self.lineno + 1, self.next_opcode(), self.line_numbers.last());
             let token = self.input.pop_front().unwrap();
             if let Some(state) = &mut self.restore_state {
                 state.input.push(token);
             }
-            self.lineno += 1;
             self.prevent_expression_statement = false;
         }
         trace::trace_parser!("advance {:?}", self.input.front());
@@ -230,7 +226,13 @@ impl<'a> Parser<'a> {
                 state.input.push(token.clone());
             }
         }
-        ret.map(|u| u.1)
+        match ret {
+            Some((loc, token)) => {
+                self.last_location = Some(loc);
+                Some(token)
+            },
+            _ => None
+        }
     }
 
     /// Reserves a space in the output code by inserting a `Noop` token
@@ -238,7 +240,7 @@ impl<'a> Parser<'a> {
     pub fn reserve(self: &mut Self) -> usize {
         trace::trace_parser!("reserve at {}", self.output.len());
         self.output.push(Noop);
-        self.line_numbers.push(self.lineno);
+        self.locations.push(self.prev_location());
         self.output.len() - 1
     }
 
@@ -317,14 +319,14 @@ impl<'a> Parser<'a> {
     /// Pushes a new token into the output stream.
     /// Returns the index of the token pushed, which allows callers to later mutate that token if they need to.
     pub fn push(self: &mut Self, token: Opcode) {
-        trace::trace_parser!("push {:?} at L{:?}", token, self.lineno + 1);
+        trace::trace_parser!("push {:?}", token);
         match &token {
             PushGlobal(id) | StoreGlobal(id) => self.locals_reference.push(self.locals[0].locals[*id as usize].name.clone()),
             PushLocal(id) | StoreLocal(id) => self.locals_reference.push(self.locals[self.function_depth as usize].locals[*id as usize].name.clone()),
             _ => {},
         }
         self.output.push(token);
-        self.line_numbers.push(self.lineno);
+        self.locations.push(self.prev_location());
     }
 
     /// Pops the last emitted token
@@ -353,7 +355,7 @@ impl<'a> Parser<'a> {
     pub fn error(self: &mut Self, error: ParserErrorType) {
         trace::trace_parser!("push_err (error = {}) {:?}", self.error_recovery, error);
         if !self.error_recovery {
-            self.errors.push(ParserError::new(error, self.lineno as usize));
+            self.errors.push(ParserError::new(error, self.next_location()));
         }
         self.error_recovery = true;
     }
@@ -363,7 +365,7 @@ impl<'a> Parser<'a> {
     pub fn semantic_error(self: &mut Self, error: ParserErrorType) {
         trace::trace_parser!("push_err (error = {}) {:?}", self.error_recovery, error);
         if !self.error_recovery {
-            self.errors.push(ParserError::new(error, self.lineno as usize));
+            self.errors.push(ParserError::new(error, self.prev_location()));
         }
     }
 
@@ -372,7 +374,17 @@ impl<'a> Parser<'a> {
         if self.error_recovery {
             None
         } else {
-            Some(ParserError::new(error, self.lineno as usize))
+            Some(ParserError::new(error, self.prev_location()))
         }
+    }
+
+    /// Returns the source location of the previous token, aka the one just accepted.
+    pub fn prev_location(self: &Self) -> Option<Location> {
+        self.last_location
+    }
+
+    /// Returns the source location of the next token, aka the one in `peek()`
+    pub fn next_location(self: &Self) -> Option<Location> {
+        self.input.front().map(|u| u.0)
     }
 }

@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use crate::compiler::parser::ParseRule;
 use crate::compiler::scanner::ScanResult;
-use crate::reporting::{ErrorReporter, ProvidesLineNumber, SourceFormatter};
+use crate::reporting::{Locations, SourceView};
 use crate::vm::{FunctionImpl, Opcode, RuntimeError};
 
 pub use crate::compiler::parser::{Locals, ParserError, ParserErrorType};
@@ -17,15 +17,14 @@ pub fn default() -> CompileResult {
     parser::default()
 }
 
-pub fn compile(source: &String, text: &String) -> Result<CompileResult, Vec<String>> {
+pub fn compile(view: &SourceView) -> Result<CompileResult, Vec<String>> {
     let mut errors: Vec<String> = Vec::new();
-    let formatter: SourceFormatter = SourceFormatter::new(source, text);
 
     // Scan
-    let scan_result: ScanResult = scanner::scan(text);
+    let scan_result: ScanResult = scanner::scan(view.text);
     if !scan_result.errors.is_empty() {
         for error in &scan_result.errors {
-            errors.push(formatter.format_scan_error(error));
+            errors.push(view.format(error));
         }
         return Err(errors);
     }
@@ -33,9 +32,8 @@ pub fn compile(source: &String, text: &String) -> Result<CompileResult, Vec<Stri
     // Parse
     let compile_result: CompileResult = parser::parse(scan_result);
     if !compile_result.errors.is_empty() {
-        let rpt: ErrorReporter = ErrorReporter::new(text, source);
         for error in &compile_result.errors {
-            errors.push(rpt.format_parse_error(&error));
+            errors.push(view.format(error));
         }
         return Err(errors);
     }
@@ -47,13 +45,14 @@ pub fn compile(source: &String, text: &String) -> Result<CompileResult, Vec<Stri
 /// Performs an incremental compile, given the following input parameters.
 ///
 /// This is used for incremental REPL structure. The result will have a `Print` instead of a delayed pop (if needed), and end with a `Yield` instruction instead of `Exit`.
-pub fn incremental_compile(source: &String, text: &String, code: &mut Vec<Opcode>, locals: &mut Vec<Locals>, strings: &mut Vec<String>, constants: &mut Vec<i64>, functions: &mut Vec<Rc<FunctionImpl>>, line_numbers: &mut Vec<u32>, globals: &mut Vec<String>) -> IncrementalCompileResult {
+pub fn incremental_compile(source: &String, text: &String, code: &mut Vec<Opcode>, locals: &mut Vec<Locals>, strings: &mut Vec<String>, constants: &mut Vec<i64>, functions: &mut Vec<Rc<FunctionImpl>>, locations: &mut Locations
+                           , globals: &mut Vec<String>) -> IncrementalCompileResult {
     // Stage changes, so an error or aborted compile doesn't overwrite the current valid compile state
-    // Doing this for code and line numbers (since those are 1-1 ordering) is sufficient
+    // Doing this for code and locations (since those are 1-1 ordering) is sufficient
     let code_len: usize = code.len();
-    let line_numbers_len: usize = line_numbers.len();
+    let locations_len: usize = locations.len();
 
-    let ret: IncrementalCompileResult = try_incremental_compile(source, text, code, locals, strings, constants, functions, line_numbers, globals, parser::RULE_INCREMENTAL, true);
+    let ret: IncrementalCompileResult = try_incremental_compile(source, text, code, locals, strings, constants, functions, locations, globals, parser::RULE_INCREMENTAL, true);
 
     if ret.is_success() {
         // Replace the final `Exit` with `Yield`, to yield control back to the REPL loop
@@ -62,7 +61,7 @@ pub fn incremental_compile(source: &String, text: &String, code: &mut Vec<Opcode
     } else {
         // Revert staged changes
         code.truncate(code_len);
-        line_numbers.truncate(line_numbers_len);
+        locations.truncate(locations_len);
     }
 
     ret
@@ -74,10 +73,10 @@ pub fn incremental_compile(source: &String, text: &String, code: &mut Vec<Opcode
 /// Note that this does not insert a terminal `Pop` or `Exit`, and instead pushes a `Return` which exits `eval`'s special call frame.
 ///
 /// This is the API used to run an `eval()` statement.
-pub fn eval_compile(text: &String, code: &mut Vec<Opcode>, strings: &mut Vec<String>, constants: &mut Vec<i64>, functions: &mut Vec<Rc<FunctionImpl>>, line_numbers: &mut Vec<u32>, globals: &mut Vec<String>) -> Result<(), Box<RuntimeError>> {
+pub fn eval_compile(text: &String, code: &mut Vec<Opcode>, strings: &mut Vec<String>, constants: &mut Vec<i64>, functions: &mut Vec<Rc<FunctionImpl>>, locations: &mut Locations, globals: &mut Vec<String>) -> Result<(), Box<RuntimeError>> {
 
     let mut locals: Vec<Locals> = Locals::empty();
-    let ret: IncrementalCompileResult = try_incremental_compile(&String::from("<eval>"), text, code, &mut locals, strings, constants, functions, line_numbers, globals, parser::RULE_EXPRESSION, false);
+    let ret: IncrementalCompileResult = try_incremental_compile(&String::from("<eval>"), text, code, &mut locals, strings, constants, functions, locations, globals, parser::RULE_EXPRESSION, false);
 
     if ret.is_success() {
         // Insert a `Return` at the end, to return out of `eval`'s frame
@@ -90,9 +89,9 @@ pub fn eval_compile(text: &String, code: &mut Vec<Opcode>, strings: &mut Vec<Str
 
 
 
-fn try_incremental_compile(source: &String, text: &String, code: &mut Vec<Opcode>, locals: &mut Vec<Locals>, strings: &mut Vec<String>, constants: &mut Vec<i64>, functions: &mut Vec<Rc<FunctionImpl>>, line_numbers: &mut Vec<u32>, globals: &mut Vec<String>, rule: ParseRule, abort_in_eof: bool) -> IncrementalCompileResult {
+fn try_incremental_compile(source: &String, text: &String, code: &mut Vec<Opcode>, locals: &mut Vec<Locals>, strings: &mut Vec<String>, constants: &mut Vec<i64>, functions: &mut Vec<Rc<FunctionImpl>>, locations: &mut Locations, globals: &mut Vec<String>, rule: ParseRule, abort_in_eof: bool) -> IncrementalCompileResult {
     let mut errors: Vec<String> = Vec::new();
-    let formatter: SourceFormatter = SourceFormatter::new(source, text);
+    let view: SourceView = SourceView::new(source, text);
 
     // Scan
     let scan_result: ScanResult = scanner::scan(text);
@@ -101,20 +100,19 @@ fn try_incremental_compile(source: &String, text: &String, code: &mut Vec<Opcode
             if error.is_eof() && abort_in_eof && errors.is_empty() {
                 return IncrementalCompileResult::Aborted;
             }
-            errors.push(formatter.format_scan_error(&error));
+            errors.push(view.format(error));
         }
         return IncrementalCompileResult::Errors(errors);
     }
 
     // Parse
-    let parse_errors: Vec<ParserError> = parser::parse_incremental(scan_result, code, locals, strings, constants, functions, line_numbers, globals, rule);
+    let parse_errors: Vec<ParserError> = parser::parse_incremental(scan_result, code, locals, strings, constants, functions, locations, globals, rule);
     if !parse_errors.is_empty() {
-        let rpt: ErrorReporter = ErrorReporter::new(text, source);
         for error in &parse_errors {
             if error.is_eof() && abort_in_eof && errors.is_empty() {
                 return IncrementalCompileResult::Aborted;
             }
-            errors.push(rpt.format_parse_error(&error));
+            errors.push(view.format(error));
         }
         return IncrementalCompileResult::Errors(errors);
     }
@@ -131,26 +129,26 @@ pub struct CompileResult {
     pub constants: Vec<i64>,
     pub functions: Vec<Rc<FunctionImpl>>,
 
-    pub line_numbers: Vec<u32>,
+    pub locations: Locations,
     pub locals: Vec<String>,
     pub globals: Vec<String>,
 }
 
 impl CompileResult {
 
-    pub fn disassemble(self: &Self) -> Vec<String> {
+    pub fn disassemble(self: &Self, view: &SourceView) -> Vec<String> {
         let mut lines: Vec<String> = Vec::new();
         let mut width: usize = 0;
-        let mut longest: usize = (self.line_numbers.last().unwrap_or(&0) + 1) as usize;
+        let mut longest: usize = view.len();
         while longest > 0 {
             width += 1;
             longest /= 10;
         }
 
-        let mut last_line_no: u32 = 0;
+        let mut last_line_no: usize = 0;
         let mut locals = self.locals.iter();
         for (ip, token) in self.code.iter().enumerate() {
-            let line_no = self.line_number(ip);
+            let line_no = view.lineno(&self.locations[ip]);
             let label: String = if line_no + 1 != last_line_no {
                 last_line_no = line_no + 1;
                 format!("L{:0>width$}: ", line_no + 1, width = width)

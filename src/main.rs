@@ -5,7 +5,7 @@ use rustyline::error::ReadlineError;
 
 use cordy::compiler;
 use cordy::compiler::{IncrementalCompileResult, Locals};
-use cordy::reporting::ErrorReporter;
+use cordy::reporting::{ErrorReporter, SourceView};
 use cordy::vm::{ExitType, VirtualMachine};
 
 
@@ -117,16 +117,17 @@ fn main() {
             return;
         }
 
-        let file_ref: &String = file.as_ref().unwrap();
-        let text: String = match fs::read_to_string(file_ref) {
+        let name: &String = file.as_ref().unwrap();
+        let text: String = match fs::read_to_string(name) {
             Ok(t) => t,
             Err(_) => {
-                eprintln!("Unable to read file '{}'", file_ref);
+                eprintln!("Unable to read file '{}'", name);
                 return;
             }
         };
 
-        let compiled = match compiler::compile(file_ref, &text) {
+        let view: SourceView = SourceView::new(name, &text);
+        let compiled = match compiler::compile(&view) {
             Ok(c) => c,
             Err(errors) => {
                 for e in errors {
@@ -137,7 +138,7 @@ fn main() {
         };
 
         if disassembly {
-            for line in compiled.disassemble() {
+            for line in compiled.disassemble(&view) {
                 println!("{}", line);
             }
             return;
@@ -150,7 +151,7 @@ fn main() {
             vm.run_until_completion()
         };
         match result {
-            ExitType::Error(e) => eprintln!("{}", ErrorReporter::new(&text, file_ref).format_runtime_error(e)),
+            ExitType::Error(e) => eprintln!("{}", ErrorReporter::new(&text, name).format_runtime_error(e)),
             _ => {}
         }
     }

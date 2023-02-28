@@ -1,6 +1,5 @@
 use std::rc::Rc;
 
-use crate::reporting::ProvidesLineNumber;
 use crate::stdlib::NativeFunction;
 use crate::vm::CallFrame;
 use crate::vm::opcode::Opcode;
@@ -88,12 +87,12 @@ impl StackTraceFrame {
 pub fn detail_runtime_error(error: RuntimeError, ip: usize, call_stack: &Vec<CallFrame>, functions: &Vec<Rc<FunctionImpl>>, line_numbers: &Vec<u32>) -> DetailRuntimeError {
 
     // Top level stack frame refers to the code being executed
-    let mut stack: Vec<StackTraceFrame> = vec![StackTraceFrame::new(ip, line_numbers.line_number(ip))];
+    let mut stack: Vec<StackTraceFrame> = vec![StackTraceFrame::new(ip, /* line_numbers.line_number(ip) */ 0)];
 
     for frame in call_stack.iter().rev() {
         if frame.return_ip > 0 {
             let frame_ip: usize = frame.return_ip - 1;
-            let mut stack_frame: StackTraceFrame = StackTraceFrame::new(frame_ip, line_numbers.line_number(frame_ip));
+            let mut stack_frame: StackTraceFrame = StackTraceFrame::new(frame_ip, /* line_numbers.line_number(frame_ip) */ 0);
 
             // Each frame from the call stack refers to the owning function of the previous frame
             stack_frame.src = Some(find_owning_function(stack.last().unwrap().ip, functions));

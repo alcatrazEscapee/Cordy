@@ -3,7 +3,7 @@ use std::iter::Peekable;
 use std::num::ParseIntError;
 use std::str::Chars;
 
-use crate::reporting::Location;
+use crate::reporting::{AsErrorWithLocation, Location};
 
 use self::ScanErrorType::{*};
 use self::ScanToken::{*};
@@ -34,7 +34,7 @@ pub struct ScanResult {
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub struct ScanError {
     pub error: ScanErrorType,
-    pub loc: Location,
+    pub loc: Option<Location>,
 }
 
 impl ScanError {
@@ -43,6 +43,12 @@ impl ScanError {
             UnterminatedStringLiteral => true,
             _ => false
         }
+    }
+}
+
+impl AsErrorWithLocation for ScanError {
+    fn location(self: &Self) -> &Option<Location> {
+        &self.loc
     }
 }
 
@@ -250,7 +256,7 @@ impl<'a> Scanner<'a> {
                                        // It makes it much easier to read.
                                        self.errors.push(ScanError {
                                            error: UnterminatedStringLiteral,
-                                           loc: Location::from_range(start, self.cursor)
+                                           loc: Some(Location::from_range(start, self.cursor))
                                        });
                                        break
                                    }
@@ -429,7 +435,7 @@ impl<'a> Scanner<'a> {
     fn push_err(self: &mut Self, width: usize, error: ScanErrorType) {
         self.errors.push(ScanError {
             error,
-            loc: Location::from_width(self.cursor, width)
+            loc: Some(Location::from_width(self.cursor, width))
         });
     }
 
@@ -479,7 +485,7 @@ mod tests {
 
     use crate::compiler::scanner;
     use crate::compiler::scanner::{ScanResult, ScanToken};
-    use crate::reporting::SourceFormatter;
+    use crate::reporting::SourceView;
     use crate::trace;
 
     use ScanToken::{*};
@@ -523,11 +529,11 @@ mod tests {
 
 
     fn run(path: &'static str) {
-        let root: PathBuf = trace::test::get_test_resource_path("scanner", path);
-        let text: String = trace::test::get_test_resource_src(&root);
+        let root: PathBuf = trace::get_test_resource_path("scanner", path);
+        let text: String = trace::get_test_resource_src(&root);
         let result: ScanResult = scanner::scan(&text);
         let name: String = String::from(path);
-        let formatter: SourceFormatter = SourceFormatter::new(&name, &text);
+        let formatter: SourceView = SourceView::new(&name, &text);
 
         let mut lines: Vec<String> = Vec::new();
         if !result.tokens.is_empty() {
@@ -543,10 +549,10 @@ mod tests {
             }
             lines.push(String::from("\n=== Formatted Scan Errors ===\n"));
             for error in &result.errors {
-                lines.push(formatter.format_scan_error(error))
+                lines.push(formatter.format(error))
             }
         }
 
-        trace::test::compare_test_resource_content(&root, lines);
+        trace::compare_test_resource_content(&root, lines);
     }
 }
