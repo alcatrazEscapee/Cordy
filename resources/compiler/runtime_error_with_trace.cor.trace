@@ -8,4 +8,4 @@ TypeError: Cannot add 'print' of type 'native function' and '1' of type 'int'
   at: `fn h()` (line 19)
 
 6 |     print + 1
-7 |             ^
+7 |           ^
