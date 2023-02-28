@@ -1330,16 +1330,15 @@ impl Parser<'_> {
             }
             match maybe_op {
                 Some(UnaryNot) => {
-                    self.advance();
-                    self.advance();
+                    let loc = self.advance_with() | self.advance_with();
                     self.parse_expr_2_unary();
-                    self.push(OpIn);
+                    self.push_with(OpIn, loc);
                     self.push(UnaryNot)
                 }
                 Some(op) => {
-                    self.advance();
+                    let loc = self.advance_with();
                     self.parse_expr_2_unary();
-                    self.push(op);
+                    self.push_with(op, loc);
                 },
                 None => break
             }
@@ -1360,9 +1359,9 @@ impl Parser<'_> {
             }
             match maybe_op {
                 Some(op) => {
-                    self.advance();
+                    let loc = self.advance_with();
                     self.parse_expr_3();
-                    self.push(op);
+                    self.push_with(op, loc);
                 },
                 None => break
             }
@@ -1383,9 +1382,9 @@ impl Parser<'_> {
             }
             match maybe_op {
                 Some(op) => {
-                    self.advance();
+                    let loc = self.advance_with();
                     self.parse_expr_4();
-                    self.push(op);
+                    self.push_with(op, loc);
                 },
                 None => break
             }
@@ -1407,9 +1406,9 @@ impl Parser<'_> {
             }
             match maybe_op {
                 Some(op) => {
-                    self.advance();
+                    let loc = self.advance_with();
                     self.parse_expr_5();
-                    self.push(op);
+                    self.push_with(op, loc);
                 },
                 None => break
             }
@@ -1450,9 +1449,9 @@ impl Parser<'_> {
             }
             match maybe_op {
                 Some(op) => {
-                    self.advance();
+                    let loc = self.advance_with();
                     self.parse_expr_7();
-                    self.push(op);
+                    self.push_with(op, loc);
                 },
                 None => break
             }
