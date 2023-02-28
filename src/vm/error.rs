@@ -61,7 +61,7 @@ impl RuntimeError {
 
     pub fn with_stacktrace(self: Self, ip: usize, call_stack: &Vec<CallFrame>, functions: &Vec<Rc<FunctionImpl>>, locations: &Locations) -> DetailRuntimeError {
         // Top level stack frame refers to the code being executed
-        let target: Option<Location> = locations[ip];
+        let target: Location = locations[ip];
         let mut stack: Vec<StackFrame> = Vec::new();
         let mut prev_ip: usize = ip;
 
@@ -82,14 +82,14 @@ impl RuntimeError {
 #[derive(Debug)]
 pub struct DetailRuntimeError {
     error: RuntimeError,
-    target: Option<Location>,
+    target: Location,
 
     /// The stack trace elements, including a location (typically of the function call), and the function name itself
     stack: Vec<StackFrame>,
 }
 
 #[derive(Debug)]
-pub struct StackFrame(usize, Option<Location>, String);
+pub struct StackFrame(usize, Location, String);
 
 impl AsError for DetailRuntimeError {
     fn as_error(self: &Self) -> String {
@@ -98,13 +98,13 @@ impl AsError for DetailRuntimeError {
 }
 
 impl AsErrorWithContext for DetailRuntimeError {
-    fn location(self: &Self) -> &Option<Location> {
-        &self.target
+    fn location(self: &Self) -> Location {
+        self.target
     }
 
     fn add_stack_trace_elements(self: &Self, view: &SourceView, text: &mut String) {
         for StackFrame(_, loc, site) in &self.stack {
-            text.push_str(format!("  at: `{}` (line {})\n", site, view.lineno(loc) + 1).as_str());
+            text.push_str(format!("  at: `{}` (line {})\n", site, view.lineno(*loc) + 1).as_str());
         }
     }
 }

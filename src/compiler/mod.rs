@@ -149,7 +149,7 @@ impl CompileResult {
         let mut last_line_no: usize = 0;
         let mut locals = self.locals.iter();
         for (ip, token) in self.code.iter().enumerate() {
-            let line_no = view.lineno(&self.locations[ip]);
+            let line_no = view.lineno(self.locations[ip]);
             let label: String = if line_no + 1 != last_line_no {
                 last_line_no = line_no + 1;
                 format!("L{:0>width$}: ", line_no + 1, width = width)

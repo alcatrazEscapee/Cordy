@@ -4,14 +4,14 @@ use crate::reporting::{AsErrorWithContext, Location};
 use ParserErrorType::{*};
 
 
-#[derive(Eq, PartialEq, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct ParserError {
     pub error: ParserErrorType,
-    pub loc: Option<Location>,
+    pub loc: Location,
 }
 
 impl ParserError {
-    pub fn new(error: ParserErrorType, loc: Option<Location>) -> ParserError {
+    pub fn new(error: ParserErrorType, loc: Location) -> ParserError {
         ParserError { error, loc }
     }
 
@@ -56,8 +56,8 @@ impl ParserError {
 }
 
 impl AsErrorWithContext for ParserError {
-    fn location(self: &Self) -> &Option<Location> {
-        &self.loc
+    fn location(self: &Self) -> Location {
+        self.loc
     }
 }
 

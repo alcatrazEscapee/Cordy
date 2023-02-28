@@ -31,10 +31,10 @@ pub struct ScanResult {
 }
 
 
-#[derive(Eq, PartialEq, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct ScanError {
     pub error: ScanErrorType,
-    pub loc: Option<Location>,
+    pub loc: Location,
 }
 
 impl ScanError {
@@ -47,8 +47,8 @@ impl ScanError {
 }
 
 impl AsErrorWithContext for ScanError {
-    fn location(self: &Self) -> &Option<Location> {
-        &self.loc
+    fn location(self: &Self) -> Location {
+        self.loc
     }
 }
 
@@ -256,7 +256,7 @@ impl<'a> Scanner<'a> {
                                        // It makes it much easier to read.
                                        self.errors.push(ScanError {
                                            error: UnterminatedStringLiteral,
-                                           loc: Some(Location::from_range(start, self.cursor))
+                                           loc: Location::new(start, self.cursor - start + 1)
                                        });
                                        break
                                    }
@@ -424,7 +424,7 @@ impl<'a> Scanner<'a> {
 
 
     fn push(self: &mut Self, width: usize, token: ScanToken) {
-        self.tokens.push((Location::from_width(self.cursor, width), token));
+        self.tokens.push((self.location(width), token));
     }
 
     fn push_skip(self: &mut Self, width: usize, token: ScanToken) {
@@ -435,7 +435,7 @@ impl<'a> Scanner<'a> {
     fn push_err(self: &mut Self, width: usize, error: ScanErrorType) {
         self.errors.push(ScanError {
             error,
-            loc: Some(Location::from_width(self.cursor, width))
+            loc: self.location(width)
         });
     }
 
@@ -475,6 +475,10 @@ impl<'a> Scanner<'a> {
     /// Inspects the next character and returns it, without consuming it
     fn peek(self: &mut Self) -> Option<char> {
         self.chars.peek().map(|c| *c)
+    }
+
+    fn location(self: &Self, width: usize) -> Location {
+        Location::new(self.cursor - width, width)
     }
 }
 

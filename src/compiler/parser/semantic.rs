@@ -104,7 +104,7 @@ impl Local {
 }
 
 
-#[derive(Eq, PartialEq, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct LateBoundGlobal {
     name: String,
     opcode: usize, // Index in output[] of the `load` opcode
@@ -391,12 +391,12 @@ impl Default for LValueReference {
 }
 
 
-#[derive(Eq, PartialEq, Debug, Clone)]
-pub enum Reference<T> where T : Eq + PartialEq + Debug + Clone {
+#[derive(Debug, Clone)]
+pub enum Reference<T> where T : Debug + Clone {
     Load(T), Store(T)
 }
 
-impl<T : Eq + PartialEq + Debug + Clone> Reference<T> {
+impl<T : Debug + Clone> Reference<T> {
     pub fn into_ref(&self) -> &T { match self { Reference::Load(it) | Reference::Store(it) => it } }
     pub fn into(self) -> T { match self { Reference::Load(it) | Reference::Store(it) => it } }
 

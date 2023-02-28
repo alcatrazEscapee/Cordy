@@ -379,12 +379,12 @@ impl<'a> Parser<'a> {
     }
 
     /// Returns the source location of the previous token, aka the one just accepted.
-    pub fn prev_location(self: &Self) -> Option<Location> {
-        self.last_location
+    pub fn prev_location(self: &Self) -> Location {
+        self.last_location.unwrap_or_else(Location::empty)
     }
 
     /// Returns the source location of the next token, aka the one in `peek()`
-    pub fn next_location(self: &Self) -> Option<Location> {
-        self.input.front().map(|u| u.0)
+    pub fn next_location(self: &Self) -> Location {
+        self.input.front().map(|u| u.0).unwrap_or_else(Location::empty)
     }
 }
