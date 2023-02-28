@@ -1,4 +1,5 @@
 use std::rc::Rc;
+use crate::reporting::{AsError, AsErrorWithContext, Location, Locations, SourceView};
 
 use crate::stdlib::NativeFunction;
 use crate::vm::CallFrame;
@@ -6,7 +7,7 @@ use crate::vm::opcode::Opcode;
 use crate::vm::value::{FunctionImpl, Value};
 
 
-#[derive(Eq, PartialEq, Debug, Clone)]
+#[derive(Debug)]
 pub enum RuntimeError {
     RuntimeExit,
     RuntimeYield,
@@ -57,51 +58,57 @@ impl RuntimeError {
     pub fn err<T>(self: Self) -> Result<T, Box<RuntimeError>> {
         Err(Box::new(self))
     }
+
+    pub fn with_stacktrace(self: Self, ip: usize, call_stack: &Vec<CallFrame>, functions: &Vec<Rc<FunctionImpl>>, locations: &Locations) -> DetailRuntimeError {
+        // Top level stack frame refers to the code being executed
+        let target: Option<Location> = locations[ip];
+        let mut stack: Vec<StackFrame> = Vec::new();
+        let mut prev_ip: usize = ip;
+
+        for frame in call_stack.iter().rev() {
+            if frame.return_ip > 0 {
+                // Each frame from the call stack refers to the owning function of the previous frame
+                let frame_ip: usize = frame.return_ip - 1;
+                stack.push(StackFrame(frame_ip, locations[frame_ip], find_owning_function(prev_ip, functions)));
+                prev_ip = frame_ip;
+            }
+        }
+
+        DetailRuntimeError { error: self, target, stack }
+    }
 }
 
-#[derive(Debug, Clone)]
+/// A `RuntimeError` with a filled-in stack trace, and source location which caused the error.
+#[derive(Debug)]
 pub struct DetailRuntimeError {
-    pub error: RuntimeError,
-    pub stack: Vec<StackTraceFrame>,
+    error: RuntimeError,
+    target: Option<Location>,
+
+    /// The stack trace elements, including a location (typically of the function call), and the function name itself
+    stack: Vec<StackFrame>,
 }
 
-impl DetailRuntimeError {
-    fn new(error: RuntimeError, stack: Vec<StackTraceFrame>) -> DetailRuntimeError {
-        DetailRuntimeError { error, stack }
+#[derive(Debug)]
+pub struct StackFrame(usize, Option<Location>, String);
+
+impl AsError for DetailRuntimeError {
+    fn as_error(self: &Self) -> String {
+        self.error.as_error()
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct StackTraceFrame {
-    ip: usize,
-    pub lineno: usize,
-    pub src: Option<String>,
-}
-
-impl StackTraceFrame {
-    fn new(ip: usize, lineno: u32) -> StackTraceFrame {
-        StackTraceFrame { ip, lineno: lineno as usize, src: None }
+impl AsErrorWithContext for DetailRuntimeError {
+    fn location(self: &Self) -> &Option<Location> {
+        &self.target
     }
-}
 
-pub fn detail_runtime_error(error: RuntimeError, ip: usize, call_stack: &Vec<CallFrame>, functions: &Vec<Rc<FunctionImpl>>, line_numbers: &Vec<u32>) -> DetailRuntimeError {
-
-    // Top level stack frame refers to the code being executed
-    let mut stack: Vec<StackTraceFrame> = vec![StackTraceFrame::new(ip, /* line_numbers.line_number(ip) */ 0)];
-
-    for frame in call_stack.iter().rev() {
-        if frame.return_ip > 0 {
-            let frame_ip: usize = frame.return_ip - 1;
-            let mut stack_frame: StackTraceFrame = StackTraceFrame::new(frame_ip, /* line_numbers.line_number(frame_ip) */ 0);
-
-            // Each frame from the call stack refers to the owning function of the previous frame
-            stack_frame.src = Some(find_owning_function(stack.last().unwrap().ip, functions));
-            stack.push(stack_frame);
+    fn add_stack_trace_elements(self: &Self, view: &SourceView, text: &mut String) {
+        for StackFrame(_, loc, site) in &self.stack {
+            text.push_str(format!("  at: `{}` (line {})\n", site, view.lineno(loc) + 1).as_str());
         }
     }
-
-    DetailRuntimeError::new(error, stack)
 }
+
 
 /// The owning function for a given IP can be defined as the closest function which encloses the desired instruction
 /// We annotate both head and tail of `FunctionImpl` to make this search easy

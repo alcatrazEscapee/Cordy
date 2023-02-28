@@ -2,8 +2,7 @@ use std::rc::Rc;
 
 use crate::compiler::{ParserError, ParserErrorType, ScanError, ScanErrorType, ScanToken};
 use crate::stdlib::NativeFunction;
-use crate::vm::{DetailRuntimeError, FunctionImpl, Opcode, RuntimeError, StackTraceFrame, Value};
-use crate::misc;
+use crate::vm::{FunctionImpl, Opcode, RuntimeError, Value};
 
 pub type Locations = Vec<Option<Location>>;
 
@@ -29,9 +28,23 @@ pub struct SourceView<'a> {
     starts: Vec<usize>,
 }
 
-pub trait AsErrorWithLocation : AsError {
-    fn location(self: &Self) -> &Option<Location>;
+/// A simple common trait for converting arbitrary objects to human-readable errors
+/// This could be implemented directly on the types, but using the trait allows all end-user-exposed text to be concentrated in this module.
+pub trait AsError {
+    fn as_error(self: &Self) -> String;
 }
+
+/// An extension of `AsError` which is used for actual error types (`ScanError`, `ParserError`, `DetailRuntimeError`)
+/// This is intentionally polymorphic, as it's used in `SourceView::format()`
+pub trait AsErrorWithContext: AsError {
+    fn location(self: &Self) -> &Option<Location>;
+
+    /// When formatting a `RuntimeError`, allows inserting additional stack trace elements.
+    /// This is appended *after* the initial `at: line X (source file)` line is appended.
+    fn add_stack_trace_elements(self: &Self, _: &SourceView, _: &mut String) {}
+}
+
+
 
 impl<'a> SourceView<'a> {
 
@@ -56,12 +69,6 @@ impl<'a> SourceView<'a> {
         }
     }
 
-    pub fn format<E : AsErrorWithLocation>(self: &Self, error: &E) -> String {
-        let mut text = error.as_error();
-        self.add_context(&mut text, error.location());
-        text
-    }
-
     pub fn len(self: &Self) -> usize {
         self.lines.len()
     }
@@ -73,7 +80,9 @@ impl<'a> SourceView<'a> {
         }
     }
 
-    fn add_context(self: &Self, text: &mut String, loc: &Option<Location>) {
+    pub fn format<E : AsErrorWithContext>(self: &Self, error: &E) -> String {
+        let mut text = error.as_error();
+        let loc = error.location();
         let start_lineno = self.lineno(loc);
         let mut end_lineno = start_lineno;
 
@@ -94,7 +103,9 @@ impl<'a> SourceView<'a> {
 
         let width: usize = format!("{}", end_lineno + 2).len();
 
-        text.push_str(format!("\n  at: line {} ({})\n\n", lineno, self.name).as_str());
+        text.push_str(format!("\n  at: line {} ({})\n", lineno, self.name).as_str());
+        error.add_stack_trace_elements(self, &mut text);
+        text.push('\n');
 
         for i in start_lineno..=end_lineno {
             let line = self.lines[i];
@@ -132,6 +143,7 @@ impl<'a> SourceView<'a> {
             }
         }
         text.push('\n');
+        text
     }
 }
 
@@ -143,46 +155,6 @@ impl Location {
     pub fn from_range(start: usize, end: usize) -> Location {
         Location { start, end }
     }
-}
-
-
-
-
-pub struct ErrorReporter<'a> {
-    lines: Vec<&'a str>,
-    src: &'a String,
-}
-
-impl<'a> ErrorReporter<'a> {
-    pub fn new(text: &'a String, src: &'a String) -> ErrorReporter<'a> {
-        ErrorReporter {
-            lines: text.lines().collect(),
-            src
-        }
-    }
-
-    pub fn format_runtime_error(self: &Self, error: DetailRuntimeError) -> String {
-        format_runtime_error(&self.lines, self.src, error)
-    }
-}
-
-pub fn format_runtime_error(source_lines: &Vec<&str>, source_file: &String, mut error: DetailRuntimeError) -> String {
-    let mut text: String = error.error.as_error();
-    let root: &mut StackTraceFrame = &mut error.stack[0];
-    let mut src: String = String::from(source_lines.get(root.lineno as usize).map(|t| *t).unwrap_or(""));
-    misc::strip_line_ending(&mut src);
-    root.src = Some(src);
-    for frame in error.stack {
-        text.push_str(format!("\n    at: `{}` (line {})", frame.src.unwrap(), frame.lineno + 1).as_str())
-    }
-    text.push_str(format!("\n    at: execution of script '{}'\n", source_file).as_str());
-    text
-}
-
-
-
-pub trait AsError {
-    fn as_error(self: &Self) -> String;
 }
 
 
@@ -438,7 +410,7 @@ impl AsError for ScanToken {
 
 #[cfg(test)]
 mod tests {
-    use crate::reporting::{Location, SourceView};
+    use crate::reporting::{AsError, AsErrorWithContext, Location, SourceView};
 
     #[test]
     fn test_error_first_word_first_line() {
@@ -531,14 +503,16 @@ mod tests {
 ")
     }
 
+    struct MockError(&'static str, Option<Location>);
+
+    impl AsError for MockError { fn as_error(self: &Self) -> String { String::from(self.0) } }
+    impl AsErrorWithContext for MockError { fn location(self: &Self) -> &Option<Location> { &self.1 } }
 
     fn run(start: usize, end: usize, expected: &'static str) {
         let name = String::from("<test>");
         let text = String::from("first += line\nsecond line?\nthird line\r\nwindows line\n\nempty\r\n\r\nmore empty");
         let src = SourceView::new(&name, &text);
-
-        let mut error = String::from("Error");
-        src.add_context(&mut error, &Some(Location::from_range(start, end)));
+        let error = src.format(&MockError("Error", Some(Location::from_range(start, end))));
 
         assert_eq!(error.as_str(), expected);
     }

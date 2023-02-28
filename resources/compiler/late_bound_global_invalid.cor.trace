@@ -1,4 +1,6 @@
 ValueError: 'bar' was referenced but has not been declared yet
-    at: `    bar . print` (line 3)
-    at: `fn foo()` (line 6)
-    at: execution of script 'late_bound_global_invalid'
+  at: line 3 (<test>)
+  at: `fn foo()` (line 6)
+
+3 |     bar . print
+4 |     ^^^

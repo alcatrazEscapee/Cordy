@@ -5,7 +5,7 @@ use rustyline::error::ReadlineError;
 
 use cordy::compiler;
 use cordy::compiler::{IncrementalCompileResult, Locals};
-use cordy::reporting::{ErrorReporter, SourceView};
+use cordy::reporting::SourceView;
 use cordy::vm::{ExitType, VirtualMachine};
 
 
@@ -16,7 +16,7 @@ fn main() {
         // REPL Mode
         println!("Welcome to Cordy! (exit with 'exit' or Ctrl-C)");
 
-        let source = &String::from("<stdin>");
+        let name = &String::from("<stdin>");
         let mut editor = Editor::<()>::new().unwrap();
         let mut buffer: String = String::new();
         let mut continuation: bool = false;
@@ -55,7 +55,9 @@ fn main() {
             buffer.push_str(line.as_str());
             buffer.push('\n');
             continuation = false;
-            match vm.incremental_compile(&source, &buffer, &mut locals) {
+
+            let view: SourceView = SourceView::new(&name, &buffer);
+            match vm.incremental_compile(&view, &mut locals) {
                 IncrementalCompileResult::Success => {},
                 IncrementalCompileResult::Errors(errors) => {
                     for e in errors {
@@ -73,7 +75,7 @@ fn main() {
             match vm.run_until_completion() {
                 ExitType::Exit | ExitType::Return => return,
                 ExitType::Yield => {},
-                ExitType::Error(e) => println!("{}", ErrorReporter::new(&buffer, source).format_runtime_error(e)),
+                ExitType::Error(error) => println!("{}", view.format(&error)),
             }
 
             buffer.clear();
@@ -150,9 +152,9 @@ fn main() {
             let mut vm = VirtualMachine::new(compiled, stdin, stdout);
             vm.run_until_completion()
         };
-        match result {
-            ExitType::Error(e) => eprintln!("{}", ErrorReporter::new(&text, name).format_runtime_error(e)),
-            _ => {}
+
+        if let ExitType::Error(error) = result {
+            eprintln!("{}", view.format(&error));
         }
     }
 }

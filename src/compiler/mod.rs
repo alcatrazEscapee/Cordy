@@ -45,14 +45,14 @@ pub fn compile(view: &SourceView) -> Result<CompileResult, Vec<String>> {
 /// Performs an incremental compile, given the following input parameters.
 ///
 /// This is used for incremental REPL structure. The result will have a `Print` instead of a delayed pop (if needed), and end with a `Yield` instruction instead of `Exit`.
-pub fn incremental_compile(source: &String, text: &String, code: &mut Vec<Opcode>, locals: &mut Vec<Locals>, strings: &mut Vec<String>, constants: &mut Vec<i64>, functions: &mut Vec<Rc<FunctionImpl>>, locations: &mut Locations
+pub fn incremental_compile(view: &SourceView, code: &mut Vec<Opcode>, locals: &mut Vec<Locals>, strings: &mut Vec<String>, constants: &mut Vec<i64>, functions: &mut Vec<Rc<FunctionImpl>>, locations: &mut Locations
                            , globals: &mut Vec<String>) -> IncrementalCompileResult {
     // Stage changes, so an error or aborted compile doesn't overwrite the current valid compile state
     // Doing this for code and locations (since those are 1-1 ordering) is sufficient
     let code_len: usize = code.len();
     let locations_len: usize = locations.len();
 
-    let ret: IncrementalCompileResult = try_incremental_compile(source, text, code, locals, strings, constants, functions, locations, globals, parser::RULE_INCREMENTAL, true);
+    let ret: IncrementalCompileResult = try_incremental_compile(view, code, locals, strings, constants, functions, locations, globals, parser::RULE_INCREMENTAL, true);
 
     if ret.is_success() {
         // Replace the final `Exit` with `Yield`, to yield control back to the REPL loop
@@ -76,7 +76,9 @@ pub fn incremental_compile(source: &String, text: &String, code: &mut Vec<Opcode
 pub fn eval_compile(text: &String, code: &mut Vec<Opcode>, strings: &mut Vec<String>, constants: &mut Vec<i64>, functions: &mut Vec<Rc<FunctionImpl>>, locations: &mut Locations, globals: &mut Vec<String>) -> Result<(), Box<RuntimeError>> {
 
     let mut locals: Vec<Locals> = Locals::empty();
-    let ret: IncrementalCompileResult = try_incremental_compile(&String::from("<eval>"), text, code, &mut locals, strings, constants, functions, locations, globals, parser::RULE_EXPRESSION, false);
+    let name: String = String::from("<eval>");
+    let view: SourceView = SourceView::new(&name, text);
+    let ret: IncrementalCompileResult = try_incremental_compile(&view, code, &mut locals, strings, constants, functions, locations, globals, parser::RULE_EXPRESSION, false);
 
     if ret.is_success() {
         // Insert a `Return` at the end, to return out of `eval`'s frame
@@ -89,12 +91,11 @@ pub fn eval_compile(text: &String, code: &mut Vec<Opcode>, strings: &mut Vec<Str
 
 
 
-fn try_incremental_compile(source: &String, text: &String, code: &mut Vec<Opcode>, locals: &mut Vec<Locals>, strings: &mut Vec<String>, constants: &mut Vec<i64>, functions: &mut Vec<Rc<FunctionImpl>>, locations: &mut Locations, globals: &mut Vec<String>, rule: ParseRule, abort_in_eof: bool) -> IncrementalCompileResult {
+fn try_incremental_compile(view: &SourceView, code: &mut Vec<Opcode>, locals: &mut Vec<Locals>, strings: &mut Vec<String>, constants: &mut Vec<i64>, functions: &mut Vec<Rc<FunctionImpl>>, locations: &mut Locations, globals: &mut Vec<String>, rule: ParseRule, abort_in_eof: bool) -> IncrementalCompileResult {
     let mut errors: Vec<String> = Vec::new();
-    let view: SourceView = SourceView::new(source, text);
 
     // Scan
-    let scan_result: ScanResult = scanner::scan(text);
+    let scan_result: ScanResult = scanner::scan(view.text);
     if !scan_result.errors.is_empty() {
         for error in &scan_result.errors {
             if error.is_eof() && abort_in_eof && errors.is_empty() {

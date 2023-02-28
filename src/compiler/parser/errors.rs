@@ -1,5 +1,5 @@
 use crate::compiler::scanner::ScanToken;
-use crate::reporting::{AsErrorWithLocation, Location};
+use crate::reporting::{AsErrorWithContext, Location};
 
 use ParserErrorType::{*};
 
@@ -55,7 +55,7 @@ impl ParserError {
     }
 }
 
-impl AsErrorWithLocation for ParserError {
+impl AsErrorWithContext for ParserError {
     fn location(self: &Self) -> &Option<Location> {
         &self.loc
     }
