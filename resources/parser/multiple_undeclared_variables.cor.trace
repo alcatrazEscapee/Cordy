@@ -7,18 +7,18 @@ L2: 0000 OpAdd
     0006 Exit
 Undeclared identifier: 'x'
   at: line 2 (multiple_undeclared_variables.cor)
-  at:
 
-x + y + z . print
+2 | x + y + z . print
+3 | ^
 
 Undeclared identifier: 'y'
   at: line 2 (multiple_undeclared_variables.cor)
-  at:
 
-x + y + z . print
+2 | x + y + z . print
+3 |     ^
 
 Undeclared identifier: 'z'
   at: line 2 (multiple_undeclared_variables.cor)
-  at:
 
-x + y + z . print
+2 | x + y + z . print
+3 |         ^

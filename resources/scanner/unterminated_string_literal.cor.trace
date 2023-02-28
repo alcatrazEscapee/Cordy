@@ -11,7 +11,7 @@ StringLiteral("... this doesn't end\n\nbut it continues...\n\n")
 
 === Scan Errors ===
 
-ScanError { error: UnterminatedStringLiteral, loc: Location { start: 9, end: 57 } }
+ScanError { error: UnterminatedStringLiteral, loc: Some(Location { start: 9, end: 57 }) }
 
 === Formatted Scan Errors ===
 

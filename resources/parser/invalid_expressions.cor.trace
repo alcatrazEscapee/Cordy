@@ -29,36 +29,36 @@ L7: 0026 Pop
     0028 Exit
 Expected an expression terminal, got '+' token instead
   at: line 2 (invalid_expressions.cor)
-  at:
 
-do { x = 1 + + 3 }
+2 | do { x = 1 + + 3 }
+3 |              ^
 
 Expected an expression terminal, got '+' token instead
   at: line 3 (invalid_expressions.cor)
-  at:
 
-do { x = - + 2 }
+3 | do { x = - + 2 }
+4 |            ^
 
 Expected an expression terminal, got '.' token instead
   at: line 4 (invalid_expressions.cor)
-  at:
 
-do { x = print .. 3 }
+4 | do { x = print .. 3 }
+5 |                 ^
 
 Expecting a statement, got integer '3' instead
   at: line 5 (invalid_expressions.cor)
-  at:
 
-do { x = print 3 }
+5 | do { x = print 3 }
+6 |                ^
 
 Expected an expression terminal, got ',' token instead
   at: line 6 (invalid_expressions.cor)
-  at:
 
-do { x = print (4 ,, 5) }
+6 | do { x = print (4 ,, 5) }
+7 |                    ^
 
 Expected a ',' or ')' after function invocation, got integer '6' instead
   at: line 7 (invalid_expressions.cor)
-  at:
 
-do { x = print (5 6) }
+7 | do { x = print (5 6) }
+8 |                   ^

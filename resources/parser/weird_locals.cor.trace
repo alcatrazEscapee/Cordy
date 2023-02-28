@@ -7,6 +7,6 @@ L5: 0005 Pop
     0006 Exit
 Undeclared identifier: 'x'
   at: line 1 (weird_locals.cor)
-  at:
 
-do { let x = x }
+1 | do { let x = x }
+2 |              ^

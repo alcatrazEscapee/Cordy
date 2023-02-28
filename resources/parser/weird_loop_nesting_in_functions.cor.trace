@@ -29,6 +29,6 @@ L11: 0024 PushGlobal(0) -> foo
      0028 Exit
 Invalid 'break' statement outside of an enclosing loop
   at: line 5 (weird_loop_nesting_in_functions.cor)
-  at:
 
-            (fn() { break })()
+5 |             (fn() { break })()
+6 |                     ^^^^^

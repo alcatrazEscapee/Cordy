@@ -9,11 +9,11 @@ NewLine
 
 === Scan Errors ===
 
-ScanError { error: InvalidCharacter('$'), loc: Location { start: 41, end: 41 } }
-ScanError { error: InvalidCharacter('#'), loc: Location { start: 44, end: 44 } }
-ScanError { error: InvalidCharacter('#'), loc: Location { start: 74, end: 74 } }
-ScanError { error: InvalidCharacter('$'), loc: Location { start: 101, end: 101 } }
-ScanError { error: InvalidCharacter('$'), loc: Location { start: 179, end: 179 } }
+ScanError { error: InvalidCharacter('$'), loc: Some(Location { start: 41, end: 41 }) }
+ScanError { error: InvalidCharacter('#'), loc: Some(Location { start: 44, end: 44 }) }
+ScanError { error: InvalidCharacter('#'), loc: Some(Location { start: 74, end: 74 }) }
+ScanError { error: InvalidCharacter('$'), loc: Some(Location { start: 101, end: 101 }) }
+ScanError { error: InvalidCharacter('$'), loc: Some(Location { start: 179, end: 179 }) }
 
 === Formatted Scan Errors ===
 

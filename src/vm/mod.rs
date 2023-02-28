@@ -10,6 +10,7 @@ use crate::compiler::{CompileResult, IncrementalCompileResult, Locals};
 use crate::stdlib::NativeFunction;
 use crate::vm::value::{PartialFunctionImpl, UpValue};
 use crate::misc::OffsetAdd;
+use crate::reporting::Locations;
 
 pub use crate::vm::error::{DetailRuntimeError, RuntimeError, StackTraceFrame};
 pub use crate::vm::opcode::Opcode;
@@ -40,7 +41,7 @@ pub struct VirtualMachine<R, W> {
     globals: Vec<String>,
     constants: Vec<i64>,
     functions: Vec<Rc<FunctionImpl>>,
-    line_numbers: Vec<u32>,
+    locations: Locations,
 
     read: R,
     write: W,
@@ -122,7 +123,7 @@ impl<R, W> VirtualMachine<R, W> where
             globals: result.globals,
             constants: result.constants,
             functions: result.functions,
-            line_numbers: result.line_numbers,
+            locations: result.locations,
             read,
             write,
         }
@@ -130,12 +131,12 @@ impl<R, W> VirtualMachine<R, W> where
 
     /// Bridge method to `compiler::incremental_compile`
     pub fn incremental_compile(self: &mut Self, source: &String, text: &String, locals: &mut Vec<Locals>) -> IncrementalCompileResult {
-        compiler::incremental_compile(source, text, &mut self.code, locals, &mut self.strings, &mut self.constants, &mut self.functions, &mut self.line_numbers, &mut self.globals)
+        compiler::incremental_compile(source, text, &mut self.code, locals, &mut self.strings, &mut self.constants, &mut self.functions, &mut self.locations, &mut self.globals)
     }
 
     /// Bridge method to `compiler::eval_compile`
     pub fn eval_compile(self: &mut Self, text: &String) -> AnyResult {
-        compiler::eval_compile(text, &mut self.code, &mut self.strings, &mut self.constants, &mut self.functions, &mut self.line_numbers, &mut self.globals)
+        compiler::eval_compile(text, &mut self.code, &mut self.strings, &mut self.constants, &mut self.functions, &mut self.locations, &mut self.globals)
     }
 
     pub fn run_until_completion(self: &mut Self) -> ExitType {
@@ -143,7 +144,7 @@ impl<R, W> VirtualMachine<R, W> where
             Ok(_) => ExitType::Return,
             Err(RuntimeExit) => ExitType::Exit,
             Err(RuntimeYield) => ExitType::Yield,
-            Err(e) => ExitType::Error(error::detail_runtime_error(e, self.ip - 1, &self.call_stack, &self.functions, &self.line_numbers)),
+            Err(e) => ExitType::Error(error::detail_runtime_error(e, self.ip - 1, &self.call_stack, &self.functions, &vec![])),
         }
     }
 
@@ -915,7 +916,7 @@ mod test {
     use std::path::PathBuf;
 
     use crate::{compiler, reporting, trace};
-    use crate::reporting::ErrorReporter;
+    use crate::reporting::{ErrorReporter, SourceView};
     use crate::vm::{ExitType, VirtualMachine};
 
     #[test] fn test_str_empty() { run_str("", ""); }
@@ -1506,10 +1507,11 @@ mod test {
     #[test] fn test_upvalue_never_captured() { run("upvalue_never_captured"); }
 
 
-    fn run_str(code: &'static str, expected: &'static str) {
-        let text: &String = &String::from(code);
-        let source: &String = &String::from("<test>");
-        let compile = compiler::compile(source, text);
+    fn run_str(text: &'static str, expected: &'static str) {
+        let text: String = String::from(text);
+        let name: String = String::from("<test>");
+        let view: SourceView = SourceView::new(&name, &text);
+        let compile = compiler::compile(&view);
 
         if compile.is_err() {
             assert_eq!(format!("Compile Error:\n\n{}", compile.err().unwrap().join("\n")).as_str(), expected);
@@ -1518,7 +1520,7 @@ mod test {
 
         let compile = compile.unwrap();
         println!("[-d] === Compiled ===");
-        for line in compile.disassemble() {
+        for line in compile.disassemble(&view) {
             println!("[-d] {}", line);
         }
 
@@ -1531,17 +1533,18 @@ mod test {
         let mut output: String = String::from_utf8(buf).unwrap();
 
         if let ExitType::Error(err) = result {
-            output.push_str(ErrorReporter::new(text, source).format_runtime_error(err).as_str());
+            output.push_str(ErrorReporter::new(&text, &name).format_runtime_error(err).as_str());
         }
 
         assert_eq!(output.as_str(), expected);
     }
 
     fn run(path: &'static str) {
-        let root: &PathBuf = &trace::test::get_test_resource_path("compiler", path);
-        let text: &String = &trace::test::get_test_resource_src(&root);
-        let source = &String::from(path);
-        let compile= compiler::compile(source, text);
+        let root: PathBuf = trace::get_test_resource_path("compiler", path);
+        let text: String = trace::get_test_resource_src(&root);
+        let name: String = String::from("<test>");
+        let view: SourceView = SourceView::new(&name, &text);
+        let compile= compiler::compile(&view);
 
         if compile.is_err() {
             assert_eq!(format!("Compile Error:\n\n{}", compile.err().unwrap().join("\n")).as_str(), "Compiled");
@@ -1550,7 +1553,7 @@ mod test {
 
         let compile = compile.unwrap();
         println!("[-d] === Compiled ===");
-        for line in compile.disassemble() {
+        for line in compile.disassemble(&view) {
             println!("[-d] {}", line);
         }
 
@@ -1563,9 +1566,9 @@ mod test {
         let mut output: String = String::from_utf8(buf).unwrap();
 
         if let ExitType::Error(e) = result {
-            output.push_str(reporting::format_runtime_error(&text.split("\n").collect(), source, e).as_str());
+            output.push_str(reporting::format_runtime_error(&text.split("\n").collect(), &name, e).as_str());
         }
 
-        trace::test::compare_test_resource_content(&root, output.split("\n").map(|s| String::from(s)).collect::<Vec<String>>());
+        trace::compare_test_resource_content(&root, output.split("\n").map(|s| String::from(s)).collect::<Vec<String>>());
     }
 }
