@@ -4,17 +4,33 @@ use crate::compiler::{ParserError, ParserErrorType, ScanError, ScanErrorType, Sc
 use crate::stdlib::NativeFunction;
 use crate::vm::{FunctionImpl, Opcode, RuntimeError, Value};
 
-pub type Locations = Vec<Option<Location>>;
+pub type Locations = Vec<Location>;
 
 
 /// A closed interval of a source code location.
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy)]
 pub struct Location {
     /// Start character index, inclusive
     start: usize,
-    /// End character index, inclusive
-    end: usize,
+    /// Total width of the location. A width of `0` indicates this is an empty location.
+    width: usize,
 }
+
+impl Location {
+    pub fn new(start: usize, width: usize) -> Location {
+        Location { start, width }
+    }
+
+    pub fn empty() -> Location {
+        Location::new(0, 0)
+    }
+
+    pub fn as_opt(self: Self) -> Option<Location> {
+        if self.width > 0 { Some(self) } else { None }
+    }
+    pub fn end(self: &Self) -> usize { self.start + self.width - 1 }
+}
+
 
 /// Indexed source code information.
 /// This is used to report errors in a readable fashion, by resolving `Location` references to a line and column number.
@@ -37,7 +53,7 @@ pub trait AsError {
 /// An extension of `AsError` which is used for actual error types (`ScanError`, `ParserError`, `DetailRuntimeError`)
 /// This is intentionally polymorphic, as it's used in `SourceView::format()`
 pub trait AsErrorWithContext: AsError {
-    fn location(self: &Self) -> &Option<Location>;
+    fn location(self: &Self) -> Location;
 
     /// When formatting a `RuntimeError`, allows inserting additional stack trace elements.
     /// This is appended *after* the initial `at: line X (source file)` line is appended.
@@ -73,8 +89,8 @@ impl<'a> SourceView<'a> {
         self.lines.len()
     }
 
-    pub fn lineno(self: &Self, loc: &Option<Location>) -> usize {
-        match loc {
+    pub fn lineno(self: &Self, loc: Location) -> usize {
+        match loc.as_opt() {
             Some(loc) => self.starts.partition_point(|u| u <= &loc.start) - 1,
             None => self.len() - 1
         }
@@ -86,8 +102,8 @@ impl<'a> SourceView<'a> {
         let start_lineno = self.lineno(loc);
         let mut end_lineno = start_lineno;
 
-        if let Some(loc) = loc {
-            while self.starts[end_lineno + 1] < loc.end {
+        if let Some(loc) = loc.as_opt() {
+            while self.starts[end_lineno + 1] < loc.end() {
                 end_lineno += 1;
             }
         }
@@ -117,8 +133,8 @@ impl<'a> SourceView<'a> {
             text.push('\n');
         }
 
-        let (start_col, end_col) = match loc {
-            Some(loc) => (loc.start - self.starts[start_lineno], loc.end - self.starts[end_lineno]),
+        let (start_col, end_col) = match loc.as_opt() {
+            Some(loc) => (loc.start - self.starts[start_lineno], loc.end() - self.starts[end_lineno]),
             None => {
                 let last_col = self.lines[end_lineno].len();
                 (last_col + 1, last_col + 3)
@@ -144,16 +160,6 @@ impl<'a> SourceView<'a> {
         }
         text.push('\n');
         text
-    }
-}
-
-impl Location {
-    pub fn from_width(cursor: usize, width: usize) -> Location {
-        Location { start: cursor - width, end: cursor - 1 }
-    }
-
-    pub fn from_range(start: usize, end: usize) -> Location {
-        Location { start, end }
     }
 }
 
@@ -503,16 +509,16 @@ mod tests {
 ")
     }
 
-    struct MockError(&'static str, Option<Location>);
+    struct MockError(&'static str, Location);
 
     impl AsError for MockError { fn as_error(self: &Self) -> String { String::from(self.0) } }
-    impl AsErrorWithContext for MockError { fn location(self: &Self) -> &Option<Location> { &self.1 } }
+    impl AsErrorWithContext for MockError { fn location(self: &Self) -> Location { self.1 } }
 
     fn run(start: usize, end: usize, expected: &'static str) {
         let name = String::from("<test>");
         let text = String::from("first += line\nsecond line?\nthird line\r\nwindows line\n\nempty\r\n\r\nmore empty");
         let src = SourceView::new(&name, &text);
-        let error = src.format(&MockError("Error", Some(Location::from_range(start, end))));
+        let error = src.format(&MockError("Error", Location::new(start, end - start + 1)));
 
         assert_eq!(error.as_str(), expected);
     }
