@@ -3,7 +3,7 @@ use std::iter::Peekable;
 use std::num::ParseIntError;
 use std::str::Chars;
 
-use crate::reporting::{AsErrorWithLocation, Location};
+use crate::reporting::{AsErrorWithContext, Location};
 
 use self::ScanErrorType::{*};
 use self::ScanToken::{*};
@@ -46,7 +46,7 @@ impl ScanError {
     }
 }
 
-impl AsErrorWithLocation for ScanError {
+impl AsErrorWithContext for ScanError {
     fn location(self: &Self) -> &Option<Location> {
         &self.loc
     }
