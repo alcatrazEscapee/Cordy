@@ -3,7 +3,7 @@ use crate::reporting::{AsError, AsErrorWithContext, Location, Locations, SourceV
 
 use crate::stdlib::NativeFunction;
 use crate::vm::CallFrame;
-use crate::vm::opcode::Opcode;
+use crate::vm::operator::{BinaryOp, UnaryOp};
 use crate::vm::value::{FunctionImpl, Value};
 
 
@@ -37,8 +37,8 @@ pub enum RuntimeError {
     ValueErrorMissingRequiredArgumentInStringFormatting,
     ValueErrorEvalListMustHaveUnitLength(usize),
 
-    TypeErrorUnaryOp(Opcode, Value),
-    TypeErrorBinaryOp(Opcode, Value, Value),
+    TypeErrorUnaryOp(UnaryOp, Value),
+    TypeErrorBinaryOp(BinaryOp, Value, Value),
     TypeErrorBinaryIs(Value, Value),
     TypeErrorCannotConvertToInt(Value),
 

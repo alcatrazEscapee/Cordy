@@ -12,7 +12,7 @@ L5: 0010 Nil
     0011 IncGlobalCount
 L6: 0012 Int(3) -> 6
     0013 Int(4) -> 5
-    0014 OpAdd
+    0014 Binary(Add)
     0015 IncGlobalCount
 L7: 0016 Nil
     0017 IncGlobalCount

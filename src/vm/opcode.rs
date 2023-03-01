@@ -1,4 +1,5 @@
 use crate::stdlib::NativeFunction;
+use crate::vm::operator::{BinaryOp, UnaryOp};
 use crate::misc::OffsetAdd;
 
 use Opcode::{*};
@@ -107,39 +108,8 @@ pub enum Opcode {
     OpSlice,
     OpSliceWithStep,
 
-    // Unary Operators
-    UnarySub,
-    UnaryNot,
-
-    // Binary Operators
-    // Ordered by precedence, highest to lowest
-
-    OpMul,
-    OpDiv,
-    OpMod,
-    OpPow,
-    OpIs,
-
-    OpAdd,
-    OpSub,
-
-    OpLeftShift,
-    OpRightShift,
-
-    OpBitwiseAnd,
-    OpBitwiseOr,
-    OpBitwiseXor,
-
-    OpIn,
-    OpLessThan,
-    OpGreaterThan,
-    OpLessThanEqual,
-    OpGreaterThanEqual,
-    OpEqual,
-    OpNotEqual,
-
-    OpMax,
-    OpMin,
+    Unary(UnaryOp),
+    Binary(BinaryOp),
 
     // Special
     Exit,
