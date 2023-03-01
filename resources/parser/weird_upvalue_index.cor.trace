@@ -1,25 +1,22 @@
 L1: 0000 IncGlobalCount
-    0001 Function(0) -> FunctionImpl { head: 3, tail: 18, nargs: 0, name: "problem", args: [] }
-    0002 Jump(20)
-L2: 0003 Nil
-L3: 0004 Function(1) -> FunctionImpl { head: 6, tail: 7, nargs: 0, name: "_", args: [] }
-    0005 Jump(8)
-    0006 PushUpValue(0)
-    0007 Return
-    0008 Closure
-    0009 CloseLocal(0)
-    0010 Pop
-L4: 0011 Function(2) -> FunctionImpl { head: 13, tail: 14, nargs: 0, name: "_", args: [] }
-    0012 Jump(15)
-    0013 PushUpValue(0)
-    0014 Return
-    0015 Closure
-    0016 CloseLocal(0)
-    0017 OpFuncEval(0)
-L5: 0018 LiftUpValue(0)
+    0001 Function(0) -> FunctionImpl { head: 7, tail: 17, nargs: 0, name: "problem", args: [] }
+L6: 0002 PushGlobal(0) -> problem
+    0003 OpFuncEval(0)
+    0004 Pop
+    0005 Pop
+    0006 Exit
+L2: 0007 Nil
+L3: 0008 Function(1) -> FunctionImpl { head: 18, tail: 19, nargs: 0, name: "_", args: [] }
+    0009 Closure
+    0010 CloseLocal(0)
+    0011 Pop
+L4: 0012 Function(2) -> FunctionImpl { head: 20, tail: 21, nargs: 0, name: "_", args: [] }
+    0013 Closure
+    0014 CloseLocal(0)
+    0015 OpFuncEval(0)
+L5: 0016 LiftUpValue(0)
+    0017 Return
+L3: 0018 PushUpValue(0)
     0019 Return
-L6: 0020 PushGlobal(0) -> problem
-    0021 OpFuncEval(0)
-    0022 Pop
-    0023 Pop
-    0024 Exit
+L4: 0020 PushUpValue(0)
+    0021 Return

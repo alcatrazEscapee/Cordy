@@ -626,7 +626,11 @@ impl<R, W> VirtualMachine<R, W> where
             OpMin => operator_unchecked!(std::cmp::min, a1, a2, "min"),
 
             Exit => return RuntimeExit.err(),
-            Yield => return RuntimeYield.err(),
+            Yield => {
+                // First, jump to the end of current code, so when we startup again, we are in the right location
+                self.ip = self.code.len();
+                return RuntimeYield.err()
+            },
         }
         Ok(())
     }

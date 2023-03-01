@@ -52,13 +52,9 @@ pub fn incremental_compile(view: &SourceView, code: &mut Vec<Opcode>, locals: &m
     let code_len: usize = code.len();
     let locations_len: usize = locations.len();
 
-    let ret: IncrementalCompileResult = try_incremental_compile(view, code, locals, strings, constants, functions, locations, globals, parser::RULE_INCREMENTAL, true);
+    let ret: IncrementalCompileResult = try_incremental_compile(view, code, locals, strings, constants, functions, locations, globals, parser::RULE_REPL, true);
 
-    if ret.is_success() {
-        // Replace the final `Exit` with `Yield`, to yield control back to the REPL loop
-        assert_eq!(Some(Exit), code.pop());
-        code.push(Yield);
-    } else {
+    if !ret.is_success() {
         // Revert staged changes
         code.truncate(code_len);
         locations.truncate(locations_len);
@@ -78,11 +74,9 @@ pub fn eval_compile(text: &String, code: &mut Vec<Opcode>, strings: &mut Vec<Str
     let mut locals: Vec<Locals> = Locals::empty();
     let name: String = String::from("<eval>");
     let view: SourceView = SourceView::new(&name, text);
-    let ret: IncrementalCompileResult = try_incremental_compile(&view, code, &mut locals, strings, constants, functions, locations, globals, parser::RULE_EXPRESSION, false);
+    let ret: IncrementalCompileResult = try_incremental_compile(&view, code, &mut locals, strings, constants, functions, locations, globals, parser::RULE_EVAL, false);
 
     if ret.is_success() {
-        // Insert a `Return` at the end, to return out of `eval`'s frame
-        code.push(Return);
         Ok(())
     } else {
         RuntimeError::RuntimeCompilationError(ret.errors()).err()

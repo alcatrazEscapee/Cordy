@@ -468,10 +468,10 @@ pub struct FunctionImpl {
 }
 
 impl FunctionImpl {
-    pub fn new(head: usize, name: String, args: Vec<String>) -> FunctionImpl {
+    pub fn new(head: usize, tail: usize, name: String, args: Vec<String>) -> FunctionImpl {
         FunctionImpl {
             head,
-            tail: head + 1,
+            tail,
             nargs: args.len() as u8,
             name,
             args
@@ -1022,7 +1022,7 @@ mod test {
     }
 
     fn all_values() -> Vec<Value> {
-        let rc = Rc::new(FunctionImpl::new(0, String::new(), vec![]));
+        let rc = Rc::new(FunctionImpl::new(0, 0, String::new(), vec![]));
         let vec = VecDeque::new();
         let set = IndexSet::new();
         let dict = IndexMap::new();

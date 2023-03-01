@@ -3,9 +3,8 @@ use std::rc::Rc;
 
 use crate::compiler::CompileResult;
 use crate::compiler::parser::core::ParserState;
-use crate::compiler::parser::semantic::{LateBoundGlobal, LValue, LValueReference, Reference};
+use crate::compiler::parser::semantic::{LateBoundGlobal, LValue, LValueReference, MaybeFunction, Reference};
 use crate::compiler::scanner::{ScanResult, ScanToken};
-use crate::misc::MaybeRc;
 use crate::stdlib::NativeFunction;
 use crate::trace;
 use crate::vm::{FunctionImpl, Opcode};
@@ -19,10 +18,11 @@ use ParserErrorType::{*};
 use ScanToken::{*};
 use crate::reporting::{Location, Locations};
 
-pub const RULE_INCREMENTAL: ParseRule = |mut parser| parser.parse_incremental();
-pub const RULE_EXPRESSION: ParseRule = |mut parser| parser.parse_expression();
+pub const RULE_REPL: ParseRule = |mut parser| parser.parse_incremental_repl();
+pub const RULE_EVAL: ParseRule = |mut parser| parser.parse_incremental_eval();
 
 pub type ParseRule = fn(Parser) -> ();
+pub type Functions = Vec<MaybeFunction>;
 
 mod core;
 mod errors;
@@ -44,15 +44,12 @@ pub fn parse(scan_result: ScanResult) -> CompileResult {
 pub fn parse_incremental(scan_result: ScanResult, code: &mut Vec<Opcode>, locals: &mut Vec<Locals>, strings: &mut Vec<String>, constants: &mut Vec<i64>, functions: &mut Vec<Rc<FunctionImpl>>, locations: &mut Locations, globals: &mut Vec<String>, rule: fn(Parser) -> ()) -> Vec<ParserError> {
 
     let mut errors: Vec<ParserError> = Vec::new();
-    let mut maybe_functions: Vec<MaybeRc<FunctionImpl>> = functions.iter().map(|u| MaybeRc::Rc(u.clone())).collect();
+    let mut maybe_functions: Functions = functions.drain(..).map(|u| MaybeFunction::wrap(&u)).collect();
 
     rule(Parser::new(scan_result.tokens, code, locals, &mut errors, strings, constants, &mut maybe_functions, locations, &mut Vec::new(), globals));
 
-    for maybe in maybe_functions {
-        match maybe {
-            MaybeRc::Raw(func) => functions.push(Rc::new(func)),
-            _ => {}
-        }
+    for func in maybe_functions {
+        functions.push(func.unwrap());
     }
 
     errors
@@ -66,7 +63,7 @@ fn parse_rule(tokens: Vec<(Location, ScanToken)>, rule: fn(Parser) -> ()) -> Com
 
     let mut strings: Vec<String> = vec![String::new()];
     let mut constants: Vec<i64> = vec![0, 1];
-    let mut functions: Vec<MaybeRc<FunctionImpl>> = Vec::new();
+    let mut functions: Functions = Vec::new();
 
     let mut locations: Locations = Vec::new();
     let mut globals: Vec<String> = Vec::new();
@@ -80,7 +77,7 @@ fn parse_rule(tokens: Vec<(Location, ScanToken)>, rule: fn(Parser) -> ()) -> Com
 
         strings,
         constants,
-        functions: functions.into_iter().map(|u| u.into_rc()).collect::<Vec<Rc<FunctionImpl>>>(),
+        functions: functions.into_iter().map(MaybeFunction::unwrap).collect::<Vec<Rc<FunctionImpl>>>(),
 
         locations,
         locals,
@@ -91,7 +88,12 @@ fn parse_rule(tokens: Vec<(Location, ScanToken)>, rule: fn(Parser) -> ()) -> Com
 
 pub struct Parser<'a> {
     input: VecDeque<(Location, ScanToken)>,
-    output: &'a mut Vec<Opcode>,
+
+    /// Previous output, from invocations of the parser are taken as input here
+    /// Output for this invocation of the parser is accumulated in `output`, and in the `code` field of `functions`.
+    /// It is then baked, emitting into `raw_output` and `locations`
+    raw_output: &'a mut Vec<Opcode>,
+    output: Vec<(Location, Opcode)>,
     errors: &'a mut Vec<ParserError>,
 
     /// A 1-1 mapping of the output tokens to their location
@@ -125,16 +127,21 @@ pub struct Parser<'a> {
 
     strings: &'a mut Vec<String>,
     constants: &'a mut Vec<i64>,
-    functions: &'a mut Vec<MaybeRc<FunctionImpl>>,
+
+    /// List of all functions known to the parser.
+    /// Note that functions can be in two forms - a 'baked' representation which is held by the VM, and an 'unbaked' representation which is held by the parser.
+    /// At the teardown stage, all functions are 'baked', by emitting their bytecode to the central output token stream, and fixing the reference to the function.
+    functions: &'a mut Vec<MaybeFunction>,
 }
 
 
 impl Parser<'_> {
 
-    fn new<'a, 'b : 'a>(tokens: Vec<(Location, ScanToken)>, output: &'b mut Vec<Opcode>, locals: &'b mut Vec<Locals>, errors: &'b mut Vec<ParserError>, strings: &'b mut Vec<String>, constants: &'b mut Vec<i64>, functions: &'b mut Vec<MaybeRc<FunctionImpl>>, locations: &'b mut Locations, locals_reference: &'b mut Vec<String>, globals_reference: &'b mut Vec<String>) -> Parser<'a> {
+    fn new<'a, 'b : 'a>(tokens: Vec<(Location, ScanToken)>, output: &'b mut Vec<Opcode>, locals: &'b mut Vec<Locals>, errors: &'b mut Vec<ParserError>, strings: &'b mut Vec<String>, constants: &'b mut Vec<i64>, functions: &'b mut Functions, locations: &'b mut Locations, locals_reference: &'b mut Vec<String>, globals_reference: &'b mut Vec<String>) -> Parser<'a> {
         Parser {
             input: tokens.into_iter().collect::<VecDeque<(Location, ScanToken)>>(),
-            output,
+            raw_output: output,
+            output: Vec::new(),
             errors,
 
             locations,
@@ -166,10 +173,11 @@ impl Parser<'_> {
         self.parse_statements();
         self.push_delayed_pop();
         self.pop_locals(None, true, true, true); // Pop top level 'local' variables
+        self.push(Exit);
         self.teardown();
     }
 
-    fn parse_incremental(self: &mut Self) {
+    fn parse_incremental_repl(self: &mut Self) {
         trace::trace_parser!("rule <root-incremental>");
         self.parse_statements();
         if self.delay_pop_from_expression_statement {
@@ -179,10 +187,39 @@ impl Parser<'_> {
             self.push(Opcode::Pop);
         }
         // Don't pop locals
+        self.push(Yield);
+        self.teardown();
+    }
+
+    fn parse_incremental_eval(self: &mut Self) {
+        self.parse_expression();
+        self.push(Return); // Insert a `Return` at the end, to return out of `eval`'s frame
         self.teardown();
     }
 
     fn teardown(self: &mut Self) {
+        // Emit code from output -> (raw_output, locations)
+        for (loc, op) in self.output.drain(..) {
+            self.raw_output.push(op);
+            self.locations.push(loc);
+        }
+
+        // Emit functions
+        for func in self.functions.iter_mut() {
+            match func {
+                MaybeFunction::Unbaked(parser_func) => {
+                    let head = self.raw_output.len();
+                    for (loc, op) in parser_func.code.drain(..) {
+                        self.raw_output.push(op);
+                        self.locations.push(loc);
+                    }
+                    let tail = self.raw_output.len() - 1;
+                    func.bake(head, tail);
+                },
+                _ => {},
+            }
+        }
+
         if let Some(t) = self.peek() {
             let token: ScanToken = t.clone();
             self.error(UnexpectedTokenAfterEoF(token));
@@ -192,7 +229,6 @@ impl Parser<'_> {
                 self.errors.push(error);
             }
         }
-        self.push(Exit);
     }
 
     fn parse_statements(self: &mut Self) {
@@ -272,17 +308,15 @@ impl Parser<'_> {
         self.expect_resync(CloseParen);
 
         // Named functions are a complicated local variable, and needs to be declared as such
-        let mut func_id: Option<u32> = None;
         if let Some(name) = maybe_name {
             if let Some(index) = self.declare_local(name.clone()) {
                 self.init_local(index);
                 let func: u32 = self.declare_function(name, &args);
-                func_id = Some(func);
                 self.push(Opcode::Function(func));  // And push the function object itself
             }
         }
 
-        self.parse_function_body(args, func_id);
+        self.parse_function_body(args);
     }
 
     fn parse_annotated_expression_function(self: &mut Self) {
@@ -313,7 +347,7 @@ impl Parser<'_> {
         let func: u32 = self.declare_function(String::from("_"), &args);
         self.push(Opcode::Function(func));  // And push the function object itself
 
-        self.parse_function_body(args, Some(func));
+        self.parse_function_body(args);
     }
 
     fn parse_function_name(self: &mut Self) -> Option<String> {
@@ -355,16 +389,15 @@ impl Parser<'_> {
         args
     }
 
-    fn parse_function_body(self: &mut Self, args: Vec<LValue>, func_id: Option<u32>) {
+    fn parse_function_body(self: &mut Self, args: Vec<LValue>) {
         trace::trace_parser!("rule <function-body>");
-        let jump = self.reserve(); // Jump over the function itself, the first time we encounter it
         let prev_pop_status: bool = self.delay_pop_from_expression_statement; // Stack semantics for the delayed pop
 
         // Functions have their own depth tracking in addition to scope
         // In addition, we let parameters have their own scope depth one outside locals to the function
         // This lets us 1) declare parameters here, in the right scope,
         // and 2) avoid popping parameters at the end of a function call (as they're handled by the `Return` opcode instead)
-        self.locals.push(Locals::new());
+        self.locals.push(Locals::new(Some(self.functions.len() - 1)));
         self.function_depth += 1;
         self.scope_depth += 1;
 
@@ -427,12 +460,6 @@ impl Parser<'_> {
             self.expect_resync(CloseBrace);
         }
 
-        // Update the function, if present, with the tail of the function
-        // This makes tracking ownership in containing functions easier during error reporting
-        if let Some(func_id) = func_id {
-            self.fix_function_tail(func_id);
-        }
-
         // Since `Return` cleans up all function locals, we just discard them from the parser without emitting any `Pop` tokens.
         // But, we still need to do this first, as we need to ensure `LiftUpValue` opcodes are still emitted before the `Return`
         // We do this twice, once for function locals, and once for function parameters (since they live in their own scope)
@@ -441,12 +468,12 @@ impl Parser<'_> {
         self.scope_depth -= 1;
 
         self.pop_locals(Some(self.scope_depth), true, false, true);
+
+        self.push(Return); // Must come before we pop locals
+
         self.locals.pop().unwrap();
         self.function_depth -= 1;
         self.scope_depth -= 1;
-
-        self.push(Return); // Returns the last expression in the function
-        self.fix_jump(jump, Jump); // Repair the jump, to skip the function body itself
 
         // If this function has captured any upvalues, we need to emit the correct tokens for them now, including wrapping the function in a closure
         if !self.current_locals().upvalues.is_empty() {
