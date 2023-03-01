@@ -1,10 +1,9 @@
 L1: 0000 IncGlobalCount
-    0001 Function(0) -> FunctionImpl { head: 3, tail: 7, nargs: 0, name: "foo", args: [] }
-    0002 Jump(8)
-L2: 0003 Str(1) -> "hello"
-    0004 NativeFunction(Print)
-    0005 Swap
-    0006 OpFuncEval(1)
-L3: 0007 Return
-    0008 Pop
-    0009 Exit
+    0001 Function(0) -> FunctionImpl { head: 4, tail: 8, nargs: 0, name: "foo", args: [] }
+L3: 0002 Pop
+    0003 Exit
+L2: 0004 Str(1) -> "hello"
+    0005 NativeFunction(Print)
+    0006 Swap
+    0007 OpFuncEval(1)
+L3: 0008 Return

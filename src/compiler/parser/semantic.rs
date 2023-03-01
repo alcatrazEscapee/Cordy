@@ -4,17 +4,17 @@
 /// The functions declared in this module are public to be used by `parser/mod.rs`, but the module `semantic` is not exported itself.
 
 use std::fmt::Debug;
+use std::rc::Rc;
 
 use itertools::Itertools;
 
 use crate::compiler::parser::{Parser, ParserError, ParserErrorType};
-use crate::misc::MaybeRc;
 use crate::stdlib;
 use crate::vm::{FunctionImpl, Opcode};
 
 use ParserErrorType::{*};
 use Opcode::{*};
-
+use crate::reporting::Location;
 
 
 #[derive(Eq, PartialEq, Debug, Clone)]
@@ -44,19 +44,23 @@ pub struct Locals {
     /// `continue` jumps back to the beginning of the loop, aka the first `usize` (loop start)
     /// `break` statements jump back to the end of the loop, which needs to be patched later. The values to be patched record themselves in the stack at the current loop level
     pub(super) loops: Vec<Loop>,
+
+    /// Ordinal into `self.functions.code`
+    /// If not present, it is assumed to be global code.
+    pub func: Option<usize>,
 }
 
 impl Locals {
     pub fn empty() -> Vec<Locals> {
-        vec![Locals::new()]
+        vec![Locals::new(None)]
     }
 
     pub fn len(self: &Self) -> usize {
         self.locals.len()
     }
 
-    pub fn new() -> Locals {
-        Locals { locals: Vec::new(), upvalues: Vec::new(), loops: Vec::new() }
+    pub fn new(func: Option<usize>) -> Locals {
+        Locals { locals: Vec::new(), upvalues: Vec::new(), loops: Vec::new(), func }
     }
 }
 
@@ -107,13 +111,17 @@ impl Local {
 #[derive(Debug, Clone)]
 pub struct LateBoundGlobal {
     name: String,
-    opcode: usize, // Index in output[] of the `load` opcode
+    opcode: OpcodeReference,
     pub(super) error: Option<ParserError>, // An error that would be thrown from here, if the variable does not end up bound
 }
 
 impl LateBoundGlobal {
-    pub fn new(name: String, opcode: usize, error: Option<ParserError>) -> LateBoundGlobal {
-        LateBoundGlobal { name, opcode, error }
+    pub fn new(name: String, ordinal: usize, opcode: usize, error: Option<ParserError>) -> LateBoundGlobal {
+        LateBoundGlobal {
+            name,
+            opcode: OpcodeReference(ordinal, opcode),
+            error
+        }
     }
 }
 
@@ -403,6 +411,73 @@ impl<T : Debug + Clone> Reference<T> {
     pub fn is_load(&self) -> bool { match self { Reference::Load(_) => true, _ => false } }
 }
 
+/// A reference to a particular opcode, while the parser is parsing, that is capable of crossing functions.
+/// This is a pair of (function ordinal, code ordinal)
+#[derive(Debug, Clone, Copy)]
+pub struct OpcodeReference(pub usize, pub usize);
+
+
+#[derive(Debug)]
+pub enum MaybeFunction {
+    Baked(Rc<FunctionImpl>),
+    Unbaked(ParserFunctionImpl)
+}
+
+#[derive(Debug)]
+pub struct ParserFunctionImpl {
+    /// Function name and argument names
+    name: String,
+    args: Vec<String>,
+
+    /// Bytecode for the function body itself
+    pub code: Vec<(Location, Opcode)>,
+}
+
+impl MaybeFunction {
+    pub fn wrap(func: &Rc<FunctionImpl>) -> MaybeFunction {
+        MaybeFunction::Baked(func.clone())
+    }
+
+    pub fn unwrap(self: Self) -> Rc<FunctionImpl> {
+        match self {
+            MaybeFunction::Baked(rc) => rc,
+            _ => panic!("Must bake functions before unwrapping!"),
+        }
+    }
+
+    fn new(name: String, args: Vec<String>) -> MaybeFunction {
+        MaybeFunction::Unbaked(ParserFunctionImpl {
+            name,
+            args,
+
+            code: Vec::new(),
+        })
+    }
+
+    pub fn bake(self: &mut Self, head: usize, tail: usize) {
+        match self {
+            MaybeFunction::Unbaked(func) => {
+                *self = MaybeFunction::Baked(Rc::new(FunctionImpl::new(head, tail, std::mem::take(&mut func.name), std::mem::take(&mut func.args))));
+            },
+            _ => {},
+        }
+    }
+
+    pub fn get(self: &Self) -> &ParserFunctionImpl {
+        match self {
+            MaybeFunction::Unbaked(p) => p,
+            _ => panic!("Cannot modify baked function."),
+        }
+    }
+
+    pub fn get_mut(self: &mut Self) -> &mut ParserFunctionImpl {
+        match self {
+            MaybeFunction::Unbaked(p) => p,
+            _ => panic!("Cannot modify baked function."),
+        }
+    }
+}
+
 
 
 impl<'a> Parser<'a> {
@@ -443,9 +518,7 @@ impl<'a> Parser<'a> {
     }
 
     pub fn declare_function(self: &mut Self, name: String, args: &Vec<LValue>) -> u32 {
-        // When we declare a function, the head will point to two instructions forward (past the fn, and jump past opcodes)
-        let head = self.output.len() + 2;
-        self.functions.push(MaybeRc::new(FunctionImpl::new(head, name, args.iter().map(|u| u.to_code_str()).collect())));
+        self.functions.push(MaybeFunction::new(name, args.iter().map(|u| u.to_code_str()).collect()));
         (self.functions.len() - 1) as u32
     }
 
@@ -476,7 +549,8 @@ impl<'a> Parser<'a> {
             // Fix references to this global
             for global in &self.late_bound_globals {
                 if global.into_ref().name == local.name {
-                    self.output[global.into_ref().opcode] = if global.is_load() {
+                    let opcode = global.into_ref().opcode;
+                    self.functions[opcode.0].get_mut().code[opcode.1].1 = if global.is_load() {
                         PushGlobal(local.index)
                     } else {
                         StoreGlobal(local.index)
@@ -580,6 +654,22 @@ impl<'a> Parser<'a> {
         self.locals.last_mut().unwrap()
     }
 
+    /// Returns the output code of the current function
+    pub fn current_function(self: &Self) -> &Vec<(Location, Opcode)> {
+        match &self.current_locals().func {
+            Some(func) => &self.functions[*func].get().code,
+            None => &self.output
+        }
+    }
+
+    /// Returns the output code of the current function
+    pub fn current_function_mut(self: &mut Self) -> &mut Vec<(Location, Opcode)> {
+        match self.current_locals().func {
+            Some(func) => &mut self.functions[func].get_mut().code,
+            None => &mut self.output
+        }
+    }
+
     /// Resolve an identifier, which can be one of many things, each of which are tried in-order
     ///
     /// 1. Native Functions. These cannot be shadowed (as it creates interesting conflict scenarios), and they are all technically global functions.
@@ -639,7 +729,7 @@ impl<'a> Parser<'a> {
         if self.function_depth > 0 {
             // Assume a late bound global
             let error = self.deferred_error(UndeclaredIdentifier(name.clone()));
-            let global = LateBoundGlobal::new(name, self.next_opcode() as usize, error);
+            let global = LateBoundGlobal::new(name, self.functions.len() - 1, self.next_opcode() as usize, error);
             return LValueReference::LateBoundGlobal(global);
         }
 

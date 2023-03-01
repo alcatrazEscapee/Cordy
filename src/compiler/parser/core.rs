@@ -241,18 +241,20 @@ impl<'a> Parser<'a> {
         ret
     }
 
-    /// Reserves a space in the output code by inserting a `Noop` token
-    /// Returns an index to the token, which can later be used to set the correct value
+    /// Reserves a space in the output code by inserting a `Noop` token.
+    /// Returns an index to the token, which can later be used to set the correct value.
+    ///
+    /// N.B. This cannot reserve across functions - the reserved token must be set from within the current function's parse.
     pub fn reserve(self: &mut Self) -> usize {
-        trace::trace_parser!("reserve at {}", self.output.len());
-        self.output.push(Noop);
-        self.locations.push(self.prev_location());
-        self.output.len() - 1
+        trace::trace_parser!("reserve at {}", self.current_function().len());
+        let loc = self.prev_location();
+        self.current_function_mut().push((loc, Noop));
+        self.current_function().len() - 1
     }
 
     /// Returns an index to the next opcode to be emitted, to be used to emit a jump to this location.
     pub fn next_opcode(self: &Self) -> usize {
-        self.output.len()
+        self.current_function().len()
     }
 
     /// Given a `usize` index, pushes a jump instruction that jumps *back* to the target index.
@@ -266,12 +268,7 @@ impl<'a> Parser<'a> {
     pub fn fix_jump<F : FnOnce(i32) -> Opcode>(self: &mut Self, reserved: usize, jump: F) {
         let jump_opcode: Opcode = jump(self.next_opcode() as i32 - reserved as i32 - 1);
         trace::trace_parser!("fixing jump at {} -> {:?}", reserved, jump_opcode);
-        self.output[reserved] = jump_opcode;
-    }
-
-    /// Given an ID for a function retrieved via `declare_function()`, this fixes the `tail` pointer of the function to point to the next opcode.
-    pub fn fix_function_tail(self: &mut Self, func_id: u32) {
-        self.functions[func_id as usize].unbox_mut().tail = self.output.len();
+        self.current_function_mut()[reserved].1 = jump_opcode;
     }
 
     /// If we previously delayed a `Pop` opcode from being omitted, push it now and reset the flag
@@ -335,13 +332,12 @@ impl<'a> Parser<'a> {
             PushLocal(id) | StoreLocal(id) => self.locals_reference.push(self.locals[self.function_depth as usize].locals[*id as usize].name.clone()),
             _ => {},
         }
-        self.output.push(token);
-        self.locations.push(location);
+        self.current_function_mut().push((location, token));
     }
 
     /// Pops the last emitted token
     pub fn pop(self: &mut Self) {
-        match self.output.pop().unwrap() {
+        match self.current_function_mut().pop().unwrap().1 {
             PushGlobal(_) | StoreGlobal(_) | PushLocal(_) | StoreLocal(_) => {
                 self.locals_reference.pop();
             },
@@ -351,7 +347,7 @@ impl<'a> Parser<'a> {
 
     /// Returns the index of the last token that was just pushed.
     pub fn last(self: &Self) -> Option<Opcode> {
-        self.output.last().copied()
+        self.current_function().last().copied().map(|u| u.1)
     }
 
     /// A specialization of `error()` which provides the last token (the result of `peek()`) to the provided error function

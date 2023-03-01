@@ -1,32 +1,29 @@
 L01: 0000 IncGlobalCount
-     0001 Function(0) -> FunctionImpl { head: 3, tail: 22, nargs: 0, name: "foo", args: [] }
-     0002 Jump(24)
-L02: 0003 Int(0) -> 0
-L03: 0004 Function(1) -> FunctionImpl { head: 6, tail: 17, nargs: 0, name: "bar", args: [] }
-     0005 Jump(18)
-L05: 0006 Function(2) -> FunctionImpl { head: 8, tail: 9, nargs: 0, name: "_", args: [] }
-     0007 Jump(10)
-     0008 Nil
-     0009 Return
-     0010 OpFuncEval(0)
-L06: 0011 Pop
-     0012 Jump(6)
-L07: 0013 PushUpValue(0)
-     0014 NativeFunction(Print)
-     0015 Swap
-     0016 OpFuncEval(1)
-L08: 0017 Return
-     0018 Closure
-     0019 CloseLocal(0)
-L09: 0020 PushLocal(1) -> bar
-     0021 OpFuncEval(0)
-L10: 0022 LiftUpValue(0)
-     0023 Return
-L11: 0024 PushGlobal(0) -> foo
-     0025 OpFuncEval(0)
-     0026 Pop
-     0027 Pop
-     0028 Exit
+     0001 Function(0) -> FunctionImpl { head: 7, tail: 14, nargs: 0, name: "foo", args: [] }
+L11: 0002 PushGlobal(0) -> bar
+     0003 OpFuncEval(0)
+     0004 Pop
+     0005 Pop
+     0006 Exit
+L02: 0007 Int(0) -> 0
+L03: 0008 Function(1) -> FunctionImpl { head: 15, tail: 23, nargs: 0, name: "bar", args: [] }
+L08: 0009 Closure
+     0010 CloseLocal(0)
+L09: 0011 PushLocal(1) -> foo
+     0012 OpFuncEval(0)
+L10: 0013 LiftUpValue(0)
+     0014 Return
+L05: 0015 Function(2) -> FunctionImpl { head: 24, tail: 25, nargs: 0, name: "_", args: [] }
+     0016 OpFuncEval(0)
+L06: 0017 Pop
+     0018 Jump(15)
+L07: 0019 PushUpValue(0)
+     0020 NativeFunction(Print)
+     0021 Swap
+     0022 OpFuncEval(1)
+L08: 0023 Return
+L05: 0024 Nil
+     0025 Return
 Invalid 'break' statement outside of an enclosing loop
   at: line 5 (weird_loop_nesting_in_functions.cor)
 

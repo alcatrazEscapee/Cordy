@@ -1,14 +1,13 @@
 L01: 0000 IncGlobalCount
-     0001 Function(0) -> FunctionImpl { head: 3, tail: 11, nargs: 0, name: "foo", args: [] }
-     0002 Jump(12)
-L02: 0003 Nil
-L04: 0004 Nil
-L06: 0005 Nil
-L07: 0006 Nil
-     0007 Return
-     0008 Pop
-L08: 0009 Pop
-L09: 0010 Nil
-L10: 0011 Return
-     0012 Pop
-     0013 Exit
+     0001 Function(0) -> FunctionImpl { head: 4, tail: 12, nargs: 0, name: "foo", args: [] }
+L10: 0002 Pop
+     0003 Exit
+L02: 0004 Nil
+L04: 0005 Nil
+L06: 0006 Nil
+L07: 0007 Nil
+     0008 Return
+     0009 Pop
+L08: 0010 Pop
+L09: 0011 Nil
+L10: 0012 Return

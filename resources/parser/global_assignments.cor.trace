@@ -7,19 +7,19 @@ L1: 0000 IncGlobalCount
 L2: 0006 Int(1) -> 1
     0007 StoreGlobal(0) -> x
     0008 Pop
-    0009 PushGlobal(0) -> x
-L3: 0010 Int(2) -> 5
+L3: 0009 PushGlobal(0) -> x
+    0010 Int(2) -> 5
     0011 OpAdd
     0012 StoreGlobal(1) -> y
     0013 Pop
-    0014 PushGlobal(2) -> z
+L4: 0014 PushGlobal(2) -> z
     0015 PushGlobal(0) -> x
-L4: 0016 OpMul
+    0016 OpMul
     0017 StoreGlobal(2) -> z
     0018 Pop
-    0019 PushGlobal(0) -> x
+L5: 0019 PushGlobal(0) -> x
     0020 PushGlobal(2) -> z
-L5: 0021 OpSub
+    0021 OpSub
     0022 StoreGlobal(0) -> x
     0023 Pop
     0024 PopN(3)
