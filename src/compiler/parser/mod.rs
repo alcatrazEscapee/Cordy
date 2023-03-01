@@ -3,11 +3,15 @@ use std::rc::Rc;
 
 use crate::compiler::CompileResult;
 use crate::compiler::parser::core::ParserState;
+use crate::compiler::parser::expr::{Expr, ExprType};
 use crate::compiler::parser::semantic::{LateBoundGlobal, LValue, LValueReference, MaybeFunction, Reference};
 use crate::compiler::scanner::{ScanResult, ScanToken};
 use crate::stdlib::NativeFunction;
-use crate::trace;
 use crate::vm::{FunctionImpl, Opcode};
+use crate::vm::operator::{BinaryOp, UnaryOp};
+use crate::trace;
+use crate::reporting::{Location, Locations};
+
 
 pub use crate::compiler::parser::errors::{ParserError, ParserErrorType};
 pub use crate::compiler::parser::semantic::Locals;
@@ -16,7 +20,6 @@ use NativeFunction::{*};
 use Opcode::{*};
 use ParserErrorType::{*};
 use ScanToken::{*};
-use crate::reporting::{Location, Locations};
 
 pub const RULE_REPL: ParseRule = |mut parser| parser.parse_incremental_repl();
 pub const RULE_EVAL: ParseRule = |mut parser| parser.parse_incremental_eval();
@@ -24,8 +27,10 @@ pub const RULE_EVAL: ParseRule = |mut parser| parser.parse_incremental_eval();
 pub type ParseRule = fn(Parser) -> ();
 pub type Functions = Vec<MaybeFunction>;
 
+mod codegen;
 mod core;
 mod errors;
+mod expr;
 mod semantic;
 
 
@@ -316,24 +321,30 @@ impl Parser<'_> {
             }
         }
 
-        self.parse_function_body(args);
+        // Emit the closed locals from the function body right away, because we are not in an expression context
+        let closed_locals = self.parse_function_body(args);
+        self.emit_closure_and_closed_locals(closed_locals);
     }
 
-    fn parse_annotated_expression_function(self: &mut Self) {
+    fn parse_annotated_expression_function(self: &mut Self) -> Expr {
         trace::trace_parser!("rule <annotated-expression-function");
 
         self.push_delayed_pop();
-        self.advance(); // Consume `@`
-        self.parse_expression(); // The annotation body
-        match self.peek() {
+        let loc_start = self.advance_with(); // Consume `@`
+        let func = self.parse_expr_top_level(); // The annotation body
+        let loc_end = self.prev_location();
+        let arg = match self.peek() {
             Some(At) => self.parse_annotated_expression_function(),
             Some(KeywordFn) => self.parse_expression_function(),
-            _ => self.error_with(|t| ExpectedAnnotationOrAnonymousFunction(t)),
-        }
-        self.push(OpFuncEval(1)) // Evaluate the annotation
+            _ => {
+                self.error_with(|t| ExpectedAnnotationOrAnonymousFunction(t));
+                Expr::nil()
+            },
+        };
+        func.eval(loc_start | loc_end, vec![arg]) // Evaluate the annotation
     }
 
-    fn parse_expression_function(self: &mut Self) {
+    fn parse_expression_function(self: &mut Self) -> Expr {
         trace::trace_parser!("rule <expression-function>");
 
         // Function header - `fn` (<arg>, ...)
@@ -345,9 +356,8 @@ impl Parser<'_> {
         // Expression functions don't declare themselves as a local variable that can be referenced.
         // Instead, as they're part of an expression, they just push a single function instance onto the stack
         let func: u32 = self.declare_function(String::from("_"), &args);
-        self.push(Opcode::Function(func));  // And push the function object itself
-
-        self.parse_function_body(args);
+        let closed_locals = self.parse_function_body(args);
+        Expr::function(func, closed_locals)
     }
 
     fn parse_function_name(self: &mut Self) -> Option<String> {
@@ -389,7 +399,7 @@ impl Parser<'_> {
         args
     }
 
-    fn parse_function_body(self: &mut Self, args: Vec<LValue>) {
+    fn parse_function_body(self: &mut Self, args: Vec<LValue>) -> Vec<Opcode> {
         trace::trace_parser!("rule <function-body>");
         let prev_pop_status: bool = self.delay_pop_from_expression_statement; // Stack semantics for the delayed pop
 
@@ -476,18 +486,15 @@ impl Parser<'_> {
         self.scope_depth -= 1;
 
         // If this function has captured any upvalues, we need to emit the correct tokens for them now, including wrapping the function in a closure
-        if !self.current_locals().upvalues.is_empty() {
-            self.push(Closure);
-            let it = self.current_locals().upvalues
-                .iter()
-                .map(|upvalue| if upvalue.is_local { CloseLocal(upvalue.index) } else { CloseUpValue(upvalue.index) })
-                .collect::<Vec<Opcode>>();
-            for op in it {
-                self.push(op);
-            }
-        }
+        // We just collect and return the opcodes for it, as if this is part of an expression function, we need to hold them to be emitted later
+        let closed_locals: Vec<Opcode> = self.current_locals().upvalues
+            .iter()
+            .map(|upvalue| if upvalue.is_local { CloseLocal(upvalue.index) } else { CloseUpValue(upvalue.index) })
+            .collect::<Vec<Opcode>>();
 
         self.delay_pop_from_expression_statement = prev_pop_status; // Exit the stack
+
+        closed_locals
     }
 
     fn parse_return_statement(self: &mut Self) {
@@ -534,8 +541,15 @@ impl Parser<'_> {
 
         if let Some(KeywordThen) = self.peek() {
             // If we see a top-level `if <expression> then`, we want to consider this an expression, with a top level `if-then-else` statement
-            // So here, we shortcut into expression parsing.
-            self.parse_expr_1_inline_if_then_else(false);
+            // We duplicate the structure here, as there's not many optimizations we could've performed if we treat this as a top-level expression
+            let jump_if_false_pop = self.reserve();
+            self.expect(KeywordThen);
+            self.parse_expression(); // Value if true
+            let jump = self.reserve();
+            self.fix_jump(jump_if_false_pop, JumpIfFalsePop);
+            self.expect(KeywordElse);
+            self.parse_expression(); // Value if false
+            self.fix_jump(jump, Jump);
             return;
         }
 
@@ -786,7 +800,13 @@ impl Parser<'_> {
 
     fn parse_expression(self: &mut Self) {
         trace::trace_parser!("rule <expression>");
-        self.parse_expr_10();
+        let expr: Expr = self.parse_expr_top_level();
+
+        self.emit_expr(expr);
+    }
+
+    fn parse_expr_top_level(self: &mut Self) -> Expr {
+        self.parse_expr_10()
     }
 
     /// Returns an `LValue`, or `None`. If this returns `None`, an error will already have been raised.
@@ -873,56 +893,70 @@ impl Parser<'_> {
 
     // ===== Expression Parsing ===== //
 
-    fn parse_expr_1_terminal(self: &mut Self) {
+    fn parse_expr_1_terminal(self: &mut Self) -> Expr {
         trace::trace_parser!("rule <expr-1>");
         match self.peek() {
-            Some(KeywordNil) => self.push_advance(Nil),
-            Some(KeywordTrue) => self.push_advance(True),
-            Some(KeywordFalse) => self.push_advance(False),
-            Some(KeywordExit) => self.push_advance(Exit),
-            Some(ScanToken::Int(_)) => {
-                let int: i64 = self.take_int();
-                let cid: u32 = self.declare_constant(int);
-                self.push(Opcode::Int(cid));
+            Some(KeywordNil) => {
+                self.advance();
+                Expr::nil()
             },
+            Some(KeywordTrue) => {
+                self.advance();
+                Expr::bool(true)
+            },
+            Some(KeywordFalse) => {
+                self.advance();
+                Expr::bool(false)
+            },
+            Some(KeywordExit) => {
+                self.advance();
+                Expr::exit()
+            },
+            Some(ScanToken::Int(_)) => Expr::int(self.take_int()),
+            Some(StringLiteral(_)) => Expr::str(self.take_str()),
             Some(Identifier(_)) => {
                 let name: String = self.take_identifier();
+                let loc: Location = self.prev_location();
                 let lvalue: LValueReference = self.resolve_identifier(name);
-                self.push_load_lvalue(lvalue);
-            },
-            Some(StringLiteral(_)) => {
-                let string: String = self.take_str();
-                let sid: u32 = self.declare_string(string);
-                self.push(Opcode::Str(sid));
+                Expr::lvalue(loc, lvalue)
             },
             Some(OpenParen) => {
-                self.advance(); // Consume the `(`
-                if self.parse_expr_1_partial_operator_left() {
-                    return // Looks ahead, and parses <op> <expr> `)`
+                let loc_start = self.advance_with(); // Consume the `(`
+                match self.parse_expr_1_partial_operator_left() {
+                    Some(expr) => return expr, // Looks ahead, and parses <op> <expr> `)`
+                    _ => {},
                 }
-                self.parse_expression(); // Parse <expr>
-                if self.parse_expr_1_partial_operator_right() {
-                    return // Looks ahead and parses <op> `)`
-                }
+                let expr = self.parse_expr_top_level(); // Parse <expr>
+                let expr = match self.parse_expr_1_partial_operator_right(expr) {
+                    Ok(expr) => return expr, // Looks ahead and parses <op> `)`
+                    Err(expr) => expr,
+                };
                 match self.peek() {
-                    Some(Comma) => self.parse_expr_1_vector_literal(),
-                    _ => self.expect(CloseParen), // Simple expression
+                    Some(Comma) => self.parse_expr_1_vector_literal(loc_start, expr),
+                    _ => {
+                        // Simple expression
+                        self.expect(CloseParen);
+                        expr
+                    },
                 }
             },
             Some(OpenSquareBracket) => self.parse_expr_1_list_literal(),
             Some(OpenBrace) => self.parse_expr_1_dict_or_set_literal(),
             Some(At) => self.parse_annotated_expression_function(),
             Some(KeywordFn) => self.parse_expression_function(),
-            Some(KeywordIf) => self.parse_expr_1_inline_if_then_else(true),
-            _ => self.error_with(|t| ExpectedExpressionTerminal(t)),
+            Some(KeywordIf) => self.parse_expr_1_inline_if_then_else(),
+            _ => {
+                self.error_with(|t| ExpectedExpressionTerminal(t));
+                Expr::nil()
+            },
         }
     }
 
-    fn parse_expr_1_partial_operator_left(self: &mut Self) -> bool {
+    fn parse_expr_1_partial_operator_left(self: &mut Self) -> Option<Expr> {
         trace::trace_parser!("rule <expr-1-partial-operator-left>");
         // Open `(` usually resolves precedence, so it begins parsing an expression from the top again
         // However it *also* can be used to wrap around a partial evaluation of a literal operator, for example
-        // (-)   => OperatorUnarySub
+        // (-)   => OperatorUnary(UnaryOp::Minus)
         // (+ 3) => Int(3) OperatorAdd OpFuncEval
         // (*)   => OperatorMul
         // So, if we peek ahead and see an operator, we know this is a expression of that sort and we need to handle accordingly
@@ -960,20 +994,20 @@ impl Parser<'_> {
         if let Some(op) = unary {
             match self.peek2() {
                 Some(CloseParen) => {
-                    self.advance(); // The unary operator
-                    self.push(NativeFunction(op)); // Push the binding - there is no partial evaluation so that's all we need
+                    // A bare `( <unary op> )`, which requires no partial evaluation
+                    let loc = self.advance_with(); // The unary operator
                     self.advance(); // The close paren
-                    true
+                    Some(Expr::native(loc, op))
                 },
-                _ => false
+                _ => None
             }
         } else if let Some(op) = binary {
-            self.advance(); // The unary operator
+            let loc = self.advance_with(); // The unary operator
             match self.peek() {
                 Some(CloseParen) => {
                     // No expression follows this operator, so we have `(` <op> `)`, which just returns the operator itself
-                    self.push(NativeFunction(op));
                     self.advance();
+                    Some(Expr::native(loc, op))
                 },
                 _ => {
                     // Anything else, and we try and parse an expression and partially evaluate.
@@ -992,19 +1026,17 @@ impl Parser<'_> {
                         OperatorGreaterThanEqual => OperatorGreaterThanEqualSwap,
                         op => op,
                     };
-                    self.push(NativeFunction(op)); // Push the operator
-                    self.parse_expression(); // Parse the expression following a binary prefix operator
-                    self.push(OpFuncEval(1)); // And partially evaluate it
+                    let arg = self.parse_expr_top_level(); // Parse the expression following a binary prefix operator
                     self.expect(CloseParen);
+                    Some(Expr::native(loc, op).eval(loc, vec![arg]))
                 }
             }
-            true
         } else {
-            false
+            None
         }
     }
 
-    fn parse_expr_1_partial_operator_right(self: &mut Self) -> bool {
+    fn parse_expr_1_partial_operator_right(self: &mut Self, expr: Expr) -> Result<Expr, Expr> {
         trace::trace_parser!("rule <expr-1-partial-operator-right>");
         // If we see the pattern of BinaryOp `)`, then we recognize this as a partial operator, but evaluated from the left hand side instead.
         // For non-symmetric operators, this means we use the normal operator as we partial evaluate the left hand argument (by having the operator on the right)
@@ -1033,43 +1065,36 @@ impl Parser<'_> {
 
         match (op, self.peek2()) {
             (Some(op), Some(CloseParen)) => {
-                self.advance(); // The operator
-                self.push(NativeFunction(op)); // Push the operator
-                self.push(Swap);
-                self.push(OpFuncEval(1)); // And partially evaluate it
+                let loc = self.advance_with(); // The operator
                 self.expect(CloseParen);
-                true
+                Ok(Expr::native(loc, op).eval(loc, vec![expr])) // Return Ok(), with our new expression
             },
-            _ => false,
+            _ => Err(expr), // Return the expression as an error, indicating we did not parse anything
         }
     }
 
-    fn parse_expr_1_vector_literal(self: &mut Self) {
+    fn parse_expr_1_vector_literal(self: &mut Self, mut loc: Location, arg1: Expr) -> Expr {
         trace::trace_parser!("rule <expr-1-vector-literal>");
+
+        let mut args: Vec<Expr> = vec![arg1];
 
         // Vector literal `(` <expr> `,` [ <expr> [ `,` <expr> ] * ] ? `)`
         // Note that this might be a single element vector literal, which includes a trailing comma
         self.advance(); // Consume `,`
         match self.peek() {
             Some(CloseParen) => {
-                self.advance(); // Consume `)`
-                self.push(Opcode::Vector(1));
-                return
+                loc |= self.advance_with(); // Consume `)`
+                return Expr::vector(loc, args)
             },
             _ => {},
         }
 
         // Otherwise, it must be > 1
-        let mut length = 1;
         loop {
-            self.parse_expression();
-            length += 1;
+            args.push(self.parse_expr_top_level());
             match self.peek() {
                 Some(CloseParen) => {
-                    // Exit
-                    self.advance(); // Consume `)`
-                    let constant_len = self.declare_constant(length);
-                    self.push(Opcode::Vector(constant_len));
+                    self.advance(); // Consume `)`, then exit
                     break
                 }
                 Some(Comma) => {
@@ -1077,8 +1102,6 @@ impl Parser<'_> {
                     match self.peek() { // Check again, to allow trailing comma
                         Some(CloseParen) => {
                             self.advance();
-                            let constant_len = self.declare_constant(length);
-                            self.push(Opcode::Vector(constant_len));
                             break
                         },
                         _ => {},
@@ -1090,18 +1113,19 @@ impl Parser<'_> {
                 }
             }
         }
+        Expr::vector(loc | self.prev_location(), args)
     }
 
-    fn parse_expr_1_list_literal(self: &mut Self) {
+    fn parse_expr_1_list_literal(self: &mut Self) -> Expr {
         trace::trace_parser!("rule <expr-1-list-literal>");
-        self.advance(); // Consume `[`
-        let mut length: i64 = 0;
+        let loc_start = self.advance_with(); // Consume `[`
+
+        let mut args: Vec<Expr> = Vec::new();
         loop {
             match self.peek() {
                 Some(CloseSquareBracket) => break,
                 Some(_) => {
-                    self.parse_expression();
-                    length += 1;
+                    args.push(self.parse_expr_top_level());
                     match self.peek() {
                         Some(Comma) => self.skip(), // Allow trailing commas, as this loops to the top again
                         Some(CloseSquareBracket) => {}, // Skip
@@ -1111,32 +1135,32 @@ impl Parser<'_> {
                 None => break,
             }
         }
-        let length: u32 = self.declare_constant(length);
-        self.push(Opcode::List(length));
         self.expect(CloseSquareBracket);
+        Expr::list(loc_start | self.prev_location(), args)
     }
 
-    fn parse_expr_1_dict_or_set_literal(self: &mut Self) {
+    fn parse_expr_1_dict_or_set_literal(self: &mut Self) -> Expr {
         trace::trace_parser!("rule <expr-1-dict-or-set-literal>");
-        self.advance(); // Consume `{`
+        let mut loc = self.advance_with(); // Consume `{`
 
         // As dict and set literals both start the same, we initially parse empty `{}` as a empty dict, and use the first argument to determine if it is a dict or set
         match self.peek() {
             Some(CloseBrace) => {
                 // Just `{}` is a empty dict, not a set
-                self.advance();
-                self.push(Opcode::Dict(0));
-                return
+                loc |= self.advance_with();
+                return Expr::dict(loc, vec![])
             },
             _ => {}, // Otherwise, continue parsing to determine if it is a dict or set
         }
 
-        self.parse_expression();
+        let mut args: Vec<Expr> = Vec::new();
+
+        args.push(self.parse_expr_top_level());
         let is_dict: bool = match self.peek() {
             Some(Colon) => {
                 // Found `{ <expr> `:`, so it must be a dict. Parse the first value, then continue as such
                 self.advance();
-                self.parse_expression();
+                args.push(self.parse_expr_top_level());
                 true
             },
             _ => false,
@@ -1147,17 +1171,15 @@ impl Parser<'_> {
             _ => {},
         }
 
-        let mut length: i64 = 1;
         loop {
             match self.peek() {
                 Some(CloseBrace) => break,
                 Some(_) => {
-                    self.parse_expression();
+                    args.push(self.parse_expr_top_level());
                     if is_dict {
                         self.expect(Colon);
-                        self.parse_expression();
+                        args.push(self.parse_expr_top_level());
                     }
-                    length += 1;
                     match self.peek() {
                         Some(Comma) => self.skip(), // Allow trailing commas, as this loops to the top again
                         Some(CloseBrace) => {}, // Skip
@@ -1171,107 +1193,98 @@ impl Parser<'_> {
                 None => break,
             }
         }
-        let length: u32 = self.declare_constant(length);
-        self.push(if is_dict { Opcode::Dict(length) } else { Opcode::Set(length) });
         self.expect(CloseBrace);
+        loc |= self.prev_location();
+        if is_dict { Expr::dict(loc, args) } else { Expr::set(loc, args) }
     }
 
-    /// If `parse_prefix` is `false`, this will not parse the leading `if <condition>`
-    fn parse_expr_1_inline_if_then_else(self: &mut Self, parse_prefix: bool) {
+    fn parse_expr_1_inline_if_then_else(self: &mut Self) -> Expr {
         trace::trace_parser!("rule <expr-1-inline-if-then-else>");
 
-        if parse_prefix {
-            self.advance(); // Consume `if`
-            self.parse_expression(); // condition
-        }
-        let jump_if_false_pop = self.reserve();
+        self.advance(); // Consume `if`
+        let condition = self.parse_expr_top_level(); // condition
         self.expect(KeywordThen);
-        self.parse_expression(); // Value if true
-        let jump = self.reserve();
-        self.fix_jump(jump_if_false_pop, JumpIfFalsePop);
+        let if_true = self.parse_expr_top_level(); // Value if true
         self.expect(KeywordElse);
-        self.parse_expression(); // Value if false
-        self.fix_jump(jump, Jump);
+        let if_false = self.parse_expr_top_level(); // Value if false
+
+        condition.if_then_else(if_true, if_false)
     }
 
-    fn parse_expr_2_unary(self: &mut Self) {
+    fn parse_expr_2_unary(self: &mut Self) -> Expr {
         trace::trace_parser!("rule <expr-2>");
+
         // Prefix operators
-        let mut stack: Vec<Opcode> = Vec::new();
+        let mut stack: Vec<(Location, UnaryOp)> = Vec::new();
         loop {
-            let maybe_op: Option<Opcode> = match self.peek() {
-                Some(Minus) => Some(UnarySub),
-                Some(Not) => Some(UnaryNot),
-                _ => None
-            };
-            match maybe_op {
-                Some(op) => {
-                    self.advance();
-                    stack.push(op);
+            match self.peek() {
+                Some(Minus) => {
+                    let loc = self.advance_with();
+                    stack.push((loc, UnaryOp::Minus));
                 },
-                None => break
+                Some(Not) => {
+                    let loc = self.advance_with();
+                    stack.push((loc, UnaryOp::Not));
+                },
+                _ => break
             }
         }
 
-        self.parse_expr_1_terminal();
+        let mut expr: Expr = self.parse_expr_1_terminal();
 
         // Suffix operators
         loop {
             // The opening token of a suffix operator must be on the same line
             match self.peek_no_newline() {
                 Some(OpenParen) => {
-                    self.advance();
+                    let mut loc_start = self.advance_with();
                     match self.peek() {
                         Some(CloseParen) => {
-                            self.advance();
-                            self.push(OpFuncEval(0));
+                            loc_start |= self.advance_with();
+                            expr = expr.eval(loc_start, vec![]);
                         },
                         Some(_) => {
                             // Special case: if we can parse a partially-evaluated operator expression, we do so
                             // This means we can write `map (+3)` instead of `map ((+3))`
                             // If we parse something here, this will have consumed everything, otherwise we parse an expression as per usual
-                            if self.parse_expr_1_partial_operator_left() {
+                            if let Some(partial_expr) = self.parse_expr_1_partial_operator_left() {
                                 // We still need to treat this as a function evaluation, however, because we pretended we didn't need to see the outer parenthesis
-                                self.push(OpFuncEval(1));
+                                expr = expr.eval(loc_start | self.prev_location(), vec![partial_expr]);
+                                continue;
                             } else {
                                 // First argument
-                                self.parse_expression();
-                                let mut count: u8 = 1;
+                                let mut args: Vec<Expr> = vec![self.parse_expr_top_level()];
 
                                 // Other arguments
                                 while let Some(Comma) = self.peek() {
                                     self.advance();
-                                    self.parse_expression();
-                                    count += 1;
+                                    args.push(self.parse_expr_top_level());
                                 }
                                 match self.peek() {
                                     Some(CloseParen) => self.skip(),
                                     _ => self.error_with(|t| ExpectedCommaOrEndOfArguments(t)),
                                 }
 
-                                // Evaluate the number of arguments we parsed
-                                self.push(OpFuncEval(count));
+                                expr = expr.eval(loc_start | self.prev_location(), args)
                             }
                         }
                         _ => self.error_with(|t| ExpectedCommaOrEndOfArguments(t)),
                     }
                 },
                 Some(OpenSquareBracket) => {
-                    self.advance(); // Consume the square bracket
+                    let loc_start = self.advance_with(); // Consume the square bracket
 
                     // Consumed `[` so far
-                    match self.peek() {
-                        Some(Colon) => { // No first argument, so push zero. Don't consume the colon as it's the seperator
-                            self.push(Nil);
-                        },
-                        _ => self.parse_expression(), // Otherwise we require a first expression
-                    }
+                    let arg1: Expr = match self.peek() {
+                        Some(Colon) => Expr::nil(), // No first argument. Don't consume the colon as it's the seperator
+                        _ => self.parse_expr_top_level(), // Otherwise we require a first expression
+                    };
 
                     // Consumed `[` <expression> so far
                     match self.peek() {
-                        Some(CloseSquareBracket) => { // One argument, so push OpIndex and exit the statement
-                            self.advance();
-                            self.push(OpIndex);
+                        Some(CloseSquareBracket) => { // One argument, so an index expression
+                            let loc_end = self.advance_with();
+                            expr = expr.index(loc_start | loc_end, arg1);
                             continue;
                         },
                         Some(Colon) => { // At least two arguments, so continue parsing
@@ -1284,24 +1297,21 @@ impl Parser<'_> {
                     }
 
                     // Consumed `[` <expression> `:` so far
-                    match self.peek() {
-                        Some(Colon) => { // No second argument, but we have a third argument, so push -1. Don't consume the colon as it's the seperator
-                            self.push(Nil);
-                        },
-                        Some(CloseSquareBracket) => { // No second argument, so push -1 and then exit
-                            self.push(Nil);
-                            self.advance();
-                            self.push(OpSlice);
+                    let arg2: Expr = match self.peek() {
+                        Some(Colon) => Expr::nil(), // No second argument, but we have a third argument. Don't consume the colon as it's the seperator
+                        Some(CloseSquareBracket) => { // No second argument, so a unbounded slice
+                            let loc_end = self.advance_with();
+                            expr = expr.slice(loc_start | loc_end, arg1, Expr::nil());
                             continue
                         }
-                        _ => self.parse_expression(), // As we consumed `:`, we require a second expression
-                    }
+                        _ => self.parse_expr_top_level(), // As we consumed `:`, we require a second expression
+                    };
 
                     // Consumed `[` <expression> `:` <expression> so far
                     match self.peek() {
-                        Some(CloseSquareBracket) => { // Two arguments, so push OpSlice and exit the statement
-                            self.advance();
-                            self.push(OpSlice);
+                        Some(CloseSquareBracket) => { // Two argument slice
+                            let loc_end = self.advance_with();
+                            expr = expr.slice(loc_start | loc_end, arg1, arg2);
                             continue;
                         },
                         Some(Colon) => {
@@ -1315,39 +1325,39 @@ impl Parser<'_> {
                     }
 
                     // Consumed `[` <expression> `:` <expression> `:` so far
-                    match self.peek() {
-                        Some(CloseSquareBracket) => { // Three arguments + default value for slice
-                            self.push(Nil);
-                        },
-                        _ => self.parse_expression(),
-                    }
+                    let arg3: Expr = match self.peek() {
+                        Some(CloseSquareBracket) => Expr::nil(),
+                        _ => self.parse_expr_top_level(),
+                    };
 
                     self.expect(CloseSquareBracket);
-                    self.push(OpSliceWithStep);
+                    expr = expr.slice_step(loc_start | self.prev_location(), arg1, arg2, arg3);
                 },
                 _ => break
             }
         }
 
         // Prefix operators are lower precedence than suffix operators
-        for op in stack.into_iter().rev() {
-            self.push(op);
+        for (loc, op) in stack.into_iter().rev() {
+            expr = expr.unary(loc, op)
         }
+
+        expr
     }
 
-    fn parse_expr_3(self: &mut Self) {
+    fn parse_expr_3(self: &mut Self) -> Expr {
         trace::trace_parser!("rule <expr-3>");
-        self.parse_expr_2_unary();
+        let mut expr: Expr = self.parse_expr_2_unary();
         loop {
-            let maybe_op: Option<Opcode> = match self.peek() {
-                Some(Mul) => Some(OpMul),
-                Some(Div) => Some(OpDiv),
-                Some(Mod) => Some(OpMod),
-                Some(Pow) => Some(OpPow),
-                Some(KeywordIs) => Some(OpIs),
-                Some(KeywordIn) => Some(OpIn),
+            let maybe_op: Option<BinaryOp> = match self.peek() {
+                Some(Mul) => Some(BinaryOp::Mul),
+                Some(Div) => Some(BinaryOp::Div),
+                Some(Mod) => Some(BinaryOp::Mod),
+                Some(Pow) => Some(BinaryOp::Pow),
+                Some(KeywordIs) => Some(BinaryOp::Is),
+                Some(KeywordIn) => Some(BinaryOp::In),
                 Some(KeywordNot) => match self.peek2() {
-                    Some(KeywordIn) => Some(UnaryNot), // Special flag for `not in`, which desugars to `!(x in y)
+                    Some(KeywordIn) => Some(BinaryOp::NotEqual), // Special flag for `not in`, which is implemented as `!(x in y)
                     _ => None,
                 }
                 _ => None
@@ -1356,29 +1366,27 @@ impl Parser<'_> {
                 break
             }
             match maybe_op {
-                Some(UnaryNot) => {
+                Some(BinaryOp::NotEqual) => {
                     let loc = self.advance_with() | self.advance_with();
-                    self.parse_expr_2_unary();
-                    self.push_with(OpIn, loc);
-                    self.push(UnaryNot)
+                    expr = expr.binary(loc, BinaryOp::In, self.parse_expr_2_unary()).not(loc);
                 }
                 Some(op) => {
                     let loc = self.advance_with();
-                    self.parse_expr_2_unary();
-                    self.push_with(op, loc);
+                    expr = expr.binary(loc, op, self.parse_expr_2_unary());
                 },
                 None => break
             }
         }
+        expr
     }
 
-    fn parse_expr_4(self: &mut Self) {
+    fn parse_expr_4(self: &mut Self) -> Expr {
         trace::trace_parser!("rule <expr-4>");
-        self.parse_expr_3();
+        let mut expr: Expr = self.parse_expr_3();
         loop {
-            let maybe_op: Option<Opcode> = match self.peek() {
-                Some(Plus) => Some(OpAdd),
-                Some(Minus) => Some(OpSub),
+            let maybe_op: Option<BinaryOp> = match self.peek() {
+                Some(Plus) => Some(BinaryOp::Add),
+                Some(Minus) => Some(BinaryOp::Sub),
                 _ => None
             };
             if maybe_op.is_some() && self.peek2() == Some(&CloseParen) {
@@ -1387,21 +1395,21 @@ impl Parser<'_> {
             match maybe_op {
                 Some(op) => {
                     let loc = self.advance_with();
-                    self.parse_expr_3();
-                    self.push_with(op, loc);
+                    expr = expr.binary(loc, op, self.parse_expr_3());
                 },
                 None => break
             }
         }
+        expr
     }
 
-    fn parse_expr_5(self: &mut Self) {
+    fn parse_expr_5(self: &mut Self) -> Expr {
         trace::trace_parser!("rule <expr-5>");
-        self.parse_expr_4();
+        let mut expr: Expr = self.parse_expr_4();
         loop {
-            let maybe_op: Option<Opcode> = match self.peek() {
-                Some(LeftShift) => Some(OpLeftShift),
-                Some(RightShift) => Some(OpRightShift),
+            let maybe_op: Option<BinaryOp> = match self.peek() {
+                Some(LeftShift) => Some(BinaryOp::LeftShift),
+                Some(RightShift) => Some(BinaryOp::RightShift),
                 _ => None
             };
             if maybe_op.is_some() && self.peek2() == Some(&CloseParen) {
@@ -1410,65 +1418,63 @@ impl Parser<'_> {
             match maybe_op {
                 Some(op) => {
                     let loc = self.advance_with();
-                    self.parse_expr_4();
-                    self.push_with(op, loc);
+                    expr = expr.binary(loc, op, self.parse_expr_4());
                 },
                 None => break
             }
         }
+        expr
     }
 
-    fn parse_expr_6(self: &mut Self) {
+    fn parse_expr_6(self: &mut Self) -> Expr {
         trace::trace_parser!("rule <expr-6>");
-        self.parse_expr_5();
+        let mut expr: Expr = self.parse_expr_5();
         loop {
-            let maybe_op: Option<Opcode> = match self.peek() {
-                Some(BitwiseAnd) => Some(OpBitwiseAnd),
-                Some(BitwiseOr) => Some(OpBitwiseOr),
-                Some(BitwiseXor) => Some(OpBitwiseXor),
+            let maybe_op: Option<BinaryOp> = match self.peek() {
+                Some(BitwiseAnd) => Some(BinaryOp::And),
+                Some(BitwiseOr) => Some(BinaryOp::Or),
+                Some(BitwiseXor) => Some(BinaryOp::Xor),
                 _ => None
             };
             if maybe_op.is_some() && self.peek2() == Some(&CloseParen) {
                 break
             }
             match maybe_op {
-                Some(op) => {
-                    let loc = self.advance_with();
-                    self.parse_expr_5();
-                    self.push_with(op, loc);
-                },
+                Some(op) => expr = expr.binary(self.advance_with(), op, self.parse_expr_5()),
                 None => break
             }
         }
+        expr
     }
 
-    fn parse_expr_7(self: &mut Self) {
+    fn parse_expr_7(self: &mut Self) -> Expr {
         trace::trace_parser!("rule <expr-7>");
-        self.parse_expr_6();
+        let mut expr: Expr = self.parse_expr_6();
         loop {
             match self.peek() {
                 Some(Dot) => {
-                    let mut rhs = self.advance_with();
-                    rhs |= self.with_location(|p| p.parse_expr_6());
-                    self.push(Swap);
-                    self.push_with(OpFuncEval(1), rhs);
+                    let mut loc = self.advance_with();
+                    let rhs = self.parse_expr_6();
+                    loc |= self.prev_location();
+                    expr = expr.compose(loc, rhs);
                 },
                 _ => break
             }
         }
+        expr
     }
 
-    fn parse_expr_8(self: &mut Self) {
+    fn parse_expr_8(self: &mut Self) -> Expr {
         trace::trace_parser!("rule <expr-8>");
-        self.parse_expr_7();
+        let mut expr: Expr = self.parse_expr_7();
         loop {
-            let maybe_op: Option<Opcode> = match self.peek() {
-                Some(LessThan) => Some(OpLessThan),
-                Some(LessThanEquals) => Some(OpLessThanEqual),
-                Some(GreaterThan) => Some(OpGreaterThan),
-                Some(GreaterThanEquals) => Some(OpGreaterThanEqual),
-                Some(DoubleEquals) => Some(OpEqual),
-                Some(NotEquals) => Some(OpNotEqual),
+            let maybe_op: Option<BinaryOp> = match self.peek() {
+                Some(LessThan) => Some(BinaryOp::LessThan),
+                Some(LessThanEquals) => Some(BinaryOp::LessThanEqual),
+                Some(GreaterThan) => Some(BinaryOp::GreaterThan),
+                Some(GreaterThanEquals) => Some(BinaryOp::GreaterThanEqual),
+                Some(DoubleEquals) => Some(BinaryOp::Equal),
+                Some(NotEquals) => Some(BinaryOp::NotEqual),
                 _ => None
             };
             if maybe_op.is_some() && self.peek2() == Some(&CloseParen) {
@@ -1477,186 +1483,138 @@ impl Parser<'_> {
             match maybe_op {
                 Some(op) => {
                     let loc = self.advance_with();
-                    self.parse_expr_7();
-                    self.push_with(op, loc);
+                    expr = expr.binary(loc, op, self.parse_expr_7());
                 },
                 None => break
             }
         }
+        expr
     }
 
-    fn parse_expr_9(self: &mut Self) {
+    fn parse_expr_9(self: &mut Self) -> Expr {
         trace::trace_parser!("rule <expr-9>");
-        self.parse_expr_8();
+        let mut expr: Expr = self.parse_expr_8();
         loop {
-            let maybe_op: Option<Opcode> = match self.peek() {
-                Some(LogicalAnd) => Some(OpBitwiseAnd), // Just markers
-                Some(LogicalOr) => Some(OpBitwiseOr),
+            let maybe_op: Option<BinaryOp> = match self.peek() {
+                Some(LogicalAnd) => Some(BinaryOp::And), // Just markers
+                Some(LogicalOr) => Some(BinaryOp::Or),
                 _ => None,
             };
             if maybe_op.is_some() && self.peek2() == Some(&CloseParen) {
                 break
             }
             match maybe_op {
-                Some(OpBitwiseAnd) => {
-                    self.advance();
-                    let jump_if_false = self.reserve();
-                    self.push(Opcode::Pop);
-                    self.parse_expr_8();
-                    self.fix_jump(jump_if_false, JumpIfFalse)
-                },
-                Some(OpBitwiseOr) => {
-                    self.advance();
-                    let jump_if_true = self.reserve();
-                    self.push(Opcode::Pop);
-                    self.parse_expr_8();
-                    self.fix_jump(jump_if_true, JumpIfTrue);
+                Some(op) => {
+                    let loc = self.advance_with();
+                    expr = expr.logical(loc, op, self.parse_expr_8());
                 },
                 _ => break
             }
         }
+        expr
     }
 
-    fn parse_expr_10(self: &mut Self) {
+    fn parse_expr_10(self: &mut Self) -> Expr {
         trace::trace_parser!("rule <expr-10>");
-        self.parse_expr_10_pattern_lvalue();
+        let mut expr: Expr = self.parse_expr_10_pattern_lvalue();
         loop {
-            let maybe_op: Option<Opcode> = match self.peek() {
-                Some(Equals) => Some(OpEqual), // Fake operator
-                Some(PlusEquals) => Some(OpAdd), // Assignment Operators
-                Some(MinusEquals) => Some(OpSub),
-                Some(MulEquals) => Some(OpMul),
-                Some(DivEquals) => Some(OpDiv),
-                Some(AndEquals) => Some(OpBitwiseAnd),
-                Some(OrEquals) => Some(OpBitwiseOr),
-                Some(XorEquals) => Some(OpBitwiseXor),
-                Some(LeftShiftEquals) => Some(OpLeftShift),
-                Some(RightShiftEquals) => Some(OpRightShift),
-                Some(ModEquals) => Some(OpMod),
-                Some(PowEquals) => Some(OpPow),
+            let mut loc = self.next_location();
+            let maybe_op: Option<BinaryOp> = match self.peek() {
+                Some(Equals) => Some(BinaryOp::Equal), // Fake operator
+                Some(PlusEquals) => Some(BinaryOp::Add), // Assignment Operators
+                Some(MinusEquals) => Some(BinaryOp::Sub),
+                Some(MulEquals) => Some(BinaryOp::Mul),
+                Some(DivEquals) => Some(BinaryOp::Div),
+                Some(AndEquals) => Some(BinaryOp::And),
+                Some(OrEquals) => Some(BinaryOp::Or),
+                Some(XorEquals) => Some(BinaryOp::Xor),
+                Some(LeftShiftEquals) => Some(BinaryOp::LeftShift),
+                Some(RightShiftEquals) => Some(BinaryOp::RightShift),
+                Some(ModEquals) => Some(BinaryOp::Mod),
+                Some(PowEquals) => Some(BinaryOp::Pow),
 
                 // `.=` is special, as it needs to emit `Swap`, then `OpFuncEval(1)`
-                Some(DotEquals) => Some(Swap),
+                Some(DotEquals) => Some(BinaryOp::NotEqual), // Marker
 
                 // Special assignment operators, use their own version of a binary operator
                 // Also need to consume the extra token
                 Some(Identifier(it)) if it == "max" => match self.peek2() {
                     Some(Equals) => {
                         self.advance();
-                        Some(OpMax)
+                        loc |= self.next_location();
+                        Some(BinaryOp::Max)
                     },
                     _ => None,
                 },
                 Some(Identifier(it)) if it == "min" => match self.peek2() {
                     Some(Equals) => {
                         self.advance();
-                        Some(OpMin)
+                        loc |= self.next_location();
+                        Some(BinaryOp::Min)
                     },
                     _ => None,
                 },
                 _ => None
             };
 
-            // We have to handle the left hand side, as we may need to rewrite the most recent tokens based on what we just parsed.
+            // We have to handle the left hand side, as we may need to rewrite the left hand side based on what we just parsed.
             // Valid LHS expressions for a direct assignment, and their translations are:
-            // PushLocal(a)                => pop, and emit a StoreLocal(a) instead
-            // PushUpValue(a)              => pop, and emit a StoreUpValue(a) instead
-            // <expr> <expr> OpIndex       => pop, and emit a StoreArray instead
-            // <expr> <expr> OpPropertyGet => pop, and emit a StoreProperty instead
-            // If we have a assignment-expression operator, like `+=`, then we need to do it slightly differently
-            // PushLocal(a)                => parse <expr>, and emit <op>, StoreLocal(a)
-            // PushUpValue(a)              => parse <expr>, and emit <op>, StoreUpValue(a)
-            // <expr> <expr> OpIndex       => pop, emit OpIndexPeek, parse <expr>, then emit <op>, StoreArray
-            // <expr> <expr> OpPropertyGet => pop, emit OpPropertyGetPeek, parse <expr>, then emit <op>, StoreProperty
+            //
+            // PushLocal(a)    => StoreLocal(a, <expr>) -> also works the same for globals, upvalues, and late bound globals
+            // Index(a, b)     => StoreArray(a, b, <expr>)
+            //
+            // If we have a assignment-expression operator, like `+=`, then we need to do it slightly differently:
+            //
+            // PushLocal(a)    => StoreLocal(Op(PushLocal(a), <expr>)) -> also works the same for globals, upvalues, and late bound globals
+            // Index(a, b)     => SwapArray(a, b, Op, <expr>) -> this is special as it needs to use `OpIndexPeek` for the read, the `StoreArray` for the write
             //
             // **Note**: Assignments are right-associative, so call <expr-10> recursively instead of <expr-9>
-            if let Some(OpEqual) = maybe_op { // // Direct assignment statement
+            if let Some(BinaryOp::Equal) = maybe_op { // // Direct assignment statement
                 self.advance();
-                match self.last() {
-                    Some(PushLocal(id)) => {
-                        self.pop();
-                        self.parse_expr_10();
-                        self.push(StoreLocal(id));
+                expr = match expr {
+                    Expr(_, ExprType::LValue(lvalue @ (LValueReference::Local(_) | LValueReference::UpValue(_) | LValueReference::Global(_) | LValueReference::LateBoundGlobal(_)))) => {
+                        let rhs = self.parse_expr_10();
+                        Expr::assign_lvalue(loc, lvalue, rhs)
                     },
-                    Some(PushUpValue(id)) => {
-                        self.pop();
-                        self.parse_expr_10();
-                        self.push(StoreUpValue(id));
+                    Expr(_, ExprType::Index(array, index)) => {
+                        let rhs = self.parse_expr_10();
+                        Expr::assign_array(loc, *array, *index, rhs)
                     },
-                    Some(PushGlobal(id)) => {
-                        self.pop();
-                        self.parse_expr_10();
-                        self.push(StoreGlobal(id));
+                    _ => {
+                        self.error(InvalidAssignmentTarget);
+                        Expr::nil()
                     },
-                    Some(OpIndex) => {
-                        self.pop();
-                        self.parse_expr_10();
-                        self.push(StoreArray);
-                    },
-                    // todo: property access
-                    _ => self.error(InvalidAssignmentTarget),
                 }
             } else if let Some(op) = maybe_op {
-
                 self.advance();
-                match self.last() {
-                    Some(PushLocal(id)) => {
-                        self.parse_expr_10();
-                        match op {
-                            Swap => {
-                                self.push(op);
-                                self.push(OpFuncEval(1));
-                            }
-                            op => self.push(op)
-                        }
-                        self.push(StoreLocal(id));
+                expr = match expr {
+                    Expr(lvalue_loc, ExprType::LValue(lvalue @ (LValueReference::Local(_) | LValueReference::UpValue(_) | LValueReference::Global(_) | LValueReference::LateBoundGlobal(_)))) => {
+                        let lhs = Expr::lvalue(lvalue_loc, lvalue.clone());
+                        let rhs = self.parse_expr_10();
+                        Expr::assign_lvalue(loc, lvalue, match op {
+                            BinaryOp::NotEqual => lhs.compose(loc, rhs),
+                            op => lhs.binary(loc, op, rhs),
+                        })
                     },
-                    Some(PushUpValue(id)) => {
-                        self.parse_expr_10();
-                        match op {
-                            Swap => {
-                                self.push(op);
-                                self.push(OpFuncEval(1));
-                            }
-                            op => self.push(op)
-                        }
-                        self.push(StoreUpValue(id));
+                    Expr(_, ExprType::Index(array, index)) => {
+                        // Array op assign uses a entire Expr token, as it needs to emit IndexPeek instead of Index
+                        let rhs = self.parse_expr_10();
+                        Expr::assign_op_array(loc, *array, *index, op, rhs)
                     },
-                    Some(PushGlobal(id)) => {
-                        self.parse_expr_10();
-                        match op {
-                            Swap => {
-                                self.push(op);
-                                self.push(OpFuncEval(1));
-                            }
-                            op => self.push(op)
-                        }
-                        self.push(StoreGlobal(id));
+                    _ => {
+                        self.error(InvalidAssignmentTarget);
+                        Expr::nil()
                     },
-                    Some(OpIndex) => {
-                        self.pop();
-                        self.push(OpIndexPeek);
-                        self.parse_expr_10();
-                        match op {
-                            Swap => {
-                                self.push(op);
-                                self.push(OpFuncEval(1));
-                            }
-                            op => self.push(op)
-                        }
-                        self.push(StoreArray);
-                    },
-                    // todo: property access
-                    _ => self.error(InvalidAssignmentTarget),
                 }
             } else {
                 // Not any kind of assignment statement
                 break
             }
         }
+        expr
     }
 
-    fn parse_expr_10_pattern_lvalue(self: &mut Self) {
+    fn parse_expr_10_pattern_lvalue(self: &mut Self) -> Expr {
         // A subset of `<lvalue> = <rvalue>` get parsed as patterns. These are for non-trivial <lvalue>s, which cannot involve array or property access, and cannot involve operator-assignment statements.
         // We use backtracking as for these cases, we want to parse the `lvalue` separately.
 
@@ -1667,18 +1625,19 @@ impl Parser<'_> {
                     if let Some(Equals) = self.peek() {
                         // At this point, we know enough that this is the only possible parse
                         // We have a nontrivial `<lvalue>`, followed by an assignment statement, so this must be a pattern assignment.
-                        self.advance(); // Accept `=`
+                        let loc = self.advance_with(); // Accept `=`
                         self.accept(); // First and foremost, accept the query.
                         lvalue.resolve_locals(self); // Resolve each local, raising an error if need be.
-                        self.parse_expr_10(); // Recursively parse, since this is left associative, call <expr-10>
-                        lvalue.emit_destructuring(self, false, true); // Emit the destructuring code, which cleans up everything
-                        return; // And exit this rule
+                        let expr: Expr = self.parse_expr_10(); // Recursively parse, since this is left associative, call <expr-10>
+                        // todo: remove / replace
+                        //lvalue.emit_destructuring(self, false, true); // Emit the destructuring code, which cleans up everything
+                        return Expr::assign_pattern(loc, lvalue, expr); // And exit this rule
                     }
                 }
             }
         }
         self.reject();
-        self.parse_expr_9();
+        self.parse_expr_9()
     }
 }
 
@@ -1693,43 +1652,44 @@ mod tests {
     use crate::stdlib::NativeFunction;
     use crate::trace;
     use crate::vm::Opcode;
+    use crate::vm::operator::{BinaryOp, UnaryOp};
 
     use NativeFunction::{OperatorAdd, OperatorDiv, OperatorMul, Print, ReadText};
     use Opcode::{*};
 
     #[test] fn test_int() { run_expr("123", vec![Int(123)]); }
     #[test] fn test_str() { run_expr("'abc'", vec![Str(1)]); }
-    #[test] fn test_unary_minus() { run_expr("-3", vec![Int(3), UnarySub]); }
-    #[test] fn test_binary_mul() { run_expr("3 * 6", vec![Int(3), Int(6), OpMul]); }
-    #[test] fn test_binary_div() { run_expr("20 / 4 / 5", vec![Int(20), Int(4), OpDiv, Int(5), OpDiv]); }
-    #[test] fn test_binary_pow() { run_expr("2 ** 10", vec![Int(2), Int(10), OpPow]); }
-    #[test] fn test_binary_minus() { run_expr("6 - 7", vec![Int(6), Int(7), OpSub]); }
-    #[test] fn test_binary_and_unary_minus() { run_expr("15 -- 7", vec![Int(15), Int(7), UnarySub, OpSub]); }
-    #[test] fn test_binary_add_and_mod() { run_expr("1 + 2 % 3", vec![Int(1), Int(2), Int(3), OpMod, OpAdd]); }
-    #[test] fn test_binary_add_and_mod_rev() { run_expr("1 % 2 + 3", vec![Int(1), Int(2), OpMod, Int(3), OpAdd]); }
-    #[test] fn test_binary_shifts() { run_expr("1 << 2 >> 3", vec![Int(1), Int(2), OpLeftShift, Int(3), OpRightShift]); }
-    #[test] fn test_binary_shifts_and_operators() { run_expr("1 & 2 << 3 | 5", vec![Int(1), Int(2), Int(3), OpLeftShift, OpBitwiseAnd, Int(5), OpBitwiseOr]); }
+    #[test] fn test_unary_minus() { run_expr("-3", vec![Int(3), Unary(UnaryOp::Minus)]); }
+    #[test] fn test_binary_mul() { run_expr("3 * 6", vec![Int(3), Int(6), Binary(BinaryOp::Mul)]); }
+    #[test] fn test_binary_div() { run_expr("20 / 4 / 5", vec![Int(20), Int(4), Binary(BinaryOp::Div), Int(5), Binary(BinaryOp::Div)]); }
+    #[test] fn test_binary_pow() { run_expr("2 ** 10", vec![Int(2), Int(10), Binary(BinaryOp::Pow)]); }
+    #[test] fn test_binary_minus() { run_expr("6 - 7", vec![Int(6), Int(7), Binary(BinaryOp::Sub)]); }
+    #[test] fn test_binary_and_unary_minus() { run_expr("15 -- 7", vec![Int(15), Int(7), Unary(UnaryOp::Minus), Binary(BinaryOp::Sub)]); }
+    #[test] fn test_binary_add_and_mod() { run_expr("1 + 2 % 3", vec![Int(1), Int(2), Int(3), Binary(BinaryOp::Mod), Binary(BinaryOp::Add)]); }
+    #[test] fn test_binary_add_and_mod_rev() { run_expr("1 % 2 + 3", vec![Int(1), Int(2), Binary(BinaryOp::Mod), Int(3), Binary(BinaryOp::Add)]); }
+    #[test] fn test_binary_shifts() { run_expr("1 << 2 >> 3", vec![Int(1), Int(2), Binary(BinaryOp::LeftShift), Int(3), Binary(BinaryOp::RightShift)]); }
+    #[test] fn test_binary_shifts_and_operators() { run_expr("1 & 2 << 3 | 5", vec![Int(1), Int(2), Int(3), Binary(BinaryOp::LeftShift), Binary(BinaryOp::And), Int(5), Binary(BinaryOp::Or)]); }
     #[test] fn test_function_composition() { run_expr("print . read_text", vec![NativeFunction(Print), NativeFunction(ReadText), Swap, OpFuncEval(1)]); }
-    #[test] fn test_precedence_with_parens() { run_expr("(1 + 2) * 3", vec![Int(1), Int(2), OpAdd, Int(3), OpMul]); }
-    #[test] fn test_precedence_with_parens_2() { run_expr("6 / (5 - 3)", vec![Int(6), Int(5), Int(3), OpSub, OpDiv]); }
-    #[test] fn test_precedence_with_parens_3() { run_expr("-(1 - 3)", vec![Int(1), Int(3), OpSub, UnarySub]); }
+    #[test] fn test_precedence_with_parens() { run_expr("(1 + 2) * 3", vec![Int(1), Int(2), Binary(BinaryOp::Add), Int(3), Binary(BinaryOp::Mul)]); }
+    #[test] fn test_precedence_with_parens_2() { run_expr("6 / (5 - 3)", vec![Int(6), Int(5), Int(3), Binary(BinaryOp::Sub), Binary(BinaryOp::Div)]); }
+    #[test] fn test_precedence_with_parens_3() { run_expr("-(1 - 3)", vec![Int(1), Int(3), Binary(BinaryOp::Sub), Unary(UnaryOp::Minus)]); }
     #[test] fn test_function_no_args() { run_expr("print", vec![NativeFunction(Print)]); }
     #[test] fn test_function_one_arg() { run_expr("print(1)", vec![NativeFunction(Print), Int(1), OpFuncEval(1)]); }
     #[test] fn test_function_many_args() { run_expr("print(1,2,3)", vec![NativeFunction(Print), Int(1), Int(2), Int(3), OpFuncEval(3)]); }
-    #[test] fn test_multiple_unary_ops() { run_expr("- ! 1", vec![Int(1), UnaryNot, UnarySub]); }
+    #[test] fn test_multiple_unary_ops() { run_expr("- ! 1", vec![Int(1), Unary(UnaryOp::Not), Unary(UnaryOp::Minus)]); }
     #[test] fn test_multiple_function_calls() { run_expr("print (1) (2) (3)", vec![NativeFunction(Print), Int(1), OpFuncEval(1), Int(2), OpFuncEval(1), Int(3), OpFuncEval(1)]); }
     #[test] fn test_multiple_function_calls_some_args() { run_expr("print () (1) (2, 3)", vec![NativeFunction(Print), OpFuncEval(0), Int(1), OpFuncEval(1), Int(2), Int(3), OpFuncEval(2)]); }
     #[test] fn test_multiple_function_calls_no_args() { run_expr("print () () ()", vec![NativeFunction(Print), OpFuncEval(0), OpFuncEval(0), OpFuncEval(0)]); }
-    #[test] fn test_function_call_unary_op_precedence() { run_expr("- print ()", vec![NativeFunction(Print), OpFuncEval(0), UnarySub]); }
-    #[test] fn test_function_call_unary_op_precedence_with_parens() { run_expr("(- print) ()", vec![NativeFunction(Print), UnarySub, OpFuncEval(0)]); }
-    #[test] fn test_function_call_unary_op_precedence_with_parens_2() { run_expr("- (print () )", vec![NativeFunction(Print), OpFuncEval(0), UnarySub]); }
-    #[test] fn test_function_call_binary_op_precedence() { run_expr("print ( 1 ) + ( 2 ( 3 ) )", vec![NativeFunction(Print), Int(1), OpFuncEval(1), Int(2), Int(3), OpFuncEval(1), OpAdd]); }
-    #[test] fn test_function_call_parens_1() { run_expr("print . read_text (1 + 3) (5)", vec![NativeFunction(Print), NativeFunction(ReadText), Int(1), Int(3), OpAdd, OpFuncEval(1), Int(5), OpFuncEval(1), Swap, OpFuncEval(1)]); }
-    #[test] fn test_function_call_parens_2() { run_expr("( print . read_text (1 + 3) ) (5)", vec![NativeFunction(Print), NativeFunction(ReadText), Int(1), Int(3), OpAdd, OpFuncEval(1), Swap, OpFuncEval(1), Int(5), OpFuncEval(1)]); }
-    #[test] fn test_function_composition_with_is() { run_expr("'123' . int is int . print", vec![Str(1), NativeFunction(NativeFunction::Int), NativeFunction(NativeFunction::Int), OpIs, Swap, OpFuncEval(1), NativeFunction(Print), Swap, OpFuncEval(1)]); }
-    #[test] fn test_and() { run_expr("1 < 2 and 3 < 4", vec![Int(1), Int(2), OpLessThan, JumpIfFalse(8), Pop, Int(3), Int(4), OpLessThan]); }
-    #[test] fn test_or() { run_expr("1 < 2 or 3 < 4", vec![Int(1), Int(2), OpLessThan, JumpIfTrue(8), Pop, Int(3), Int(4), OpLessThan]); }
-    #[test] fn test_precedence_1() { run_expr("1 . 2 & 3 > 4", vec![Int(1), Int(2), Int(3), OpBitwiseAnd, Swap, OpFuncEval(1), Int(4), OpGreaterThan]); }
+    #[test] fn test_function_call_unary_op_precedence() { run_expr("- print ()", vec![NativeFunction(Print), OpFuncEval(0), Unary(UnaryOp::Minus)]); }
+    #[test] fn test_function_call_unary_op_precedence_with_parens() { run_expr("(- print) ()", vec![NativeFunction(Print), Unary(UnaryOp::Minus), OpFuncEval(0)]); }
+    #[test] fn test_function_call_unary_op_precedence_with_parens_2() { run_expr("- (print () )", vec![NativeFunction(Print), OpFuncEval(0), Unary(UnaryOp::Minus)]); }
+    #[test] fn test_function_call_binary_op_precedence() { run_expr("print ( 1 ) + ( 2 ( 3 ) )", vec![NativeFunction(Print), Int(1), OpFuncEval(1), Int(2), Int(3), OpFuncEval(1), Binary(BinaryOp::Add)]); }
+    #[test] fn test_function_call_parens_1() { run_expr("print . read_text (1 + 3) (5)", vec![NativeFunction(Print), NativeFunction(ReadText), Int(1), Int(3), Binary(BinaryOp::Add), OpFuncEval(1), Int(5), OpFuncEval(1), Swap, OpFuncEval(1)]); }
+    #[test] fn test_function_call_parens_2() { run_expr("( print . read_text (1 + 3) ) (5)", vec![NativeFunction(Print), NativeFunction(ReadText), Int(1), Int(3), Binary(BinaryOp::Add), OpFuncEval(1), Swap, OpFuncEval(1), Int(5), OpFuncEval(1)]); }
+    #[test] fn test_function_composition_with_is() { run_expr("'123' . int is int . print", vec![Str(1), NativeFunction(NativeFunction::Int), NativeFunction(NativeFunction::Int), Binary(BinaryOp::Is), Swap, OpFuncEval(1), NativeFunction(Print), Swap, OpFuncEval(1)]); }
+    #[test] fn test_and() { run_expr("1 < 2 and 3 < 4", vec![Int(1), Int(2), Binary(BinaryOp::LessThan), JumpIfFalse(8), Pop, Int(3), Int(4), Binary(BinaryOp::LessThan)]); }
+    #[test] fn test_or() { run_expr("1 < 2 or 3 < 4", vec![Int(1), Int(2), Binary(BinaryOp::LessThan), JumpIfTrue(8), Pop, Int(3), Int(4), Binary(BinaryOp::LessThan)]); }
+    #[test] fn test_precedence_1() { run_expr("1 . 2 & 3 > 4", vec![Int(1), Int(2), Int(3), Binary(BinaryOp::And), Swap, OpFuncEval(1), Int(4), Binary(BinaryOp::GreaterThan)]); }
     #[test] fn test_slice_01() { run_expr("1 [::]", vec![Int(1), Nil, Nil, Nil, OpSliceWithStep]); }
     #[test] fn test_slice_02() { run_expr("1 [2::]", vec![Int(1), Int(2), Nil, Nil, OpSliceWithStep]); }
     #[test] fn test_slice_03() { run_expr("1 [:3:]", vec![Int(1), Nil, Int(3), Nil, OpSliceWithStep]); }
@@ -1742,10 +1702,10 @@ mod tests {
     #[test] fn test_slice_10() { run_expr("1 [2:]", vec![Int(1), Int(2), Nil, OpSlice]); }
     #[test] fn test_slice_11() { run_expr("1 [:3]", vec![Int(1), Nil, Int(3), OpSlice]); }
     #[test] fn test_slice_12() { run_expr("1 [2:3]", vec![Int(1), Int(2), Int(3), OpSlice]); }
-    #[test] fn test_binary_ops() { run_expr("(*) * (+) + (/)", vec![NativeFunction(OperatorMul), NativeFunction(OperatorAdd), OpMul, NativeFunction(OperatorDiv), OpAdd]); }
+    #[test] fn test_binary_ops() { run_expr("(*) * (+) + (/)", vec![NativeFunction(OperatorMul), NativeFunction(OperatorAdd), Binary(BinaryOp::Mul), NativeFunction(OperatorDiv), Binary(BinaryOp::Add)]); }
     #[test] fn test_if_then_else() { run_expr("(if true then 1 else 2)", vec![True, JumpIfFalsePop(4), Int(1), Jump(5), Int(2)]); }
-    #[test] fn test_zero_equals_zero() { run_expr("0 == 0", vec![Int(0), Int(0), OpEqual]); }
-    #[test] fn test_zero_equals_zero_no_spaces() { run_expr("0==0", vec![Int(0), Int(0), OpEqual]); }
+    #[test] fn test_zero_equals_zero() { run_expr("0 == 0", vec![Int(0), Int(0), Binary(BinaryOp::Equal)]); }
+    #[test] fn test_zero_equals_zero_no_spaces() { run_expr("0==0", vec![Int(0), Int(0), Binary(BinaryOp::Equal)]); }
 
     #[test] fn test_let_eof() { run_err("let", "Expected a variable binding, either a name, or '_', or pattern (i.e. 'x, (_, y), *z'), got end of input instead\n  at: line 1 (<test>)\n\n1 | let\n2 |     ^^^\n"); }
     #[test] fn test_let_no_identifier() { run_err("let =", "Expected a variable binding, either a name, or '_', or pattern (i.e. 'x, (_, y), *z'), got '=' token instead\n  at: line 1 (<test>)\n\n1 | let =\n2 |     ^\n"); }

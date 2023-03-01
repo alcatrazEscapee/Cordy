@@ -1,6 +1,6 @@
 L1: 0000 Int(2) -> 3
     0001 Int(3) -> 5
-    0002 OpLessThan
+    0002 Binary(LessThan)
     0003 JumpIfFalsePop(8)
 L2: 0004 NativeFunction(Print)
     0005 Str(1) -> "yes"
@@ -8,7 +8,7 @@ L2: 0004 NativeFunction(Print)
 L3: 0007 Jump(17)
 L4: 0008 Int(4) -> 6
     0009 Int(5) -> 7
-    0010 OpLessThan
+    0010 Binary(LessThan)
     0011 JumpIfFalsePop(16)
 L5: 0012 NativeFunction(Print)
     0013 Str(2) -> "no"

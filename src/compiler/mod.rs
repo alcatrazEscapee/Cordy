@@ -143,7 +143,8 @@ impl CompileResult {
         let mut last_line_no: usize = 0;
         let mut locals = self.locals.iter();
         for (ip, token) in self.code.iter().enumerate() {
-            let line_no = view.lineno(self.locations[ip]);
+            let loc = self.locations[ip];
+            let line_no = view.lineno(loc);
             let label: String = if line_no + 1 != last_line_no {
                 last_line_no = line_no + 1;
                 format!("L{:0>width$}: ", line_no + 1, width = width)
@@ -151,7 +152,7 @@ impl CompileResult {
                 " ".repeat(width + 3)
             };
             let asm: String = match *token {
-                Int(cid) | CheckLengthEqualTo(cid) | CheckLengthGreaterThan(cid) | List(cid) => format!("{:?} -> {}", token, self.constants[cid as usize]),
+                Int(cid) | CheckLengthEqualTo(cid) | CheckLengthGreaterThan(cid) => format!("{:?} -> {}", token, self.constants[cid as usize]),
                 Str(sid) => format!("Str({}) -> {:?}", sid, self.strings[sid as usize]),
                 Function(fid) => format!("Function({}) -> {:?}", fid, self.functions[fid as usize]),
                 PushGlobal(_) | StoreGlobal(_) | PushLocal(_) | StoreLocal(_) => match locals.next() {
@@ -161,6 +162,8 @@ impl CompileResult {
                 _ => format!("{:?}", token.to_absolute_jump(ip)),
             };
             lines.push(format!("{}{:0>4} {}", label, ip % 10_000, asm));
+            // Debug for locations
+            //lines.push(format!("{}{:0>4}[{:>4}{:>4}] {}", label, ip % 10_000, loc.start(), loc.end(), asm));
         }
         lines
     }

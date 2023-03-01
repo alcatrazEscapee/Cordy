@@ -117,14 +117,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Advances the token stream and pushes the provided token to the output stream.
-    /// The output token will be associated with the input token that was advanced.
-    pub fn push_advance(self: &mut Self, token: Opcode) {
-        self.advance();
-        self.push(token);
-    }
-
-
     /// Like `advance()`, but returns the boxed `Identifier` token.
     /// **Important**: Must only be called once `peek()` has identified an `Identifier` token is present, as this will panic otherwise.
     pub fn take_identifier(self: &mut Self) -> String {
@@ -290,17 +282,17 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn push_load_lvalue(self: &mut Self, lvalue: LValueReference) {
+    pub fn push_load_lvalue(self: &mut Self, loc: Location, lvalue: LValueReference) {
         match lvalue {
-            LValueReference::Local(index) => self.push(PushLocal(index)),
-            LValueReference::Global(index) => self.push(PushGlobal(index)),
+            LValueReference::Local(index) => self.push_with(PushLocal(index), loc),
+            LValueReference::Global(index) => self.push_with(PushGlobal(index), loc),
             LValueReference::LateBoundGlobal(global) => {
                 self.late_bound_globals.push(Reference::Load(global));
-                self.push(Noop); // Will be fixed when the global is declared, or caught at EoF as an error
+                self.push_with(Noop, loc); // Will be fixed when the global is declared, or caught at EoF as an error
             }
-            LValueReference::UpValue(index) => self.push(PushUpValue(index)),
+            LValueReference::UpValue(index) => self.push_with(PushUpValue(index), loc),
             LValueReference::Invalid => {},
-            LValueReference::NativeFunction(native) => self.push(NativeFunction(native)),
+            LValueReference::NativeFunction(native) => self.push_with(NativeFunction(native), loc),
             _ => panic!("Invalid load: {:?}", lvalue),
         }
     }
@@ -335,21 +327,6 @@ impl<'a> Parser<'a> {
         self.current_function_mut().push((location, token));
     }
 
-    /// Pops the last emitted token
-    pub fn pop(self: &mut Self) {
-        match self.current_function_mut().pop().unwrap().1 {
-            PushGlobal(_) | StoreGlobal(_) | PushLocal(_) | StoreLocal(_) => {
-                self.locals_reference.pop();
-            },
-            _ => {},
-        };
-    }
-
-    /// Returns the index of the last token that was just pushed.
-    pub fn last(self: &Self) -> Option<Opcode> {
-        self.current_function().last().copied().map(|u| u.1)
-    }
-
     /// A specialization of `error()` which provides the last token (the result of `peek()`) to the provided error function
     /// This avoids ugly borrow checker issues where `match self.peek() { ... t => self.error(Error(t)) }` does not work, despite the semantics being identical.
     pub fn error_with<F : FnOnce(Option<ScanToken>) -> ParserErrorType>(self: &mut Self, error: F) {
@@ -382,12 +359,6 @@ impl<'a> Parser<'a> {
         } else {
             Some(ParserError::new(error, self.prev_location()))
         }
-    }
-
-    pub fn with_location<F : FnOnce(&mut Parser) -> ()>(self: &mut Self, parse: F) -> Location {
-        let loc = self.next_location();
-        parse(self);
-        loc | self.prev_location()
     }
 
     /// Returns the source location of the previous token, aka the one just accepted.

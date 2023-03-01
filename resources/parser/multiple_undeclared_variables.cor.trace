@@ -1,5 +1,5 @@
-L2: 0000 OpAdd
-    0001 OpAdd
+L2: 0000 Binary(Add)
+    0001 Binary(Add)
     0002 NativeFunction(Print)
     0003 Swap
     0004 OpFuncEval(1)

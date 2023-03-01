@@ -3,7 +3,8 @@ use std::rc::Rc;
 
 use crate::compiler::{ParserError, ParserErrorType, ScanError, ScanErrorType, ScanToken};
 use crate::stdlib::NativeFunction;
-use crate::vm::{FunctionImpl, Opcode, RuntimeError, Value};
+use crate::vm::{FunctionImpl, RuntimeError, Value};
+use crate::vm::operator::{BinaryOp, UnaryOp};
 
 pub type Locations = Vec<Location>;
 
@@ -29,6 +30,7 @@ impl Location {
     pub fn as_opt(self: Self) -> Option<Location> {
         if self.width > 0 { Some(self) } else { None }
     }
+    pub fn start(self: &Self) -> usize { self.start }
     pub fn end(self: &Self) -> usize { self.start + self.width - 1 }
 }
 
@@ -250,35 +252,39 @@ impl AsError for FunctionImpl {
     }
 }
 
-impl AsError for Opcode {
+impl AsError for UnaryOp {
     fn as_error(self: &Self) -> String {
         String::from(match self {
-            Opcode::UnarySub => "-",
-            Opcode::UnaryNot => "!",
-            Opcode::OpDiv => "divide",
-            Opcode::OpMul => "multiply",
-            Opcode::OpMod => "modulo",
-            Opcode::OpAdd => "add",
-            Opcode::OpSub => "subtract",
-            Opcode::OpLeftShift => "left shift",
-            Opcode::OpRightShift => "right shift",
-            Opcode::OpPow => "**",
-            Opcode::OpIs => "is",
-            Opcode::OpBitwiseAnd => "&",
-            Opcode::OpBitwiseOr => "|",
-            Opcode::OpBitwiseXor => "^",
-            Opcode::OpIn => "in",
-            Opcode::OpLessThan => "<",
-            Opcode::OpGreaterThan => ">",
-            Opcode::OpLessThanEqual => "<=",
-            Opcode::OpGreaterThanEqual => ">=",
-            Opcode::OpEqual => "==",
-            Opcode::OpNotEqual => "!=",
-            Opcode::OpIndex => "array index",
-            Opcode::OpFuncEval(_) => "()",
-            Opcode::OpSlice => "list slice",
-            Opcode::OpSliceWithStep => "list slice",
-            op => panic!("AsError not implemented for opcode {:?}", op)
+            UnaryOp::Minus => "-",
+            UnaryOp::Not => "!",
+        })
+    }
+}
+
+impl AsError for BinaryOp {
+    fn as_error(self: &Self) -> String {
+        String::from(match self {
+            BinaryOp::Div => "divide",
+            BinaryOp::Mul => "multiply",
+            BinaryOp::Mod => "modulo",
+            BinaryOp::Add => "add",
+            BinaryOp::Sub => "subtract",
+            BinaryOp::LeftShift => "left shift",
+            BinaryOp::RightShift => "right shift",
+            BinaryOp::Pow => "**",
+            BinaryOp::Is => "is",
+            BinaryOp::And => "&",
+            BinaryOp::Or => "|",
+            BinaryOp::Xor => "^",
+            BinaryOp::In => "in",
+            BinaryOp::LessThan => "<",
+            BinaryOp::GreaterThan => ">",
+            BinaryOp::LessThanEqual => "<=",
+            BinaryOp::GreaterThanEqual => ">=",
+            BinaryOp::Equal => "==",
+            BinaryOp::NotEqual => "!=",
+            BinaryOp::Max => "min",
+            BinaryOp::Min => "max",
         })
     }
 }

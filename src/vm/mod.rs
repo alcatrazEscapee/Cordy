@@ -19,8 +19,8 @@ pub use crate::vm::value::{FunctionImpl, IntoDictValue, IntoIterableValue, IntoV
 use Opcode::{*};
 use RuntimeError::{*};
 
-type ValueResult = Result<Value, Box<RuntimeError>>;
-type AnyResult = Result<(), Box<RuntimeError>>;
+pub type ValueResult = Result<Value, Box<RuntimeError>>;
+pub type AnyResult = Result<(), Box<RuntimeError>>;
 
 pub mod operator;
 
@@ -176,40 +176,6 @@ impl<R, W> VirtualMachine<R, W> where
 
     /// Executes a single instruction
     fn run_instruction(self: &mut Self, op: Opcode) -> AnyResult {
-        macro_rules! operator {
-            ($op:expr, $a1:ident, $tr:expr) => {{
-                trace::trace_interpreter!("op unary {}", $tr);
-                let $a1: Value = self.pop();
-                match $op {
-                    Ok(v) => self.push(v),
-                    Err(e) => return e.err(),
-                }
-            }};
-            ($op:path, $a1:ident, $a2:ident, $tr:expr) => {{
-                trace::trace_interpreter!("op binary {}", $tr);
-                let $a2: Value = self.pop();
-                let $a1: Value = self.pop();
-                match $op($a1, $a2) {
-                    Ok(v) => self.push(v),
-                    Err(e) => return e.err(),
-                }
-            }};
-        }
-
-        macro_rules! operator_unchecked {
-            ($op:path, $a1:ident, $tr:expr) => {{
-                trace::trace_interpreter!("op unary {}", $tr);
-                let $a1: Value = self.pop();
-                self.push($op($a1));
-            }};
-            ($op:path, $a1:ident, $a2:ident, $tr:expr) => {{
-                trace::trace_interpreter!("op binary {}", $tr);
-                let $a2: Value = self.pop();
-                let $a1: Value = self.pop();
-                self.push($op($a1, $a2));
-            }};
-        }
-
         match op {
             Noop => panic!("Noop should only be emitted as a temporary instruction"),
 
@@ -488,45 +454,41 @@ impl<R, W> VirtualMachine<R, W> where
                 trace::trace_interpreter!("push {}", Value::NativeFunction(b).as_debug_str());
                 self.push(Value::NativeFunction(b));
             },
-            List(cid) => {
+            List(length) => {
                 // List values are present on the stack in-order
                 // So we need to splice the last n values of the stack into it's own list
-                let length: usize = self.constants[cid as usize] as usize;
                 trace::trace_interpreter!("push list n={}", length);
-                let start: usize = self.stack.len() - length;
+                let start: usize = self.stack.len() - length as usize;
                 let end: usize = self.stack.len();
                 trace::trace_interpreter_stack!("stack splice {}..{} into list", start, end);
                 let list: Value = self.stack.splice(start..end, std::iter::empty()).to_list();
                 self.push(list);
             },
-            Vector(cid) => {
+            Vector(length) => {
                 // Vector values are present on the stack in-order
                 // So we need to splice the last n values of the stack into it's own vector
-                let length: usize = self.constants[cid as usize] as usize;
                 trace::trace_interpreter!("push vector n={}", length);
-                let start: usize = self.stack.len() - length;
+                let start: usize = self.stack.len() - length as usize;
                 let end: usize = self.stack.len();
                 trace::trace_interpreter_stack!("stack splice {}..{} into list", start, end);
                 let vector: Value = self.stack.splice(start..end, std::iter::empty()).to_vector();
                 self.push(vector);
             },
-            Set(cid) => {
+            Set(length) => {
                 // Set values are present on the stack in-order
                 // So we need to splice the last n values of the stack into it's own set
-                let length: usize = self.constants[cid as usize] as usize;
                 trace::trace_interpreter!("push set n={}", length);
-                let start: usize = self.stack.len() - length;
+                let start: usize = self.stack.len() - length as usize;
                 let end: usize = self.stack.len();
                 trace::trace_interpreter_stack!("stack splice {}..{} into set", start, end);
                 let set: Value = self.stack.splice(start..end, std::iter::empty()).to_set();
                 self.push(set);
             },
-            Dict(cid) => {
+            Dict(length) => {
                 // Dict values are present on the stack in-order, in flat key-value order.
                 // So we need to splice the last n*2 values of the stack into it's own dict.
-                let length: usize = (self.constants[cid as usize] as usize) * 2;
                 trace::trace_interpreter!("push set n={}", length);
-                let start: usize = self.stack.len() - length;
+                let start: usize = self.stack.len() - length as usize;
                 let end: usize = self.stack.len();
                 trace::trace_interpreter_stack!("stack splice {}..{} into dict", start, end);
                 let dict: Value = self.stack.splice(start..end, std::iter::empty()).tuples().to_dict();
@@ -598,32 +560,19 @@ impl<R, W> VirtualMachine<R, W> where
                 self.push(ret);
             },
 
-            // Unary Operators
-            UnarySub => operator!(operator::unary_sub(a1), a1, "-"),
-            UnaryNot => operator!(operator::unary_not(a1), a1, "!"),
-
-            // Binary Operators
-            OpMul => operator!(operator::binary_mul, a1, a2, "*"),
-            OpDiv => operator!(operator::binary_div, a1, a2, "/"),
-            OpMod => operator!(operator::binary_mod, a1, a2, "%"),
-            OpPow => operator!(operator::binary_pow, a1, a2, "**"),
-            OpIs => operator!(operator::binary_is, a1, a2, "is"),
-            OpAdd => operator!(operator::binary_add, a1, a2, "+"),
-            OpSub => operator!(operator::binary_sub, a1, a2, "-"),
-            OpLeftShift => operator!(operator::binary_left_shift, a1, a2, "<<"),
-            OpRightShift => operator!(operator::binary_right_shift, a1, a2, ">>"),
-            OpBitwiseAnd => operator!(operator::binary_bitwise_and, a1, a2, "&"),
-            OpBitwiseOr => operator!(operator::binary_bitwise_or, a1, a2, "|"),
-            OpBitwiseXor => operator!(operator::binary_bitwise_xor, a1, a2, "^"),
-            OpIn => operator!(operator::binary_in, a1, a2, "in"),
-            OpLessThan => operator_unchecked!(operator::binary_less_than, a1, a2, "<"),
-            OpGreaterThan => operator_unchecked!(operator::binary_greater_than, a1, a2, ">"),
-            OpLessThanEqual => operator_unchecked!(operator::binary_less_than_or_equal, a1, a2, "<="),
-            OpGreaterThanEqual => operator_unchecked!(operator::binary_greater_than_or_equal, a1, a2, ">="),
-            OpEqual => operator_unchecked!(operator::binary_equals, a1, a2, "=="),
-            OpNotEqual => operator_unchecked!(operator::binary_not_equals, a1, a2, "!="),
-            OpMax => operator_unchecked!(std::cmp::max, a1, a2, "max"),
-            OpMin => operator_unchecked!(std::cmp::min, a1, a2, "min"),
+            Unary(op) => {
+                trace::trace_interpreter!("op unary {:?}", op);
+                let a1: Value = self.pop();
+                let ret: Value = op.apply(a1)?;
+                self.push(ret);
+            },
+            Binary(op) => {
+                trace::trace_interpreter!("op binary {:?}", op);
+                let a2: Value = self.pop();
+                let a1: Value = self.pop();
+                let ret: Value = op.apply(a1, a2)?;
+                self.push(ret);
+            },
 
             Exit => return RuntimeExit.err(),
             Yield => {
@@ -972,7 +921,7 @@ mod test {
     #[test] fn test_str_list_add() { run_str("[1, 2, 3] + [4, 5, 6] . print", "[1, 2, 3, 4, 5, 6]\n"); }
     #[test] fn test_str_empty_list() { run_str("[] . print", "[]\n"); }
     #[test] fn test_str_list_and_index() { run_str("[1, 2, 3] [1] . print", "2\n"); }
-    #[test] fn test_str_list_index_out_of_bounds() { run_str("[1, 2, 3] [3] . print", "Index '3' is out of bounds for list of length [0, 3)\n  at: line 1 (<test>)\n\n1 | [1, 2, 3] [3] . print\n2 |             ^\n"); }
+    #[test] fn test_str_list_index_out_of_bounds() { run_str("[1, 2, 3] [3] . print", "Index '3' is out of bounds for list of length [0, 3)\n  at: line 1 (<test>)\n\n1 | [1, 2, 3] [3] . print\n2 |           ^^^\n"); }
     #[test] fn test_str_list_index_negative() { run_str("[1, 2, 3] [-1] . print", "3\n"); }
     #[test] fn test_str_list_slice_01() { run_str("[1, 2, 3, 4] [:] . print", "[1, 2, 3, 4]\n"); }
     #[test] fn test_str_list_slice_02() { run_str("[1, 2, 3, 4] [::] . print", "[1, 2, 3, 4]\n"); }
@@ -1018,14 +967,14 @@ mod test {
     #[test] fn test_str_list_slice_42() { run_str("[1, 2, 3, 4] [10:1:-1] . print", "[4, 3]\n"); }
     #[test] fn test_str_list_slice_43() { run_str("[1, 2, 3, 4] [-10:1] . print", "[1]\n"); }
     #[test] fn test_str_list_slice_44() { run_str("[1, 2, 3, 4] [1:-10:-1] . print", "[2, 1]\n"); }
-    #[test] fn test_str_list_slice_45() { run_str("[1, 2, 3, 4] [::0]", "ValueError: 'step' argument cannot be zero\n  at: line 1 (<test>)\n\n1 | [1, 2, 3, 4] [::0]\n2 |                  ^\n"); }
+    #[test] fn test_str_list_slice_45() { run_str("[1, 2, 3, 4] [::0]", "ValueError: 'step' argument cannot be zero\n  at: line 1 (<test>)\n\n1 | [1, 2, 3, 4] [::0]\n2 |              ^^^^^\n"); }
     #[test] fn test_str_list_slice_46() { run_str("[1, 2, 3, 4][:-1] . print", "[1, 2, 3]\n"); }
     #[test] fn test_str_list_slice_47() { run_str("[1, 2, 3, 4][:0] . print", "[]\n"); }
     #[test] fn test_str_list_slice_48() { run_str("[1, 2, 3, 4][:1] . print", "[1]\n"); }
     #[test] fn test_str_list_slice_49() { run_str("[1, 2, 3, 4][5:] . print", "[]\n"); }
     #[test] fn test_str_sum_list() { run_str("[1, 2, 3, 4] . sum . print", "10\n"); }
     #[test] fn test_str_sum_values() { run_str("sum(1, 3, 5, 7) . print", "16\n"); }
-    #[test] fn test_str_sum_no_arg() { run_str("sum()", "Function 'sum' requires at least 1 parameter but none were present.\n  at: line 1 (<test>)\n\n1 | sum()\n2 |     ^\n"); }
+    #[test] fn test_str_sum_no_arg() { run_str("sum()", "Function 'sum' requires at least 1 parameter but none were present.\n  at: line 1 (<test>)\n\n1 | sum()\n2 |    ^^\n"); }
     #[test] fn test_str_sum_empty_list() { run_str("[] . sum . print", "0\n"); }
     #[test] fn test_local_vars_01() { run_str("let x=0 do { x.print }", "0\n"); }
     #[test] fn test_local_vars_02() { run_str("let x=0 do { let x=1; x.print }", "1\n"); }
@@ -1172,7 +1121,7 @@ mod test {
     #[test] fn test_range_6() { run_str("range(0, 20, -1) . list . print", "[]\n"); }
     #[test] fn test_range_7() { run_str("range(10, 0, 3) . list . print", "[]\n"); }
     #[test] fn test_range_8() { run_str("range(1, 1, 1) . list . print", "[]\n"); }
-    #[test] fn test_range_9() { run_str("range(1, 1, 0) . list . print", "ValueError: 'step' argument cannot be zero\n  at: line 1 (<test>)\n\n1 | range(1, 1, 0) . list . print\n2 |              ^\n"); }
+    #[test] fn test_range_9() { run_str("range(1, 1, 0) . list . print", "ValueError: 'step' argument cannot be zero\n  at: line 1 (<test>)\n\n1 | range(1, 1, 0) . list . print\n2 |      ^^^^^^^^^\n"); }
     #[test] fn test_enumerate_1() { run_str("[] . enumerate . list . print", "[]\n"); }
     #[test] fn test_enumerate_2() { run_str("[1, 2, 3] . enumerate . list . print", "[(0, 1), (1, 2), (2, 3)]\n"); }
     #[test] fn test_enumerate_3() { run_str("'foobar' . enumerate . list . print", "[(0, 'f'), (1, 'o'), (2, 'o'), (3, 'b'), (4, 'a'), (5, 'r')]\n"); }
@@ -1183,7 +1132,7 @@ mod test {
     #[test] fn test_for_loop_range_start_stop() { run_str("for x in range(3, 6) { x . print }", "3\n4\n5\n"); }
     #[test] fn test_for_loop_range_start_stop_step_positive() { run_str("for x in range(1, 10, 3) { x . print }", "1\n4\n7\n"); }
     #[test] fn test_for_loop_range_start_stop_step_negative() { run_str("for x in range(11, 0, -4) { x . print }", "11\n7\n3\n"); }
-    #[test] fn test_for_loop_range_start_stop_step_zero() { run_str("for x in range(1, 2, 0) { x . print }", "ValueError: 'step' argument cannot be zero\n  at: line 1 (<test>)\n\n1 | for x in range(1, 2, 0) { x . print }\n2 |                       ^\n"); }
+    #[test] fn test_for_loop_range_start_stop_step_zero() { run_str("for x in range(1, 2, 0) { x . print }", "ValueError: 'step' argument cannot be zero\n  at: line 1 (<test>)\n\n1 | for x in range(1, 2, 0) { x . print }\n2 |               ^^^^^^^^^\n"); }
     #[test] fn test_list_literal_empty() { run_str("[] . print", "[]\n"); }
     #[test] fn test_list_literal_len_1() { run_str("['hello'] . print", "['hello']\n"); }
     #[test] fn test_list_literal_len_2() { run_str("['hello', 'world'] . print", "['hello', 'world']\n"); }
@@ -1270,7 +1219,7 @@ mod test {
     #[test] fn test_int_in_range_yes() { run_str("13 in range(10, 15) . print", "true\n"); }
     #[test] fn test_int_in_range_no() { run_str("3 in range(10, 15) . print", "false\n"); }
     #[test] fn test_dict_get_and_set() { run_str("let d = dict() ; d['hi'] = 'yes' ; d['hi'] . print", "yes\n"); }
-    #[test] fn test_dict_get_when_not_present() { run_str("let d = dict() ; d['hello']", "ValueError: Key 'hello' of type 'str' not found in dictionary\n  at: line 1 (<test>)\n\n1 | let d = dict() ; d['hello']\n2 |                           ^\n"); }
+    #[test] fn test_dict_get_when_not_present() { run_str("let d = dict() ; d['hello']", "ValueError: Key 'hello' of type 'str' not found in dictionary\n  at: line 1 (<test>)\n\n1 | let d = dict() ; d['hello']\n2 |                   ^^^^^^^^^\n"); }
     #[test] fn test_dict_get_when_not_present_with_default() { run_str("let d = dict() . default('haha') ; d['hello'] . print", "haha\n"); }
     #[test] fn test_flat_map_identity() { run_str("['hi', 'bob'] . flat_map(fn(i) -> i) . print", "['h', 'i', 'b', 'o', 'b']\n"); }
     #[test] fn test_flat_map_with_func() { run_str("['hello', 'bob'] . flat_map(fn(i) -> i[2:]) . print", "['l', 'l', 'o', 'b']\n"); }
