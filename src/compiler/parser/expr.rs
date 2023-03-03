@@ -1,7 +1,7 @@
 use crate::compiler::parser::semantic::{LValue, LValueReference};
 use crate::reporting::Location;
 use crate::stdlib::NativeFunction;
-use crate::vm::Opcode;
+use crate::vm::{IntoValue, Opcode, RuntimeError, Value, ValueResult};
 use crate::vm::operator::{BinaryOp, UnaryOp};
 
 #[derive(Debug, Clone)]
@@ -36,6 +36,8 @@ pub enum ExprType {
     /// Note that `BinaryOp::NotEqual` is used to indicate this is a `Compose()` operation under the hood
     ArrayOpAssignment(Arg, Arg, BinaryOp, Arg),
     PatternAssignment(LValue, Arg),
+
+    RuntimeError(Box<RuntimeError>),
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -92,6 +94,58 @@ impl Expr {
             BinaryOp::And => Expr(loc, ExprType::LogicalAnd(Box::new(self), Box::new(rhs))),
             BinaryOp::Or => Expr(loc, ExprType::LogicalOr(Box::new(self), Box::new(rhs))),
             _ => panic!("No logical operator for binary operator {:?}", op),
+        }
+    }
+
+    fn value_result(loc: Location, value: ValueResult) -> Expr {
+        match value {
+            Ok(value) => match value {
+                Value::Nil => Expr::nil(),
+                Value::Bool(it) => Expr::bool(it),
+                Value::Int(it) => Expr::int(it),
+                Value::Str(it) => Expr::str((*it).clone()),
+                _ => panic!(),
+            },
+            Err(e) => Expr(loc, ExprType::RuntimeError(e)),
+        }
+    }
+
+    // ===== Optimization ===== //
+
+    /// Traverses this expression, and returns a new expression which is the optimized form. This is able to apply a number of different optimizations,
+    /// with full view of the expression tree. It includes the following passes:
+    ///
+    /// - Constant Folding (`1 + 2` -> `3`)
+    /// - Compose/Eval Reordering (`a . b` -> `b(a)` where legal)
+    /// - Consistent Function Eval Merging (`a(b1, b2, ...)(c1, c2, ...)` -> `a(b1, b2, ... c1, c2, ...)` where legal)
+    /// - Compose-List Folding (`a . [b]` -> `a[b]`)
+    /// - Eval-List Reordering (`[b](a)` -> `a[b]` where legal)
+    ///
+    pub fn optimize(self: Self) -> Self {
+        match self {
+            // Terminals
+            e @ Expr(_, ExprType::Nil | ExprType::Exit | ExprType::Bool(_) | ExprType::Int(_) | ExprType::Str(_) | ExprType::LValue(_) | ExprType::Function(_, _) | ExprType::NativeFunction(_)) => e,
+
+            // Unary Operators
+            Expr(loc, ExprType::Unary(op, arg)) => {
+                let arg: Expr = arg.optimize();
+                match arg.as_constant() {
+                    Ok(con) => Expr::value_result(loc, op.apply(con)),
+                    Err(arg) => arg.unary(loc, op)
+                }
+            },
+
+            e => e,
+        }
+    }
+
+    fn as_constant(self: Self) -> Result<Value, Expr> {
+        match self {
+            Expr(_, ExprType::Nil) => Ok(Value::Nil),
+            Expr(_, ExprType::Bool(it)) => Ok(it.to_value()),
+            Expr(_, ExprType::Int(it)) => Ok(it.to_value()),
+            Expr(_, ExprType::Str(it)) => Ok(it.to_value()),
+            _ => Err(self)
         }
     }
 }

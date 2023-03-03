@@ -8,7 +8,7 @@ use crate::compiler::scanner::ScanToken;
 use crate::compiler::parser::semantic::{LValueReference, Reference};
 use crate::reporting::Location;
 use crate::trace;
-use crate::vm::Opcode;
+use crate::vm::{Opcode, RuntimeError};
 
 use ParserErrorType::{*};
 use ScanToken::{*};
@@ -302,7 +302,7 @@ impl<'a> Parser<'a> {
             LValueReference::Local(index) => self.push(StoreLocal(index)),
             LValueReference::Global(index) => self.push(StoreGlobal(index)),
             LValueReference::LateBoundGlobal(global) => {
-                self.late_bound_globals.push(Reference::Store(global));
+                self.late_bound_globals.push(Reference::Store(global.update_opcode(self.functions.len() - 1, self.next_opcode() as usize)));
                 self.push(Noop); // Will be fixed when the global is declared, or caught at EoF as an error
             },
             LValueReference::UpValue(index) => self.push(StoreUpValue(index)),
@@ -349,6 +349,15 @@ impl<'a> Parser<'a> {
         trace::trace_parser!("push_err (error = {}) {:?}", self.error_recovery, error);
         if !self.error_recovery {
             self.errors.push(ParserError::new(error, self.prev_location()));
+        }
+    }
+
+    /// Pushes a new error token into the output error stream, based on the provided runtime error (produced by constant expressions at compile time)
+    /// Does not initiate error recovery.
+    pub fn runtime_error(self: &mut Self, loc: Location, error: Box<RuntimeError>) {
+        trace::trace_parser!("push_err (error = {}) {:?}", self.error_recovery, error);
+        if !self.error_recovery {
+            self.errors.push(ParserError::new(Runtime(error), loc));
         }
     }
 

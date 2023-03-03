@@ -127,10 +127,13 @@ impl<'a> Parser<'a> {
                 }
                 self.push_with(StoreArray, loc);
             },
-            Expr(loc, ExprType::PatternAssignment(lvalue, rhs)) => {
+            Expr(_, ExprType::PatternAssignment(lvalue, rhs)) => {
                 self.emit_expr(*rhs);
                 lvalue.emit_destructuring(self, false, true);
             },
+            Expr(loc, ExprType::RuntimeError(e)) => {
+                self.runtime_error(loc, e);
+            }
         }
     }
 

@@ -87,6 +87,7 @@ fn main() {
         let mut iter = args.into_iter();
         let mut file: Option<String> = None;
         let mut disassembly: bool = false;
+        let mut enable_optimization: bool = false;
 
         if let None = iter.next() {
             eprintln!("Unexpected first argument");
@@ -102,6 +103,9 @@ fn main() {
                 "-d" | "--disassembly" => {
                     disassembly = true;
                 },
+                "-o" | "--optimize" => {
+                    enable_optimization = true;
+                }
                 a => {
                     file = Some(String::from(a));
                     break
@@ -129,7 +133,7 @@ fn main() {
         };
 
         let view: SourceView = SourceView::new(name, &text);
-        let compiled = match compiler::compile(&view) {
+        let compiled = match compiler::compile(enable_optimization, &view) {
             Ok(c) => c,
             Err(errors) => {
                 for e in errors {

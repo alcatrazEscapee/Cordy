@@ -123,6 +123,10 @@ impl LateBoundGlobal {
             error
         }
     }
+
+    pub fn update_opcode(self: Self, ordinal: usize, opcode: usize) -> Self {
+        LateBoundGlobal::new(self.name, ordinal, opcode, self.error)
+    }
 }
 
 
@@ -399,12 +403,12 @@ impl Default for LValueReference {
 }
 
 
-#[derive(Debug, Clone)]
-pub enum Reference<T> where T : Debug + Clone {
+#[derive(Debug)]
+pub enum Reference<T> where T : Debug {
     Load(T), Store(T)
 }
 
-impl<T : Debug + Clone> Reference<T> {
+impl<T : Debug> Reference<T> {
     pub fn into_ref(&self) -> &T { match self { Reference::Load(it) | Reference::Store(it) => it } }
     pub fn into(self) -> T { match self { Reference::Load(it) | Reference::Store(it) => it } }
 
