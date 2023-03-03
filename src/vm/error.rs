@@ -7,7 +7,7 @@ use crate::vm::operator::{BinaryOp, UnaryOp};
 use crate::vm::value::{FunctionImpl, Value};
 
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum RuntimeError {
     RuntimeExit,
     RuntimeYield,

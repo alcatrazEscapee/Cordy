@@ -36,22 +36,22 @@ mod semantic;
 
 /// Create a default empty `CompileResult`. This is semantically equivalent to parsing an empty program, but will output nothing.
 pub fn default() -> CompileResult {
-    parse_rule(vec![], |_| ())
+    parse_rule(false, vec![], |_| ())
 }
 
 
 /// Parse a complete `CompileResult` from the given `ScanResult`
-pub fn parse(scan_result: ScanResult) -> CompileResult {
-    parse_rule(scan_result.tokens, |mut parser| parser.parse())
+pub fn parse(enable_optimization: bool, scan_result: ScanResult) -> CompileResult {
+    parse_rule(enable_optimization, scan_result.tokens, |mut parser| parser.parse())
 }
 
 
-pub fn parse_incremental(scan_result: ScanResult, code: &mut Vec<Opcode>, locals: &mut Vec<Locals>, strings: &mut Vec<String>, constants: &mut Vec<i64>, functions: &mut Vec<Rc<FunctionImpl>>, locations: &mut Locations, globals: &mut Vec<String>, rule: fn(Parser) -> ()) -> Vec<ParserError> {
+pub fn parse_incremental(enable_optimization: bool, scan_result: ScanResult, code: &mut Vec<Opcode>, locals: &mut Vec<Locals>, strings: &mut Vec<String>, constants: &mut Vec<i64>, functions: &mut Vec<Rc<FunctionImpl>>, locations: &mut Locations, globals: &mut Vec<String>, rule: fn(Parser) -> ()) -> Vec<ParserError> {
 
     let mut errors: Vec<ParserError> = Vec::new();
     let mut maybe_functions: Functions = functions.drain(..).map(|u| MaybeFunction::wrap(&u)).collect();
 
-    rule(Parser::new(scan_result.tokens, code, locals, &mut errors, strings, constants, &mut maybe_functions, locations, &mut Vec::new(), globals));
+    rule(Parser::new(enable_optimization, scan_result.tokens, code, locals, &mut errors, strings, constants, &mut maybe_functions, locations, &mut Vec::new(), globals));
 
     for func in maybe_functions {
         functions.push(func.unwrap());
@@ -61,7 +61,7 @@ pub fn parse_incremental(scan_result: ScanResult, code: &mut Vec<Opcode>, locals
 }
 
 
-fn parse_rule(tokens: Vec<(Location, ScanToken)>, rule: fn(Parser) -> ()) -> CompileResult {
+fn parse_rule(enable_optimization: bool, tokens: Vec<(Location, ScanToken)>, rule: fn(Parser) -> ()) -> CompileResult {
 
     let mut code: Vec<Opcode> = Vec::new();
     let mut errors: Vec<ParserError> = Vec::new();
@@ -74,7 +74,7 @@ fn parse_rule(tokens: Vec<(Location, ScanToken)>, rule: fn(Parser) -> ()) -> Com
     let mut globals: Vec<String> = Vec::new();
     let mut locals: Vec<String> = Vec::new();
 
-    rule(Parser::new(tokens, &mut code, &mut Locals::empty(), &mut errors, &mut strings, &mut constants, &mut functions, &mut locations, &mut locals, &mut globals));
+    rule(Parser::new(enable_optimization, tokens, &mut code, &mut Locals::empty(), &mut errors, &mut strings, &mut constants, &mut functions, &mut locations, &mut locals, &mut globals));
 
     CompileResult {
         code,
@@ -92,6 +92,8 @@ fn parse_rule(tokens: Vec<(Location, ScanToken)>, rule: fn(Parser) -> ()) -> Com
 
 
 pub struct Parser<'a> {
+    enable_optimization: bool,
+
     input: VecDeque<(Location, ScanToken)>,
 
     /// Previous output, from invocations of the parser are taken as input here
@@ -142,8 +144,10 @@ pub struct Parser<'a> {
 
 impl Parser<'_> {
 
-    fn new<'a, 'b : 'a>(tokens: Vec<(Location, ScanToken)>, output: &'b mut Vec<Opcode>, locals: &'b mut Vec<Locals>, errors: &'b mut Vec<ParserError>, strings: &'b mut Vec<String>, constants: &'b mut Vec<i64>, functions: &'b mut Functions, locations: &'b mut Locations, locals_reference: &'b mut Vec<String>, globals_reference: &'b mut Vec<String>) -> Parser<'a> {
+    fn new<'a, 'b : 'a>(enable_optimization: bool, tokens: Vec<(Location, ScanToken)>, output: &'b mut Vec<Opcode>, locals: &'b mut Vec<Locals>, errors: &'b mut Vec<ParserError>, strings: &'b mut Vec<String>, constants: &'b mut Vec<i64>, functions: &'b mut Functions, locations: &'b mut Locations, locals_reference: &'b mut Vec<String>, globals_reference: &'b mut Vec<String>) -> Parser<'a> {
         Parser {
+            enable_optimization,
+
             input: tokens.into_iter().collect::<VecDeque<(Location, ScanToken)>>(),
             raw_output: output,
             output: Vec::new(),
@@ -800,8 +804,10 @@ impl Parser<'_> {
 
     fn parse_expression(self: &mut Self) {
         trace::trace_parser!("rule <expression>");
-        let expr: Expr = self.parse_expr_top_level();
-
+        let mut expr: Expr = self.parse_expr_top_level();
+        if self.enable_optimization {
+            expr = expr.optimize();
+        }
         self.emit_expr(expr);
     }
 
@@ -1769,7 +1775,7 @@ mod tests {
         let result: ScanResult = scanner::scan(&String::from(text));
         assert!(result.errors.is_empty());
 
-        let compile = parser::parse(result);
+        let compile = parser::parse(false, result);
         assert!(compile.errors.is_empty(), "Found parser errors: {:?}", compile.errors);
 
         // For the purposes of the test, we perform some transformations on the 'expected' opcodes
@@ -1798,7 +1804,7 @@ mod tests {
         let scan_result: ScanResult = scanner::scan(&text);
         assert!(scan_result.errors.is_empty());
 
-        let compile: CompileResult = parser::parse(scan_result);
+        let compile: CompileResult = parser::parse(false, scan_result);
         assert!(!compile.errors.is_empty());
 
         let mut actual: Vec<String> = Vec::new();
@@ -1818,7 +1824,7 @@ mod tests {
         let scan_result: ScanResult = scanner::scan(&text);
         assert!(scan_result.errors.is_empty());
 
-        let parse_result: CompileResult = parser::parse(scan_result);
+        let parse_result: CompileResult = parser::parse(false, scan_result);
         let mut lines: Vec<String> = parse_result.disassemble(&view);
         if !parse_result.errors.is_empty() {
             for error in &parse_result.errors {

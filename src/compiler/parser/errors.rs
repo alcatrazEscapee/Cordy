@@ -1,5 +1,6 @@
 use crate::compiler::scanner::ScanToken;
 use crate::reporting::{AsErrorWithContext, Location};
+use crate::vm::RuntimeError;
 
 use ParserErrorType::{*};
 
@@ -51,6 +52,8 @@ impl ParserError {
             LetWithPatternBindingNoExpression |
             BreakOutsideOfLoop |
             ContinueOutsideOfLoop => false,
+
+            Runtime(_) => false,
         }
     }
 }
@@ -62,7 +65,7 @@ impl AsErrorWithContext for ParserError {
 }
 
 
-#[derive(Eq, PartialEq, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub enum ParserErrorType {
     UnexpectedTokenAfterEoF(ScanToken),
 
@@ -96,4 +99,6 @@ pub enum ParserErrorType {
     LetWithPatternBindingNoExpression,
     BreakOutsideOfLoop,
     ContinueOutsideOfLoop,
+
+    Runtime(Box<RuntimeError>),
 }

@@ -330,6 +330,8 @@ impl AsError for ParserError {
             ParserErrorType::LetWithPatternBindingNoExpression => format!("'let' with a pattern variable must be followed by an expression if the pattern contains non-simple elements such as variadic (i.e. '*'), empty (i.e. '_'), or nested (i.e. 'x, (_, y)) terms."),
             ParserErrorType::BreakOutsideOfLoop => String::from("Invalid 'break' statement outside of an enclosing loop"),
             ParserErrorType::ContinueOutsideOfLoop => String::from("Invalid 'continue' statement outside of an enclosing loop"),
+
+            ParserErrorType::Runtime(e) => e.as_error(),
         }
     }
 }

@@ -17,7 +17,7 @@ pub fn default() -> CompileResult {
     parser::default()
 }
 
-pub fn compile(view: &SourceView) -> Result<CompileResult, Vec<String>> {
+pub fn compile(enable_optimization: bool, view: &SourceView) -> Result<CompileResult, Vec<String>> {
     let mut errors: Vec<String> = Vec::new();
 
     // Scan
@@ -30,7 +30,7 @@ pub fn compile(view: &SourceView) -> Result<CompileResult, Vec<String>> {
     }
 
     // Parse
-    let compile_result: CompileResult = parser::parse(scan_result);
+    let compile_result: CompileResult = parser::parse(enable_optimization, scan_result);
     if !compile_result.errors.is_empty() {
         for error in &compile_result.errors {
             errors.push(view.format(error));
@@ -52,7 +52,7 @@ pub fn incremental_compile(view: &SourceView, code: &mut Vec<Opcode>, locals: &m
     let code_len: usize = code.len();
     let locations_len: usize = locations.len();
 
-    let ret: IncrementalCompileResult = try_incremental_compile(view, code, locals, strings, constants, functions, locations, globals, parser::RULE_REPL, true);
+    let ret: IncrementalCompileResult = try_incremental_compile(false, view, code, locals, strings, constants, functions, locations, globals, parser::RULE_REPL, true);
 
     if !ret.is_success() {
         // Revert staged changes
@@ -74,7 +74,7 @@ pub fn eval_compile(text: &String, code: &mut Vec<Opcode>, strings: &mut Vec<Str
     let mut locals: Vec<Locals> = Locals::empty();
     let name: String = String::from("<eval>");
     let view: SourceView = SourceView::new(&name, text);
-    let ret: IncrementalCompileResult = try_incremental_compile(&view, code, &mut locals, strings, constants, functions, locations, globals, parser::RULE_EVAL, false);
+    let ret: IncrementalCompileResult = try_incremental_compile(true, &view, code, &mut locals, strings, constants, functions, locations, globals, parser::RULE_EVAL, false);
 
     if ret.is_success() {
         Ok(())
@@ -85,7 +85,7 @@ pub fn eval_compile(text: &String, code: &mut Vec<Opcode>, strings: &mut Vec<Str
 
 
 
-fn try_incremental_compile(view: &SourceView, code: &mut Vec<Opcode>, locals: &mut Vec<Locals>, strings: &mut Vec<String>, constants: &mut Vec<i64>, functions: &mut Vec<Rc<FunctionImpl>>, locations: &mut Locations, globals: &mut Vec<String>, rule: ParseRule, abort_in_eof: bool) -> IncrementalCompileResult {
+fn try_incremental_compile(enable_optimization: bool, view: &SourceView, code: &mut Vec<Opcode>, locals: &mut Vec<Locals>, strings: &mut Vec<String>, constants: &mut Vec<i64>, functions: &mut Vec<Rc<FunctionImpl>>, locations: &mut Locations, globals: &mut Vec<String>, rule: ParseRule, abort_in_eof: bool) -> IncrementalCompileResult {
     let mut errors: Vec<String> = Vec::new();
 
     // Scan
@@ -101,7 +101,7 @@ fn try_incremental_compile(view: &SourceView, code: &mut Vec<Opcode>, locals: &m
     }
 
     // Parse
-    let parse_errors: Vec<ParserError> = parser::parse_incremental(scan_result, code, locals, strings, constants, functions, locations, globals, rule);
+    let parse_errors: Vec<ParserError> = parser::parse_incremental(enable_optimization, scan_result, code, locals, strings, constants, functions, locations, globals, rule);
     if !parse_errors.is_empty() {
         for error in &parse_errors {
             if error.is_eof() && abort_in_eof && errors.is_empty() {

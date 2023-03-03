@@ -1450,6 +1450,7 @@ mod test {
     #[test] fn test_function_capture_from_inner_scope() { run("function_capture_from_inner_scope"); }
     #[test] fn test_function_capture_from_outer_scope() { run("function_capture_from_outer_scope"); }
     #[test] fn test_late_bound_global() { run("late_bound_global"); }
+    #[test] fn test_late_bound_global_assignment() { run("late_bound_global_assignment"); }
     #[test] fn test_late_bound_global_invalid() { run("late_bound_global_invalid"); }
     #[test] fn test_map_loop_with_multiple_references() { run("map_loop_with_multiple_references"); }
     #[test] fn test_memoize() { run("memoize"); }
@@ -1464,7 +1465,7 @@ mod test {
         let text: String = String::from(text);
         let name: String = String::from("<test>");
         let view: SourceView = SourceView::new(&name, &text);
-        let compile = compiler::compile(&view);
+        let compile = compiler::compile(true, &view);
 
         if compile.is_err() {
             assert_eq!(format!("Compile Error:\n\n{}", compile.err().unwrap().join("\n")).as_str(), expected);
@@ -1497,7 +1498,7 @@ mod test {
         let text: String = trace::get_test_resource_src(&root);
         let name: String = String::from("<test>");
         let view: SourceView = SourceView::new(&name, &text);
-        let compile= compiler::compile(&view);
+        let compile= compiler::compile(true, &view);
 
         if compile.is_err() {
             assert_eq!(format!("Compile Error:\n\n{}", compile.err().unwrap().join("\n")).as_str(), "Compiled");
