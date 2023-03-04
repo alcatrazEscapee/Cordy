@@ -287,7 +287,7 @@ impl<'a> Parser<'a> {
             LValueReference::Local(index) => self.push_with(PushLocal(index), loc),
             LValueReference::Global(index) => self.push_with(PushGlobal(index), loc),
             LValueReference::LateBoundGlobal(global) => {
-                self.late_bound_globals.push(Reference::Load(global));
+                self.late_bound_globals.push(Reference::Load(global.update_opcode(self.functions.len() - 1, self.next_opcode() as usize)));
                 self.push_with(Noop, loc); // Will be fixed when the global is declared, or caught at EoF as an error
             }
             LValueReference::UpValue(index) => self.push_with(PushUpValue(index), loc),

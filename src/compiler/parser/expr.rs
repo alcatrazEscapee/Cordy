@@ -1,7 +1,7 @@
 use crate::compiler::parser::semantic::{LValue, LValueReference};
 use crate::reporting::Location;
 use crate::stdlib::NativeFunction;
-use crate::vm::{IntoValue, Opcode, RuntimeError, Value, ValueResult};
+use crate::vm::{Opcode, RuntimeError, Value, ValueResult};
 use crate::vm::operator::{BinaryOp, UnaryOp};
 
 #[derive(Debug, Clone)]
@@ -11,6 +11,7 @@ type Arg = Box<Expr>;
 
 #[derive(Debug, Clone)]
 pub enum ExprType {
+    // Terminals
     Nil,
     Exit,
     Bool(bool),
@@ -19,6 +20,8 @@ pub enum ExprType {
     LValue(LValueReference),
     NativeFunction(NativeFunction),
     Function(u32, Vec<Opcode>),
+
+    // Operators + Functions
     Unary(UnaryOp, Arg),
     Binary(BinaryOp, Arg, Arg),
     Sequence(SequenceOp, Vec<Expr>),
@@ -30,6 +33,8 @@ pub enum ExprType {
     Slice(Arg, Arg, Arg),
     SliceWithStep(Arg, Arg, Arg, Arg),
     IfThenElse(Arg, Arg, Arg),
+
+    // Assignments
     Assignment(LValueReference, Arg),
     ArrayAssignment(Arg, Arg, Arg),
 
@@ -37,12 +42,19 @@ pub enum ExprType {
     ArrayOpAssignment(Arg, Arg, BinaryOp, Arg),
     PatternAssignment(LValue, Arg),
 
+    // Error
     RuntimeError(Box<RuntimeError>),
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum SequenceOp {
     List, Set, Dict, Vector
+}
+
+impl SequenceOp {
+    pub fn apply(self: Self, loc: Location, args: Vec<Expr>) -> Expr {
+        Expr(loc, ExprType::Sequence(self, args))
+    }
 }
 
 
@@ -74,10 +86,10 @@ impl Expr {
     pub fn assign_array(loc: Location, array: Expr, index: Expr, rhs: Expr) -> Expr { Expr(loc, ExprType::ArrayAssignment(Box::new(array), Box::new(index), Box::new(rhs))) }
     pub fn assign_op_array(loc: Location, array: Expr, index: Expr, op: BinaryOp, rhs: Expr) -> Expr { Expr(loc, ExprType::ArrayOpAssignment(Box::new(array), Box::new(index), op, Box::new(rhs))) }
 
-    pub fn list(loc: Location, args: Vec<Expr>) -> Expr { Expr(loc, ExprType::Sequence(SequenceOp::List, args)) }
-    pub fn set(loc: Location, args: Vec<Expr>) -> Expr { Expr(loc, ExprType::Sequence(SequenceOp::Set, args)) }
-    pub fn dict(loc: Location, args: Vec<Expr>) -> Expr { Expr(loc, ExprType::Sequence(SequenceOp::Dict, args)) }
-    pub fn vector(loc: Location, args: Vec<Expr>) -> Expr { Expr(loc, ExprType::Sequence(SequenceOp::Vector, args)) }
+    pub fn list(loc: Location, args: Vec<Expr>) -> Expr { SequenceOp::List.apply(loc, args) }
+    pub fn set(loc: Location, args: Vec<Expr>) -> Expr { SequenceOp::Set.apply(loc, args) }
+    pub fn dict(loc: Location, args: Vec<Expr>) -> Expr { SequenceOp::Dict.apply(loc, args) }
+    pub fn vector(loc: Location, args: Vec<Expr>) -> Expr { SequenceOp::Vector.apply(loc, args) }
 
     pub fn not(self: Self, loc: Location) -> Expr { self.unary(loc, UnaryOp::Not) }
     pub fn unary(self: Self, loc: Location, op: UnaryOp) -> Expr { Expr(loc, ExprType::Unary(op, Box::new(self))) }
@@ -97,55 +109,24 @@ impl Expr {
         }
     }
 
-    fn value_result(loc: Location, value: ValueResult) -> Expr {
+    pub fn value(value: Value) -> Expr {
         match value {
-            Ok(value) => match value {
-                Value::Nil => Expr::nil(),
-                Value::Bool(it) => Expr::bool(it),
-                Value::Int(it) => Expr::int(it),
-                Value::Str(it) => Expr::str((*it).clone()),
-                _ => panic!(),
-            },
-            Err(e) => Expr(loc, ExprType::RuntimeError(e)),
+            Value::Nil => Expr::nil(),
+            Value::Bool(it) => Expr::bool(it),
+            Value::Int(it) => Expr::int(it),
+            Value::Str(it) => Expr::str((*it).clone()),
+            _ => panic!(),
         }
     }
 
-    // ===== Optimization ===== //
-
-    /// Traverses this expression, and returns a new expression which is the optimized form. This is able to apply a number of different optimizations,
-    /// with full view of the expression tree. It includes the following passes:
-    ///
-    /// - Constant Folding (`1 + 2` -> `3`)
-    /// - Compose/Eval Reordering (`a . b` -> `b(a)` where legal)
-    /// - Consistent Function Eval Merging (`a(b1, b2, ...)(c1, c2, ...)` -> `a(b1, b2, ... c1, c2, ...)` where legal)
-    /// - Compose-List Folding (`a . [b]` -> `a[b]`)
-    /// - Eval-List Reordering (`[b](a)` -> `a[b]` where legal)
-    ///
-    pub fn optimize(self: Self) -> Self {
-        match self {
-            // Terminals
-            e @ Expr(_, ExprType::Nil | ExprType::Exit | ExprType::Bool(_) | ExprType::Int(_) | ExprType::Str(_) | ExprType::LValue(_) | ExprType::Function(_, _) | ExprType::NativeFunction(_)) => e,
-
-            // Unary Operators
-            Expr(loc, ExprType::Unary(op, arg)) => {
-                let arg: Expr = arg.optimize();
-                match arg.as_constant() {
-                    Ok(con) => Expr::value_result(loc, op.apply(con)),
-                    Err(arg) => arg.unary(loc, op)
-                }
-            },
-
-            e => e,
-        }
+    pub fn error(loc: Location, error: Box<RuntimeError>) -> Expr {
+        Expr(loc, ExprType::RuntimeError(error))
     }
 
-    fn as_constant(self: Self) -> Result<Value, Expr> {
-        match self {
-            Expr(_, ExprType::Nil) => Ok(Value::Nil),
-            Expr(_, ExprType::Bool(it)) => Ok(it.to_value()),
-            Expr(_, ExprType::Int(it)) => Ok(it.to_value()),
-            Expr(_, ExprType::Str(it)) => Ok(it.to_value()),
-            _ => Err(self)
+    pub fn value_result(loc: Location, value: ValueResult) -> Expr {
+        match value {
+            Ok(value) => Expr::value(value),
+            Err(e) => Expr::error(loc, e),
         }
     }
 }
