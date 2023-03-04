@@ -882,8 +882,8 @@ mod test {
     #[test] fn test_str_mul_str() { run_str("print('abc' * 3)", "abcabcabc\n"); }
     #[test] fn test_str_add_sub_mul_div_int() { run_str("print(5 - 3, 12 + 5, 3 * 9, 16 / 3)", "2 17 27 5\n"); }
     #[test] fn test_str_div_mod_int() { run_str("print(3 / 2, 3 / 3, -3 / 2, 10 % 3, 11 % 3, 12 % 3)", "1 1 -2 1 2 0\n"); }
-    #[test] fn test_str_div_by_zero() { run_str("print(15 / 0)", "ValueError: Expected value to be non-zero\n  at: line 1 (<test>)\n\n1 | print(15 / 0)\n2 |          ^\n"); }
-    #[test] fn test_str_mod_by_zero() { run_str("print(15 % 0)", "ValueError: Expected value '0: int' to be positive\n  at: line 1 (<test>)\n\n1 | print(15 % 0)\n2 |          ^\n"); }
+    #[test] fn test_str_div_by_zero() { run_str("print(15 / 0)", "Compile Error:\n\nValueError: Expected value to be non-zero\n  at: line 1 (<test>)\n\n1 | print(15 / 0)\n2 |          ^\n"); }
+    #[test] fn test_str_mod_by_zero() { run_str("print(15 % 0)", "Compile Error:\n\nValueError: Expected value '0: int' to be positive\n  at: line 1 (<test>)\n\n1 | print(15 % 0)\n2 |          ^\n"); }
     #[test] fn test_str_left_right_shift() { run_str("print(1 << 10, 16 >> 1, 16 << -1, 1 >> -10)", "1024 8 8 1024\n"); }
     #[test] fn test_str_compare_ints_1() { run_str("print(1 < 3, -5 < -10, 6 > 7, 6 > 4)", "true false false true\n"); }
     #[test] fn test_str_compare_ints_2() { run_str("print(1 <= 3, -5 < -10, 3 <= 3, 2 >= 2, 6 >= 7, 6 >= 4, 6 <= 6, 8 >= 8)", "true false true true false true true true\n"); }

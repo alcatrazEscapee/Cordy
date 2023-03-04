@@ -5,6 +5,7 @@ use crate::compiler::CompileResult;
 use crate::compiler::parser::core::ParserState;
 use crate::compiler::parser::expr::{Expr, ExprType};
 use crate::compiler::parser::semantic::{LateBoundGlobal, LValue, LValueReference, MaybeFunction, Reference};
+use crate::compiler::parser::optimizer::Optimize;
 use crate::compiler::scanner::{ScanResult, ScanToken};
 use crate::stdlib::NativeFunction;
 use crate::vm::{FunctionImpl, Opcode};
@@ -27,11 +28,13 @@ pub const RULE_EVAL: ParseRule = |mut parser| parser.parse_incremental_eval();
 pub type ParseRule = fn(Parser) -> ();
 pub type Functions = Vec<MaybeFunction>;
 
-mod codegen;
 mod core;
 mod errors;
 mod expr;
+
 mod semantic;
+mod codegen;
+mod optimizer;
 
 
 /// Create a default empty `CompileResult`. This is semantically equivalent to parsing an empty program, but will output nothing.
