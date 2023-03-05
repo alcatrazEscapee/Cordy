@@ -195,7 +195,7 @@ impl AsError for RuntimeError {
             RuntimeError::RuntimeCompilationError(vec) => format!("Encountered compilation error(s) within 'eval':\n\n{}", vec.join("\n")),
             RuntimeError::ValueIsNotFunctionEvaluable(v) => format!("Tried to evaluate {} but it is not a function.", v.as_error()),
             RuntimeError::IncorrectNumberOfFunctionArguments(f, a) => format!("Function {} requires {} parameters but {} were present.", f.as_error(), f.nargs, a),
-            RuntimeError::IncorrectNumberOfArguments(b, e, a) => format!("Function '{}' requires {} parameters but {} were present.", b.as_error(), e, a),
+            RuntimeError::IncorrectNumberOfArguments(b, a, e) => format!("Function '{}' requires {} parameters but {} were present.", b.as_error(), e, a),
             RuntimeError::IncorrectNumberOfArgumentsVariadicAtLeastOne(b) => format!("Function '{}' requires at least 1 parameter but none were present.", b.as_error()),
             RuntimeError::ValueErrorIndexOutOfBounds(i, ln) => format!("Index '{}' is out of bounds for list of length [0, {})", i, ln),
             RuntimeError::ValueErrorStepCannotBeZero => String::from("ValueError: 'step' argument cannot be zero"),
