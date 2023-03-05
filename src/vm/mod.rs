@@ -1087,7 +1087,7 @@ mod test {
     #[test] fn test_bare_operator_compose_and_eval() { run_str("2 . (+)(1) . print", "3\n"); }
     #[test] fn test_bare_operator_compose() { run_str("1 . (2 . (+)) . print", "3\n"); }
     #[test] fn test_reduce_list_1() { run_str("[1, 2, 3] . reduce (+) . print", "6\n"); }
-    #[test] fn test_reduce_list_2() { run_str("[1, 2, 3] . reduce (!) . print", "Function '(!)' requires 2 parameters but 1 were present.\n  at: line 1 (<test>)\n\n1 | [1, 2, 3] . reduce (!) . print\n2 |           ^^^^^^^^^^^^\n"); }
+    #[test] fn test_reduce_list_2() { run_str("[1, 2, 3] . reduce (!) . print", "Function '(!)' requires 1 parameters but 2 were present.\n  at: line 1 (<test>)\n\n1 | [1, 2, 3] . reduce (!) . print\n2 |           ^^^^^^^^^^^^\n"); }
     #[test] fn test_str_to_list() { run_str("'funny beans' . list . print", "['f', 'u', 'n', 'n', 'y', ' ', 'b', 'e', 'a', 'n', 's']\n"); }
     #[test] fn test_str_to_set() { run_str("'funny beans' . set . print", "{'f', 'u', 'n', 'y', ' ', 'b', 'e', 'a', 's'}\n"); }
     #[test] fn test_str_to_set_to_sorted() { run_str("'funny' . set . sort . print", "['f', 'n', 'u', 'y']\n"); }
@@ -1420,6 +1420,7 @@ mod test {
     #[test] fn test_typeof_functions() { run_str("[range, fn() -> nil, push(3), ((fn(a, b) -> nil)(1))] . map(typeof) . all(==function) . print", "true\n"); }
     #[test] fn test_compose_with_single_element_list() { run_str("'hello' . [0] . print", "h\n"); }
     #[test] fn test_eval_single_element_list() { run_str("[-1]('hello') . print", "o\n"); }
+    #[test] fn test_optimized_no_arg_function_call() { run_str("abs()(1)", "Function 'abs' requires 1 parameters but 0 were present.\n  at: line 1 (<test>)\n\n1 | abs()(1)\n2 |    ^^\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }

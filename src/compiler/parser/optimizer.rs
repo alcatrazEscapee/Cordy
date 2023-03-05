@@ -1,5 +1,4 @@
 use crate::compiler::parser::expr::{Expr, ExprType, SequenceOp};
-use crate::reporting::Location;
 use crate::vm::{IntoValue, RuntimeError, Value};
 use crate::vm::operator::BinaryOp;
 
@@ -176,7 +175,7 @@ impl Expr {
     fn is_partial(self: &Self, nargs: usize) -> bool {
         match &self.1 {
             ExprType::NativeFunction(native) => match native.nargs() {
-                Some(expected_nargs) => expected_nargs > nargs as u8,
+                Some(expected_nargs) => expected_nargs > nargs as u8 && nargs > 0,
                 None => false,
             },
             _ => false

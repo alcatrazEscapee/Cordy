@@ -738,3 +738,39 @@ fn type_of(value: Value) -> Value {
         Value::Function(_) | Value::PartialFunction(_) | Value::NativeFunction(_) | Value::PartialNativeFunction(_, _) | Value::Closure(_) => Function.to_value(),
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use crate::{compiler, stdlib};
+    use crate::vm::{IntoValue, Value, VirtualInterface, VirtualMachine};
+
+    #[test]
+    fn test_consistency_condition() {
+        // Asserts that `nargs < native.nargs()` is a sufficient condition for declaring a function is consistent
+        let mut buffer = Vec::new();
+        let mut vm = VirtualMachine::new(compiler::default(), &b""[..], &mut buffer);
+
+        for native in stdlib::NATIVE_FUNCTIONS.iter() {
+            match native.nargs {
+                Some(n) => {
+                    for nargs in 1..n {
+                        // Prepare stack arguments
+                        let args: Vec<Value> = (0..nargs).map(|arg| (arg as i64).to_value()).collect();
+                        vm.push( native.native.to_value());
+                        for arg in args.iter().rev().cloned() {
+                            vm.push(arg);
+                        }
+
+                        let ret = stdlib::invoke(native.native, nargs, &mut vm);
+
+                        assert_eq!(ret.clone().ok(), Some(Value::PartialNativeFunction(native.native, Box::new(args))), "Native function {:?} with nargs={:?}, args={:?} is not consistent, returned result {:?} instead", native.name, native.nargs, nargs, ret);
+
+                        vm.pop();
+                    }
+                },
+                None => {},
+            }
+        }
+    }
+}
