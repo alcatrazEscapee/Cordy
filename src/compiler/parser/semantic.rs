@@ -3,6 +3,7 @@
 ///
 /// The functions declared in this module are public to be used by `parser/mod.rs`, but the module `semantic` is not exported itself.
 
+use std::collections::HashMap;
 use std::fmt::Debug;
 
 use itertools::Itertools;
@@ -60,6 +61,41 @@ impl Locals {
 
     pub fn new(func: Option<usize>) -> Locals {
         Locals { locals: Vec::new(), upvalues: Vec::new(), loops: Vec::new(), func }
+    }
+}
+
+#[derive(Debug)]
+pub struct Fields {
+    /// A mapping of `field name` to `field index`. This is used to record unique fields.
+    /// For example, `struct Foo(a, b, c)` would generate the fields `"a"`, `"b"`, and `"c"` at index `0`, `1`, and `2`, respectively.
+    fields: HashMap<String, u32>,
+
+    /// A table which maps pairs of `(type index, field index)` to a `field offset`
+    /// The `type index` is known at runtime, based on the runtime type of the struct in use.
+    /// The `field index` is known at compile time, based on the identifier that it resolves to.
+    /// The resultant `field offset` is a index into a specific struct object's `Vec<Value>` of fields.
+    lookup: HashMap<(u32, u32), usize>,
+}
+
+impl Fields {
+    pub(super) fn new() -> Fields {
+        Fields {
+            fields: HashMap::new(),
+            lookup: HashMap::new(),
+        }
+    }
+
+    pub fn get_field_offset(self: &Self, type_index: u32, field_index: u32) -> Option<usize> {
+        self.lookup.get(&(type_index, field_index)).copied()
+    }
+
+    pub fn get_field_name(self: &Self, field_index: u32) -> String {
+        self.fields.iter()
+            .filter(|(_, v)| field_index == **v)
+            .next()
+            .unwrap()
+            .0
+            .clone()
     }
 }
 
@@ -486,7 +522,7 @@ impl<'a> Parser<'a> {
         (self.functions.len() + self.baked_functions.len() - 1) as u32
     }
 
-    /// After a `let <name>` or `fn <name>` declaration, tries to declare this as a local variable in the current scope.
+    /// After a `let <name>`, `fn <name>`, or `struct <name>` declaration, tries to declare this as a local variable in the current scope.
     /// Returns the index of the local variable in `self.current_locals().locals`, or `None` if the variable could not be declared.
     /// Note that if `None` is returned, a semantic error will already have been raised.
     pub fn declare_local(self: &mut Self, name: String) -> Option<usize> {
@@ -767,5 +803,26 @@ impl<'a> Parser<'a> {
         if local.is_global() {
             self.push(IncGlobalCount);
         }
+    }
+
+    /// Declares a field, and returns the corresponding `field index`. The field does not need to be unique, not even among fields.
+    /// The field **does** have to be unique among fields within this struct, however - this method will not check this condition, nor raise an error.
+    /// If the field has not been seen before, this will declare the field (assign a `field index` for it).
+    /// It will also insert the lookup entry for the field and type pair, to the desired field offset
+    pub fn declare_field(self: &mut Self, type_index: u32, field_offset: usize, name: String) -> u32 {
+        let next_field_index: u32 = self.fields.fields.len() as u32;
+        let field_index: u32 = *self.fields.fields
+            .entry(name)
+            .or_insert(next_field_index);
+
+        self.fields.lookup.insert((type_index, field_index), field_offset);
+
+        field_index
+    }
+
+    /// Resolves a field name to a specific field index. If the field is not present, raises a parse error.
+    /// Returns the `field_index`, if one was found, or `None` if not.
+    pub fn resolve_field(self: &Self, name: &String) -> Option<u32> {
+        self.fields.fields.get(name).copied()
     }
 }

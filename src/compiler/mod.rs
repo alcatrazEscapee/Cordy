@@ -3,9 +3,9 @@ use std::rc::Rc;
 use crate::compiler::parser::ParseRule;
 use crate::compiler::scanner::ScanResult;
 use crate::reporting::{Locations, SourceView};
-use crate::vm::{FunctionImpl, Opcode, RuntimeError};
+use crate::vm::{FunctionImpl, Opcode, RuntimeError, StructTypeImpl};
 
-pub use crate::compiler::parser::{Locals, ParserError, ParserErrorType};
+pub use crate::compiler::parser::{Locals, Fields, ParserError, ParserErrorType};
 pub use crate::compiler::scanner::{ScanError, ScanErrorType, ScanToken};
 
 use Opcode::{*};
@@ -114,16 +114,18 @@ pub struct CompileParameters<'a> {
 
     code: &'a mut Vec<Opcode>,
     locals: &'a mut Vec<Locals>,
+    fields: &'a mut Fields,
     strings: &'a mut Vec<String>,
     constants: &'a mut Vec<i64>,
     functions: &'a mut Vec<Rc<FunctionImpl>>,
+    structs: &'a mut Vec<Rc<StructTypeImpl>>,
     locations: &'a mut Locations,
     globals: &'a mut Vec<String>,
 }
 
 impl<'a> CompileParameters<'a> {
-    pub fn new(enable_optimization: bool, code: &'a mut Vec<Opcode>, locals: &'a mut Vec<Locals>, strings: &'a mut Vec<String>, constants: &'a mut Vec<i64>, functions: &'a mut Vec<Rc<FunctionImpl>>, locations: &'a mut Locations, globals: &'a mut Vec<String>) -> CompileParameters<'a> {
-        CompileParameters { enable_optimization, code, locals, strings, constants, functions, locations, globals }
+    pub fn new(enable_optimization: bool, code: &'a mut Vec<Opcode>, locals: &'a mut Vec<Locals>, fields: &'a mut Fields, strings: &'a mut Vec<String>, constants: &'a mut Vec<i64>, functions: &'a mut Vec<Rc<FunctionImpl>>, structs: &'a mut Vec<Rc<StructTypeImpl>>, locations: &'a mut Locations, globals: &'a mut Vec<String>) -> CompileParameters<'a> {
+        CompileParameters { enable_optimization, code, locals, fields, strings, constants, functions, structs, locations, globals }
     }
 }
 
@@ -135,10 +137,12 @@ pub struct CompileResult {
     pub strings: Vec<String>,
     pub constants: Vec<i64>,
     pub functions: Vec<Rc<FunctionImpl>>,
+    pub structs: Vec<Rc<StructTypeImpl>>,
 
     pub locations: Locations,
     pub locals: Vec<String>,
     pub globals: Vec<String>,
+    pub fields: Fields,
 }
 
 impl CompileResult {

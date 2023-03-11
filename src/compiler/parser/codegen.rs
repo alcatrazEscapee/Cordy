@@ -103,6 +103,25 @@ impl<'a> Parser<'a> {
                 self.emit_expr(*if_false);
                 self.fix_jump(jump, Jump);
             },
+            Expr(loc, ExprType::GetField(lhs, field_index)) => {
+                self.emit_expr(*lhs);
+                self.push_with(GetField(field_index), loc);
+            },
+            Expr(loc, ExprType::SetField(lhs, field_index, rhs)) => {
+                self.emit_expr(*lhs);
+                self.emit_expr(*rhs);
+                self.push_with(SetField(field_index), loc)
+            },
+            Expr(loc, ExprType::SwapField(lhs, field_index, rhs, op)) => {
+                self.emit_expr(*lhs);
+                self.push_with(GetFieldPeek(field_index), loc);
+                self.emit_expr(*rhs);
+                self.push_with(Binary(op), loc);
+                self.push_with(SetField(field_index), loc);
+            },
+            Expr(loc, ExprType::GetFieldFunction(field_index)) => {
+                self.push_with(GetFieldFunction(field_index), loc);
+            },
             Expr(_, ExprType::Assignment(lvalue, rhs)) => {
                 self.emit_expr(*rhs);
                 self.push_store_lvalue(lvalue);

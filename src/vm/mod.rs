@@ -6,7 +6,7 @@ use std::rc::Rc;
 use itertools::Itertools;
 
 use crate::{compiler, misc, stdlib, trace};
-use crate::compiler::{CompileParameters, CompileResult, IncrementalCompileResult, Locals};
+use crate::compiler::{CompileParameters, CompileResult, Fields, IncrementalCompileResult, Locals};
 use crate::stdlib::NativeFunction;
 use crate::vm::value::{PartialFunctionImpl, UpValue};
 use crate::misc::OffsetAdd;
@@ -14,7 +14,7 @@ use crate::reporting::{Locations, SourceView};
 
 pub use crate::vm::error::{DetailRuntimeError, RuntimeError};
 pub use crate::vm::opcode::Opcode;
-pub use crate::vm::value::{FunctionImpl, IntoDictValue, IntoIterableValue, IntoValue, Iterable, Value};
+pub use crate::vm::value::{FunctionImpl, StructTypeImpl, IntoDictValue, IntoIterableValue, IntoValue, Iterable, Value};
 
 use Opcode::{*};
 use RuntimeError::{*};
@@ -41,7 +41,9 @@ pub struct VirtualMachine<R, W> {
     globals: Vec<String>,
     constants: Vec<i64>,
     functions: Vec<Rc<FunctionImpl>>,
+    structs: Vec<Rc<StructTypeImpl>>,
     locations: Locations,
+    fields: Fields,
 
     read: R,
     write: W,
@@ -123,7 +125,9 @@ impl<R, W> VirtualMachine<R, W> where
             globals: result.globals,
             constants: result.constants,
             functions: result.functions,
+            structs: result.structs,
             locations: result.locations,
+            fields: result.fields,
             read,
             write,
         }
@@ -141,7 +145,7 @@ impl<R, W> VirtualMachine<R, W> where
     }
 
     fn as_compile_parameters<'a, 'b: 'a, 'c: 'a>(self: &'b mut Self, enable_optimization: bool, locals: &'c mut Vec<Locals>) -> CompileParameters<'a> {
-        CompileParameters::new(enable_optimization, &mut self.code, locals, &mut self.strings, &mut self.constants, &mut self.functions, &mut self.locations, &mut self.globals)
+        CompileParameters::new(enable_optimization, &mut self.code, locals, &mut self.fields, &mut self.strings, &mut self.constants, &mut self.functions, &mut self.structs, &mut self.locations, &mut self.globals)
     }
 
     pub fn run_until_completion(self: &mut Self) -> ExitType {
@@ -499,6 +503,10 @@ impl<R, W> VirtualMachine<R, W> where
                 let dict: Value = self.stack.splice(start..end, std::iter::empty()).tuples().to_dict();
                 self.push(dict);
             },
+            Struct(type_index) => {
+                trace::trace_interpreter!("push struct {} ({})", self.structs[type_index as usize].name, type_index);
+                self.push(Value::StructType(self.structs[type_index as usize].clone()));
+            },
 
             OpFuncEval(nargs) => {
                 trace::trace_interpreter!("op function evaluate n = {}", nargs);
@@ -562,6 +570,30 @@ impl<R, W> VirtualMachine<R, W> where
                 let a2: Value = self.pop();
                 let a1: Value = self.pop();
                 let ret = stdlib::get_slice(a1, a2, a3, a4)?;
+                self.push(ret);
+            },
+
+            GetField(field_index) => {
+                trace::trace_interpreter!("get field {}", field_index);
+                let a1: Value = self.pop();
+                let ret: Value = a1.get_field(&self.fields, field_index)?;
+                self.push(ret);
+            },
+            GetFieldPeek(field_index) => {
+                trace::trace_interpreter!("get field peek {}", field_index);
+                let a1: Value = self.peek(0).clone();
+                let ret: Value = a1.get_field(&self.fields, field_index)?;
+                self.push(ret);
+            },
+            GetFieldFunction(field_index) => {
+                trace::trace_interpreter!("push get field {}", field_index);
+                self.push(Value::GetField(field_index));
+            },
+            SetField(field_index) => {
+                trace::trace_interpreter!("set field {}", field_index);
+                let a2: Value = self.pop();
+                let a1: Value = self.pop();
+                let ret: Value = a1.set_field(&self.fields, field_index, a2)?;
                 self.push(ret);
             },
 
@@ -744,6 +776,37 @@ impl<R, W> VirtualMachine<R, W> where
                 let index = list[0].clone();
                 let result = stdlib::get_index(self, arg, index)?;
                 self.push(result);
+                Ok(FunctionType::Native)
+            },
+            Value::StructType(type_impl) => {
+                let type_impl = type_impl.clone();
+                trace::trace_interpreter!("invoke_struct -> {} ({}) with {}", type_impl.name, type_impl.type_index, nargs);
+                let expected_args = type_impl.field_names.len() as u8;
+                if nargs != expected_args {
+                    return IncorrectNumberOfStructArguments(type_impl.name.clone(), nargs, expected_args).err()
+                }
+
+                let args: Vec<Value> = self.popn(nargs as usize);
+                let instance: Value = Value::instance(type_impl, args);
+
+                self.pop(); // The struct type
+                self.push(instance);
+
+                Ok(FunctionType::Native)
+            },
+            Value::GetField(field_index) => {
+                let field_index = *field_index;
+                trace::trace_interpreter!("invoke_get_field {}", field_index);
+                if nargs != 1 {
+                    return IncorrectNumberOfGetFieldArguments(self.fields.get_field_name(field_index), nargs, 1).err()
+                }
+
+                let arg: Value = self.pop();
+                let ret: Value = arg.get_field(&self.fields, field_index)?;
+
+                self.pop(); // The get field
+                self.push(ret);
+
                 Ok(FunctionType::Native)
             },
             _ => return ValueIsNotFunctionEvaluable(f.clone()).err(),
@@ -1437,6 +1500,21 @@ mod test {
     #[test] fn test_assert_fail_with_message() { run_str("assert 'here' in 'the goose is gone' : 'goose issues are afoot'", "Assertion Failed: goose issues are afoot\n  at: line 1 (<test>)\n\n1 | assert 'here' in 'the goose is gone' : 'goose issues are afoot'\n2 |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n"); }
     #[test] fn test_operator_add_left_eval() { run_str("'world' . (+'hello') . print", "worldhello\n"); }
     #[test] fn test_operator_add_right_eval() { run_str("'world' . ('hello'+) . print", "helloworld\n"); }
+    #[test] fn test_typeof_struct_constructor() { run_str("struct Foo(a, b) Foo . typeof . print", "function\n"); }
+    #[test] fn test_typeof_struct_instance() { run_str("struct Foo(a, b) Foo(1, 2) . typeof . print", "struct Foo(a, b)\n"); }
+    #[test] fn test_str_of_struct_instance() { run_str("struct Foo(a, b) Foo(1, 2) . print", "Foo(a=1, b=2)\n"); }
+    #[test] fn test_str_of_struct_constructor() { run_str("struct Foo(a, b) Foo . print", "struct Foo(a, b)\n"); }
+    #[test] fn test_get_field_of_struct() { run_str("struct Foo(a, b) Foo(1, 2) -> a . print", "1\n"); }
+    #[test] fn test_get_field_of_struct_wrong_name() { run_str("struct Foo(a, b) struct Bar(c, d) Foo(1, 2) -> c . print", "TypeError: Cannot get field 'c' on struct Foo(a, b)\n  at: line 1 (<test>)\n\n1 | struct Foo(a, b) struct Bar(c, d) Foo(1, 2) -> c . print\n2 |                                             ^^^^\n"); }
+    #[test] fn test_get_field_of_not_struct() { run_str("struct Foo(a, b) (1, 2) -> a . print", "TypeError: Cannot get field 'a' on '(1, 2)' of type 'vector'\n  at: line 1 (<test>)\n\n1 | struct Foo(a, b) (1, 2) -> a . print\n2 |                         ^^^^\n"); }
+    #[test] fn test_get_field_with_overlapping_offsets() { run_str("struct Foo(a, b) struct Bar(b, a) Foo(1, 2) -> b . print", "2\n"); }
+    #[test] fn test_set_field_of_struct() { run_str("struct Foo(a, b) let x = Foo(1, 2) ; x->a = 3 ; x->a . print", "3\n"); }
+    #[test] fn test_set_field_of_struct_wrong_name() { run_str("struct Foo(a, b) struct Bar(c, d) let x = Foo(1, 2) ; x->c = 3", "TypeError: Cannot get field 'c' on struct Foo(a, b)\n  at: line 1 (<test>)\n\n1 | struct Foo(a, b) struct Bar(c, d) let x = Foo(1, 2) ; x->c = 3\n2 |                                                            ^\n"); }
+    #[test] fn test_set_field_of_not_struct() { run_str("struct Foo(a, b) (1, 2)->a = 3", "TypeError: Cannot get field 'a' on '(1, 2)' of type 'vector'\n  at: line 1 (<test>)\n\n1 | struct Foo(a, b) (1, 2)->a = 3\n2 |                            ^\n"); }
+    #[test] fn test_op_set_field_of_struct() { run_str("struct Foo(a, b) let x = Foo(1, 2) ; x->a += 3 ; x->a . print", "4\n"); }
+    #[test] fn test_partial_get_field_in_bare_method() { run_str("struct Foo(a, b) let x = Foo(2, 3), f = (->b) ; x . f . print", "3\n"); }
+    #[test] fn test_partial_get_field_in_function_eval() { run_str("struct Foo(a, b) [Foo(1, 2), Foo(2, 3)] . map(->b) . print", "[2, 3]\n"); }
+    #[test] fn test_more_partial_get_field() { run_str("struct Foo(foo) ; let x = Foo('hello') ; print([x, Foo('')] . filter(->foo) . len)", "1\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }

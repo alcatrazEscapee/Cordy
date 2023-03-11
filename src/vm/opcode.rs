@@ -83,6 +83,8 @@ pub enum Opcode {
     Vector(u32),
     Set(u32),
     Dict(u32),
+    /// The parameter corresponds to the `type index` of the struct.
+    Struct(u32),
 
     // Runtime specific type checks
 
@@ -107,6 +109,11 @@ pub enum Opcode {
 
     OpSlice,
     OpSliceWithStep,
+
+    GetField(u32),
+    GetFieldPeek(u32),
+    GetFieldFunction(u32),
+    SetField(u32),
 
     Unary(UnaryOp),
     Binary(BinaryOp),

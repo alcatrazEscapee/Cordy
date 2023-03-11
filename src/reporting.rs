@@ -199,6 +199,9 @@ impl AsError for RuntimeError {
             RuntimeError::IncorrectNumberOfFunctionArguments(f, a) => format!("Function {} requires {} parameters but {} were present.", f.as_error(), f.nargs, a),
             RuntimeError::IncorrectNumberOfArguments(b, a, e) => format!("Function '{}' requires {} parameters but {} were present.", b.as_error(), e, a),
             RuntimeError::IncorrectNumberOfArgumentsVariadicAtLeastOne(b) => format!("Function '{}' requires at least 1 parameter but none were present.", b.as_error()),
+            RuntimeError::IncorrectNumberOfStructArguments(s, a, e) => format!("Struct '{}' has {} fields but {} arguments were present", s, e, a),
+            RuntimeError::IncorrectNumberOfGetFieldArguments(s, a, e) => format!("Function '(->{})' requires {} parameters but {} were present", s, e, a),
+
             RuntimeError::ValueErrorIndexOutOfBounds(i, ln) => format!("Index '{}' is out of bounds for list of length [0, {})", i, ln),
             RuntimeError::ValueErrorStepCannotBeZero => String::from("ValueError: 'step' argument cannot be zero"),
             RuntimeError::ValueErrorVariableNotDeclaredYet(x) => format!("ValueError: '{}' was referenced but has not been declared yet", x),
@@ -220,6 +223,7 @@ impl AsError for RuntimeError {
             RuntimeError::TypeErrorBinaryOp(op, l, r) => format!("TypeError: Cannot {} {} and {}", op.as_error(), l.as_error(), r.as_error()),
             RuntimeError::TypeErrorBinaryIs(l, r) => format!("TypeError: {} is not a type and cannot be used with binary 'is' on {}", r.as_error(), l.as_error()),
             RuntimeError::TypeErrorCannotConvertToInt(v) => format!("TypeError: Cannot convert {} to an int", v.as_error()),
+            RuntimeError::TypeErrorFieldNotPresentOnValue(v, f, b) => format!("TypeError: Cannot get field '{}' on {}", f, if *b { v.to_repr_str() } else { v.as_error() }),
             RuntimeError::TypeErrorArgMustBeInt(v) => format!("TypeError: Expected {} to be a int", v.as_error()),
             RuntimeError::TypeErrorArgMustBeStr(v) => format!("TypeError: Expected {} to be a string", v.as_error()),
             RuntimeError::TypeErrorArgMustBeChar(v) => format!("TypeError: Expected {} to be a single character string", v.as_error()),
@@ -322,16 +326,21 @@ impl AsError for ParserError {
             ParserErrorType::ExpectedUnderscoreOrVariableNameOrPattern(e) => format!("Expected a variable binding, either a name, or '_', or pattern (i.e. 'x, (_, y), *z'), got {} instead", e.as_error()),
             ParserErrorType::ExpectedAnnotationOrNamedFunction(e) => format!("Expected another decorator, or a named function after decorator, got {} instead", e.as_error()),
             ParserErrorType::ExpectedAnnotationOrAnonymousFunction(e) => format!("Expected another decorator, or an expression function after decorator, got {} instead", e.as_error()),
+            ParserErrorType::ExpectedStructNameAfterStruct(e) => format!("Expected a struct name after 'struct' keyword, got {} instead", e.as_error()),
+            ParserErrorType::ExpectedFieldNameAfterArrow(e) => format!("Expected a field name after '->', got {} instead", e.as_error()),
 
             ParserErrorType::LocalVariableConflict(e) => format!("Multiple declarations for 'let {}' in the same scope", e),
             ParserErrorType::LocalVariableConflictWithNativeFunction(e) => format!("Name for variable '{}' conflicts with the native function by the same name", e),
             ParserErrorType::UndeclaredIdentifier(e) => format!("Undeclared identifier: '{}'", e),
+            ParserErrorType::DuplicateFieldName(e) => format!("Duplicate field name: '{}'", e),
+            ParserErrorType::InvalidFieldName(e) => format!("Invalid or unknown field name: '{}'", e),
 
             ParserErrorType::InvalidAssignmentTarget => format!("The left hand side of an assignment expression must be a variable, array access, or property access"),
             ParserErrorType::MultipleVariadicTermsInPattern => format!("Pattern is not allowed to have more than one variadic (i.e. '*') term."),
             ParserErrorType::LetWithPatternBindingNoExpression => format!("'let' with a pattern variable must be followed by an expression if the pattern contains non-simple elements such as variadic (i.e. '*'), empty (i.e. '_'), or nested (i.e. 'x, (_, y)) terms."),
             ParserErrorType::BreakOutsideOfLoop => String::from("Invalid 'break' statement outside of an enclosing loop"),
             ParserErrorType::ContinueOutsideOfLoop => String::from("Invalid 'continue' statement outside of an enclosing loop"),
+            ParserErrorType::StructNotInGlobalScope => String::from("'struct' statements can only be present in global scope."),
 
             ParserErrorType::Runtime(e) => e.as_error(),
         }
