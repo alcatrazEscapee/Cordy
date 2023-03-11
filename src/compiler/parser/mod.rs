@@ -320,13 +320,18 @@ impl Parser<'_> {
         self.expect_resync(CloseParen);
 
         // Named functions are a complicated local variable, and needs to be declared as such
-        if let Some(name) = maybe_name {
-            if let Some(index) = self.declare_local(name.clone()) {
-                self.init_local(index);
-                let func: u32 = self.declare_function(name, &args);
-                self.push(Opcode::Function(func));  // And push the function object itself
-            }
-        }
+        // Note that we always declare the function here, to preserve parser operation in the event of a parse error
+        let name = maybe_name
+            .map(|name| {
+                if let Some(index) = self.declare_local(name.clone()) {
+                    self.init_local(index);
+                }
+                name
+            })
+            .unwrap_or_else(|| String::from("<invalid>"));
+
+        let func: u32 = self.declare_function(name, &args);
+        self.push(Opcode::Function(func));
 
         // Emit the closed locals from the function body right away, because we are not in an expression context
         let closed_locals = self.parse_function_body(args);
@@ -1721,6 +1726,9 @@ mod tests {
     #[test] fn test_let_no_identifier() { run_err("let =", "Expected a variable binding, either a name, or '_', or pattern (i.e. 'x, (_, y), *z'), got '=' token instead\n  at: line 1 (<test>)\n\n1 | let =\n2 |     ^\n"); }
     #[test] fn test_let_expression_eof() { run_err("let x =", "Expected an expression terminal, got end of input instead\n  at: line 1 (<test>)\n\n1 | let x =\n2 |         ^^^\n"); }
     #[test] fn test_let_no_expression() { run_err("let x = &", "Expected an expression terminal, got '&' token instead\n  at: line 1 (<test>)\n\n1 | let x = &\n2 |         ^\n"); }
+    #[test] fn test_top_level_fn_no_name() { run_err("fn () {}", "Expecting a function name after 'fn' keyword, got '(' token instead\n  at: line 1 (<test>)\n\n1 | fn () {}\n2 |    ^\n"); }
+    #[test] fn test_expression_function_with_name() { run_err("(fn hello() {})", "Expected a '(' token, got identifier 'hello' instead\n  at: line 1 (<test>)\n\n1 | (fn hello() {})\n2 |     ^^^^^\n"); }
+    #[test] fn test_top_level_function_in_error_recovery_mode() { run_err("+ fn hello() {}", "Expected an expression terminal, got '+' token instead\n  at: line 1 (<test>)\n\n1 | + fn hello() {}\n2 | ^\n"); }
 
     #[test] fn test_array_access_after_newline() { run("array_access_after_newline"); }
     #[test] fn test_array_access_no_newline() { run("array_access_no_newline"); }
