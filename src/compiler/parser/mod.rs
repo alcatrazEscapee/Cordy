@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::rc::Rc;
 
-use crate::compiler::CompileResult;
+use crate::compiler::{CompileParameters, CompileResult};
 use crate::compiler::parser::core::ParserState;
 use crate::compiler::parser::expr::{Expr, ExprType};
 use crate::compiler::parser::semantic::{LateBoundGlobal, LValue, LValueReference, MaybeFunction, Reference};
@@ -49,15 +49,15 @@ pub fn parse(enable_optimization: bool, scan_result: ScanResult) -> CompileResul
 }
 
 
-pub fn parse_incremental(enable_optimization: bool, scan_result: ScanResult, code: &mut Vec<Opcode>, locals: &mut Vec<Locals>, strings: &mut Vec<String>, constants: &mut Vec<i64>, functions: &mut Vec<Rc<FunctionImpl>>, locations: &mut Locations, globals: &mut Vec<String>, rule: fn(Parser) -> ()) -> Vec<ParserError> {
+pub fn parse_incremental(scan_result: ScanResult, params: &mut CompileParameters, rule: fn(Parser) -> ()) -> Vec<ParserError> {
 
     let mut errors: Vec<ParserError> = Vec::new();
-    let mut maybe_functions: Functions = functions.drain(..).map(|u| MaybeFunction::wrap(&u)).collect();
+    let mut maybe_functions: Functions = params.functions.drain(..).map(|u| MaybeFunction::wrap(&u)).collect();
 
-    rule(Parser::new(enable_optimization, scan_result.tokens, code, locals, &mut errors, strings, constants, &mut maybe_functions, locations, &mut Vec::new(), globals));
+    rule(Parser::new(params.enable_optimization, scan_result.tokens, params.code, params.locals, &mut errors, params.strings, params.constants, &mut maybe_functions, params.locations, &mut Vec::new(), params.globals));
 
     for func in maybe_functions {
-        functions.push(func.unwrap());
+        params.functions.push(func.unwrap());
     }
 
     errors

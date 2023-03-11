@@ -45,19 +45,18 @@ pub fn compile(enable_optimization: bool, view: &SourceView) -> Result<CompileRe
 /// Performs an incremental compile, given the following input parameters.
 ///
 /// This is used for incremental REPL structure. The result will have a `Print` instead of a delayed pop (if needed), and end with a `Yield` instruction instead of `Exit`.
-pub fn incremental_compile(view: &SourceView, code: &mut Vec<Opcode>, locals: &mut Vec<Locals>, strings: &mut Vec<String>, constants: &mut Vec<i64>, functions: &mut Vec<Rc<FunctionImpl>>, locations: &mut Locations
-                           , globals: &mut Vec<String>) -> IncrementalCompileResult {
+pub fn incremental_compile(view: &SourceView, mut params: CompileParameters) -> IncrementalCompileResult {
     // Stage changes, so an error or aborted compile doesn't overwrite the current valid compile state
     // Doing this for code and locations (since those are 1-1 ordering) is sufficient
-    let code_len: usize = code.len();
-    let locations_len: usize = locations.len();
+    let code_len: usize = params.code.len();
+    let locations_len: usize = params.locations.len();
 
-    let ret: IncrementalCompileResult = try_incremental_compile(false, view, code, locals, strings, constants, functions, locations, globals, parser::RULE_REPL, true);
+    let ret: IncrementalCompileResult = try_incremental_compile(view, &mut params, parser::RULE_REPL, true);
 
     if !ret.is_success() {
         // Revert staged changes
-        code.truncate(code_len);
-        locations.truncate(locations_len);
+        params.code.truncate(code_len);
+        params.locations.truncate(locations_len);
     }
 
     ret
@@ -69,23 +68,18 @@ pub fn incremental_compile(view: &SourceView, code: &mut Vec<Opcode>, locals: &m
 /// Note that this does not insert a terminal `Pop` or `Exit`, and instead pushes a `Return` which exits `eval`'s special call frame.
 ///
 /// This is the API used to run an `eval()` statement.
-pub fn eval_compile(text: &String, code: &mut Vec<Opcode>, strings: &mut Vec<String>, constants: &mut Vec<i64>, functions: &mut Vec<Rc<FunctionImpl>>, locations: &mut Locations, globals: &mut Vec<String>) -> Result<(), Box<RuntimeError>> {
+pub fn eval_compile(text: &String, mut params: CompileParameters) -> Result<(), Box<RuntimeError>> {
 
-    let mut locals: Vec<Locals> = Locals::empty();
     let name: String = String::from("<eval>");
     let view: SourceView = SourceView::new(&name, text);
-    let ret: IncrementalCompileResult = try_incremental_compile(true, &view, code, &mut locals, strings, constants, functions, locations, globals, parser::RULE_EVAL, false);
+    let ret: IncrementalCompileResult = try_incremental_compile(&view, &mut params, parser::RULE_EVAL, false);
 
-    if ret.is_success() {
-        Ok(())
-    } else {
-        RuntimeError::RuntimeCompilationError(ret.errors()).err()
-    }
+    ret.as_ok_or_runtime_error()
 }
 
 
 
-fn try_incremental_compile(enable_optimization: bool, view: &SourceView, code: &mut Vec<Opcode>, locals: &mut Vec<Locals>, strings: &mut Vec<String>, constants: &mut Vec<i64>, functions: &mut Vec<Rc<FunctionImpl>>, locations: &mut Locations, globals: &mut Vec<String>, rule: ParseRule, abort_in_eof: bool) -> IncrementalCompileResult {
+fn try_incremental_compile(view: &SourceView, params: &mut CompileParameters, rule: ParseRule, abort_in_eof: bool) -> IncrementalCompileResult {
     let mut errors: Vec<String> = Vec::new();
 
     // Scan
@@ -101,7 +95,7 @@ fn try_incremental_compile(enable_optimization: bool, view: &SourceView, code: &
     }
 
     // Parse
-    let parse_errors: Vec<ParserError> = parser::parse_incremental(enable_optimization, scan_result, code, locals, strings, constants, functions, locations, globals, rule);
+    let parse_errors: Vec<ParserError> = parser::parse_incremental(scan_result, params, rule);
     if !parse_errors.is_empty() {
         for error in &parse_errors {
             if error.is_eof() && abort_in_eof && errors.is_empty() {
@@ -113,6 +107,24 @@ fn try_incremental_compile(enable_optimization: bool, view: &SourceView, code: &
     }
 
     IncrementalCompileResult::Success
+}
+
+pub struct CompileParameters<'a> {
+    enable_optimization: bool,
+
+    code: &'a mut Vec<Opcode>,
+    locals: &'a mut Vec<Locals>,
+    strings: &'a mut Vec<String>,
+    constants: &'a mut Vec<i64>,
+    functions: &'a mut Vec<Rc<FunctionImpl>>,
+    locations: &'a mut Locations,
+    globals: &'a mut Vec<String>,
+}
+
+impl<'a> CompileParameters<'a> {
+    pub fn new(enable_optimization: bool, code: &'a mut Vec<Opcode>, locals: &'a mut Vec<Locals>, strings: &'a mut Vec<String>, constants: &'a mut Vec<i64>, functions: &'a mut Vec<Rc<FunctionImpl>>, locations: &'a mut Locations, globals: &'a mut Vec<String>) -> CompileParameters<'a> {
+        CompileParameters { enable_optimization, code, locals, strings, constants, functions, locations, globals }
+    }
 }
 
 
@@ -178,17 +190,18 @@ pub enum IncrementalCompileResult {
 }
 
 impl IncrementalCompileResult {
+    fn as_ok_or_runtime_error(self: Self) -> Result<(), Box<RuntimeError>> {
+        match self {
+            IncrementalCompileResult::Success => Ok(()),
+            IncrementalCompileResult::Errors(e) => RuntimeError::RuntimeCompilationError(e).err(),
+            _ => panic!("{:?} should not be unboxed as a Result<(), Box<RuntimeError>>", self),
+        }
+    }
+
     fn is_success(self: &Self) -> bool {
         match self {
             IncrementalCompileResult::Success => true,
             _ => false
-        }
-    }
-
-    fn errors(self: Self) -> Vec<String> {
-        match self {
-            IncrementalCompileResult::Errors(e) => e,
-            _ => panic!("Tried to unwrap {:?}", self),
         }
     }
 }

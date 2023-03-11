@@ -6,7 +6,7 @@ use std::rc::Rc;
 use itertools::Itertools;
 
 use crate::{compiler, misc, stdlib, trace};
-use crate::compiler::{CompileResult, IncrementalCompileResult, Locals};
+use crate::compiler::{CompileParameters, CompileResult, IncrementalCompileResult, Locals};
 use crate::stdlib::NativeFunction;
 use crate::vm::value::{PartialFunctionImpl, UpValue};
 use crate::misc::OffsetAdd;
@@ -131,12 +131,17 @@ impl<R, W> VirtualMachine<R, W> where
 
     /// Bridge method to `compiler::incremental_compile`
     pub fn incremental_compile(self: &mut Self, view: &SourceView, locals: &mut Vec<Locals>) -> IncrementalCompileResult {
-        compiler::incremental_compile(view, &mut self.code, locals, &mut self.strings, &mut self.constants, &mut self.functions, &mut self.locations, &mut self.globals)
+        compiler::incremental_compile(view, self.as_compile_parameters(false, locals))
     }
 
     /// Bridge method to `compiler::eval_compile`
     pub fn eval_compile(self: &mut Self, text: &String) -> AnyResult {
-        compiler::eval_compile(text, &mut self.code, &mut self.strings, &mut self.constants, &mut self.functions, &mut self.locations, &mut self.globals)
+        let mut locals = Locals::empty();
+        compiler::eval_compile(text, self.as_compile_parameters(false, &mut locals))
+    }
+
+    fn as_compile_parameters<'a, 'b: 'a, 'c: 'a>(self: &'b mut Self, enable_optimization: bool, locals: &'c mut Vec<Locals>) -> CompileParameters<'a> {
+        CompileParameters::new(enable_optimization, &mut self.code, locals, &mut self.strings, &mut self.constants, &mut self.functions, &mut self.locations, &mut self.globals)
     }
 
     pub fn run_until_completion(self: &mut Self) -> ExitType {
