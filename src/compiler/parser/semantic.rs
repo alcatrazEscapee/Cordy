@@ -4,17 +4,16 @@
 /// The functions declared in this module are public to be used by `parser/mod.rs`, but the module `semantic` is not exported itself.
 
 use std::fmt::Debug;
-use std::rc::Rc;
 
 use itertools::Itertools;
 
 use crate::compiler::parser::{Parser, ParserError, ParserErrorType};
 use crate::stdlib;
-use crate::vm::{FunctionImpl, Opcode};
+use crate::vm::Opcode;
+use crate::reporting::Location;
 
 use ParserErrorType::{*};
 use Opcode::{*};
-use crate::reporting::Location;
 
 
 #[derive(Eq, PartialEq, Debug, Clone)]
@@ -417,71 +416,20 @@ impl<T : Debug> Reference<T> {
 
 /// A reference to a particular opcode, while the parser is parsing, that is capable of crossing functions.
 /// This is a pair of (function ordinal, code ordinal)
+/// Note that the function ordinal is an index into `self.functions`, not an absolute function ID (and is thus a `usize` not a `u32`)
 #[derive(Debug, Clone, Copy)]
 pub struct OpcodeReference(pub usize, pub usize);
 
 
 #[derive(Debug)]
-pub enum MaybeFunction {
-    Baked(Rc<FunctionImpl>),
-    Unbaked(ParserFunctionImpl)
-}
-
-#[derive(Debug)]
 pub struct ParserFunctionImpl {
     /// Function name and argument names
-    name: String,
-    args: Vec<String>,
+    pub(super) name: String,
+    pub(super) args: Vec<String>,
 
     /// Bytecode for the function body itself
-    pub code: Vec<(Location, Opcode)>,
+    pub(super) code: Vec<(Location, Opcode)>,
 }
-
-impl MaybeFunction {
-    pub fn wrap(func: &Rc<FunctionImpl>) -> MaybeFunction {
-        MaybeFunction::Baked(func.clone())
-    }
-
-    pub fn unwrap(self: Self) -> Rc<FunctionImpl> {
-        match self {
-            MaybeFunction::Baked(rc) => rc,
-            _ => panic!("Must bake functions before unwrapping!"),
-        }
-    }
-
-    fn new(name: String, args: Vec<String>) -> MaybeFunction {
-        MaybeFunction::Unbaked(ParserFunctionImpl {
-            name,
-            args,
-
-            code: Vec::new(),
-        })
-    }
-
-    pub fn bake(self: &mut Self, head: usize, tail: usize) {
-        match self {
-            MaybeFunction::Unbaked(func) => {
-                *self = MaybeFunction::Baked(Rc::new(FunctionImpl::new(head, tail, std::mem::take(&mut func.name), std::mem::take(&mut func.args))));
-            },
-            _ => {},
-        }
-    }
-
-    pub fn get(self: &Self) -> &ParserFunctionImpl {
-        match self {
-            MaybeFunction::Unbaked(p) => p,
-            _ => panic!("Cannot modify baked function."),
-        }
-    }
-
-    pub fn get_mut(self: &mut Self) -> &mut ParserFunctionImpl {
-        match self {
-            MaybeFunction::Unbaked(p) => p,
-            _ => panic!("Cannot modify baked function."),
-        }
-    }
-}
-
 
 
 impl<'a> Parser<'a> {
@@ -522,8 +470,16 @@ impl<'a> Parser<'a> {
     }
 
     pub fn declare_function(self: &mut Self, name: String, args: &Vec<LValue>) -> u32 {
-        self.functions.push(MaybeFunction::new(name, args.iter().map(|u| u.to_code_str()).collect()));
-        (self.functions.len() - 1) as u32
+        self.functions.push(ParserFunctionImpl {
+            name,
+            args: args.iter().map(|u| u.to_code_str()).collect(),
+            code: Vec::new(),
+        });
+        self.last_function_id()
+    }
+
+    pub fn last_function_id(self: &Self) -> u32 {
+        (self.functions.len() + self.baked_functions.len() - 1) as u32
     }
 
     /// After a `let <name>` or `fn <name>` declaration, tries to declare this as a local variable in the current scope.
@@ -554,7 +510,7 @@ impl<'a> Parser<'a> {
             for global in &self.late_bound_globals {
                 if global.into_ref().name == local.name {
                     let opcode = global.into_ref().opcode;
-                    self.functions[opcode.0].get_mut().code[opcode.1].1 = if global.is_load() {
+                    self.functions[opcode.0].code[opcode.1].1 = if global.is_load() {
                         PushGlobal(local.index)
                     } else {
                         StoreGlobal(local.index)
@@ -661,7 +617,7 @@ impl<'a> Parser<'a> {
     /// Returns the output code of the current function
     pub fn current_function(self: &Self) -> &Vec<(Location, Opcode)> {
         match &self.current_locals().func {
-            Some(func) => &self.functions[*func].get().code,
+            Some(func) => &self.functions[*func].code,
             None => &self.output
         }
     }
@@ -669,7 +625,7 @@ impl<'a> Parser<'a> {
     /// Returns the output code of the current function
     pub fn current_function_mut(self: &mut Self) -> &mut Vec<(Location, Opcode)> {
         match self.current_locals().func {
-            Some(func) => &mut self.functions[func].get_mut().code,
+            Some(func) => &mut self.functions[func].code,
             None => &mut self.output
         }
     }

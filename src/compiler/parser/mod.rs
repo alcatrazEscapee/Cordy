@@ -4,7 +4,7 @@ use std::rc::Rc;
 use crate::compiler::{CompileParameters, CompileResult};
 use crate::compiler::parser::core::ParserState;
 use crate::compiler::parser::expr::{Expr, ExprType};
-use crate::compiler::parser::semantic::{LateBoundGlobal, LValue, LValueReference, MaybeFunction, Reference};
+use crate::compiler::parser::semantic::{LateBoundGlobal, LValue, LValueReference, ParserFunctionImpl, Reference};
 use crate::compiler::parser::optimizer::Optimize;
 use crate::compiler::scanner::{ScanResult, ScanToken};
 use crate::stdlib::NativeFunction;
@@ -22,11 +22,11 @@ use Opcode::{*};
 use ParserErrorType::{*};
 use ScanToken::{*};
 
-pub const RULE_REPL: ParseRule = |mut parser| parser.parse_incremental_repl();
-pub const RULE_EVAL: ParseRule = |mut parser| parser.parse_incremental_eval();
 
-pub type ParseRule = fn(Parser) -> ();
-pub type Functions = Vec<MaybeFunction>;
+pub const RULE_REPL: ParseRule = |parser| parser.parse_incremental_repl();
+pub const RULE_EVAL: ParseRule = |parser| parser.parse_incremental_eval();
+
+pub type ParseRule = fn(&mut Parser) -> ();
 
 mod core;
 mod errors;
@@ -45,52 +45,36 @@ pub fn default() -> CompileResult {
 
 /// Parse a complete `CompileResult` from the given `ScanResult`
 pub fn parse(enable_optimization: bool, scan_result: ScanResult) -> CompileResult {
-    parse_rule(enable_optimization, scan_result.tokens, |mut parser| parser.parse())
+    parse_rule(enable_optimization, scan_result.tokens, |parser| parser.parse())
 }
 
 
-pub fn parse_incremental(scan_result: ScanResult, params: &mut CompileParameters, rule: fn(Parser) -> ()) -> Vec<ParserError> {
-
+pub fn parse_incremental(scan_result: ScanResult, params: &mut CompileParameters, rule: ParseRule) -> Vec<ParserError> {
     let mut errors: Vec<ParserError> = Vec::new();
-    let mut maybe_functions: Functions = params.functions.drain(..).map(|u| MaybeFunction::wrap(&u)).collect();
 
-    rule(Parser::new(params.enable_optimization, scan_result.tokens, params.code, params.locals, &mut errors, params.strings, params.constants, &mut maybe_functions, params.locations, &mut Vec::new(), params.globals));
-
-    for func in maybe_functions {
-        params.functions.push(func.unwrap());
-    }
+    rule(&mut Parser::new(params.enable_optimization, scan_result.tokens, params.code, params.locals, &mut errors, params.strings, params.constants, params.functions, params.locations, &mut Vec::new(), params.globals));
 
     errors
 }
 
 
-fn parse_rule(enable_optimization: bool, tokens: Vec<(Location, ScanToken)>, rule: fn(Parser) -> ()) -> CompileResult {
+fn parse_rule(enable_optimization: bool, tokens: Vec<(Location, ScanToken)>, rule: ParseRule) -> CompileResult {
+    let mut result = CompileResult {
+        code: Vec::new(),
+        errors: Vec::new(),
 
-    let mut code: Vec<Opcode> = Vec::new();
-    let mut errors: Vec<ParserError> = Vec::new();
+        strings: vec![String::new()],
+        constants: vec![0, 1],
+        functions: Vec::new(),
 
-    let mut strings: Vec<String> = vec![String::new()];
-    let mut constants: Vec<i64> = vec![0, 1];
-    let mut functions: Functions = Vec::new();
+        locations: Vec::new(),
+        globals: Vec::new(),
+        locals: Vec::new(),
+    };
 
-    let mut locations: Locations = Vec::new();
-    let mut globals: Vec<String> = Vec::new();
-    let mut locals: Vec<String> = Vec::new();
+    rule(&mut Parser::new(enable_optimization, tokens, &mut result.code, &mut Locals::empty(), &mut result.errors, &mut result.strings, &mut result.constants, &mut result.functions, &mut result.locations, &mut result.locals, &mut result.globals));
 
-    rule(Parser::new(enable_optimization, tokens, &mut code, &mut Locals::empty(), &mut errors, &mut strings, &mut constants, &mut functions, &mut locations, &mut locals, &mut globals));
-
-    CompileResult {
-        code,
-        errors,
-
-        strings,
-        constants,
-        functions: functions.into_iter().map(MaybeFunction::unwrap).collect::<Vec<Rc<FunctionImpl>>>(),
-
-        locations,
-        locals,
-        globals,
-    }
+    result
 }
 
 
@@ -138,16 +122,16 @@ pub struct Parser<'a> {
     strings: &'a mut Vec<String>,
     constants: &'a mut Vec<i64>,
 
-    /// List of all functions known to the parser.
-    /// Note that functions can be in two forms - a 'baked' representation which is held by the VM, and an 'unbaked' representation which is held by the parser.
-    /// At the teardown stage, all functions are 'baked', by emitting their bytecode to the central output token stream, and fixing the reference to the function.
-    functions: &'a mut Vec<MaybeFunction>,
+    /// List of all functions known to the parser, in their unbaked form.
+    /// Note that this list is considered starting at the length of `baked_functions`
+    functions: Vec<ParserFunctionImpl>,
+    baked_functions: &'a mut Vec<Rc<FunctionImpl>>,
 }
 
 
 impl Parser<'_> {
 
-    fn new<'a, 'b : 'a>(enable_optimization: bool, tokens: Vec<(Location, ScanToken)>, output: &'b mut Vec<Opcode>, locals: &'b mut Vec<Locals>, errors: &'b mut Vec<ParserError>, strings: &'b mut Vec<String>, constants: &'b mut Vec<i64>, functions: &'b mut Functions, locations: &'b mut Locations, locals_reference: &'b mut Vec<String>, globals_reference: &'b mut Vec<String>) -> Parser<'a> {
+    fn new<'a, 'b : 'a>(enable_optimization: bool, tokens: Vec<(Location, ScanToken)>, output: &'b mut Vec<Opcode>, locals: &'b mut Vec<Locals>, errors: &'b mut Vec<ParserError>, strings: &'b mut Vec<String>, constants: &'b mut Vec<i64>, baked_functions: &'b mut Vec<Rc<FunctionImpl>>, locations: &'b mut Locations, locals_reference: &'b mut Vec<String>, globals_reference: &'b mut Vec<String>) -> Parser<'a> {
         Parser {
             enable_optimization,
 
@@ -176,7 +160,8 @@ impl Parser<'_> {
 
             strings,
             constants,
-            functions
+            functions: Vec::new(),
+            baked_functions,
         }
     }
 
@@ -217,19 +202,16 @@ impl Parser<'_> {
         }
 
         // Emit functions
-        for func in self.functions.iter_mut() {
-            match func {
-                MaybeFunction::Unbaked(parser_func) => {
-                    let head = self.raw_output.len();
-                    for (loc, op) in parser_func.code.drain(..) {
-                        self.raw_output.push(op);
-                        self.locations.push(loc);
-                    }
-                    let tail = self.raw_output.len() - 1;
-                    func.bake(head, tail);
-                },
-                _ => {},
+        for mut func in self.functions.drain(..) {
+            let head: usize = self.raw_output.len();
+            for (loc, op) in func.code.drain(..) {
+                self.raw_output.push(op);
+                self.locations.push(loc);
             }
+            let tail: usize = self.raw_output.len() - 1;
+            let baked: Rc<FunctionImpl> = Rc::new(FunctionImpl::new(head, tail, func.name, func.args));
+
+            self.baked_functions.push(baked);
         }
 
         if let Some(t) = self.peek() {
@@ -419,7 +401,7 @@ impl Parser<'_> {
         // In addition, we let parameters have their own scope depth one outside locals to the function
         // This lets us 1) declare parameters here, in the right scope,
         // and 2) avoid popping parameters at the end of a function call (as they're handled by the `Return` opcode instead)
-        self.locals.push(Locals::new(Some(self.functions.len() - 1)));
+        self.locals.push(Locals::new(Some(self.last_function_id() as usize)));
         self.function_depth += 1;
         self.scope_depth += 1;
 
