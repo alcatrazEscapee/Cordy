@@ -1421,6 +1421,7 @@ mod test {
     #[test] fn test_compose_with_single_element_list() { run_str("'hello' . [0] . print", "h\n"); }
     #[test] fn test_eval_single_element_list() { run_str("[-1]('hello') . print", "o\n"); }
     #[test] fn test_optimized_no_arg_function_call() { run_str("abs()(1)", "Function 'abs' requires 1 parameters but 0 were present.\n  at: line 1 (<test>)\n\n1 | abs()(1)\n2 |    ^^\n"); }
+    #[test] fn test_if_then_else_does_not_stack_smash() { run_str("for x in range(2) { if x then x else x }", "\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }
