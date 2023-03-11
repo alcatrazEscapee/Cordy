@@ -1,9 +1,7 @@
 fn foo(x) {
-    if x > 1 {
-        true
-    } else {
-        false
-    }
+    if x > 1
+    then true
+    else false
 }
 
 foo(2) . print

@@ -3,7 +3,7 @@ fn foo() {
         return
     }
     if false {
-        return;
+        return
     }
     if nil {
         return 123

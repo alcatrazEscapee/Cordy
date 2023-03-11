@@ -1,17 +1,19 @@
 L1: 0000 False
-    0001 JumpIfFalsePop(6)
+    0001 JumpIfFalsePop(7)
 L2: 0002 NativeFunction(Print)
     0003 Str(1) -> "one"
     0004 OpFuncEval(1)
-L3: 0005 Jump(15)
-    0006 True
-    0007 JumpIfFalsePop(12)
-L4: 0008 NativeFunction(Print)
-    0009 Str(2) -> "two"
-    0010 OpFuncEval(1)
-L5: 0011 Jump(15)
-L6: 0012 NativeFunction(Print)
-    0013 Str(3) -> "three"
-    0014 OpFuncEval(1)
-L7: 0015 Pop
-    0016 Exit
+L3: 0005 Pop
+    0006 Jump(18)
+    0007 True
+    0008 JumpIfFalsePop(14)
+L4: 0009 NativeFunction(Print)
+    0010 Str(2) -> "two"
+    0011 OpFuncEval(1)
+L5: 0012 Pop
+    0013 Jump(18)
+L6: 0014 NativeFunction(Print)
+    0015 Str(3) -> "three"
+    0016 OpFuncEval(1)
+L7: 0017 Pop
+    0018 Exit

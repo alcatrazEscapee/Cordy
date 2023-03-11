@@ -1,32 +1,20 @@
 L01: 0000 IncGlobalCount
-     0001 Function(0) -> FunctionImpl { head: 4, tail: 31, nargs: 0, name: "foo", args: [] }
+     0001 Function(0) -> FunctionImpl { head: 4, tail: 19, nargs: 0, name: "foo", args: [] }
 L12: 0002 Pop
      0003 Exit
 L02: 0004 True
-     0005 JumpIfFalsePop(10)
+     0005 JumpIfFalsePop(8)
 L03: 0006 Nil
      0007 Return
-L04: 0008 Nil
-     0009 Jump(11)
-     0010 Nil
-L05: 0011 Pop
-     0012 False
-     0013 JumpIfFalsePop(18)
-L06: 0014 Nil
+L05: 0008 False
+     0009 JumpIfFalsePop(12)
+L06: 0010 Nil
+     0011 Return
+L08: 0012 Nil
+     0013 JumpIfFalsePop(16)
+L09: 0014 Int(2) -> 123
      0015 Return
-L07: 0016 Nil
-     0017 Jump(19)
+L11: 0016 Nil
+     0017 Return
      0018 Nil
-L08: 0019 Pop
-     0020 Nil
-     0021 JumpIfFalsePop(26)
-L09: 0022 Int(2) -> 123
-     0023 Return
-L10: 0024 Nil
-     0025 Jump(27)
-     0026 Nil
-     0027 Pop
-L11: 0028 Nil
-     0029 Return
-     0030 Nil
-L12: 0031 Return
+L12: 0019 Return

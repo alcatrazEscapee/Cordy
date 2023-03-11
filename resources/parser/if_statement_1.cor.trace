@@ -5,7 +5,5 @@ L1: 0000 Int(2) -> 3
 L2: 0004 NativeFunction(Print)
     0005 Str(1) -> "yes"
     0006 OpFuncEval(1)
-L3: 0007 Jump(9)
-    0008 Nil
-    0009 Pop
-    0010 Exit
+L3: 0007 Pop
+    0008 Exit

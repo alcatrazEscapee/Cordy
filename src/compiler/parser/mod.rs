@@ -537,14 +537,16 @@ impl Parser<'_> {
         self.push_delayed_pop();
         self.parse_expression();
 
+        let jump_if_false = self.reserve(); // placeholder for jump to the beginning of an if branch, if it exists
+
         if let Some(KeywordThen) = self.peek() {
             // If we see a top-level `if <expression> then`, we want to consider this an expression, with a top level `if-then-else` statement
-            // We duplicate the structure here, as there's not many optimizations we could've performed if we treat this as a top-level expression
-            let jump_if_false_pop = self.reserve();
-            self.expect(KeywordThen);
+            // We duplicate the structure here, as there's not many optimizations we could've performed if we treat this as a top-level expression.
+            // Note that unlike `if { }`, an `if then else` **does** count as an expression, and leaves a value on the stack, so we set the flag for delay pop = true
+            self.advance();
             self.parse_expression(); // Value if true
             let jump = self.reserve();
-            self.fix_jump(jump_if_false_pop, JumpIfFalsePop);
+            self.fix_jump(jump_if_false, JumpIfFalsePop);
             self.expect(KeywordElse);
             self.parse_expression(); // Value if false
             self.fix_jump(jump, Jump);
@@ -552,16 +554,8 @@ impl Parser<'_> {
             return;
         }
 
-
-        let jump_if_false = self.reserve(); // placeholder for jump to the beginning of an if branch, if it exists
         self.parse_block_statement();
-
-        // We treat `if` statements as expressions - each branch will create an value on the stack, and we set this flag at the end of parsing the `if`
-        // But, if we didn't delay a `Pop`, we need to push a fake `Nil` onto the stack to maintain the stack size
-        if !self.delay_pop_from_expression_statement {
-            self.delay_pop_from_expression_statement = true;
-            self.push(Nil);
-        }
+        self.push_delayed_pop();
 
         // `elif` can be de-sugared to else { if <expr> { ... } else { ... } }
         // The additional scope around the else {} can be dropped as it doesn't contain anything already in a scope
@@ -571,7 +565,6 @@ impl Parser<'_> {
                 // Don't advance, as `parse_if_statement()` will advance the first token
                 let jump = self.reserve();
                 self.fix_jump(jump_if_false, JumpIfFalsePop);
-                self.delay_pop_from_expression_statement = false;
                 self.parse_if_statement();
                 self.fix_jump(jump, Jump);
             },
@@ -580,20 +573,13 @@ impl Parser<'_> {
                 self.advance();
                 let jump = self.reserve();
                 self.fix_jump(jump_if_false, JumpIfFalsePop);
-                self.delay_pop_from_expression_statement = false;
                 self.parse_block_statement();
-                if !self.delay_pop_from_expression_statement {
-                    self.delay_pop_from_expression_statement = true;
-                    self.push(Nil);
-                }
+                self.push_delayed_pop();
                 self.fix_jump(jump, Jump);
             },
             _ => {
-                // No `else`, but we need to wire in a fake `else` statement which just pushes `Nil` so each branch still pushes a value
-                let jump = self.reserve();
+                // No `else`, but we still need to fix the initial jump
                 self.fix_jump(jump_if_false, JumpIfFalsePop);
-                self.push(Nil);
-                self.fix_jump(jump, Jump);
             },
         }
     }
