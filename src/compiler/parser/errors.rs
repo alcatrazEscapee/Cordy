@@ -41,17 +41,22 @@ impl ParserError {
             ExpectedUnderscoreOrVariableNameAfterVariadicInPattern(it) |
             ExpectedUnderscoreOrVariableNameOrPattern(it) |
             ExpectedAnnotationOrNamedFunction(it) |
-            ExpectedAnnotationOrAnonymousFunction(it) => it.is_none(),
+            ExpectedAnnotationOrAnonymousFunction(it) |
+            ExpectedStructNameAfterStruct(it) |
+            ExpectedFieldNameAfterArrow(it) => it.is_none(),
 
             LocalVariableConflict(_) |
             LocalVariableConflictWithNativeFunction(_) |
-            UndeclaredIdentifier(_) => false,
+            UndeclaredIdentifier(_) |
+            DuplicateFieldName(_) |
+            InvalidFieldName(_) => false,
 
             InvalidAssignmentTarget |
             MultipleVariadicTermsInPattern |
             LetWithPatternBindingNoExpression |
             BreakOutsideOfLoop |
-            ContinueOutsideOfLoop => false,
+            ContinueOutsideOfLoop |
+            StructNotInGlobalScope => false,
 
             Runtime(_) => false,
         }
@@ -89,16 +94,21 @@ pub enum ParserErrorType {
     ExpectedUnderscoreOrVariableNameOrPattern(Option<ScanToken>),
     ExpectedAnnotationOrNamedFunction(Option<ScanToken>),
     ExpectedAnnotationOrAnonymousFunction(Option<ScanToken>),
+    ExpectedStructNameAfterStruct(Option<ScanToken>),
+    ExpectedFieldNameAfterArrow(Option<ScanToken>),
 
     LocalVariableConflict(String),
     LocalVariableConflictWithNativeFunction(String),
     UndeclaredIdentifier(String),
+    DuplicateFieldName(String),
+    InvalidFieldName(String),
 
     InvalidAssignmentTarget,
     MultipleVariadicTermsInPattern,
     LetWithPatternBindingNoExpression,
     BreakOutsideOfLoop,
     ContinueOutsideOfLoop,
+    StructNotInGlobalScope,
 
     Runtime(Box<RuntimeError>),
 }

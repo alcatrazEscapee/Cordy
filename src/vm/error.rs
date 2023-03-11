@@ -17,8 +17,10 @@ pub enum RuntimeError {
     ValueIsNotFunctionEvaluable(Value),
 
     IncorrectNumberOfFunctionArguments(FunctionImpl, u8),
-    IncorrectNumberOfArguments(NativeFunction, u8, u8),
+    IncorrectNumberOfArguments(NativeFunction, u8, u8), // actual, expected
     IncorrectNumberOfArgumentsVariadicAtLeastOne(NativeFunction),
+    IncorrectNumberOfStructArguments(String, u8, u8), // actual, expected
+    IncorrectNumberOfGetFieldArguments(String, u8, u8), // actual, expected
 
     ValueErrorIndexOutOfBounds(i64, usize),
     ValueErrorStepCannotBeZero,
@@ -41,6 +43,7 @@ pub enum RuntimeError {
     TypeErrorBinaryOp(BinaryOp, Value, Value),
     TypeErrorBinaryIs(Value, Value),
     TypeErrorCannotConvertToInt(Value),
+    TypeErrorFieldNotPresentOnValue(Value, String, bool), // value, field name, is the value to be printed with to_repr_str()?
 
     TypeErrorArgMustBeInt(Value),
     TypeErrorArgMustBeStr(Value),

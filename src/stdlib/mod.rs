@@ -762,12 +762,15 @@ fn type_of(value: Value) -> Value {
         Value::Heap(_) => Heap.to_value(),
         Value::Vector(_) => Vector.to_value(),
 
+        Value::Struct(it) => Value::StructType(it.unbox().type_impl.clone()), // Structs return their type constructor
+        Value::StructType(_) => Function.to_value(), // And the type constructor returns `function`
+
         Value::Range(_) => Range.to_value(),
         Value::Enumerate(_) => Enumerate.to_value(),
 
         x @ (Value::Iter(_) | Value::Memoized(_)) => panic!("{:?} is synthetic and cannot have type_of() called on it", x),
 
-        Value::Function(_) | Value::PartialFunction(_) | Value::NativeFunction(_) | Value::PartialNativeFunction(_, _) | Value::Closure(_) => Function.to_value(),
+        Value::Function(_) | Value::PartialFunction(_) | Value::NativeFunction(_) | Value::PartialNativeFunction(_, _) | Value::Closure(_) | Value::GetField(_) => Function.to_value(),
     }
 }
 

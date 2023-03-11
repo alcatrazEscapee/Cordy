@@ -15,6 +15,7 @@ use crate::vm::error::RuntimeError;
 
 use Value::{*};
 use RuntimeError::{*};
+use crate::compiler::Fields;
 
 type ValueResult = Result<Value, Box<RuntimeError>>;
 
@@ -36,6 +37,11 @@ pub enum Value {
     Heap(Mut<HeapImpl>), // `List` functions as both Array + Deque, but that makes it un-viable for a heap. So, we have a dedicated heap structure
     Vector(Mut<Vec<Value>>), // `Vector` is a fixed-size list (in theory, not in practice), that most operations will behave elementwise on
 
+    /// A mutable instance of a struct - basically a named tuple.
+    Struct(Mut<StructImpl>),
+    /// The constructor / single type instance of a struct. This can be invoked to create new instances.
+    StructType(Rc<StructTypeImpl>),
+
     // Iterator Types (Immutable)
     Range(Box<RangeImpl>),
 
@@ -55,6 +61,10 @@ pub enum Value {
     /// It will only ever be present as the first partial argument for a `SyntheticMemoizedFunction` native function.
     Memoized(Box<MemoizedImpl>),
 
+    /// A unique type for a partially evaluated `->` operator, i.e. `(->some_field)`
+    /// The parameter is a field index. The only use of this type is as a function, where it shortcuts to a `GetField` operation.
+    GetField(u32),
+
     // Functions
     Function(Rc<FunctionImpl>),
     PartialFunction(Box<PartialFunctionImpl>),
@@ -70,6 +80,7 @@ impl Value {
 
     pub fn partial(func: Value, args: Vec<Value>) -> Value { PartialFunction(Box::new(PartialFunctionImpl { func, args: args.into_iter().map(|v| Box::new(v)).collect() }))}
     pub fn closure(func: Rc<FunctionImpl>) -> Value { Closure(Box::new(ClosureImpl { func, environment: Vec::new() })) }
+    pub fn instance(type_impl: Rc<StructTypeImpl>, values: Vec<Value>) -> Value { Struct(Mut::new(StructImpl { type_index: type_impl.type_index, type_impl, values }))}
 
     /// Creates a memoized `PartialNativeFunction`, which wraps the provided function `func`, as a memoized function.
     pub fn memoized(func: Value) -> Value {
@@ -120,11 +131,19 @@ impl Value {
             Heap(v) => format!("[{}]", v.unbox().heap.iter().map(|t| t.0.to_repr_str()).join(", ")),
             Vector(v) => format!("({})", v.unbox().iter().map(|t| t.to_repr_str()).join(", ")),
 
+            Struct(it) => {
+                let it = it.unbox();
+                format!("{}({})", it.type_impl.name.as_str(), it.values.iter().zip(it.type_impl.field_names.iter()).map(|(v, k)| format!("{}={}", k, v.to_repr_str())).join(", "))
+            },
+            StructType(it) => format!("struct {}({})", it.name.clone(), it.field_names.join(", ")),
+
             Range(r) => if r.step == 0 { String::from("range(empty)") } else { format!("range({}, {}, {})", r.start, r.stop, r.step) },
             Enumerate(v) => format!("enumerate({})", v.to_repr_str()),
 
             Iter(_) => format!("<synthetic> iterator"),
             Memoized(_) => format!("<synthetic> memoized"),
+
+            GetField(_) => String::from("(->)"),
 
             Function(f) => (*f).as_ref().borrow().as_str(),
             PartialFunction(f) => (*f).as_ref().borrow().func.to_repr_str(),
@@ -146,9 +165,13 @@ impl Value {
             Dict(_) => "dict",
             Heap(_) => "heap",
             Vector(_) => "vector",
+            Struct(_) => "struct",
+            StructType(_) => "struct type",
             Range(_) => "range",
             Enumerate(_) => "enumerate",
-            Iter(_) | Memoized(_) => "synthetic",
+            Iter(_) => "iter",
+            Memoized(_) => "memoized",
+            GetField(_) => "get field",
             Function(_) => "function",
             PartialFunction(_) => "partial function",
             NativeFunction(_) => "native function",
@@ -171,11 +194,12 @@ impl Value {
             Set(it) => !it.unbox().set.is_empty(),
             Dict(it) => !it.unbox().dict.is_empty(),
             Heap(it) => !it.unbox().heap.is_empty(),
+            Struct(_) | StructType(_) => true,
             Range(it) => !it.is_empty(),
             Enumerate(it) => (**it).as_bool(),
             Iter(_) | Memoized(_) => panic!("{:?} is a synthetic type should not have as_bool() invoked on it", self),
             Vector(v) => v.unbox().is_empty(),
-            Function(_) | PartialFunction(_) | NativeFunction(_) | PartialNativeFunction(_, _) | Closure(_) => true,
+            GetField(_) | Function(_) | PartialFunction(_) | NativeFunction(_) | PartialNativeFunction(_, _) | Closure(_) => true,
         }
     }
 
@@ -307,6 +331,35 @@ impl Value {
             Range(it) => Ok(it.len()),
             Enumerate(it) => it.len(),
             _ => TypeErrorArgMustBeIterable(self.clone()).err()
+        }
+    }
+
+    pub fn get_field(self: Self, fields: &Fields, field_index: u32) -> ValueResult {
+        match self {
+            Struct(it) => {
+                let mut it = it.unbox_mut();
+                match fields.get_field_offset(it.type_index, field_index) {
+                    Some(field_offset) => Ok(it.get_field(field_offset)),
+                    None => TypeErrorFieldNotPresentOnValue(StructType(it.type_impl.clone()), fields.get_field_name(field_index), true).err()
+                }
+            },
+            _ => TypeErrorFieldNotPresentOnValue(self, fields.get_field_name(field_index), false).err()
+        }
+    }
+
+    pub fn set_field(self: Self, fields: &Fields, field_index: u32, value: Value) -> ValueResult {
+        match self {
+            Struct(it) => {
+                let mut it = it.unbox_mut();
+                match fields.get_field_offset(it.type_index, field_index) {
+                    Some(field_offset) => {
+                        it.set_field(field_offset, value.clone());
+                        Ok(value)
+                    },
+                    None => TypeErrorFieldNotPresentOnValue(StructType(it.type_impl.clone()), fields.get_field_name(field_index), true).err()
+                }
+            },
+            _ => TypeErrorFieldNotPresentOnValue(self, fields.get_field_name(field_index), false).err()
         }
     }
 
@@ -654,6 +707,62 @@ impl Hash for HeapImpl {
         }
     }
 }
+
+/// The `Value` type for a instance of a struct.
+/// It holds the `type_index` for easy access, but also the `type_impl`, in order to access fields such as the struct name or field names, when converting to a string.
+#[derive(Debug, Clone)]
+pub struct StructImpl {
+    pub type_index: u32,
+    pub type_impl: Rc<StructTypeImpl>,
+    values: Vec<Value>,
+}
+
+impl StructImpl {
+    fn get_field(self: &mut Self, field_offset: usize) -> Value {
+        self.values[field_offset].clone()
+    }
+
+    fn set_field(self: &mut Self, field_offset: usize, value: Value) {
+        self.values[field_offset] = value;
+    }
+}
+
+impl PartialEq<Self> for StructImpl {
+    fn eq(&self, other: &Self) -> bool {
+        self.type_index == other.type_index && self.values == other.values
+    }
+}
+
+impl Eq for StructImpl {}
+
+impl Hash for StructImpl {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.type_index.hash(state);
+        self.values.hash(state);
+    }
+}
+
+/// The `Value` type for a struct constructor. It is a single instance, immutable object which only holds metadata about the struct itself.
+#[derive(Debug, Eq)]
+pub struct StructTypeImpl {
+    pub name: String,
+    pub field_names: Vec<String>,
+
+    pub type_index: u32,
+}
+
+impl PartialEq for StructTypeImpl {
+    fn eq(&self, other: &Self) -> bool {
+        self.type_index == other.type_index
+    }
+}
+
+impl Hash for StructTypeImpl {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.type_index.hash(state);
+    }
+}
+
 
 /// ### Range Type
 ///

@@ -45,6 +45,7 @@ This language is inspired by parts from Python, Rust, Haskell, Java, and JavaScr
     - `dict`: A mapping from keys to values with O(1) lookups, along with insertion-order iteration.
     - `heap`: A min-heap.
     - `vector`: A `list` variant which behaves elementwise with all basic operators.
+- And user definable named tuple types, with the `struct` keyword.
 - Expressions should be familiar from most imperative programming languages, as should be operator precedence.
     - Operators on their own are functions, so `(+)` is a two argument function which adds values.
     - `%` is mathematical modulo, and `/` rounds to negative infinity, and `-(a / b) == -a / b == a / -b` (similar to Python)
@@ -60,7 +61,7 @@ Below is a solution to [Advent of Code 2022 Day 1 Part 1](https://adventofcode.c
 
 ```rust
 'input.txt' . read_text . split ('\n\n')
-    . map(fn(g) -> g . split('\n') . map(int) . sum )
+    . map(fn(g) -> g . split('\n') . map(int) . sum)
     . max
     . print
 ```
@@ -86,6 +87,4 @@ For a more comprehensive documentation, see the [language documentation](./docs/
 
 ### To-Do
 
-- implement basic structs: compile time verified access with `->`, type-dispatched at runtime.
-- Even MORE standard library functions
-  - regex match, find, and replace -> just on normal strings. Make `\` less required for escaping (only escape if needed), or add regex literals, maybe with `/`
+- regex match, find, and replace -> just on normal strings. Make `\` less required for escaping (only escape if needed), or add regex literals, maybe with `/`

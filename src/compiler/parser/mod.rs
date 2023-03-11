@@ -8,14 +8,13 @@ use crate::compiler::parser::semantic::{LateBoundGlobal, LValue, LValueReference
 use crate::compiler::parser::optimizer::Optimize;
 use crate::compiler::scanner::{ScanResult, ScanToken};
 use crate::stdlib::NativeFunction;
-use crate::vm::{FunctionImpl, Opcode};
+use crate::vm::{FunctionImpl, Opcode, StructTypeImpl};
 use crate::vm::operator::{BinaryOp, UnaryOp};
 use crate::trace;
 use crate::reporting::{Location, Locations};
 
-
 pub use crate::compiler::parser::errors::{ParserError, ParserErrorType};
-pub use crate::compiler::parser::semantic::Locals;
+pub use crate::compiler::parser::semantic::{Locals, Fields};
 
 use NativeFunction::{*};
 use Opcode::{*};
@@ -52,7 +51,7 @@ pub fn parse(enable_optimization: bool, scan_result: ScanResult) -> CompileResul
 pub fn parse_incremental(scan_result: ScanResult, params: &mut CompileParameters, rule: ParseRule) -> Vec<ParserError> {
     let mut errors: Vec<ParserError> = Vec::new();
 
-    rule(&mut Parser::new(params.enable_optimization, scan_result.tokens, params.code, params.locals, &mut errors, params.strings, params.constants, params.functions, params.locations, &mut Vec::new(), params.globals));
+    rule(&mut Parser::new(params.enable_optimization, scan_result.tokens, params.code, params.locals, params.fields, &mut errors, params.strings, params.constants, params.functions, params.structs, params.locations, &mut Vec::new(), params.globals));
 
     errors
 }
@@ -66,13 +65,15 @@ fn parse_rule(enable_optimization: bool, tokens: Vec<(Location, ScanToken)>, rul
         strings: vec![String::new()],
         constants: vec![0, 1],
         functions: Vec::new(),
+        structs: Vec::new(),
 
         locations: Vec::new(),
         globals: Vec::new(),
         locals: Vec::new(),
+        fields: Fields::new(),
     };
 
-    rule(&mut Parser::new(enable_optimization, tokens, &mut result.code, &mut Locals::empty(), &mut result.errors, &mut result.strings, &mut result.constants, &mut result.functions, &mut result.locations, &mut result.locals, &mut result.globals));
+    rule(&mut Parser::new(enable_optimization, tokens, &mut result.code, &mut Locals::empty(), &mut result.fields, &mut result.errors, &mut result.strings, &mut result.constants, &mut result.functions, &mut result.structs, &mut result.locations, &mut result.locals, &mut result.globals));
 
     result
 }
@@ -114,6 +115,11 @@ pub struct Parser<'a> {
     /// While this mirrors the call stack it may not be representative. The only thing we can assume is that when a function is declared, all locals in the enclosing function are accessible.
     locals: &'a mut Vec<Locals>,
 
+    /// A table of all struct fields and types. This is used to resolve `-> <name>` references at compile time, to a `field index`. At runtime it is used as a lookup to resolve a `(type index, field index)` into a `field offset`, which is used to access the underlying field.
+    fields: &'a mut Fields,
+    /// A vector of all baked structs, known to the runtime. These are appended as a new struct is encountered.
+    structs: &'a mut Vec<Rc<StructTypeImpl>>,
+
     late_bound_globals: Vec<Reference<LateBoundGlobal>>, // Table of all late bound globals, as they occur.
     synthetic_local_index: usize, // A counter for unique synthetic local variables (`$1`, `$2`, etc.)
     scope_depth: u32, // Current scope depth
@@ -131,7 +137,7 @@ pub struct Parser<'a> {
 
 impl Parser<'_> {
 
-    fn new<'a, 'b : 'a>(enable_optimization: bool, tokens: Vec<(Location, ScanToken)>, output: &'b mut Vec<Opcode>, locals: &'b mut Vec<Locals>, errors: &'b mut Vec<ParserError>, strings: &'b mut Vec<String>, constants: &'b mut Vec<i64>, baked_functions: &'b mut Vec<Rc<FunctionImpl>>, locations: &'b mut Locations, locals_reference: &'b mut Vec<String>, globals_reference: &'b mut Vec<String>) -> Parser<'a> {
+    fn new<'a, 'b : 'a>(enable_optimization: bool, tokens: Vec<(Location, ScanToken)>, output: &'b mut Vec<Opcode>, locals: &'b mut Vec<Locals>, fields: &'b mut Fields, errors: &'b mut Vec<ParserError>, strings: &'b mut Vec<String>, constants: &'b mut Vec<i64>, baked_functions: &'b mut Vec<Rc<FunctionImpl>>, structs: &'b mut Vec<Rc<StructTypeImpl>>, locations: &'b mut Locations, locals_reference: &'b mut Vec<String>, globals_reference: &'b mut Vec<String>) -> Parser<'a> {
         Parser {
             enable_optimization,
 
@@ -152,6 +158,8 @@ impl Parser<'_> {
             restore_state: None,
 
             locals,
+            fields,
+            structs,
             late_bound_globals: Vec::new(),
 
             synthetic_local_index: 0,
@@ -251,6 +259,7 @@ impl Parser<'_> {
                     self.advance();
                     self.parse_block_statement();
                 },
+                Some(KeywordStruct) => self.parse_struct_statement(),
                 Some(CloseBrace) => break,
                 Some(KeywordExit) => {
                     self.push_delayed_pop();
@@ -279,6 +288,67 @@ impl Parser<'_> {
         self.pop_locals(Some(self.scope_depth), true, true, true);
         self.scope_depth -= 1;
         self.expect_resync(CloseBrace);
+    }
+
+    fn parse_struct_statement(self: &mut Self) {
+        // Structs can only be declared in global scope
+        // While technically we could support scoped structs - the struct constructor becomes a local, there, the use case is just not there
+        // The struct object and fields would have to be globally known anyway.
+        self.push_delayed_pop();
+        self.advance(); // Consume `struct`
+
+        if self.function_depth != 0 || self.scope_depth != 0 {
+            self.semantic_error(StructNotInGlobalScope);
+            return;
+        }
+
+        let type_name: String = match self.peek() {
+            Some(Identifier(_)) => self.take_identifier(),
+            _ => return,
+        };
+
+        // Declare a local for the struct in the global scope
+        match self.declare_local(type_name.clone()) {
+            Some(local) => self.init_local(local),
+            _ => return,
+        }
+
+        // Declare a type index, as at this point we know we're in totally global scope, and the type name must be unique
+        let type_index: u32 = self.structs.len() as u32;
+        let mut unique_fields: Vec<String> = Vec::new();
+
+        self.expect(OpenParen);
+
+        loop {
+            match self.peek() {
+                Some(Identifier(_)) => {
+                    let name: String = self.take_identifier();
+
+                    if unique_fields.contains(&name) {
+                        self.semantic_error(DuplicateFieldName(name))
+                    } else {
+                        self.declare_field(type_index, unique_fields.len(), name.clone());
+                        unique_fields.push(name);
+                    }
+
+                    // Consume `,` and allow trailing comma
+                    match self.peek() {
+                        Some(Comma) => self.skip(),
+                        _ => {},
+                    }
+                },
+                _ => break, // `CloseParen` also breaks the loop, and hits resync below
+            }
+        }
+
+        self.push(Struct(type_index));
+        self.structs.push(Rc::new(StructTypeImpl {
+            name: type_name,
+            field_names: unique_fields,
+            type_index,
+        }));
+
+        self.expect_resync(CloseParen);
     }
 
     fn parse_annotated_named_function(self: &mut Self) {
@@ -1003,6 +1073,16 @@ impl Parser<'_> {
             Some(DoubleEquals) => binary = Some(OperatorEqual),
             Some(NotEquals) => binary = Some(OperatorNotEqual),
 
+            // This is a unique case, as we can only partially evaluate this with an identifier, not an expression.
+            // It also involves a unique operator, as it cannot be evaluated as a normal native operator (since again, it takes a field index, not a expression)
+            // This operator also cannot stand alone: `(->)` is not valid, but `(->x)` is, presuming a field `x` exists.
+            Some(Arrow) => {
+                if let Some((loc, field_index)) = self.parse_expr_2_field_access() {
+                    self.expect(CloseParen);
+                    return Some(Expr::get_field_function(loc, field_index))
+                }
+            },
+
             _ => {},
         }
 
@@ -1349,7 +1429,14 @@ impl Parser<'_> {
                     self.expect(CloseSquareBracket);
                     expr = expr.slice_step(loc_start | self.prev_location(), arg1, arg2, arg3);
                 },
-                _ => break
+                _ => match self.peek() { // Re-match, since this is allowed to break over newlines
+                    Some(Arrow) => {
+                        if let Some((loc, field_index)) = self.parse_expr_2_field_access() {
+                            expr = expr.get_field(loc, field_index);
+                        }
+                    },
+                    _ => break
+                }
             }
         }
 
@@ -1359,6 +1446,22 @@ impl Parser<'_> {
         }
 
         expr
+    }
+
+    /// Parses a `-> <field>` - either returns a `(Location, field_index)` pairing, or `None` and raises a parse error.
+    fn parse_expr_2_field_access(self: &mut Self) -> Option<(Location, u32)> {
+        let loc_start = self.advance_with(); // Consume `->`
+        match self.peek() {
+            Some(Identifier(_)) => {
+                let field: String = self.take_identifier();
+                match self.resolve_field(&field) {
+                    Some(field_index) => return Some((loc_start | self.prev_location(), field_index)),
+                    None => self.semantic_error(InvalidFieldName(field))
+                }
+            },
+            _ => self.error_with(ExpectedFieldNameAfterArrow)
+        }
+        None
     }
 
     fn parse_expr_3(self: &mut Self) -> Expr {
@@ -1578,11 +1681,13 @@ impl Parser<'_> {
             //
             // PushLocal(a)    => StoreLocal(a, <expr>) -> also works the same for globals, upvalues, and late bound globals
             // Index(a, b)     => StoreArray(a, b, <expr>)
+            // GetField(a, b)  => SetField(a, b, <expr>)
             //
             // If we have a assignment-expression operator, like `+=`, then we need to do it slightly differently:
             //
             // PushLocal(a)    => StoreLocal(Op(PushLocal(a), <expr>)) -> also works the same for globals, upvalues, and late bound globals
-            // Index(a, b)     => SwapArray(a, b, Op, <expr>) -> this is special as it needs to use `OpIndexPeek` for the read, the `StoreArray` for the write
+            // Index(a, b)     => SwapArray(a, b, Op, <expr>) -> this is special as it needs to use `OpIndexPeek` for the read, then `StoreArray` for the write
+            // GetField(a, b)  => SwapField(a, b, Op, <expr>) -> this is special as it needs to use `GetFieldPeek` for the read, then `SetField` for the write
             //
             // **Note**: Assignments are right-associative, so call <expr-10> recursively instead of <expr-9>
             if let Some(BinaryOp::Equal) = maybe_op { // // Direct assignment statement
@@ -1595,6 +1700,10 @@ impl Parser<'_> {
                     Expr(_, ExprType::Index(array, index)) => {
                         let rhs = self.parse_expr_10();
                         Expr::assign_array(loc, *array, *index, rhs)
+                    },
+                    Expr(_, ExprType::GetField(lhs, field_index)) => {
+                        let rhs = self.parse_expr_10();
+                        lhs.set_field(loc, field_index, rhs)
                     },
                     _ => {
                         self.error(InvalidAssignmentTarget);
@@ -1613,9 +1722,12 @@ impl Parser<'_> {
                         })
                     },
                     Expr(_, ExprType::Index(array, index)) => {
-                        // Array op assign uses a entire Expr token, as it needs to emit IndexPeek instead of Index
                         let rhs = self.parse_expr_10();
                         Expr::assign_op_array(loc, *array, *index, op, rhs)
+                    },
+                    Expr(_, ExprType::GetField(lhs, field_index)) => {
+                        let rhs = self.parse_expr_10();
+                        lhs.swap_field(loc, field_index, rhs, op)
                     },
                     _ => {
                         self.error(InvalidAssignmentTarget);

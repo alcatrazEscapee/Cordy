@@ -14,7 +14,7 @@ The primitive types in Cordy are:
 - `int`, which is a 64-bit integer. It can be expressed as decimal numbers (`5`), binary (`0b101`), or hexidecimal (`0x5`).
 - `str`, which is a UTF-8 string. Like Python, there is no separate `char` data type, instead a string is a sequence of single element strings.
 
-All primitive types are **immutable**. In addition to these, Cordy has a number of [Collection Types](#collection-types)
+All primitive types are **immutable**. In addition to these, Cordy has a number of [Collection Types](#collection-types), and allows the creation of basic user defined types in the form of [Structs](#structs).
 
 ### Expressions
 
@@ -46,7 +46,7 @@ All operators are left associative (except `=` for assigning variables). Their p
 | Precedence | Operators                                                                                      | Description                                                                            |
 |------------|------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------|
 | 1          | `[]`, `()`, `if then else`                                                                     | Array Access, Function Evaluation, Ternary `if`                                        |
-| 2          | `-`, `!`, `~`                                                                                  | Unary Negation, Logical Not, and Bitwise Not                                           |
+| 2          | `-`, `!`, `~`, `->`                                                                            | Unary Negation, Logical Not, Bitwise Not, Struct Access                                |
 | 3          | `*`, `/`, `%`, `**`, `is`, `in`, `not in`                                                      | Multiplication, Division, Modulo, Power, Is In, Not In                                 |
 | 4          | `+`, `-`                                                                                       | Addition, Subtraction                                                                  |
 | 5          | `<<`, `>>`                                                                                     | Left Shift, Right Shift                                                                |
@@ -387,4 +387,42 @@ Assertion Failed: message goes here
   
 1 | assert false : 'message goes here'
 2 |        ^^^^^
+```
+
+### Structs
+
+A `struct` is a user definable type which is able to have named fields. It can be declared much like a function, with the keyword `struct`, followed by the struct name, and then the field names in `(` parenthesis `)`. Structs have a few important properties:
+
+- A struct can only be declared as a global variable, and thus can be referenced from anywhere in the program.
+- The struct name can be invoked as a function, which creates a new instance of the struct with the provided default values for each field.
+- Structs `typeof`, `is`, and `==` operators treat different structs as entirely different types.
+
+Examples:
+
+```rust
+// An empty struct with no fields.
+struct Empty()
+
+// The only instance of Empty() that can be created
+let empty = Empty()
+
+// A struct with two fields `x` and `y`
+struct Point2D(x, y)
+
+// prints `Point2D(x=3, y=4)`
+let pos_3_4 = Point2D(3, 4)
+pos_3_4 . print
+```
+
+In order to access the field of a struct, the `->` operator can be used. This *can* be partially right evaluated, i.e. `->foo`. Note that the name of a field must be declared before it can be used, but unlike variables and functions, the name of a field can shadow other variables and native function names.
+
+```rust
+struct Foo(bar, baz)
+
+let foo = Foo('bar', 'baz')
+
+foo->bar . print // prints 'bar'
+
+let get_baz = (->baz)
+get_baz(foo) . print // prints 'baz'
 ```

@@ -33,6 +33,10 @@ pub enum ExprType {
     Slice(Arg, Arg, Arg),
     SliceWithStep(Arg, Arg, Arg, Arg),
     IfThenElse(Arg, Arg, Arg),
+    GetField(Arg, u32),
+    SetField(Arg, u32, Arg),
+    SwapField(Arg, u32, Arg, BinaryOp),
+    GetFieldFunction(u32),
 
     // Assignments
     Assignment(LValueReference, Arg),
@@ -100,6 +104,10 @@ impl Expr {
     pub fn slice(self: Self, loc: Location, arg1: Expr, arg2: Expr) -> Expr { Expr(loc, ExprType::Slice(Box::new(self), Box::new(arg1), Box::new(arg2))) }
     pub fn slice_step(self: Self, loc: Location, arg1: Expr, arg2: Expr, arg3: Expr) -> Expr { Expr(loc, ExprType::SliceWithStep(Box::new(self), Box::new(arg1), Box::new(arg2), Box::new(arg3))) }
     pub fn if_then_else(self: Self, if_true: Expr, if_false: Expr) -> Expr { Expr(Location::empty(), ExprType::IfThenElse(Box::new(self), Box::new(if_true), Box::new(if_false))) }
+    pub fn get_field(self: Self, loc: Location, field_index: u32) -> Expr { Expr(loc, ExprType::GetField(Box::new(self), field_index)) }
+    pub fn set_field(self: Self, loc: Location, field_index: u32, rhs: Expr) -> Expr { Expr(loc, ExprType::SetField(Box::new(self), field_index, Box::new(rhs))) }
+    pub fn swap_field(self: Self, loc: Location, field_index: u32, rhs: Expr, op: BinaryOp) -> Expr { Expr(loc, ExprType::SwapField(Box::new(self), field_index, Box::new(rhs), op)) }
+    pub fn get_field_function(loc: Location, field_index: u32) -> Expr { Expr(loc, ExprType::GetFieldFunction(field_index)) }
 
     pub fn logical(self: Self, loc: Location, op: BinaryOp, rhs: Expr) -> Expr {
         match op {
