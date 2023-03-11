@@ -303,7 +303,7 @@ impl Parser<'_> {
         match self.peek() {
             Some(At) => self.parse_annotated_named_function(),
             Some(KeywordFn) => self.parse_named_function(),
-            _ => self.error_with(|t| ExpectedAnnotationOrNamedFunction(t)),
+            _ => self.error_with(ExpectedAnnotationOrNamedFunction),
         }
         self.push(OpFuncEval(1)) // Evaluate the annotation
     }
@@ -344,7 +344,7 @@ impl Parser<'_> {
             Some(At) => self.parse_annotated_expression_function(),
             Some(KeywordFn) => self.parse_expression_function(),
             _ => {
-                self.error_with(|t| ExpectedAnnotationOrAnonymousFunction(t));
+                self.error_with(ExpectedAnnotationOrAnonymousFunction);
                 Expr::nil()
             },
         };
@@ -372,7 +372,7 @@ impl Parser<'_> {
         match self.peek() {
             Some(Identifier(_)) => Some(self.take_identifier()),
             _ => {
-                self.error_with(|t| ExpectedFunctionNameAfterFn(t));
+                self.error_with(ExpectedFunctionNameAfterFn);
                 None
             }
         }
@@ -389,7 +389,7 @@ impl Parser<'_> {
             match self.parse_lvalue() {
                 Some(lvalue) => args.push(lvalue),
                 _ => {
-                    self.error_with(|t| ExpectedParameterOrEndOfList(t));
+                    self.error_with(ExpectedParameterOrEndOfList);
                     break
                 },
             }
@@ -398,7 +398,7 @@ impl Parser<'_> {
                 Some(Comma) => self.skip(),
                 Some(CloseParen) => break,
                 _ => {
-                    self.error_with(|t| ExpectedCommaOrEndOfParameters(t));
+                    self.error_with(ExpectedCommaOrEndOfParameters);
                     break
                 },
             }
@@ -468,7 +468,7 @@ impl Parser<'_> {
                 false
             },
             _ => {
-                self.error_with(|t| ExpectedFunctionBlockOrArrowAfterFn(t));
+                self.error_with(ExpectedFunctionBlockOrArrowAfterFn);
                 true
             }
         };
@@ -801,7 +801,7 @@ impl Parser<'_> {
             self.parse_expression();
             self.delay_pop_from_expression_statement = true;
         } else {
-            self.error_with(|t| ExpectedStatement(t))
+            self.error_with(ExpectedStatement)
         }
     }
 
@@ -843,7 +843,7 @@ impl Parser<'_> {
                         Some(LValue::VarEmpty)
                     },
                     _ => {
-                        self.error_with(|t| ExpectedUnderscoreOrVariableNameAfterVariadicInPattern(t));
+                        self.error_with(ExpectedUnderscoreOrVariableNameAfterVariadicInPattern);
                         None
                     }
                 }
@@ -855,7 +855,7 @@ impl Parser<'_> {
                 terms
             },
             _ => {
-                self.error_with(|t| ExpectedUnderscoreOrVariableNameOrPattern(t));
+                self.error_with(ExpectedUnderscoreOrVariableNameOrPattern);
                 None
             }
         }
@@ -955,7 +955,7 @@ impl Parser<'_> {
             Some(KeywordFn) => self.parse_expression_function(),
             Some(KeywordIf) => self.parse_expr_1_inline_if_then_else(),
             _ => {
-                self.error_with(|t| ExpectedExpressionTerminal(t));
+                self.error_with(ExpectedExpressionTerminal);
                 Expr::nil()
             },
         }
@@ -1117,7 +1117,7 @@ impl Parser<'_> {
                     }
                 },
                 _ => {
-                    self.error_with(|t| ExpectedCommaOrEndOfVector(t));
+                    self.error_with(ExpectedCommaOrEndOfVector);
                     break
                 }
             }
@@ -1138,7 +1138,7 @@ impl Parser<'_> {
                     match self.peek() {
                         Some(Comma) => self.skip(), // Allow trailing commas, as this loops to the top again
                         Some(CloseSquareBracket) => {}, // Skip
-                        _ => self.error_with(|t| ExpectedCommaOrEndOfList(t)),
+                        _ => self.error_with(ExpectedCommaOrEndOfList),
                     }
                 },
                 None => break,
@@ -1193,9 +1193,9 @@ impl Parser<'_> {
                         Some(Comma) => self.skip(), // Allow trailing commas, as this loops to the top again
                         Some(CloseBrace) => {}, // Skip
                         _ => if is_dict {
-                            self.error_with(|t| ExpectedCommaOrEndOfDict(t))
+                            self.error_with(ExpectedCommaOrEndOfDict)
                         } else {
-                            self.error_with(|t| ExpectedCommaOrEndOfSet(t))
+                            self.error_with(ExpectedCommaOrEndOfSet)
                         },
                     }
                 },
@@ -1271,13 +1271,13 @@ impl Parser<'_> {
                                 }
                                 match self.peek() {
                                     Some(CloseParen) => self.skip(),
-                                    _ => self.error_with(|t| ExpectedCommaOrEndOfArguments(t)),
+                                    _ => self.error_with(ExpectedCommaOrEndOfArguments),
                                 }
 
                                 expr = expr.eval(loc_start | self.prev_location(), args)
                             }
                         }
-                        _ => self.error_with(|t| ExpectedCommaOrEndOfArguments(t)),
+                        _ => self.error_with(ExpectedCommaOrEndOfArguments),
                     }
                 },
                 Some(OpenSquareBracket) => {
@@ -1300,7 +1300,7 @@ impl Parser<'_> {
                             self.advance();
                         },
                         _ => {
-                            self.error_with(|t| ExpectedColonOrEndOfSlice(t));
+                            self.error_with(ExpectedColonOrEndOfSlice);
                             continue
                         },
                     }
@@ -1328,7 +1328,7 @@ impl Parser<'_> {
                             self.advance();
                         },
                         _ => {
-                            self.error_with(|t| ExpectedColonOrEndOfSlice(t));
+                            self.error_with(ExpectedColonOrEndOfSlice);
                             continue
                         },
                     }
