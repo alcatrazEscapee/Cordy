@@ -557,6 +557,7 @@ impl Parser<'_> {
             self.expect(KeywordElse);
             self.parse_expression(); // Value if false
             self.fix_jump(jump, Jump);
+            self.delay_pop_from_expression_statement = true;
             return;
         }
 
