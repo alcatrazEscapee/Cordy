@@ -8,12 +8,8 @@ L4: 0006 Pop
     0007 PushGlobal(0) -> x
     0008 Int(2) -> 10
     0009 Binary(GreaterThan)
-    0010 JumpIfFalsePop(14)
-    0011 Jump(17)
-    0012 Nil
-    0013 Jump(15)
-    0014 Nil
-L5: 0015 Pop
-    0016 Jump(2)
-    0017 Pop
-    0018 Exit
+    0010 JumpIfFalsePop(12)
+    0011 Jump(13)
+L5: 0012 Jump(2)
+    0013 Pop
+    0014 Exit

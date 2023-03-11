@@ -1010,17 +1010,17 @@ mod test {
     #[test] fn test_functions_14() { run_str("fn foo(x) { 'hello ' + x . print } 'world' . foo", "hello world\n"); }
     #[test] fn test_function_implicit_return_01() { run_str("fn foo() { } foo() . print", "nil\n"); }
     #[test] fn test_function_implicit_return_02() { run_str("fn foo() { 'hello' } foo() . print", "hello\n"); }
-    #[test] fn test_function_implicit_return_03() { run_str("fn foo(x) { if x > 1 {} else {} } foo(2) . print", "nil\n"); }
-    #[test] fn test_function_implicit_return_04() { run_str("fn foo(x) { if x > 1 { true } else { false } } foo(2) . print", "true\n"); }
-    #[test] fn test_function_implicit_return_05() { run_str("fn foo(x) { if x > 1 { true } else { false } } foo(0) . print", "false\n"); }
-    #[test] fn test_function_implicit_return_06() { run_str("fn foo(x) { if x > 1 { } else { false } } foo(2) . print", "nil\n"); }
-    #[test] fn test_function_implicit_return_07() { run_str("fn foo(x) { if x > 1 { } else { false } } foo(0) . print", "false\n"); }
-    #[test] fn test_function_implicit_return_08() { run_str("fn foo(x) { if x > 1 { true } else { } } foo(2) . print", "true\n"); }
-    #[test] fn test_function_implicit_return_09() { run_str("fn foo(x) { if x > 1 { true } else { } } foo(0) . print", "nil\n"); }
-    #[test] fn test_function_implicit_return_10() { run_str("fn foo(x) { if x > 1 { 'hello' } } foo(2) . print", "hello\n"); }
-    #[test] fn test_function_implicit_return_11() { run_str("fn foo(x) { if x > 1 { 'hello' } } foo(0) . print", "nil\n"); }
-    #[test] fn test_function_implicit_return_12() { run_str("fn foo(x) { if x > 1 { if true { 'hello' } } } foo(2) . print", "hello\n"); }
-    #[test] fn test_function_implicit_return_13() { run_str("fn foo(x) { if x > 1 { if true { 'hello' } } } foo(0) . print", "nil\n"); }
+    #[test] fn test_function_implicit_return_03() { run_str("fn foo(x) { if x > 1 then nil else 'nope' } foo(2) . print", "nil\n"); }
+    #[test] fn test_function_implicit_return_04() { run_str("fn foo(x) { if x > 1 then true else false } foo(2) . print", "true\n"); }
+    #[test] fn test_function_implicit_return_05() { run_str("fn foo(x) { if x > 1 then true else false } foo(0) . print", "false\n"); }
+    #[test] fn test_function_implicit_return_06() { run_str("fn foo(x) { if x > 1 then nil else false } foo(2) . print", "nil\n"); }
+    #[test] fn test_function_implicit_return_07() { run_str("fn foo(x) { if x > 1 then nil else false } foo(0) . print", "false\n"); }
+    #[test] fn test_function_implicit_return_08() { run_str("fn foo(x) { if x > 1 then true else nil } foo(2) . print", "true\n"); }
+    #[test] fn test_function_implicit_return_09() { run_str("fn foo(x) { if x > 1 then true else nil } foo(0) . print", "nil\n"); }
+    #[test] fn test_function_implicit_return_10() { run_str("fn foo(x) { if x > 1 then 'hello' else nil } foo(2) . print", "hello\n"); }
+    #[test] fn test_function_implicit_return_11() { run_str("fn foo(x) { if x > 1 then 'hello' else nil } foo(0) . print", "nil\n"); }
+    #[test] fn test_function_implicit_return_12() { run_str("fn foo(x) { if x > 1 then if true then 'hello' else nil else nil } foo(2) . print", "hello\n"); }
+    #[test] fn test_function_implicit_return_13() { run_str("fn foo(x) { if x > 1 then if true then 'hello' else nil else nil } foo(0) . print", "nil\n"); }
     #[test] fn test_function_implicit_return_14() { run_str("fn foo(x) { loop { if x > 1 { break } } } foo(2) . print", "nil\n"); }
     #[test] fn test_function_implicit_return_15() { run_str("fn foo(x) { loop { if x > 1 { continue } else { break } } } foo(0) . print", "nil\n"); }
     #[test] fn test_closures_01() { run_str("fn foo() { let x = 'hello' ; fn bar() { x . print } bar() } foo()", "hello\n"); }

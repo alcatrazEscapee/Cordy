@@ -259,21 +259,7 @@ if condition1 {
 }
 ```
 
-Note that `if`, `else` blocks will return the last expression in the block that was executed, meaning they can be used as return values:
-
-```rust
-// These are semantically equivilant
-
-fn foo(x) {
-    if x {
-        'yes'
-    } else {
-        'no'
-    }
-}
-
-fn foo(x) -> if x then 'yes' else 'no'
-```
+Note that `if`, `else` with `{` curly brackets `}` are **not** expressions, and thus don't produce a value, however the `if`, `then`, `else` block is, and so **does** produce a value.
 
 ### Collection Types
 
