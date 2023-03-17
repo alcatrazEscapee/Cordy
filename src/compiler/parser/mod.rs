@@ -208,6 +208,10 @@ impl Parser<'_> {
                 self.raw_output.push(op);
                 self.locations.push(loc);
             }
+            for local in func.locals_reference.drain(..) {
+                self.locals_reference.push(local);
+            }
+
             let tail: usize = self.raw_output.len() - 1;
             let baked: Rc<FunctionImpl> = Rc::new(FunctionImpl::new(head, tail, func.name, func.args));
 
@@ -1743,6 +1747,7 @@ mod tests {
     #[test] fn test_if_statement_4() { run("if_statement_4"); }
     #[test] fn test_invalid_expressions() { run("invalid_expressions"); }
     #[test] fn test_local_assignments() { run("local_assignments"); }
+    #[test] fn test_local_variable_reference() { run("local_variable_reference"); }
     #[test] fn test_local_variables() { run("local_variables"); }
     #[test] fn test_loop_1() { run("loop_1"); }
     #[test] fn test_loop_2() { run("loop_2"); }

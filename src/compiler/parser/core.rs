@@ -319,11 +319,14 @@ impl<'a> Parser<'a> {
 
     pub fn push_with(self: &mut Self, token: Opcode, location: Location) {
         trace::trace_parser!("push {:?}", token);
-        match &token {
-            PushGlobal(id) | StoreGlobal(id) => self.locals_reference.push(self.locals[0].locals[*id as usize].name.clone()),
-            PushLocal(id) | StoreLocal(id) => self.locals_reference.push(self.locals[self.function_depth as usize].locals[*id as usize].name.clone()),
-            _ => {},
-        }
+        match match &token {
+            PushGlobal(id) | StoreGlobal(id) => Some(self.locals[0].locals[*id as usize].name.clone()),
+            PushLocal(id) | StoreLocal(id) => Some(self.locals[self.function_depth as usize].locals[*id as usize].name.clone()),
+            _ => None,
+        } {
+            Some(local) => self.current_locals_reference_mut().push(local),
+            _ => {}
+        };
         self.current_function_mut().push((location, token));
     }
 

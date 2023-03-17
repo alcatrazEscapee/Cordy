@@ -429,6 +429,9 @@ pub struct ParserFunctionImpl {
 
     /// Bytecode for the function body itself
     pub(super) code: Vec<(Location, Opcode)>,
+
+    /// Entries for `locals_reference`, that need to be held until the function code is emitted
+    pub(super) locals_reference: Vec<String>,
 }
 
 
@@ -474,6 +477,7 @@ impl<'a> Parser<'a> {
             name,
             args: args.iter().map(|u| u.to_code_str()).collect(),
             code: Vec::new(),
+            locals_reference: Vec::new(),
         });
         self.last_function_id()
     }
@@ -627,6 +631,14 @@ impl<'a> Parser<'a> {
         match self.current_locals().func {
             Some(func) => &mut self.functions[func].code,
             None => &mut self.output
+        }
+    }
+
+    /// Returns the locals reference of the current function, like `current_function_mut()`
+    pub fn current_locals_reference_mut(self: &mut Self) -> &mut Vec<String> {
+        match self.current_locals().func {
+            Some(func) => &mut self.functions[func].locals_reference,
+            None => self.locals_reference,
         }
     }
 

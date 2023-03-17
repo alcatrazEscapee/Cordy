@@ -1,6 +1,6 @@
 L01: 0000 IncGlobalCount
      0001 Function(0) -> FunctionImpl { head: 7, tail: 14, nargs: 0, name: "foo", args: [] }
-L11: 0002 PushGlobal(0) -> bar
+L11: 0002 PushGlobal(0) -> foo
      0003 OpFuncEval(0)
      0004 Pop
      0005 Pop
@@ -9,7 +9,7 @@ L02: 0007 Int(0) -> 0
 L03: 0008 Function(1) -> FunctionImpl { head: 15, tail: 23, nargs: 0, name: "bar", args: [] }
 L08: 0009 Closure
      0010 CloseLocal(0)
-L09: 0011 PushLocal(1) -> foo
+L09: 0011 PushLocal(1) -> bar
      0012 OpFuncEval(0)
 L10: 0013 LiftUpValue(0)
      0014 Return
