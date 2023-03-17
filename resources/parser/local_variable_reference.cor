@@ -1,0 +1,5 @@
+let global0
+
+fn global1(x) -> x
+
+global1()
