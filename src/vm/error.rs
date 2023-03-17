@@ -60,18 +60,41 @@ impl RuntimeError {
     }
 
     pub fn with_stacktrace(self: Self, ip: usize, call_stack: &Vec<CallFrame>, functions: &Vec<Rc<FunctionImpl>>, locations: &Locations) -> DetailRuntimeError {
+        const REPEAT_LIMIT: usize = 0;
+
         // Top level stack frame refers to the code being executed
         let target: Location = locations[ip];
         let mut stack: Vec<StackFrame> = Vec::new();
         let mut prev_ip: usize = ip;
+        let mut prev_frame: Option<(usize, usize)> = None;
+        let mut prev_count: usize = 0;
 
         for frame in call_stack.iter().rev() {
             if frame.return_ip > 0 {
                 // Each frame from the call stack refers to the owning function of the previous frame
                 let frame_ip: usize = frame.return_ip - 1;
-                stack.push(StackFrame(frame_ip, locations[frame_ip], find_owning_function(prev_ip, functions)));
+
+                if prev_frame == Some((frame_ip, prev_ip)) {
+                    prev_count += 1;
+                } else {
+                    if prev_count > REPEAT_LIMIT {
+                        // Push a 'repeat' element
+                        stack.push(StackFrame::Repeat(prev_count - REPEAT_LIMIT))
+                    }
+                    prev_count = 0;
+                }
+
+                if prev_count <= REPEAT_LIMIT {
+                    stack.push(StackFrame::Simple(frame_ip, locations[frame_ip], find_owning_function(prev_ip, functions)));
+                }
+
+                prev_frame = Some((frame_ip, prev_ip));
                 prev_ip = frame_ip;
             }
+        }
+
+        if prev_count > REPEAT_LIMIT {
+            stack.push(StackFrame::Repeat(prev_count - REPEAT_LIMIT))
         }
 
         DetailRuntimeError { error: self, target, stack }
@@ -89,7 +112,10 @@ pub struct DetailRuntimeError {
 }
 
 #[derive(Debug)]
-pub struct StackFrame(usize, Location, String);
+enum StackFrame {
+    Simple(usize, Location, String),
+    Repeat(usize),
+}
 
 impl AsError for DetailRuntimeError {
     fn as_error(self: &Self) -> String {
@@ -103,8 +129,11 @@ impl AsErrorWithContext for DetailRuntimeError {
     }
 
     fn add_stack_trace_elements(self: &Self, view: &SourceView, text: &mut String) {
-        for StackFrame(_, loc, site) in &self.stack {
-            text.push_str(format!("  at: `{}` (line {})\n", site, view.lineno(*loc) + 1).as_str());
+        for frame in &self.stack {
+            text.push_str(match frame {
+                StackFrame::Simple(_, loc, site) => format!("  at: `{}` (line {})\n", site, view.lineno(*loc) + 1),
+                StackFrame::Repeat(n) => format!("  ... above line repeated {} more time(s) ...\n", n),
+            }.as_str());
         }
     }
 }
