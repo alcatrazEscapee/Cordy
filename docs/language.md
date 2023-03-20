@@ -368,3 +368,23 @@ fn iife(f) -> f() // 'Immediately Invoked Function Expression', from JavaScript
 @iffe
 fn do_stuff() { print('hello world') } // prints 'hello world' immediately, and assigns `do_stuff` to `nil`
 ```
+
+### Assertions
+
+The `assert` keyword can be used to raise an error, or assert a condition is true. Note that runtime errors in cordy are **unrecoverable**, meaning if this assertion fails, the program will effectively call `exit`. An assert statement consists of `assert <expression>`, optionally followed by `: <expression>`, where the second expression will be used in the error message.
+
+```java
+assert false // Errors with 'Assertion Failed: nil'
+
+assert false : 'Oh no!' // Errors with 'Assertion Failed: Oh no!
+```
+
+Assertions will point to the expression in question being asserted:
+
+```
+Assertion Failed: message goes here
+  at: line 1 (<test>)
+  
+1 | assert false : 'message goes here'
+2 |        ^^^^^
+```

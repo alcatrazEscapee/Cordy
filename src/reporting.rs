@@ -192,7 +192,9 @@ impl AsError for RuntimeError {
     fn as_error(self: &Self) -> String {
         match self {
             RuntimeError::RuntimeExit | RuntimeError::RuntimeYield => panic!("Not a real error"),
+            RuntimeError::RuntimeAssertFailed(reason) => format!("Assertion Failed: {}", reason),
             RuntimeError::RuntimeCompilationError(vec) => format!("Encountered compilation error(s) within 'eval':\n\n{}", vec.join("\n")),
+
             RuntimeError::ValueIsNotFunctionEvaluable(v) => format!("Tried to evaluate {} but it is not a function.", v.as_error()),
             RuntimeError::IncorrectNumberOfFunctionArguments(f, a) => format!("Function {} requires {} parameters but {} were present.", f.as_error(), f.nargs, a),
             RuntimeError::IncorrectNumberOfArguments(b, a, e) => format!("Function '{}' requires {} parameters but {} were present.", b.as_error(), e, a),
@@ -384,6 +386,7 @@ impl AsError for ScanToken {
             ScanToken::KeywordNil => String::from("'nil' keyword"),
             ScanToken::KeywordStruct => String::from("'struct' keyword"),
             ScanToken::KeywordExit => String::from("'exit' keyword"),
+            ScanToken::KeywordAssert => String::from("'assert' keyword"),
 
             ScanToken::Equals => String::from("'=' token"),
             ScanToken::PlusEquals => String::from("'+=' token"),

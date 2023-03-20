@@ -11,7 +11,7 @@ use crate::vm::value::{FunctionImpl, Value};
 pub enum RuntimeError {
     RuntimeExit,
     RuntimeYield,
-
+    RuntimeAssertFailed(String),
     RuntimeCompilationError(Vec<String>),
 
     ValueIsNotFunctionEvaluable(Value),

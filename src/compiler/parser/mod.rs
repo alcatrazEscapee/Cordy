@@ -244,12 +244,13 @@ impl Parser<'_> {
                 Some(KeywordFor) => self.parse_for_statement(),
                 Some(KeywordBreak) => self.parse_break_statement(),
                 Some(KeywordContinue) => self.parse_continue_statement(),
+                Some(KeywordAssert) => self.parse_assert_statement(),
                 Some(KeywordDo) => {
                     // For now, this is just a bridge (almost undocumented) keyword, in order to trigger a scoped block
                     // Maybe later we can expand it to a `do {} while` loop, but probably not.
                     self.advance();
                     self.parse_block_statement();
-                }
+                },
                 Some(CloseBrace) => break,
                 Some(KeywordExit) => {
                     self.push_delayed_pop();
@@ -728,6 +729,33 @@ impl Parser<'_> {
             },
             None => self.semantic_error(ContinueOutsideOfLoop),
         }
+    }
+
+    fn parse_assert_statement(self: &mut Self) {
+        trace::trace_parser!("rule <assert-statement>");
+        self.push_delayed_pop();
+        self.advance(); // Consume `assert`
+
+        // `assert x : y` is effectively
+        // `if x {} else { throw an exception with description `y` }
+        let mut loc = self.next_location();
+        self.parse_expression();
+        loc |= self.prev_location();
+        let jump_if_true = self.reserve();
+        match self.peek() {
+            Some(Colon) => {
+                // Optional error message, that is lazily evaluated
+                self.advance(); // Consume `:`
+                self.parse_expression();
+            },
+            _ => {
+                // Push `Nil`
+                self.push(Nil);
+            }
+        }
+
+        self.push_with(AssertFailed, loc); // Make sure the `AssertFailed` token has the same location as the original expression that failed
+        self.fix_jump(jump_if_true, JumpIfTruePop)
     }
 
     // ===== Variables + Expressions ===== //
