@@ -585,6 +585,10 @@ impl<R, W> VirtualMachine<R, W> where
                 self.ip = self.code.len();
                 return RuntimeYield.err()
             },
+            AssertFailed => {
+                let ret: Value = self.pop();
+                return RuntimeAssertFailed(ret.to_str()).err()
+            }
         }
         Ok(())
     }
@@ -1427,6 +1431,10 @@ mod test {
     #[test] fn test_eval_single_element_list() { run_str("[-1]('hello') . print", "o\n"); }
     #[test] fn test_optimized_no_arg_function_call() { run_str("abs()(1)", "Function 'abs' requires 1 parameters but 0 were present.\n  at: line 1 (<test>)\n\n1 | abs()(1)\n2 |    ^^\n"); }
     #[test] fn test_top_level_if_then_else_does_not_stack_smash() { run_str("for x in range(2) { if x then x else x }", ""); }
+    #[test] fn test_assert_pass() { run_str("assert [1, 2] . len . (==2) ; print('yes!')", "yes!\n")}
+    #[test] fn test_assert_pass_with_no_message() { run_str("assert [1, 2] .len . (==2) : print('should not show') ; print('should show')", "should show\n"); }
+    #[test] fn test_assert_fail() { run_str("assert 1 + 2 != 3", "Assertion Failed: nil\n  at: line 1 (<test>)\n\n1 | assert 1 + 2 != 3\n2 |        ^^^^^^^^^^\n"); }
+    #[test] fn test_assert_fail_with_message() { run_str("assert 'here' in 'the goose is gone' : 'goose issues are afoot'", "Assertion Failed: goose issues are afoot\n  at: line 1 (<test>)\n\n1 | assert 'here' in 'the goose is gone' : 'goose issues are afoot'\n2 |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }

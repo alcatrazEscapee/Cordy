@@ -114,6 +114,7 @@ pub enum Opcode {
     // Special
     Exit,
     Yield,
+    AssertFailed,
 }
 
 impl Opcode {

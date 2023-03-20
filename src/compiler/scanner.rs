@@ -90,6 +90,7 @@ pub enum ScanToken {
     KeywordNil,
     KeywordStruct,
     KeywordExit,
+    KeywordAssert,
 
     // Syntax
     Equals,
@@ -406,6 +407,7 @@ impl<'a> Scanner<'a> {
             "nil" => KeywordNil,
             "struct" => KeywordStruct,
             "exit" => KeywordExit,
+            "assert" => KeywordAssert,
             "and" => LogicalAnd,
             "or" => LogicalOr,
              _ => Identifier(string)
@@ -496,7 +498,7 @@ mod tests {
 
 
     #[test] fn test_str_empty() { run_str("", vec![]); }
-    #[test] fn test_str_keywords() { run_str("let fn return if elif else then loop while for in is not break continue do true false nil struct exit", vec![KeywordLet, KeywordFn, KeywordReturn, KeywordIf, KeywordElif, KeywordElse, KeywordThen, KeywordLoop, KeywordWhile, KeywordFor, KeywordIn, KeywordIs, KeywordNot, KeywordBreak, KeywordContinue, KeywordDo, KeywordTrue, KeywordFalse, KeywordNil, KeywordStruct, KeywordExit]); }
+    #[test] fn test_str_keywords() { run_str("let fn return if elif else then loop while for in is not break continue do true false nil struct exit assert", vec![KeywordLet, KeywordFn, KeywordReturn, KeywordIf, KeywordElif, KeywordElse, KeywordThen, KeywordLoop, KeywordWhile, KeywordFor, KeywordIn, KeywordIs, KeywordNot, KeywordBreak, KeywordContinue, KeywordDo, KeywordTrue, KeywordFalse, KeywordNil, KeywordStruct, KeywordExit, KeywordAssert]); }
     #[test] fn test_str_identifiers() { run_str("foobar big_bad_wolf ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz", vec![Identifier(String::from("foobar")), Identifier(String::from("big_bad_wolf")), Identifier(String::from("ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz"))]); }
     #[test] fn test_str_literals() { run_str("'abc' 'a \n 3' '\\''", vec![StringLiteral(String::from("abc")), NewLine, StringLiteral(String::from("a \n 3")), StringLiteral(String::from("'"))]); }
     #[test] fn test_str_ints() { run_str("1234 654 10_00_00 0 1", vec![Int(1234), Int(654), Int(100000), Int(0), Int(1)]); }

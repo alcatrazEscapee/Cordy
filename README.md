@@ -87,7 +87,5 @@ For a more comprehensive documentation, see the [language documentation](./docs/
 ### To-Do
 
 - implement basic structs: compile time verified access with `->`, type-dispatched at runtime.
-- `assert` statement?
 - Even MORE standard library functions
-  - regex match, find, and replace -> just on normal strings. Make `\` less required for escaping (only escape if needed)
-- Investigate making a separate `Queue` type and making `List` a `Vec`? Benchmarks...
+  - regex match, find, and replace -> just on normal strings. Make `\` less required for escaping (only escape if needed), or add regex literals, maybe with `/`
