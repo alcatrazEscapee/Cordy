@@ -24,6 +24,7 @@ impl Optimize for Expr {
     /// - Compose/List Folding (`a . [b]` -> `a[b]`)
     /// - Compose/Eval Reordering (`a . b` -> `b(a)` where legal)
     /// - Consistent Function Eval Merging (`a(b1, b2, ...)(c1, c2, ...)` -> `a(b1, b2, ... c1, c2, ...)` where legal)
+    /// - Inlining of partially evaluated operators (`(==)(a, b)` -> `a == b`)
     ///
     fn optimize(self: Self) -> Self {
         match self {
@@ -59,11 +60,20 @@ impl Optimize for Expr {
                 let mut args: Vec<Expr> = args.optimize();
 
                 match f {
+                    // Certain native functions, we can transform into operators, with two arguments
+                    Expr(_, ExprType::NativeFunction(native_f)) if native_f.is_standard_binary_operator() && args.len() == 2 => {
+                        let f_op = native_f.as_standard_binary_operator().unwrap();
+                        let rhs = args.pop().unwrap();
+                        let lhs = args.pop().unwrap();
+                        lhs.binary(loc, f_op, rhs)
+                    },
+
                     // If we can assert the inner function is partial, then we can merge the two calls
                     // Note this does not require any reordering of the arguments
+                    // This re-calls `.optimize()` as we might be able to replace the operator on the constant-eval'd function
                     Expr(_, ExprType::Eval(f_inner, mut args_inner)) if f_inner.is_partial(args_inner.len()) => {
                         args_inner.append(&mut args);
-                        f_inner.eval(loc, args_inner)
+                        f_inner.eval(loc, args_inner).optimize()
                     },
 
                     f => f.eval(loc, args)

@@ -1033,6 +1033,7 @@ impl Parser<'_> {
                         OperatorPow => OperatorPowSwap,
                         OperatorMod => OperatorModSwap,
                         OperatorIs => OperatorIsSwap,
+                        OperatorAdd => OperatorAddSwap,
                         OperatorLeftShift => OperatorLeftShiftSwap,
                         OperatorRightShift => OperatorRightShiftSwap,
                         OperatorLessThan => OperatorLessThanSwap,

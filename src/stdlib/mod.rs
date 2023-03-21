@@ -4,6 +4,7 @@ use indexmap::{IndexMap, IndexSet};
 use lazy_static::lazy_static;
 
 use crate::vm::{operator, IntoIterableValue, IntoValue, Value, VirtualInterface, RuntimeError};
+use crate::vm::operator::BinaryOp;
 use crate::trace;
 
 use NativeFunction::{*};
@@ -61,6 +62,7 @@ pub enum NativeFunction {
     OperatorIn,
     OperatorInSwap,
     OperatorAdd,
+    OperatorAddSwap,
     OperatorSub, // Cannot be referenced as (- <expr>)
     OperatorLeftShift,
     OperatorLeftShiftSwap,
@@ -151,6 +153,34 @@ impl NativeFunction {
     pub fn args(self: &Self) -> &'static str {
         NATIVE_FUNCTIONS[*self as usize].args
     }
+
+    /// A `standard operator` refers to an operator which has a direct opcode representation.
+    /// Note this excludes asymmetric 'swap' operators
+    pub fn is_standard_binary_operator(self: &Self) -> bool { self.as_standard_binary_operator().is_some() }
+    pub fn as_standard_binary_operator(self: &Self) -> Option<BinaryOp> {
+        match self {
+            OperatorMul => Some(BinaryOp::Mul),
+            OperatorDiv => Some(BinaryOp::Div),
+            OperatorPow => Some(BinaryOp::Pow),
+            OperatorMod => Some(BinaryOp::Mod),
+            OperatorIs => Some(BinaryOp::Is),
+            OperatorIn => Some(BinaryOp::In),
+            OperatorAdd => Some(BinaryOp::Add),
+            OperatorSub => Some(BinaryOp::Sub),
+            OperatorLeftShift => Some(BinaryOp::LeftShift),
+            OperatorRightShift => Some(BinaryOp::RightShift),
+            OperatorBitwiseAnd => Some(BinaryOp::And),
+            OperatorBitwiseOr => Some(BinaryOp::Or),
+            OperatorBitwiseXor => Some(BinaryOp::Xor),
+            OperatorLessThan => Some(BinaryOp::LessThan),
+            OperatorLessThanEqual => Some(BinaryOp::LessThanEqual),
+            OperatorGreaterThan => Some(BinaryOp::GreaterThan),
+            OperatorGreaterThanEqual => Some(BinaryOp::GreaterThanEqual),
+            OperatorEqual => Some(BinaryOp::Equal),
+            OperatorNotEqual => Some(BinaryOp::NotEqual),
+            _ => None
+        }
+    }
 }
 
 
@@ -225,6 +255,7 @@ fn load_native_functions() -> Vec<NativeFunctionInfo> {
     declare!(OperatorIn, "(in)", "lhs, rhs", Some(2), true);
     declare!(OperatorInSwap, "(in)", "lhs, rhs", Some(2), true);
     declare!(OperatorAdd, "(+)", "lhs, rhs", Some(2), true);
+    declare!(OperatorAddSwap, "(+)", "lhs, rhs", Some(2), true);
     declare!(OperatorSub, "(-)", "lhs, rhs", Some(2), true); // Cannot be referenced as (- <expr>)
     declare!(OperatorLeftShift, "(<<)", "lhs, rhs", Some(2), true);
     declare!(OperatorLeftShiftSwap, "(<<)", "lhs, rhs", Some(2), true);
@@ -553,6 +584,7 @@ pub fn invoke<VM>(native: NativeFunction, nargs: u8, vm: &mut VM) -> ValueResult
         OperatorIn => dispatch!(a1, a2, operator::binary_in(a1, a2)),
         OperatorInSwap => dispatch!(a1, a2, operator::binary_in(a2, a1)),
         OperatorAdd => dispatch!(a1, a2, operator::binary_add(a1, a2)),
+        OperatorAddSwap => dispatch!(a1, a2, operator::binary_add(a2, a1)),
         OperatorSub => dispatch!(a1, a2, operator::binary_sub(a1, a2)),
         OperatorLeftShift => dispatch!(a1, a2, operator::binary_left_shift(a1, a2)),
         OperatorLeftShiftSwap => dispatch!(a1, a2, operator::binary_left_shift(a2, a1)),
