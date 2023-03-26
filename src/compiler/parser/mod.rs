@@ -291,12 +291,12 @@ impl Parser<'_> {
     }
 
     fn parse_struct_statement(self: &mut Self) {
-        // Structs can only be declared in global scope
-        // While technically we could support scoped structs - the struct constructor becomes a local, there, the use case is just not there
-        // The struct object and fields would have to be globally known anyway.
         self.push_delayed_pop();
         self.advance(); // Consume `struct`
 
+        // Structs can only be declared in global scope
+        // While technically we could support scoped structs - the struct constructor becomes a local, there, the use case is just not there
+        // The struct object and fields would have to be globally known anyway.
         if self.function_depth != 0 || self.scope_depth != 0 {
             self.semantic_error(StructNotInGlobalScope);
             return;

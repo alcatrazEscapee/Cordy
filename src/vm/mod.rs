@@ -1498,6 +1498,7 @@ mod test {
     #[test] fn test_assert_pass_with_no_message() { run_str("assert [1, 2] .len . (==2) : print('should not show') ; print('should show')", "should show\n"); }
     #[test] fn test_assert_fail() { run_str("assert 1 + 2 != 3", "Assertion Failed: nil\n  at: line 1 (<test>)\n\n1 | assert 1 + 2 != 3\n2 |        ^^^^^^^^^^\n"); }
     #[test] fn test_assert_fail_with_message() { run_str("assert 'here' in 'the goose is gone' : 'goose issues are afoot'", "Assertion Failed: goose issues are afoot\n  at: line 1 (<test>)\n\n1 | assert 'here' in 'the goose is gone' : 'goose issues are afoot'\n2 |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n"); }
+    #[test] fn test_assert_messages_are_lazy() { run_str("assert true : exit ; print('should reach here')", "should reach here\n"); }
     #[test] fn test_operator_add_left_eval() { run_str("'world' . (+'hello') . print", "worldhello\n"); }
     #[test] fn test_operator_add_right_eval() { run_str("'world' . ('hello'+) . print", "helloworld\n"); }
     #[test] fn test_typeof_struct_constructor() { run_str("struct Foo(a, b) Foo . typeof . print", "function\n"); }
