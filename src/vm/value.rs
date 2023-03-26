@@ -12,10 +12,10 @@ use itertools::Itertools;
 
 use crate::stdlib::NativeFunction;
 use crate::vm::error::RuntimeError;
+use crate::compiler::Fields;
 
 use Value::{*};
 use RuntimeError::{*};
-use crate::compiler::Fields;
 
 type ValueResult = Result<Value, Box<RuntimeError>>;
 
