@@ -235,20 +235,39 @@ impl<'a> Scanner<'a> {
                            let start: usize = self.cursor;
                            loop {
                                match self.advance() {
-                                   Some('\'') if !escaped => break,
-                                   Some('\\') if !escaped => {
-                                       escaped = true;
-                                   }
-                                   Some('\r') => {}, // Don't include '\r' in strings which include newlines
-                                   Some('n') if escaped => {
+                                   Some('\'') => { // Escaped single quote emits a single quote, un-escaped will terminate the string
+                                       if escaped {
+                                           buffer.push('\'');
+                                           escaped = false;
+                                       } else {
+                                           break
+                                       }
+                                   },
+                                   Some('\\') => { // Escaped backslash will emit a backslash, un-escaped will begin an escape sequence (skipping the backslash)
+                                       if escaped {
+                                           buffer.push('\\');
+                                           escaped = false;
+                                       } else {
+                                           escaped = true;
+                                       }
+                                   },
+                                   Some('\r') => {}, // A natural `\r` never gets included in a string, when present in source
+                                   Some('n') if escaped => { // `\n` escape sequence -> emit a single `\n`
                                        buffer.push('\n');
                                        escaped = false;
                                    },
+                                   Some('r') if escaped => { // `\r` escape sequence -> emit a single `\r`
+                                       buffer.push('\r');
+                                       escaped = false;
+                                   }
                                    Some('t') if escaped => {
-                                       buffer.push('\t');
+                                       buffer.push('\t'); // `\t` escape sequence -> emit a single `\t`
                                        escaped = false;
                                    },
-                                   Some(c0) => {
+                                   Some(c0) => { // Any other character, emits itself. If escaped, the backslash is also included as part of the string
+                                       if escaped {
+                                           buffer.push('\\');
+                                       }
                                        buffer.push(c0);
                                        escaped = false;
                                    }
@@ -497,22 +516,23 @@ mod tests {
     use ScanToken::{*};
 
 
-    #[test] fn test_str_empty() { run_str("", vec![]); }
-    #[test] fn test_str_keywords() { run_str("let fn return if elif else then loop while for in is not break continue do true false nil struct exit assert", vec![KeywordLet, KeywordFn, KeywordReturn, KeywordIf, KeywordElif, KeywordElse, KeywordThen, KeywordLoop, KeywordWhile, KeywordFor, KeywordIn, KeywordIs, KeywordNot, KeywordBreak, KeywordContinue, KeywordDo, KeywordTrue, KeywordFalse, KeywordNil, KeywordStruct, KeywordExit, KeywordAssert]); }
-    #[test] fn test_str_identifiers() { run_str("foobar big_bad_wolf ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz", vec![Identifier(String::from("foobar")), Identifier(String::from("big_bad_wolf")), Identifier(String::from("ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz"))]); }
+    #[test] fn test_empty() { run_str("", vec![]); }
+    #[test] fn test_keywords() { run_str("let fn return if elif else then loop while for in is not break continue do true false nil struct exit assert", vec![KeywordLet, KeywordFn, KeywordReturn, KeywordIf, KeywordElif, KeywordElse, KeywordThen, KeywordLoop, KeywordWhile, KeywordFor, KeywordIn, KeywordIs, KeywordNot, KeywordBreak, KeywordContinue, KeywordDo, KeywordTrue, KeywordFalse, KeywordNil, KeywordStruct, KeywordExit, KeywordAssert]); }
+    #[test] fn test_identifiers() { run_str("foobar big_bad_wolf ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz", vec![Identifier(String::from("foobar")), Identifier(String::from("big_bad_wolf")), Identifier(String::from("ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz"))]); }
     #[test] fn test_str_literals() { run_str("'abc' 'a \n 3' '\\''", vec![StringLiteral(String::from("abc")), NewLine, StringLiteral(String::from("a \n 3")), StringLiteral(String::from("'"))]); }
-    #[test] fn test_str_ints() { run_str("1234 654 10_00_00 0 1", vec![Int(1234), Int(654), Int(100000), Int(0), Int(1)]); }
-    #[test] fn test_str_binary_ints() { run_str("0b11011011 0b0 0b1 0b1_01", vec![Int(0b11011011), Int(0b0), Int(0b1), Int(0b101)]); }
-    #[test] fn test_str_hex_ints() { run_str("0x12345678 0xabcdef90 0xABCDEF 0xF_f", vec![Int(0x12345678), Int(0xabcdef90), Int(0xABCDEF), Int(0xFF)])}
-    #[test] fn test_str_unary_operators() { run_str("- !", vec![Minus, Not]); }
-    #[test] fn test_str_comparison_operators() { run_str("> < >= > = <= < =", vec![GreaterThan, LessThan, GreaterThanEquals, GreaterThan, Equals, LessThanEquals, LessThan, Equals]); }
-    #[test] fn test_str_equality_operators() { run_str("!= ! = == =", vec![NotEquals, Not, Equals, DoubleEquals, Equals]); }
-    #[test] fn test_str_binary_logical_operators() { run_str("and & or |", vec![LogicalAnd, BitwiseAnd, LogicalOr, BitwiseOr]); }
-    #[test] fn test_str_arithmetic_operators() { run_str("+ - += -= * = *= / = /=", vec![Plus, Minus, PlusEquals, MinusEquals, Mul, Equals, MulEquals, Div, Equals, DivEquals]); }
-    #[test] fn test_str_other_arithmetic_operators() { run_str("% %= ** *= **= * *=", vec![Mod, ModEquals, Pow, MulEquals, PowEquals, Mul, MulEquals]); }
-    #[test] fn test_str_bitwise_operators() { run_str("| ^ & &= |= ^=", vec![BitwiseOr, BitwiseXor, BitwiseAnd, AndEquals, OrEquals, XorEquals]); }
-    #[test] fn test_str_groupings() { run_str("( [ { } ] )", vec![OpenParen, OpenSquareBracket, OpenBrace, CloseBrace, CloseSquareBracket, CloseParen]); }
-    #[test] fn test_str_syntax() { run_str(". .= , -> - > : @", vec![Dot, DotEquals, Comma, Arrow, Minus, GreaterThan, Colon, At]); }
+    #[test] fn test_str_escaping() { run_str("'\\.' '\\\\.' '\\n' '\\\\n'", vec![StringLiteral(String::from("\\.")), StringLiteral(String::from("\\.")), StringLiteral(String::from("\n")), StringLiteral(String::from("\\n"))]); }
+    #[test] fn test_ints() { run_str("1234 654 10_00_00 0 1", vec![Int(1234), Int(654), Int(100000), Int(0), Int(1)]); }
+    #[test] fn test_binary_ints() { run_str("0b11011011 0b0 0b1 0b1_01", vec![Int(0b11011011), Int(0b0), Int(0b1), Int(0b101)]); }
+    #[test] fn test_hex_ints() { run_str("0x12345678 0xabcdef90 0xABCDEF 0xF_f", vec![Int(0x12345678), Int(0xabcdef90), Int(0xABCDEF), Int(0xFF)])}
+    #[test] fn test_unary_operators() { run_str("- !", vec![Minus, Not]); }
+    #[test] fn test_comparison_operators() { run_str("> < >= > = <= < =", vec![GreaterThan, LessThan, GreaterThanEquals, GreaterThan, Equals, LessThanEquals, LessThan, Equals]); }
+    #[test] fn test_equality_operators() { run_str("!= ! = == =", vec![NotEquals, Not, Equals, DoubleEquals, Equals]); }
+    #[test] fn test_binary_logical_operators() { run_str("and & or |", vec![LogicalAnd, BitwiseAnd, LogicalOr, BitwiseOr]); }
+    #[test] fn test_arithmetic_operators() { run_str("+ - += -= * = *= / = /=", vec![Plus, Minus, PlusEquals, MinusEquals, Mul, Equals, MulEquals, Div, Equals, DivEquals]); }
+    #[test] fn test_other_arithmetic_operators() { run_str("% %= ** *= **= * *=", vec![Mod, ModEquals, Pow, MulEquals, PowEquals, Mul, MulEquals]); }
+    #[test] fn test_bitwise_operators() { run_str("| ^ & &= |= ^=", vec![BitwiseOr, BitwiseXor, BitwiseAnd, AndEquals, OrEquals, XorEquals]); }
+    #[test] fn test_groupings() { run_str("( [ { } ] )", vec![OpenParen, OpenSquareBracket, OpenBrace, CloseBrace, CloseSquareBracket, CloseParen]); }
+    #[test] fn test_syntax() { run_str(". .= , -> - > : @", vec![Dot, DotEquals, Comma, Arrow, Minus, GreaterThan, Colon, At]); }
 
     fn run_str(text: &str, expected: Vec<ScanToken>) {
         let result: ScanResult = scanner::scan(&String::from(text));
@@ -526,7 +546,6 @@ mod tests {
     }
 
 
-    #[test] fn test_empty() { run("empty"); }
     #[test] fn test_hello_world() { run("hello_world"); }
     #[test] fn test_invalid_character() { run("invalid_character"); }
     #[test] fn test_invalid_numeric_value() { run("invalid_numeric_value"); }

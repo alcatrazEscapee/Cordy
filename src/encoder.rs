@@ -201,7 +201,7 @@ impl Encode for Opcode {
             Int(i) => encode!(27, i),
             Str(i) => encode!(28, i),
             Function(i) => encode!(29, i),
-            NativeFunction(i) => encode!(72 + (*i as u8)), // [72, 256) - currently uses up to 177
+            NativeFunction(i) => encode!(72 + (*i as u8)), // [72, 256) - currently uses up to 178
             List(i) => encode!(30, i),
             Vector(i) => encode!(31, i),
             Set(i) => encode!(32, i),
@@ -261,7 +261,7 @@ impl Decode<Opcode> for Decoder {
             27 => Int(self.decode()?),
             28 => Str(self.decode()?),
             29 => Function(self.decode()?),
-            72..=177 => NativeFunction(stdlib::NativeFunction::get(op - 72)),
+            72..=178 => NativeFunction(stdlib::NativeFunction::get(op - 72)),
             30 => List(self.decode()?),
             31 => Vector(self.decode()?),
             32 => Set(self.decode()?),
@@ -306,7 +306,7 @@ mod tests {
     #[test] fn test_opcode_binary_lo() { run(Opcode::Binary(BinaryOp::Mul), vec![51]); }
     #[test] fn test_opcode_binary_hi() { run(Opcode::Binary(BinaryOp::Min), vec![71]); }
     #[test] fn test_opcode_native_function_lo() { run(Opcode::NativeFunction(NativeFunction::Read), vec![72]); }
-    #[test] fn test_opcode_native_function_hi() { run(Opcode::NativeFunction(NativeFunction::CountZeros), vec![177]); }
+    #[test] fn test_opcode_native_function_hi() { run(Opcode::NativeFunction(NativeFunction::CountZeros), vec![178]); }
 
     fn run<E>(e: E, bytes: Vec<u8>) where
         E : Encode + Sized + Eq + Debug,

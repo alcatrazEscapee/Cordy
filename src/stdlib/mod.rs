@@ -89,6 +89,7 @@ pub enum NativeFunction {
     ToLower,
     ToUpper,
     Replace,
+    Search,
     Trim,
     Split,
     Char,
@@ -287,7 +288,8 @@ fn load_native_functions() -> Vec<NativeFunctionInfo> {
     // strings
     declare!(ToLower, "to_lower", "x", 1);
     declare!(ToUpper, "to_upper", "x", 1);
-    declare!(Replace, "replace", "search, with, target", 3);
+    declare!(Replace, "replace", "from, to, x", 3);
+    declare!(Search, "search", "pattern, x", 2);
     declare!(Trim, "trim", "x", 1);
     declare!(Split, "split", "delim, x", 2);
     declare!(Char, "char", "x", 1);
@@ -620,7 +622,8 @@ pub fn invoke<VM>(native: NativeFunction, nargs: u8, vm: &mut VM) -> ValueResult
         // strings
         ToLower => dispatch!(a1, strings::to_lower(a1)),
         ToUpper => dispatch!(a1, strings::to_upper(a1)),
-        Replace => dispatch!(a1, a2, a3, strings::replace(a1, a2, a3)),
+        Replace => dispatch!(a1, a2, a3, strings::replace(vm, a1, a2, a3)),
+        Search => dispatch!(a1, a2, strings::search(a1, a2)),
         Trim => dispatch!(a1, strings::trim(a1)),
         Split => dispatch!(a1, a2, strings::split(a1, a2)),
         Char => dispatch!(a1, strings::to_char(a1)),

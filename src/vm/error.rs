@@ -38,6 +38,7 @@ pub enum RuntimeError {
     ValueErrorNotAllArgumentsUsedInStringFormatting(Value),
     ValueErrorMissingRequiredArgumentInStringFormatting,
     ValueErrorEvalListMustHaveUnitLength(usize),
+    ValueErrorCannotCompileRegex(String, String),
 
     TypeErrorUnaryOp(UnaryOp, Value),
     TypeErrorBinaryOp(BinaryOp, Value, Value),
@@ -54,6 +55,7 @@ pub enum RuntimeError {
     TypeErrorArgMustBeDict(Value),
     TypeErrorArgMustBeFunction(Value),
     TypeErrorArgMustBeCmpOrKeyFunction(Value),
+    TypeErrorArgMustBeReplaceFunction(Value),
 }
 
 impl RuntimeError {

@@ -634,15 +634,49 @@ Splits `string` on the delimiter `delim` and returns a `list` of all split eleme
 ['hello', 'the', 'world']
 ```
 
-### (Str) Replace `replace(search: str, with: str, self: str) -> str`
+### (Str) Replace `replace(...) -> str`
 
-Replaces all occurrences of `search` with `with` in `self`
+**Possible Signatures**
 
-**Example**
+- `replace(pattern: str, replacer: str, x: str)`
+- `replace(pattern: str, replacer: fn(vector<str>) -> str, x: str)`
+
+Performs string replacement, with regular expression (regex) support. Regex syntax is the same as used by the [Fancy Regex](https://docs.rs/fancy-regex/0.11.0/fancy_regex/) crate. Additionally, `\r`, `\n`, and `\t` sequences are supported as part of a regex, and they will be replaced in the pattern with `\\r`, `\\n`, and `\\t` respectively.
+
+When `replacer` is a string, this will replace all instances of `pattern` in the string `x` with `replacer`. When `replacer` is a function with one defined argument, this will invoke that function for each replacement to be made, to provide the result. This takes an argument of the match, which is a vector consisting of the full text, followed by any capture groups found.
+
+Note that capture groups can also be referenced in a string via `$<number>` syntax, where `$0` represents the entire match.
+
+**Examples**
 
 ```
 >>> 'bob and alice' . replace('and', 'or')
 'bob or alice'
+>>> 'bob and alice' . replace('\sa', ' Ba')
+'bob Band Balice'
+>>> 'bob and alice' . replace('[a-z]+', '$0!')
+'bob! and! alice!'
+>>> 'bob and alice' . replace('[a-z]+', fn((g, *_)) -> g . reverse . reduce(+))
+'bob dna ecila'
+>>> 'bob and alice' . replace('([a-z])([a-z]+)', fn((_, g1, g2)) -> to_upper(g1) + g2)
+'Bob And Alice'
+```
+
+### (Str) Search `search(pattern: str, x: str) -> list<vector<str>>`
+
+Matches a string `x` against a given `pattern`, and returns a list of all results. The pattern is a regular expression (regex), with syntax identical to using `replace`. When invoked, this returns a list of all matches in the string, or an empty list if no matches are found. A match consists of a vector of all capture groups, with the first group containing the entire match.
+
+Note, for simple substring searching, it is sufficient to test for truthiness, as no match will return an empty list. Using characters such as `^` and `$` in the regex will also ensure that only one match is possible, and so can only return a list with at most one element.
+
+**Examples**
+
+```
+>>> 'bob and alice' . search('bob')
+[('bob')]
+>>> 'bob and alice' . search('a[a-z]+')
+[('and'), ('alice')]
+>>> 'bob and alice' . search('([a-z])[^ ]+([a-z])')
+[('bob', 'b', 'b'), ('and', 'a', 'd'), ('alice', 'a', 'e')]
 ```
 
 ### (Dict) Default `<K, V> default(x: V, it: dict<K, V>) -> dict<K, V>`

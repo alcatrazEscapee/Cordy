@@ -1,10 +1,13 @@
 use std::iter::Peekable;
 use std::str::Chars;
+use fancy_regex::{Captures, Regex};
 
-use crate::vm::{IntoIterableValue, IntoValue, Iterable, Value, RuntimeError};
+use crate::vm::{IntoIterableValue, IntoValue, Iterable, Value, RuntimeError, VirtualInterface};
+use crate::misc;
 
 use Value::{*};
 use RuntimeError::{*};
+
 
 type ValueResult = Result<Value, Box<RuntimeError>>;
 
@@ -21,8 +24,65 @@ pub fn trim(a0: Value) -> ValueResult {
     Ok(a0.as_str()?.trim().to_value())
 }
 
-pub fn replace(a0: Value, a1: Value, a2: Value) -> ValueResult {
-    Ok(a2.as_str()?.replace(a0.as_str()?, a1.as_str()?.as_str()).to_value())
+pub fn replace<VM: VirtualInterface>(vm: &mut VM, pattern: Value, replacer: Value, target: Value) -> ValueResult {
+    let regex: Regex = compile_regex(pattern)?;
+    let text = target.as_str()?;
+    match replacer.unbox_func_args() {
+        Some(Some(1)) => {
+            let mut err = None;
+            let replaced: Value = regex.replace_all(text, |captures: &Captures| {
+                let arg: Value = as_result(captures);
+                misc::yield_result(&mut err, || vm.invoke_func1(replacer.clone(), arg)?.as_str().cloned(), String::new())
+            }).to_value();
+            misc::join_result(replaced, err)
+        },
+        Some(None) => TypeErrorArgMustBeReplaceFunction(replacer).err(),
+        _ => Ok(regex.replace_all(text, replacer.as_str()?).to_value())
+    }
+}
+
+pub fn search(pattern: Value, target: Value) -> ValueResult {
+    let regex: Regex = compile_regex(pattern)?;
+    let text: &String = target.as_str()?;
+
+    let mut start: usize = 0;
+    Ok(std::iter::from_fn(move || {
+        match regex.captures_from_pos(text, start).unwrap() {
+            Some(captures) => {
+                start = captures.get(0).unwrap().end();
+                Some(as_result(&captures))
+            },
+            None => None
+        }
+    }).to_list())
+}
+
+fn as_result(captures: &Captures) -> Value {
+    captures.iter()
+        .map(|group| group.unwrap().as_str().to_value())
+        .to_vector()
+}
+
+fn compile_regex(a1: Value) -> Result<Regex, Box<RuntimeError>> {
+    let raw = escape_regex(a1.as_str()?);
+    match Regex::new(&raw) {
+        Ok(regex) => Ok(regex),
+        Err(e) => ValueErrorCannotCompileRegex(raw, e.to_string()).err()
+    }
+}
+
+/// Replaces escaped characters `\t`, `\n`, `\r` with their original un-escaped sequences.
+fn escape_regex(raw: &String) -> String {
+    let mut result = String::with_capacity(raw.len());
+    for c in raw.chars() {
+        match c {
+            '\t' => result.push_str("\\t"),
+            '\r' => result.push_str("\\r"),
+            '\n' => result.push_str("\\n"),
+            _ => result.push(c)
+        };
+    }
+    result
 }
 
 pub fn split(a0: Value, a1: Value) -> ValueResult {

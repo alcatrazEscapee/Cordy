@@ -1548,6 +1548,28 @@ mod test {
     #[test] fn test_env_exists() { run_str("env . repr . print", "fn env(...)\n"); }
     #[test] fn test_argv_exists() { run_str("argv . repr . print", "fn argv()\n"); }
     #[test] fn test_argv_is_empty() { run_str("argv() . repr . print", "[]\n"); }
+    #[test] fn test_replace_regex_1() { run_str("'apples and bananas' . replace('[abe]+', 'o') . print", "opplos ond ononos\n"); }
+    #[test] fn test_replace_regex_2() { run_str("'[a] [b] [c] [d]' . replace('[ac]', '$0$0') . print", "[aa] [b] [cc] [d]\n"); }
+    #[test] fn test_replace_regex_with_function() { run_str("'apples and bananas' . replace('apples', fn((c, *_)) -> c . to_upper) . print", "APPLES and bananas\n"); }
+    #[test] fn test_replace_regex_with_wrong_function() { run_str("'apples and bananas' . replace('apples', min) . print", "TypeError: Expected 'min' of type 'native function' to be a 'fn replace(vector<str>) -> str' function\n  at: line 1 (<test>)\n\n1 | 'apples and bananas' . replace('apples', min) . print\n2 |                      ^^^^^^^^^^^^^^^^^^^^^^^^\n"); }
+    #[test] fn test_replace_regex_with_capture_group() { run_str("'apples and bananas' . replace('([a-z])([a-z]+)', 'yes') . print", "yes yes yes\n"); }
+    #[test] fn test_replace_regex_with_capture_group_function() { run_str("'apples and bananas' . replace('([a-z])([a-z]+)', fn((_, a, b)) -> to_upper(a) + b) . print", "Apples And Bananas\n"); }
+    #[test] fn test_replace_regex_implicit_newline() { run_str("'first\nsecond\nthird\nfourth' . replace('\\n', ', ') . print", "first, second, third, fourth\n"); }
+    #[test] fn test_replace_regex_explicit_newline() { run_str("'first\nsecond\nthird\nfourth' . replace('\n', ', ') . print", "first, second, third, fourth\n"); }
+    #[test] fn test_search_regex_match_all_yes() { run_str("'test' . search('test') . print", "[('test')]\n"); }
+    #[test] fn test_search_regex_match_all_no() { run_str("'test' . search('nope') . print", "[]\n"); }
+    #[test] fn test_search_regex_match_partial_yes() { run_str("'any and nope and nothing' . search('nope') . print", "[('nope')]\n"); }
+    #[test] fn test_search_regex_match_partial_no() { run_str("'any and nope and nothing' . search('some') . print", "[]\n"); }
+    #[test] fn test_search_regex_match_partial_no_start() { run_str("'any and nope and nothing' . search('^some') . print", "[]\n"); }
+    #[test] fn test_search_regex_match_partial_no_end() { run_str("'any and nope and nothing' . search('some$') . print", "[]\n"); }
+    #[test] fn test_search_regex_match_partial_no_start_and_end() { run_str("'any and nope and nothing' . search('^some$') . print", "[]\n"); }
+    #[test] fn test_search_regex_capture_group_match_none() { run_str("'some WORDS with CAPITAL letters' . search('[A-Z]([a-z]+)') . print", "[]\n"); }
+    #[test] fn test_search_regex_capture_group_match_one() { run_str("'some WORDS with Capital letters' . search('[A-Z]([a-z]+)') . print", "[('Capital', 'apital')]\n"); }
+    #[test] fn test_search_regex_capture_group_match_some() { run_str("'some Words With Capital letters' . search('[A-Z]([a-z]+)') . print", "[('Words', 'ords'), ('With', 'ith'), ('Capital', 'apital')]\n"); }
+    #[test] fn test_search_regex_many_capture_groups_match_none() { run_str("'some WORDS with CAPITAL letters' . search('([A-Z])([a-z]+)') . print", "[]\n"); }
+    #[test] fn test_search_regex_many_capture_groups_match_one() { run_str("'some WORDS with Capital letters' . search('([A-Z])[a-z]([a-z]+)') . print", "[('Capital', 'C', 'pital')]\n"); }
+    #[test] fn test_search_regex_many_capture_groups_match_some() { run_str("'some Words With Capital letters' . search('([A-Z])[a-z]([a-z]+)') . print", "[('Words', 'W', 'rds'), ('With', 'W', 'th'), ('Capital', 'C', 'pital')]\n"); }
+    #[test] fn test_search_regex_cannot_compile() { run_str("'test' . search('missing close bracket lol ( this one') . print", "ValueError: Cannot compile regex 'missing close bracket lol ( this one'\n            Parsing error at position 36: Opening parenthesis without closing parenthesis\n  at: line 1 (<test>)\n\n1 | 'test' . search('missing close bracket lol ( this one') . print\n2 |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }
