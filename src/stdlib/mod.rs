@@ -139,6 +139,8 @@ pub enum NativeFunction {
     Sqrt,
     Gcd,
     Lcm,
+    CountOnes,
+    CountZeros,
 }
 
 impl NativeFunction {
@@ -331,6 +333,8 @@ fn load_native_functions() -> Vec<NativeFunctionInfo> {
     declare!(Sqrt, "sqrt", "x", 1);
     declare!(Gcd, "gcd", "...");
     declare!(Lcm, "lcm", "...");
+    declare!(CountOnes, "count_ones", "x", 1);
+    declare!(CountZeros, "count_zeros", "x", 1);
 
     natives
 }
@@ -661,6 +665,8 @@ pub fn invoke<VM>(native: NativeFunction, nargs: u8, vm: &mut VM) -> ValueResult
         Sqrt => dispatch!(a1, math::sqrt(a1)),
         Gcd => dispatch_varargs!(an, math::gcd(an)),
         Lcm => dispatch_varargs!(an, math::lcm(an)),
+        CountOnes => dispatch!(a1, math::count_ones(a1)),
+        CountZeros => dispatch!(a1, math::count_zeros(a1)),
 
         _ => ValueIsNotFunctionEvaluable(Value::NativeFunction(native)).err(),
     }

@@ -560,6 +560,14 @@ Returns the absolute value of `x`.
 
 Returns the positive integer square root of `x`, or the largest `y` such that `y*y <= x`.
 
+### (Int) Count Ones `count_ones(x: int) -> int`
+
+Returns the number of ones in the 64-bit, signed, binary representation of `x`
+
+### (Int) Count Zeros `count_zeros(x: int) -> int`
+
+Returns the number of zeros in the 64-bit, signed, binary representation of `x`
+
 ### Lcm `lcm(...) -> int`
 
 Possible signatures:
