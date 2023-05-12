@@ -1516,6 +1516,8 @@ mod test {
     #[test] fn test_partial_get_field_in_bare_method() { run_str("struct Foo(a, b) let x = Foo(2, 3), f = (->b) ; x . f . print", "3\n"); }
     #[test] fn test_partial_get_field_in_function_eval() { run_str("struct Foo(a, b) [Foo(1, 2), Foo(2, 3)] . map(->b) . print", "[2, 3]\n"); }
     #[test] fn test_more_partial_get_field() { run_str("struct Foo(foo) ; let x = Foo('hello') ; print([x, Foo('')] . filter(->foo) . len)", "1\n"); }
+    #[test] fn test_count_ones() { run_str("0b11011011 . count_ones . print", "6\n"); }
+    #[test] fn test_count_zeros() { run_str("0 . count_zeros . print", "64\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }

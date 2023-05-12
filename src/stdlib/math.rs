@@ -52,3 +52,11 @@ pub fn lcm(a1: impl Iterator<Item=Value>) -> ValueResult {
         .map_or_else(|| ValueErrorValueMustBeNonEmpty.err(), |v| Ok(Int(v)))
 }
 
+pub fn count_ones(a1: Value) -> ValueResult {
+    Ok(Int(a1.as_int()?.count_ones() as i64))
+}
+
+pub fn count_zeros(a1: Value) -> ValueResult {
+    Ok(Int(a1.as_int()?.count_zeros() as i64))
+}
+
