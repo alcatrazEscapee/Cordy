@@ -83,8 +83,3 @@ print(answer)
 ```
 
 For a more comprehensive documentation, see the [language documentation](./docs/language.md) or the [standard library](./docs/stdlib.md).
-
-
-### To-Do
-
-- regex match, find, and replace -> just on normal strings. Make `\` less required for escaping (only escape if needed), or add regex literals, maybe with `/`

@@ -218,6 +218,7 @@ impl AsError for RuntimeError {
             RuntimeError::ValueErrorNotAllArgumentsUsedInStringFormatting(v) => format!("ValueError: Not all arguments consumed in format string, next: {}", v.as_error()),
             RuntimeError::ValueErrorMissingRequiredArgumentInStringFormatting => format!("ValueError: Not enough arguments for format string"),
             RuntimeError::ValueErrorEvalListMustHaveUnitLength(len) => format!("ValueError: Evaluating an index must have len = 1, got len = {}", len),
+            RuntimeError::ValueErrorCannotCompileRegex(raw, err) => format!("ValueError: Cannot compile regex '{}'\n            {}", raw, err),
 
             RuntimeError::TypeErrorUnaryOp(op, v) => format!("TypeError: Argument to unary '{}' must be an int, got {}", op.as_error(), v.as_error()),
             RuntimeError::TypeErrorBinaryOp(op, l, r) => format!("TypeError: Cannot {} {} and {}", op.as_error(), l.as_error(), r.as_error()),
@@ -233,6 +234,7 @@ impl AsError for RuntimeError {
             RuntimeError::TypeErrorArgMustBeDict(v) => format!("TypeError: Expected {} to be a dict", v.as_error()),
             RuntimeError::TypeErrorArgMustBeFunction(v) => format!("TypeError: Expected {} to be a function", v.as_error()),
             RuntimeError::TypeErrorArgMustBeCmpOrKeyFunction(v) => format!("TypeError: Expected {} to be a '<A, B> fn key(A) -> B' or '<A> cmp(A, A) -> int' function", v.as_error()),
+            RuntimeError::TypeErrorArgMustBeReplaceFunction(v) => format!("TypeError: Expected {} to be a 'fn replace(vector<str>) -> str' function", v.as_error()),
         }
     }
 }
