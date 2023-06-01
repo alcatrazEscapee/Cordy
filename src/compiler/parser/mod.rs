@@ -1776,8 +1776,6 @@ impl Parser<'_> {
                         self.accept(); // First and foremost, accept the query.
                         lvalue.resolve_locals(self); // Resolve each local, raising an error if need be.
                         let expr: Expr = self.parse_expr_10(); // Recursively parse, since this is left associative, call <expr-10>
-                        // todo: remove / replace
-                        //lvalue.emit_destructuring(self, false, true); // Emit the destructuring code, which cleans up everything
                         return Expr::assign_pattern(loc, lvalue, expr); // And exit this rule
                     }
                 }
