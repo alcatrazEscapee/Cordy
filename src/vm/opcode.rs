@@ -30,9 +30,6 @@ pub enum Opcode {
     Dup,
     Swap,
 
-    // Note: Local + Global does not, for the VM, mean in terms of block scoped
-    // Rather, it means if this variable is accessed in the stack relative to the stack frame, or relative to the stack bottom
-    // In this regard it refers to variables outside of functions (top level, even within block scopes), and variables within functions
     PushLocal(u32),
     StoreLocal(u32),
     PushGlobal(u32),

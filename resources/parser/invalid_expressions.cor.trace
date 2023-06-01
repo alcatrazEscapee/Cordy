@@ -4,27 +4,27 @@ L2: 0002 Int(1) -> 1
     0003 Nil
     0004 Binary(Add)
     0005 StoreGlobal(0) -> x
-L3: 0006 Pop
-    0007 Nil
+    0006 Pop
+L3: 0007 Nil
     0008 Unary(Minus)
     0009 StoreGlobal(0) -> x
-L4: 0010 Pop
-    0011 NativeFunction(Print)
+    0010 Pop
+L4: 0011 NativeFunction(Print)
     0012 Nil
     0013 Swap
     0014 OpFuncEval(1)
     0015 StoreGlobal(0) -> x
-L5: 0016 Pop
-    0017 NativeFunction(Print)
+    0016 Pop
+L5: 0017 NativeFunction(Print)
     0018 StoreGlobal(0) -> x
-L6: 0019 Pop
-    0020 NativeFunction(Print)
+    0019 Pop
+L6: 0020 NativeFunction(Print)
     0021 Int(2) -> 4
     0022 Nil
     0023 OpFuncEval(2)
     0024 StoreGlobal(0) -> x
-L7: 0025 Pop
-    0026 NativeFunction(Print)
+    0025 Pop
+L7: 0026 NativeFunction(Print)
     0027 Int(3) -> 5
     0028 OpFuncEval(1)
     0029 StoreGlobal(0) -> x

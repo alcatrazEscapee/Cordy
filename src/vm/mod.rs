@@ -270,6 +270,7 @@ impl<R, W> VirtualMachine<R, W> where
             },
 
             PushLocal(local) => {
+                // Locals are offset by the frame pointer, and don't need to check existence, as we don't allow late binding.
                 let local = self.frame_pointer() + local as usize;
                 trace::trace_interpreter!("push local {} : {}", local, self.stack[local].as_debug_str());
                 self.push(self.stack[local].clone());
@@ -280,9 +281,7 @@ impl<R, W> VirtualMachine<R, W> where
                 self.stack[local] = self.peek(0).clone();
             },
             PushGlobal(local) => {
-                // Globals are fancy locals that don't use the frame pointer to offset their local variable ID
-                // 'global' just means a variable declared outside of an enclosing function
-                // As we allow late binding for globals, we need to check that this has been declared first, based on the globals count.
+                // Globals are absolute offsets, and allow late binding, which means we have to check the global count before referencing.
                 let local: usize = local as usize;
                 trace::trace_interpreter!("push global {} : {}", local, self.stack[local].as_debug_str());
                 if local < self.global_count {
@@ -1518,6 +1517,15 @@ mod test {
     #[test] fn test_more_partial_get_field() { run_str("struct Foo(foo) ; let x = Foo('hello') ; print([x, Foo('')] . filter(->foo) . len)", "1\n"); }
     #[test] fn test_count_ones() { run_str("0b11011011 . count_ones . print", "6\n"); }
     #[test] fn test_count_zeros() { run_str("0 . count_zeros . print", "64\n"); }
+    #[test] fn test_do_while_1() { run_str("do { 'test' . print } while false", "test\n"); }
+    #[test] fn test_do_while_2() { run_str("let i = 0 ; do { i . print ; i += 1 } while i < 3", "0\n1\n2\n"); }
+    #[test] fn test_do_while_3() { run_str("let i = 0 ; do { i += 1 ; i . print } while i < 3", "1\n2\n3\n"); }
+    #[test] fn test_do_while_4() { run_str("let i = 5 ; do { i . print } while i < 3", "5\n"); }
+    #[test] fn test_do_without_while() { run_str("do { 'test' . print }", "test\n"); }
+    #[test] fn test_do_while_else_1() { run_str("do { 'loop' . print } while false else { 'else' . print }", "loop\nelse\n"); }
+    #[test] fn test_do_while_else_2() { run_str("do { 'loop' . print ; break } while false else { 'else' . print }", "loop\n"); }
+    #[test] fn test_do_while_else_3() { run_str("let i = 0 ; do { i . print ; i += 1 ; if i > 2 { break } } while 1 else { 'end' . print }", "0\n1\n2\n"); }
+    #[test] fn test_do_while_else_4() { run_str("let i = 0 ; do { i . print ; i += 1 ; if i > 2 { break } } while i < 2 else { 'end' . print }", "0\n1\nend\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }
