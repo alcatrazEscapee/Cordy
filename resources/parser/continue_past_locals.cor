@@ -1,7 +1,7 @@
 let x
 loop {
     let x
-    do {
+    if true {
         let x
         continue
     }

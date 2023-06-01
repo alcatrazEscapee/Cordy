@@ -249,16 +249,11 @@ impl Parser<'_> {
                 Some(KeywordIf) => self.parse_if_statement(),
                 Some(KeywordLoop) => self.parse_loop_statement(),
                 Some(KeywordWhile) => self.parse_while_statement(),
+                Some(KeywordDo) => self.parse_do_while_statement(),
                 Some(KeywordFor) => self.parse_for_statement(),
                 Some(KeywordBreak) => self.parse_break_statement(),
                 Some(KeywordContinue) => self.parse_continue_statement(),
                 Some(KeywordAssert) => self.parse_assert_statement(),
-                Some(KeywordDo) => {
-                    // For now, this is just a bridge (almost undocumented) keyword, in order to trigger a scoped block
-                    // Maybe later we can expand it to a `do {} while` loop, but probably not.
-                    self.advance();
-                    self.parse_block_statement();
-                },
                 Some(KeywordStruct) => self.parse_struct_statement(),
                 Some(CloseBrace) => break,
                 Some(KeywordExit) => {
@@ -680,6 +675,30 @@ impl Parser<'_> {
 
         if let Some(KeywordElse) = self.peek() { // Parse `while {} else {}`
             self.advance();
+            self.parse_block_statement();
+            self.push_delayed_pop();
+        }
+
+        self.end_loop();
+    }
+
+    /// Parses a `do { }`, which is a syntax for a scoped block, and optionally a `while` at the end
+    fn parse_do_while_statement(self: &mut Self) {
+        self.advance(); // Consume `do`
+
+        let jump: usize = self.begin_loop();
+
+        self.parse_block_statement(); // The statements
+        self.push_delayed_pop(); // Inner loop expressions cannot yield out of the loop
+
+        if let Some(KeywordWhile) = self.peek() {
+            self.advance(); // Consume `while`
+            self.parse_expression(); // While condition
+            self.push_jump(jump, JumpIfTruePop); // Jump back to origin
+        }
+
+        if let Some(KeywordElse) = self.peek() { // Parse do { } while <expr> else { }
+            self.advance(); // Consume `else`
             self.parse_block_statement();
             self.push_delayed_pop();
         }

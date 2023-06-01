@@ -228,13 +228,33 @@ while condition {
 
 Like in Python, it can have an optional `else`, which will only be entered if a `break` statement was **not** encountered.
 
-```rust
+```java
 while condition {
     // statements
 } else {
     // only if no `break`
 }
 ```
+
+`do-while` is a variant of the above which runs statements first, then evaluates the loop
+
+```java
+do {
+    // statements
+} while condition
+```
+
+Like a typical `while` loop, it can also have an optional `else` block, which will only be entered if a `break` statement was **not** encountered.
+
+```java
+do {
+    // statements
+} while condition else {
+    // onlf if no `break`    
+}
+```
+
+Note that the `while condition` can be omitted entirely, in which case the `do { }` statement functions as a single scoped block, that also supports `break` (jump to the end of the block) and `continue` (jump to the top of the block) semantics.
 
 `for-in` is a loop which iterates through a collection or string, yielding elements from the collection each iteration.
 

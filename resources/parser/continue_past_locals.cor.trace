@@ -1,11 +1,13 @@
 L1: 0000 IncGlobalCount
     0001 Nil
 L3: 0002 Nil
-L5: 0003 Nil
-L6: 0004 PopN(2)
-    0005 Jump(2)
-    0006 Pop
-L7: 0007 Pop
-L8: 0008 Jump(2)
-    0009 Pop
-    0010 Exit
+L4: 0003 True
+    0004 JumpIfFalsePop(9)
+L5: 0005 Nil
+L6: 0006 PopN(2)
+    0007 Jump(2)
+    0008 Pop
+L7: 0009 Pop
+L8: 0010 Jump(2)
+    0011 Pop
+    0012 Exit
