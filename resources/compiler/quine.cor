@@ -1,0 +1,5 @@
+let c = '\'', d = '\\'
+let s = 'let c = %s%s%s%s, d = %s%s%s%s
+let s = %s%%s%s
+s %%%% (c,d,c,c,c,d,d,c,c,c) %%%% s . print'
+s % (c,d,c,c,c,d,d,c,c,c) % s . print

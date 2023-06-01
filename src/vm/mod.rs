@@ -1562,6 +1562,7 @@ mod test {
     #[test] fn test_memoize() { run("memoize"); }
     #[test] fn test_memoize_recursive() { run("memoize_recursive"); }
     #[test] fn test_memoize_recursive_as_annotation() { run("memoize_recursive_as_annotation"); }
+    #[test] fn test_quine() { run("quine"); }
     #[test] fn test_range_used_twice() { run("range_used_twice"); }
     #[test] fn test_runtime_error_with_trace() { run("runtime_error_with_trace"); }
     #[test] fn test_upvalue_never_captured() { run("upvalue_never_captured"); }
