@@ -23,7 +23,7 @@ fn main() {
 
         // Retain local variables through the entire lifetime of the REPL
         let mut locals = Locals::empty();
-        let mut vm = VirtualMachine::new(compiler::default(), &b""[..], io::stdout());
+        let mut vm = VirtualMachine::new(compiler::default(), &b""[..], io::stdout(), vec![]);
 
         loop {
             io::stdout().flush().unwrap();
@@ -113,10 +113,7 @@ fn main() {
             }
         }
 
-        if let Some(arg) = iter.next() {
-            eprintln!("Unrecognized argument: {}", arg);
-            return;
-        }
+        let program_args: Vec<String> = iter.collect();
 
         if file.is_none() {
             eprintln!("No file specified.");
@@ -153,7 +150,7 @@ fn main() {
         let result = {
             let stdin = io::stdin().lock();
             let stdout = io::stdout();
-            let mut vm = VirtualMachine::new(compiled, stdin, stdout);
+            let mut vm = VirtualMachine::new(compiled, stdin, stdout, program_args);
             vm.run_until_completion()
         };
 
@@ -164,7 +161,7 @@ fn main() {
 }
 
 fn print_help() {
-    println!("cordy [options] <file>");
+    println!("cordy [options] <file> [program arguments...]");
     println!("When invoked with no arguments, this will open a REPL for the Cordy language (exit with 'exit' or Ctrl-C)");
     println!("Options:");
     println!("  -h --help        : Show this message and then exit");

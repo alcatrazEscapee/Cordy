@@ -32,6 +32,8 @@ pub enum NativeFunction {
     Print,
     ReadText,
     WriteText,
+    Env,
+    Argv,
     Bool,
     Int,
     Str,
@@ -227,6 +229,8 @@ fn load_native_functions() -> Vec<NativeFunctionInfo> {
     declare!(Print, "print", "...");
     declare!(ReadText, "read_text", "file", 1);
     declare!(WriteText, "write_text", "file, text", 2);
+    declare!(Env, "env", "...");
+    declare!(Argv, "argv", "", 0);
     declare!(Bool, "bool", "x", 1);
     declare!(Int, "int", "x", 1);
     declare!(Str, "str", "x", 1);
@@ -561,6 +565,8 @@ pub fn invoke<VM>(native: NativeFunction, nargs: u8, vm: &mut VM) -> ValueResult
                 }
             },
         }),
+        Env => dispatch!(Ok(vm.get_envs()), a1, Ok(vm.get_env(a1.as_str()?))),
+        Argv => dispatch!(Ok(vm.get_args())),
         Bool => dispatch!(a1, Ok(Value::Bool(a1.as_bool()))),
         Int => dispatch!(a1, math::convert_to_int(a1, None), a2, math::convert_to_int(a1, Some(a2))),
         Str => dispatch!(Ok("".to_value()), a1, Ok(a1.to_str().to_value())),
@@ -790,7 +796,7 @@ mod tests {
     fn test_consistency_condition() {
         // Asserts that `nargs < native.nargs()` is a sufficient condition for declaring a function is consistent
         let mut buffer = Vec::new();
-        let mut vm = VirtualMachine::new(compiler::default(), &b""[..], &mut buffer);
+        let mut vm = VirtualMachine::new(compiler::default(), &b""[..], &mut buffer, vec![]);
 
         for native in stdlib::NATIVE_FUNCTIONS.iter() {
             match native.nargs {
