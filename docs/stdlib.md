@@ -45,6 +45,43 @@ N.B When reading from external sources, newline `\r\n` sequences will be replace
 
 Writes the string `content` to the file at `path`, in overwrite mode. A file will be created if it does not exist, and if it does it will be overwritten.
 
+### Env `env(...) -> any`
+
+Possible signatures:
+
+- `env(): dict<str, str>`
+- `env(key: str) -> str | nil`
+
+When invoked with no arguments, will return a dictionary of all currently present environment variables. When invoked with one argument, will query that specific environment variable and return its value if defined, or `nil` if not.
+
+Prefer using `env(key)` over `env()[key]`.
+
+**Example**
+
+```bash
+$ cat example.cor
+env('DUCKS') . repr . print
+
+$ cordy example.cor
+nil
+$ DUCKS=1337 cordy example.cor
+'1337'
+```
+
+### Argv `argv() -> list<str>`
+
+Returns the list of user defined program arguments when invoked. These are arguments appended to the cordy invocation after the file name.
+
+**Example**
+
+```bash
+$ cat example.cor
+argv() . repr . print
+
+$ cordy example.cor --number-of-ducks 2 -run
+['--number-of-ducks', '2', '-run']
+```
+
 ### Bool `bool(x: any) -> bool`
 
 Returns the argument as a boolean. `nil`, `0`, `false`, `''`, and empty collections, will return `false`, everything else will return `true`.

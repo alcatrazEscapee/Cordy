@@ -47,6 +47,7 @@ pub struct VirtualMachine<R, W> {
 
     read: R,
     write: W,
+    args: Value,
 }
 
 #[derive(Eq, PartialEq, Debug, Copy, Clone)]
@@ -87,6 +88,10 @@ pub trait VirtualInterface {
     fn read_line(self: &mut Self) -> String;
     fn read(self: &mut Self) -> String;
 
+    fn get_envs(self: &Self) -> Value;
+    fn get_env(self: &Self, name: &String) -> Value;
+    fn get_args(self: &Self) -> Value;
+
     // Stack Manipulation
     fn peek(self: &Self, offset: usize) -> &Value;
     fn pop(self: &mut Self) -> Value;
@@ -113,7 +118,7 @@ impl<R, W> VirtualMachine<R, W> where
     R: BufRead,
     W: Write {
 
-    pub fn new(result: CompileResult, read: R, write: W) -> VirtualMachine<R, W> {
+    pub fn new(result: CompileResult, read: R, write: W, args: Vec<String>) -> VirtualMachine<R, W> {
         VirtualMachine {
             ip: 0,
             code: result.code,
@@ -130,6 +135,7 @@ impl<R, W> VirtualMachine<R, W> where
             fields: result.fields,
             read,
             write,
+            args: args.into_iter().map(|u| u.to_value()).to_list(),
         }
     }
 
@@ -898,6 +904,18 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
         buf
     }
 
+    fn get_envs(self: &Self) -> Value {
+        std::env::vars().map(|(k, v)| (k.to_value(), v.to_value())).to_dict()
+    }
+
+    fn get_env(self: &Self, name: &String) -> Value {
+        std::env::var(name).map_or(Value::Nil, |u| u.to_value())
+    }
+
+    fn get_args(self: &Self) -> Value {
+        self.args.clone()
+    }
+
 
     // ===== Stack Manipulations ===== //
 
@@ -1526,6 +1544,9 @@ mod test {
     #[test] fn test_do_while_else_2() { run_str("do { 'loop' . print ; break } while false else { 'else' . print }", "loop\n"); }
     #[test] fn test_do_while_else_3() { run_str("let i = 0 ; do { i . print ; i += 1 ; if i > 2 { break } } while 1 else { 'end' . print }", "0\n1\n2\n"); }
     #[test] fn test_do_while_else_4() { run_str("let i = 0 ; do { i . print ; i += 1 ; if i > 2 { break } } while i < 2 else { 'end' . print }", "0\n1\nend\n"); }
+    #[test] fn test_env_exists() { run_str("env . repr . print", "fn env(...)\n"); }
+    #[test] fn test_argv_exists() { run_str("argv . repr . print", "fn argv()\n"); }
+    #[test] fn test_argv_is_empty() { run_str("argv() . repr . print", "[]\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }
@@ -1586,7 +1607,7 @@ mod test {
         }
 
         let mut buf: Vec<u8> = Vec::new();
-        let mut vm = VirtualMachine::new(compile, &b""[..], &mut buf);
+        let mut vm = VirtualMachine::new(compile, &b""[..], &mut buf, vec![]);
 
         let result: ExitType = vm.run_until_completion();
         assert!(vm.stack.is_empty() || result.is_early_exit());
@@ -1619,7 +1640,7 @@ mod test {
         }
 
         let mut buf: Vec<u8> = Vec::new();
-        let mut vm = VirtualMachine::new(compile, &b""[..], &mut buf);
+        let mut vm = VirtualMachine::new(compile, &b""[..], &mut buf, vec![]);
 
         let result: ExitType = vm.run_until_completion();
         assert!(vm.stack.is_empty() || result.is_early_exit());
