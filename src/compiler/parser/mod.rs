@@ -471,7 +471,7 @@ impl Parser<'_> {
         // In addition, we let parameters have their own scope depth one outside locals to the function
         // This lets us 1) declare parameters here, in the right scope,
         // and 2) avoid popping parameters at the end of a function call (as they're handled by the `Return` opcode instead)
-        self.locals.push(Locals::new(Some(self.last_function_id() as usize)));
+        self.locals.push(Locals::new(Some(self.functions.len() - 1)));
         self.function_depth += 1;
         self.scope_depth += 1;
 
