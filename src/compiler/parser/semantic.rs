@@ -45,8 +45,9 @@ pub struct Locals {
     /// `break` statements jump back to the end of the loop, which needs to be patched later. The values to be patched record themselves in the stack at the current loop level
     pub(super) loops: Vec<Loop>,
 
-    /// Ordinal into `self.functions.code`
+    /// Ordinal into `self.functions` to access `self.functions[func].code`
     /// If not present, it is assumed to be global code.
+    /// Note this is not quite the same as the function ID, as if there are baked functions present, this will differ by the amount of baked functions
     pub func: Option<usize>,
 }
 
@@ -508,6 +509,10 @@ impl<'a> Parser<'a> {
         (self.constants.len() - 1) as u32
     }
 
+    /// Declares a function with a given name and arguments
+    /// Returns the function ID, which is the runtime identifier for the function
+    ///
+    /// **N.B.** The function ID is not an index into `self.functions`, due to the existence of `self.baked_functions`
     pub fn declare_function(self: &mut Self, name: String, args: &Vec<LValue>) -> u32 {
         self.functions.push(ParserFunctionImpl {
             name,
@@ -515,10 +520,6 @@ impl<'a> Parser<'a> {
             code: Vec::new(),
             locals_reference: Vec::new(),
         });
-        self.last_function_id()
-    }
-
-    pub fn last_function_id(self: &Self) -> u32 {
         (self.functions.len() + self.baked_functions.len() - 1) as u32
     }
 
@@ -664,6 +665,7 @@ impl<'a> Parser<'a> {
 
     /// Returns the output code of the current function
     pub fn current_function_mut(self: &mut Self) -> &mut Vec<(Location, Opcode)> {
+        dbg!(&self.functions, self.baked_functions.len());
         match self.current_locals().func {
             Some(func) => &mut self.functions[func].code,
             None => &mut self.output
