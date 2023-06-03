@@ -10,11 +10,13 @@ use RuntimeError::{*};
 use Value::{*};
 
 
+#[repr(u8)]
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum UnaryOp {
     Minus, Not
 }
 
+#[repr(u8)]
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum BinaryOp {
     Mul, Div, Pow, Mod, Is, Add, Sub, LeftShift, RightShift, And, Or, Xor, In, LessThan, GreaterThan, LessThanEqual, GreaterThanEqual, Equal, NotEqual, Max, Min

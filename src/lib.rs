@@ -1,9 +1,10 @@
-
+pub use crate::reporting::{AsError, SourceView};
 
 pub mod compiler;
-pub mod stdlib;
+pub mod encoder;
 pub mod vm;
 
-pub mod misc;
-pub mod reporting;
-pub mod trace;
+mod stdlib;
+mod misc;
+mod reporting;
+mod trace;
