@@ -516,8 +516,8 @@ pub struct FunctionImpl {
     pub tail: usize, // Pointer to the final `Return` opcode.
     pub nargs: u8, // The number of arguments the function takes
 
-    name: String, // The name of the function, useful to show in stack traces
-    args: Vec<String>, // Names of the arguments
+    pub name: String, // The name of the function, useful to show in stack traces
+    pub args: Vec<String>, // Names of the arguments
 }
 
 impl FunctionImpl {
@@ -749,6 +749,12 @@ pub struct StructTypeImpl {
     pub field_names: Vec<String>,
 
     pub type_index: u32,
+}
+
+impl StructTypeImpl {
+    pub fn new(name: String, field_names: Vec<String>, type_index: u32) -> StructTypeImpl {
+        StructTypeImpl { name, field_names, type_index }
+    }
 }
 
 impl PartialEq for StructTypeImpl {

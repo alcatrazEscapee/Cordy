@@ -69,13 +69,13 @@ impl Locals {
 pub struct Fields {
     /// A mapping of `field name` to `field index`. This is used to record unique fields.
     /// For example, `struct Foo(a, b, c)` would generate the fields `"a"`, `"b"`, and `"c"` at index `0`, `1`, and `2`, respectively.
-    fields: HashMap<String, u32>,
+    pub fields: HashMap<String, u32>,
 
     /// A table which maps pairs of `(type index, field index)` to a `field offset`
     /// The `type index` is known at runtime, based on the runtime type of the struct in use.
     /// The `field index` is known at compile time, based on the identifier that it resolves to.
     /// The resultant `field offset` is a index into a specific struct object's `Vec<Value>` of fields.
-    lookup: HashMap<(u32, u32), usize>,
+    pub lookup: HashMap<(u32, u32), usize>,
 }
 
 impl Fields {
@@ -665,7 +665,6 @@ impl<'a> Parser<'a> {
 
     /// Returns the output code of the current function
     pub fn current_function_mut(self: &mut Self) -> &mut Vec<(Location, Opcode)> {
-        dbg!(&self.functions, self.baked_functions.len());
         match self.current_locals().func {
             Some(func) => &mut self.functions[func].code,
             None => &mut self.output

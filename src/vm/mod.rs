@@ -195,7 +195,6 @@ impl<R, W> VirtualMachine<R, W> where
             Noop => panic!("Noop should only be emitted as a temporary instruction"),
 
             // Flow Control
-            // All jumps are absolute (because we don't have variable length instructions and it's easy to do so)
             JumpIfFalse(ip) => {
                 let jump: usize = self.ip.add_offset(ip);
                 trace::trace_interpreter!("jump if false {} -> {}", self.stack.last().unwrap().as_debug_str(), jump);

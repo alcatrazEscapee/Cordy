@@ -25,6 +25,7 @@ pub fn find_native_function(name: &String) -> Option<NativeFunction> {
 }
 
 
+#[repr(u8)]
 #[derive(Eq, PartialEq, Debug, Clone, Copy, Hash)]
 pub enum NativeFunction {
     Read,
@@ -146,6 +147,8 @@ pub enum NativeFunction {
 }
 
 impl NativeFunction {
+    pub fn get(op: u8) -> NativeFunction { NATIVE_FUNCTIONS[op as usize].native }
+
     pub fn nargs(self: &Self) -> Option<u8> {
         NATIVE_FUNCTIONS[*self as usize].nargs
     }

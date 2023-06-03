@@ -337,11 +337,7 @@ impl Parser<'_> {
         }
 
         self.push(Struct(type_index));
-        self.structs.push(Rc::new(StructTypeImpl {
-            name: type_name,
-            field_names: unique_fields,
-            type_index,
-        }));
+        self.structs.push(Rc::new(StructTypeImpl::new(type_name, unique_fields, type_index)));
 
         self.expect_resync(CloseParen);
     }

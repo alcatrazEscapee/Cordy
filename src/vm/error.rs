@@ -66,7 +66,7 @@ impl RuntimeError {
         const REPEAT_LIMIT: usize = 0;
 
         // Top level stack frame refers to the code being executed
-        let target: Location = locations[ip];
+        let target: Location = locations.get(ip).copied().unwrap_or(Location::empty());
         let mut stack: Vec<StackFrame> = Vec::new();
         let mut prev_ip: usize = ip;
         let mut prev_frame: Option<(usize, usize)> = None;
