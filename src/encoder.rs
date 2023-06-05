@@ -16,6 +16,8 @@ const SEGMENT_BITS: u8 = 0x7F;
 const SEGMENT_BITS_MASK: u64 = !(SEGMENT_BITS as u64);
 const CONTINUE_BIT: u8 = 0x80;
 
+const MAX_NATIVE_FUNCTION_OPCODE: u8 = 178;
+
 
 /// Encodes a compile result into a series of bytes
 pub fn encode(compile: &CompileResult) -> Vec<u8> {
@@ -201,7 +203,7 @@ impl Encode for Opcode {
             Int(i) => encode!(27, i),
             Str(i) => encode!(28, i),
             Function(i) => encode!(29, i),
-            NativeFunction(i) => encode!(72 + (*i as u8)), // [72, 256) - currently uses up to 178
+            NativeFunction(i) => encode!(72 + (*i as u8)), // [72, 256) - currently uses up to MAX_NATIVE_FUNCTION_OPCODE
             List(i) => encode!(30, i),
             Vector(i) => encode!(31, i),
             Set(i) => encode!(32, i),
@@ -261,7 +263,7 @@ impl Decode<Opcode> for Decoder {
             27 => Int(self.decode()?),
             28 => Str(self.decode()?),
             29 => Function(self.decode()?),
-            72..=178 => NativeFunction(stdlib::NativeFunction::get(op - 72)),
+            72..=MAX_NATIVE_FUNCTION_OPCODE => NativeFunction(stdlib::NativeFunction::get(op - 72)),
             30 => List(self.decode()?),
             31 => Vector(self.decode()?),
             32 => Set(self.decode()?),
@@ -294,7 +296,7 @@ mod tests {
     use std::fmt::Debug;
     use std::io::Cursor;
 
-    use crate::encoder::{Decode, Decoder, Encode, Encoder, Maybe};
+    use crate::encoder::{Decode, Decoder, Encode, Encoder, MAX_NATIVE_FUNCTION_OPCODE, Maybe};
     use crate::stdlib::NativeFunction;
     use crate::vm::Opcode;
     use crate::vm::operator::{BinaryOp, UnaryOp};
@@ -306,7 +308,7 @@ mod tests {
     #[test] fn test_opcode_binary_lo() { run(Opcode::Binary(BinaryOp::Mul), vec![51]); }
     #[test] fn test_opcode_binary_hi() { run(Opcode::Binary(BinaryOp::Min), vec![71]); }
     #[test] fn test_opcode_native_function_lo() { run(Opcode::NativeFunction(NativeFunction::Read), vec![72]); }
-    #[test] fn test_opcode_native_function_hi() { run(Opcode::NativeFunction(NativeFunction::CountZeros), vec![178]); }
+    #[test] fn test_opcode_native_function_hi() { run(Opcode::NativeFunction(NativeFunction::CountZeros), vec![MAX_NATIVE_FUNCTION_OPCODE]); }
 
     fn run<E>(e: E, bytes: Vec<u8>) where
         E : Encode + Sized + Eq + Debug,
