@@ -175,6 +175,7 @@ impl CompileResult {
                     Some(local) => format!("{:?} -> {}", token, local),
                     None => format!("{:?}", token),
                 },
+                GetField(fid) | SetField(fid) | GetFieldFunction(fid) => format!("{:?} -> {}", token, self.fields.get_field_name(fid)),
                 _ => format!("{:?}", token.to_absolute_jump(ip)),
             };
             lines.push(format!("{}{:0>4} {}", label, ip % 10_000, asm));
