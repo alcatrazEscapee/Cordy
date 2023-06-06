@@ -623,15 +623,21 @@ Possible signatures:
 
 With one argument, returns the greatest common divisor of each value in the iterable. With more than one argument, returns the greatest common divisor of all the arguments. Raises an error when invoked with no arguments.
 
-### (Str) Split `split(delim: str, string: str) -> list<str>`
+### (Str) Split `split(pattern: str, x: str) -> list<str>`
 
-Splits `string` on the delimiter `delim` and returns a `list` of all split elements.
+Splits a string `x` based on `pattern`, with regular expression (regex) support. If `pattern` is an empty string, this functions identical to `list` applied to a string, and returns a list of all characters in the string. Otherwise, it will treat `pattern` like a regex, and split the string on sequences matching the regex.
+
+Regex syntax is the same as used by the `replace`, and `search` functions.
 
 **Example**
 
 ```
+>>> 'abc' . split('')
+['a', 'b', 'c']
 >>> 'hello the world' . split(' ')
 ['hello', 'the', 'world']
+>>> '   hello  \t the \n\n   world  !' . trim . split('\s+')
+['hello', 'the', 'world', '!']
 ```
 
 ### (Str) Replace `replace(...) -> str`
