@@ -288,10 +288,10 @@ fn load_native_functions() -> Vec<NativeFunctionInfo> {
     // strings
     declare!(ToLower, "to_lower", "x", 1);
     declare!(ToUpper, "to_upper", "x", 1);
-    declare!(Replace, "replace", "from, to, x", 3);
+    declare!(Replace, "replace", "pattern, replacer, x", 3);
     declare!(Search, "search", "pattern, x", 2);
     declare!(Trim, "trim", "x", 1);
-    declare!(Split, "split", "delim, x", 2);
+    declare!(Split, "split", "pattern, x", 2);
     declare!(Char, "char", "x", 1);
     declare!(Ord, "ord", "x", 1);
     declare!(Hex, "hex", "x", 1);

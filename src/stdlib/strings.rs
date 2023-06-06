@@ -1,6 +1,6 @@
-use std::iter::Peekable;
+use std::iter::{FusedIterator, Peekable};
 use std::str::Chars;
-use fancy_regex::{Captures, Regex};
+use fancy_regex::{Captures, Matches, Regex};
 
 use crate::vm::{IntoIterableValue, IntoValue, Iterable, Value, RuntimeError, VirtualInterface};
 use crate::misc;
@@ -57,6 +57,18 @@ pub fn search(pattern: Value, target: Value) -> ValueResult {
     }).to_list())
 }
 
+pub fn split(pattern: Value, target: Value) -> ValueResult {
+    if pattern.as_str()? == "" {
+        // Special case for empty string
+        return Ok(target.as_str()?.chars().map(|u| u.to_value()).to_list());
+    }
+    let regex: Regex = compile_regex(pattern)?;
+    let text: &String = target.as_str()?;
+    Ok(fancy_split(&regex, text.as_str())
+        .map(|u| u.to_value())
+        .to_list())
+}
+
 fn as_result(captures: &Captures) -> Value {
     captures.iter()
         .map(|group| group.unwrap().as_str().to_value())
@@ -85,9 +97,48 @@ fn escape_regex(raw: &String) -> String {
     result
 }
 
-pub fn split(a0: Value, a1: Value) -> ValueResult {
-    Ok(a1.as_str()?.split(a0.as_str()?).map(|u| u.to_value()).to_list())
+/// For some reason the `fancy_regex` crate does not support `.split()`
+/// However, it does support `find_iter()`, so we just create the same extension to allow `Split` to work.
+/// This implementation is completely borrowed from the `re_unicode.rs` module in the `regex` crate, and adapted to use `Regex` from the `fancy-regex` crate.
+///
+/// `'r` is the lifetime of the compiled regular expression and `'t` is the lifetime of the string being split.
+fn fancy_split<'r, 't>(regex: &'r Regex, text: &'t str) -> FancySplit<'r, 't> {
+    FancySplit { finder: regex.find_iter(text), last: 0 }
 }
+
+#[derive(Debug)]
+struct FancySplit<'r, 't> {
+    finder: Matches<'r, 't>,
+    last: usize,
+}
+
+impl<'r, 't> Iterator for FancySplit<'r, 't> {
+    type Item = &'t str;
+
+    fn next(&mut self) -> Option<&'t str> {
+        let text = self.finder.text();
+        match self.finder.next() {
+            None => {
+                if self.last > text.len() {
+                    None
+                } else {
+                    let s = &text[self.last..];
+                    self.last = text.len() + 1; // Next call will return None
+                    Some(s)
+                }
+            }
+            Some(Ok(m)) => {
+                let matched = &text[self.last..m.start()];
+                self.last = m.end();
+                Some(matched)
+            },
+            _ => None
+        }
+    }
+}
+
+impl<'r, 't> FusedIterator for FancySplit<'r, 't> {}
+
 
 pub fn to_char(a1: Value) -> ValueResult {
     match &a1 {
