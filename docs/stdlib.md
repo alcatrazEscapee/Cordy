@@ -88,9 +88,14 @@ Returns the argument as a boolean. `nil`, `0`, `false`, `''`, and empty collecti
 
 The keyword `bool` can also be used in an `is` expression, to check if a value is of the type `bool`.
 
-### Int `int(x: any) -> int`
+### Int `int(...) -> int`
 
-Returns the argument as an integer. `nil` and `false` evaluate to `0`, where strings will be parsed as an integer or raise an error.
+**Possible Signatures**
+
+- `int(x: any) -> int`
+- `<T> int(x: any, default: T) -> int | T`
+
+Returns the argument as an integer. `nil` and `false` evaluate to `0`, where strings will be parsed as an integer or raise an error. If a second argument is provided, will instead return the default value instead of raising an error.
 
 The keyword `int` can also be used in an `is` expression, to check if a value is of the type `int`.
 

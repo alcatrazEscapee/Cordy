@@ -1578,6 +1578,8 @@ mod test {
     #[test] fn test_split_regex_on_substring() { run_str("'the horse escaped the barn' . split('the') . print", "['', ' horse escaped ', ' barn']\n"); }
     #[test] fn test_split_regex_on_substring_with_or() { run_str("'the horse escaped the barn' . split('(the| )') . print", "['', '', 'horse', 'escaped', '', '', 'barn']\n"); }
     #[test] fn test_split_regex_on_substring_with_wildcard() { run_str("'the horse escaped the barn' . split(' *e *') . print", "['th', 'hors', '', 'scap', 'd th', 'barn']\n"); }
+    #[test] fn test_int_default_value_yes() { run_str("int('123', 567) . print", "123\n"); }
+    #[test] fn test_int_default_value_no() { run_str("int('yes', 567) . print", "567\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }
