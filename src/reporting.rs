@@ -219,6 +219,7 @@ impl AsError for RuntimeError {
             RuntimeError::ValueErrorMissingRequiredArgumentInStringFormatting => format!("ValueError: Not enough arguments for format string"),
             RuntimeError::ValueErrorEvalListMustHaveUnitLength(len) => format!("ValueError: Evaluating an index must have len = 1, got len = {}", len),
             RuntimeError::ValueErrorCannotCompileRegex(raw, err) => format!("ValueError: Cannot compile regex '{}'\n            {}", raw, err),
+            RuntimeError::ValueErrorRecursiveHash(value) => format!("ValueError: Cannot create recursive hash based collection from {}", value.as_error()),
 
             RuntimeError::TypeErrorUnaryOp(op, v) => format!("TypeError: Argument to unary '{}' must be an int, got {}", op.as_error(), v.as_error()),
             RuntimeError::TypeErrorBinaryOp(op, l, r) => format!("TypeError: Cannot {} {} and {}", op.as_error(), l.as_error(), r.as_error()),

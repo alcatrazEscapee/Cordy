@@ -1,4 +1,4 @@
-
+use crate::vm::Value;
 
 pub fn strip_line_ending(buffer: &mut String) {
     if buffer.ends_with('\n') {
@@ -54,3 +54,33 @@ impl OffsetAdd<i32> for usize {
         (self as isize + offset as isize) as usize
     }
 }
+
+
+/// - `Option<...>` because in the case we don't discover any data structures, this stays a null pointer
+/// - `ValuePtr` because we need to do reference based equality when we're checking if we've seen a value before
+pub struct RecursionGuard(Option<Vec<ValuePtr>>);
+
+impl RecursionGuard {
+    pub fn new() -> RecursionGuard { RecursionGuard(None) }
+
+    /// Returns `true` if the value has been seen before, triggering an early exit
+    pub fn enter(self: &mut Self, value: &Value) -> bool {
+        let vec = self.0.get_or_insert_with(|| Vec::new());
+        if vec.len() == 10 {
+            return true;
+        }
+        let boxed = ValuePtr(value.clone());
+        let ret = vec.contains(&boxed);
+        vec.push(boxed);
+        ret
+    }
+
+    pub fn leave(self: &mut Self) {
+        self.0.as_mut().unwrap().pop().unwrap(); // `.unwrap()` is safe as we should always call `enter()` before `leave()`
+    }
+}
+
+struct ValuePtr(Value);
+
+impl PartialEq for ValuePtr { fn eq(&self, other: &Self) -> bool { self.0.ptr_eq(&other.0) } }
+impl Eq for ValuePtr {}
