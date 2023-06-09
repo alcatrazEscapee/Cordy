@@ -7,11 +7,18 @@ Cordy is a dynamically typed, interpreted, semi-functional / semi-procedural lan
 It is a standard Rust project, and thus built with `cargo build --release`. The `cordy` executable serves both as the compiler and runtime. Running `cordy` without any arguments opens a (primitive) REPL.
 
 ```
-cordy [options] <file>
-    -d : Show the disassembly output, then exit.
-
-Compiles and executes the file <file>
+$ cordy --help
+cordy [options] <file> [program arguments...]
+When invoked with no arguments, this will open a REPL for the Cordy language (exit with 'exit' or Ctrl-C)
+Options:
+  -h --help        : Show this message and then exit
+  -c --compile     : Compile only. Outputs the compiled program to <file>.o
+  -d --disassembly : Dump the disassembly view. Use -o to dump to a file.
+  -e --execute     : Execute the provided file as a compiled binary (with -c), rather than compling a text file
+  -o --optimize    : Enables compiler optimizations
 ```
+
+Cordy language support is available via a [VS Code Extension](https://github.com/alcatrazEscapee/CordyLanguageSupport).
 
 For additional debugging information, compile with the environment variable `RUSTFLAGS` set to
 
