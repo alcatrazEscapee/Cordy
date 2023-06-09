@@ -636,9 +636,23 @@ pub fn invoke<VM>(native: NativeFunction, nargs: u8, vm: &mut VM) -> ValueResult
         Range => dispatch!(a1, Value::range(0, a1.as_int()?, 1), a2, Value::range(a1.as_int()?, a2.as_int()?, 1), a3, Value::range(a1.as_int()?, a2.as_int()?, a3.as_int()?)),
         Enumerate => dispatch!(a1, Ok(Value::Enumerate(Box::new(a1)))),
         Sum => dispatch_varargs!(an, collections::sum(an)),
-        Min => dispatch_varargs!(an, collections::min(an)),
+        Min => match nargs {
+            0 => IncorrectNumberOfArgumentsVariadicAtLeastOne(native).err(),
+            1 => match vm.pop() {
+                Value::NativeFunction(Int) => Ok(Value::Int(i64::MIN)),
+                an => collections::min(an.as_iter()?),
+            },
+            _ => collections::min(vm.popn(nargs as usize).iter().cloned()),
+        },
         MinBy => dispatch!(a1, a2, collections::min_by(vm, a1, a2)),
-        Max => dispatch_varargs!(an, collections::max(an)),
+        Max => match nargs {
+            0 => IncorrectNumberOfArgumentsVariadicAtLeastOne(native).err(),
+            1 => match vm.pop() {
+                Value::NativeFunction(Int) => Ok(Value::Int(i64::MAX)),
+                an => collections::max(an.as_iter()?),
+            },
+            _ => collections::max(vm.popn(nargs as usize).iter().cloned()),
+        },
         MaxBy => dispatch!(a1, a2, collections::max_by(vm, a1, a2)),
         Map => dispatch!(a1, a2, collections::map(vm, a1, a2)),
         Filter => dispatch!(a1, a2, collections::filter(vm, a1, a2)),

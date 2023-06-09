@@ -319,6 +319,8 @@ Possible signatures:
 
 With one argument, returns the minimum of each value in the iterable. With more than one argument, returns the minimum of all the arguments. Raises an error when invoked with no arguments.
 
+Note that the special case `min(int)` or `int.min` will return the lowest possible signed 64-bit integer representable.
+
 ### Min By `min_by(...) -> int`
 
 Possible signatures:
@@ -336,6 +338,8 @@ Possible signatures:
 - `max(int, ...) -> int`
 
 With one argument, returns the maximum of each value in the iterable. With more than one argument, returns the maximum of all the arguments. Raises an error when invoked with no arguments.
+
+Note that the special case `max(int)` or `int.max` will return the highest possible signed 64-bit integer representable.
 
 ### Max By `max_by(...) -> int`
 

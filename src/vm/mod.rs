@@ -1596,6 +1596,7 @@ mod test {
     #[test] fn test_recursive_struct_repr() { run_str("struct S(x) ; let x = S(nil) ; x->x = x ; x.print", "S(x=S(...))\n"); }
     #[test] fn test_recursive_knot_lists() { run_str("let x = [] ; let y = [x] ; x.push(y) ; x.print", "[[[...]]]\n"); }
     #[test] fn test_recursive_nested_list_struct_repr() { run_str("struct S(x) ; let x = [S(nil)] ; x[0]->x = [S(x)] ; x.print", "[S(x=[S(x=[...])])]\n"); }
+    #[test] fn test_int_min_and_max() { run_str("[int.min, max(int)] . print", "[-9223372036854775808, 9223372036854775807]\n")}
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }

@@ -1,4 +1,5 @@
 use crate::compiler::parser::expr::{Expr, ExprType, SequenceOp};
+use crate::stdlib::NativeFunction;
 use crate::vm::{IntoValue, RuntimeError, Value};
 use crate::vm::operator::BinaryOp;
 
@@ -66,6 +67,15 @@ impl Optimize for Expr {
                         let rhs = args.pop().unwrap();
                         let lhs = args.pop().unwrap();
                         lhs.binary(loc, f_op, rhs)
+                    },
+
+                    // This is a special case, for `min(int)` and `max(int)`, we can replace this with a compile time constant
+                    Expr(_, ExprType::NativeFunction(native_f @ (NativeFunction::Min | NativeFunction::Max))) if args.len() == 1 => {
+                        if let Expr(_, ExprType::NativeFunction(NativeFunction::Int)) = args[0] {
+                            Expr::int(if native_f == NativeFunction::Min { i64::MIN } else { i64::MAX })
+                        } else {
+                            f.eval(loc, args)
+                        }
                     },
 
                     // If we can assert the inner function is partial, then we can merge the two calls
