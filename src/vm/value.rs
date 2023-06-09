@@ -13,6 +13,7 @@ use itertools::Itertools;
 use crate::stdlib::NativeFunction;
 use crate::vm::error::RuntimeError;
 use crate::compiler::Fields;
+use crate::misc::RecursionGuard;
 
 use Value::{*};
 use RuntimeError::{*};
@@ -102,20 +103,32 @@ impl Value {
     }
 
     /// Converts the `Value` to a `String`. This is equivalent to the stdlib function `str()`
-    pub fn to_str(self: &Self) -> String {
+    pub fn to_str(self: &Self) -> String { self.safe_to_str(&mut RecursionGuard::new()) }
+
+    fn safe_to_str(self: &Self, rc: &mut RecursionGuard) -> String {
         match self {
             Str(s) => (**s).to_owned(),
             Function(f) => f.name.clone(),
-            PartialFunction(f) => f.func.to_str(),
+            PartialFunction(f) => f.func.safe_to_str(rc),
             NativeFunction(b) => String::from(b.name()),
             PartialNativeFunction(b, _) => String::from(b.name()),
             Closure(c) => (*c).func.as_ref().name.clone(),
-            _ => self.to_repr_str(),
+            _ => self.safe_to_repr_str(rc),
         }
     }
 
     /// Converts the `Value` to a representative `String. This is equivalent to the stdlib function `repr()`, and meant to be an inverse of `eval()`
-    pub fn to_repr_str(self: &Self) -> String {
+    pub fn to_repr_str(self: &Self) -> String { self.safe_to_repr_str(&mut RecursionGuard::new()) }
+    
+    fn safe_to_repr_str(self: &Self, rc: &mut RecursionGuard) -> String {
+        macro_rules! recursive_guard {
+            ($default:expr, $recursive:expr) => {{
+                let ret = if rc.enter(self) { $default } else { $recursive };
+                rc.leave();
+                ret
+            }};
+        }
+
         match self {
             Nil => String::from("nil"),
             Bool(b) => b.to_string(),
@@ -125,28 +138,59 @@ impl Value {
                 format!("'{}'", &escaped[1..escaped.len() - 1])
             },
 
-            List(v) => format!("[{}]", v.unbox().iter().map(|t| t.to_repr_str()).join(", ")),
-            Set(v) => format!("{{{}}}", v.unbox().set.iter().map(|t| t.to_repr_str()).join(", ")),
-            Dict(v) => format!("{{{}}}", v.unbox().dict.iter().map(|(k, v)| format!("{}: {}", k.to_repr_str(), v.to_repr_str())).join(", ")),
-            Heap(v) => format!("[{}]", v.unbox().heap.iter().map(|t| t.0.to_repr_str()).join(", ")),
-            Vector(v) => format!("({})", v.unbox().iter().map(|t| t.to_repr_str()).join(", ")),
+            List(v) => recursive_guard!(
+                String::from("[...]"),
+                format!("[{}]", v.unbox().iter()
+                    .map(|t| t.safe_to_repr_str(rc))
+                    .join(", "))
+            ),
+            Set(v) => recursive_guard!(
+                String::from("{...}"),
+                format!("{{{}}}", v.unbox().set.iter()
+                    .map(|t| t.safe_to_repr_str(rc))
+                    .join(", "))
+            ),
+            Dict(v) => recursive_guard!(
+                String::from("{...}"),
+                format!("{{{}}}", v.unbox().dict.iter()
+                    .map(|(k, v)| format!("{}: {}", k.safe_to_repr_str(rc), v.safe_to_repr_str(rc)))
+                    .join(", "))
+            ),
+            Heap(v) => recursive_guard!(
+                String::from("[...]"),
+                format!("[{}]", v.unbox().heap.iter()
+                    .map(|t| t.0.safe_to_repr_str(rc))
+                    .join(", "))
+            ),
+            Vector(v) => recursive_guard!(
+                String::from("(...)"),
+                format!("({})", v.unbox().iter()
+                    .map(|t| t.safe_to_repr_str(rc))
+                    .join(", "))
+            ),
 
             Struct(it) => {
                 let it = it.unbox();
-                format!("{}({})", it.type_impl.name.as_str(), it.values.iter().zip(it.type_impl.field_names.iter()).map(|(v, k)| format!("{}={}", k, v.to_repr_str())).join(", "))
+                recursive_guard!(
+                    format!("{}(...)", it.type_impl.name),
+                    format!("{}({})", it.type_impl.name.as_str(), it.values.iter()
+                        .zip(it.type_impl.field_names.iter())
+                        .map(|(v, k)| format!("{}={}", k, v.safe_to_repr_str(rc)))
+                        .join(", "))
+                )
             },
             StructType(it) => format!("struct {}({})", it.name.clone(), it.field_names.join(", ")),
 
             Range(r) => if r.step == 0 { String::from("range(empty)") } else { format!("range({}, {}, {})", r.start, r.stop, r.step) },
-            Enumerate(v) => format!("enumerate({})", v.to_repr_str()),
+            Enumerate(v) => format!("enumerate({})", v.safe_to_repr_str(rc)),
 
-            Iter(_) => format!("<synthetic> iterator"),
-            Memoized(_) => format!("<synthetic> memoized"),
+            Iter(_) => String::from("<synthetic> iterator"),
+            Memoized(_) => String::from("<synthetic> memoized"),
 
             GetField(_) => String::from("(->)"),
 
             Function(f) => (*f).as_ref().borrow().as_str(),
-            PartialFunction(f) => (*f).as_ref().borrow().func.to_repr_str(),
+            PartialFunction(f) => (*f).as_ref().borrow().func.safe_to_repr_str(rc),
             NativeFunction(b) => format!("fn {}({})", b.name(), b.args()),
             PartialNativeFunction(b, _) => format!("fn {}({})", b.name(), b.args()),
             Closure(c) => (*c).func.as_ref().borrow().as_str(),
@@ -180,6 +224,7 @@ impl Value {
         })
     }
 
+    /// Used by `trace` disabled code, do not remove!
     pub fn as_debug_str(self: &Self) -> String {
         format!("{}: {}", self.to_repr_str(), self.as_type_str())
     }
@@ -386,6 +431,18 @@ impl Value {
             _ => false
         }
     }
+
+    pub fn ptr_eq(self: &Self, other: &Value) -> bool {
+        match (&self, &other) {
+            (List(l), List(r)) => l.ptr_eq(r),
+            (Set(l), Set(r)) => l.ptr_eq(r),
+            (Dict(l), Dict(r)) => l.ptr_eq(r),
+            (Heap(l), Heap(r)) => l.ptr_eq(r),
+            (Vector(l), Vector(r)) => l.ptr_eq(r),
+            (Struct(l), Struct(r)) => l.ptr_eq(r),
+            _ => self == other
+        }
+    }
 }
 
 /// Implement Ord and PartialOrd explicitly, to derive implementations for each individual type.
@@ -494,12 +551,25 @@ impl<T : Eq + PartialEq + Debug + Clone> Mut<T> {
         Mut(Rc::new(RefCell::new(value)))
     }
 
+    /// Unbox the `Mut<T>`, obtaining a borrow on the contents.
+    /// Note that while semantically in Rust, this is a non-unique borrow, and we can treat it as such while in native code, we **cannot** yield into user code while this borrow is active.
     pub fn unbox(&self) -> Ref<T> {
         (*self.0).borrow()
     }
 
+    /// Unbox the `Mut<T>`, obtaining a mutable and unique borrow on the contents.
     pub fn unbox_mut(&self) -> RefMut<T> {
         (*self.0).borrow_mut()
+    }
+
+    /// Attempt to unbox the `Mut<T>`, obtaining a borrow on the contents if it not already borrowed - otherwise return `None`
+    pub fn try_unbox(&self) -> Option<Ref<T>> {
+        (*self.0).try_borrow().ok()
+    }
+
+    /// Returns `true` if the two inner instances are part of the same object.
+    pub fn ptr_eq(&self, other: &Mut<T>) -> bool {
+        return Rc::ptr_eq(&self.0, &other.0)
     }
 }
 
@@ -642,12 +712,46 @@ impl Ord for SetImpl {
     }
 }
 
-impl Hash for SetImpl {
+/// `set()` is one object which can enter into a recursive hash situation:
+/// ```cordy
+/// let x = dict()
+/// x.push(x)
+/// ```
+///
+/// This will take a mutable borrow on `x`, in the implementation of `push`, but then need to compute the hash of `x` to insert it into the set.
+/// It can also apply to nested structures, as long as any recursive entry is formed.
+///
+/// The resolution is twofold:
+///
+/// - We don't implement `Hash` for `SetImpl`, instead implementing for `Mut<SetImpl>`, as before unboxing we need to do a borrow check
+/// - If the borrow check fails, we set a global flag that we've entered this pathological case, which is checked by `ArrayStore` before yielding back to user code
+///
+/// Note this also applies to `DictImpl` / `dict()`, although only when used as a key.
+impl Hash for Mut<SetImpl> {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        for v in &self.set {
-            v.hash(state)
+        match self.try_unbox() {
+            Some(it) => {
+                for v in &it.set {
+                    v.hash(state)
+                }
+            },
+            None => FLAG_RECURSIVE_HASH.with(|cell| cell.set(true)),
         }
     }
+}
+
+
+// Support for `set` and `dict` recursive hash exceptions
+thread_local! {
+    static FLAG_RECURSIVE_HASH: Cell<bool> = Cell::new(false);
+}
+
+/// Returns `true` if a recursive hash error occurred.
+#[inline]
+pub fn guard_recursive_hash<T, F : FnOnce() -> T>(f: F) -> bool {
+    FLAG_RECURSIVE_HASH.with(|cell| cell.set(false));
+    f();
+    FLAG_RECURSIVE_HASH.with(|cell| cell.get())
 }
 
 
@@ -676,10 +780,16 @@ impl Ord for DictImpl {
     }
 }
 
-impl Hash for DictImpl {
+/// See justification for the unique `Hash` implementation on `SetImpl`
+impl Hash for Mut<DictImpl> {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        for v in &self.dict {
-            v.hash(state)
+        match self.try_unbox() {
+            Some(it) => {
+                for v in &it.dict {
+                    v.hash(state)
+                }
+            },
+            None => FLAG_RECURSIVE_HASH.with(|cell| cell.set(true))
         }
     }
 }

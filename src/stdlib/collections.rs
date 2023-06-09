@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 
 use itertools::Itertools;
 
-use crate::misc;
+use crate::{misc, vm};
 use crate::vm::{IntoDictValue, IntoIterableValue, IntoValue, Iterable, RuntimeError, Value, VirtualInterface};
 
 use RuntimeError::{*};
@@ -345,7 +345,10 @@ pub fn pop_front(a1: Value) -> ValueResult {
 pub fn push(a1: Value, a2: Value) -> ValueResult {
     match &a2 {
         List(v) => { v.unbox_mut().push_back(a1); Ok(a2) }
-        Set(v) => { v.unbox_mut().set.insert(a1); Ok(a2) }
+        Set(v) => match vm::guard_recursive_hash(|| v.unbox_mut().set.insert(a1)) {
+            true => ValueErrorRecursiveHash(a2).err(),
+            false => Ok(a2)
+        }
         Heap(v) => { v.unbox_mut().heap.push(Reverse(a1)); Ok(a2) }
         _ => TypeErrorArgMustBeIterable(a2).err()
     }
@@ -373,7 +376,10 @@ pub fn insert(a1: Value, a2: Value, a3: Value) -> ValueResult {
                 ValueErrorIndexOutOfBounds(index as i64, len).err()
             }
         },
-        Dict(v) => { v.unbox_mut().dict.insert(a1, a2); Ok(a3) },
+        Dict(v) => match vm::guard_recursive_hash(|| v.unbox_mut().dict.insert(a1, a2)) {
+            true => ValueErrorRecursiveHash(a3).err(),
+            false => Ok(a3)
+        },
         _ => TypeErrorArgMustBeIndexable(a3).err()
     }
 }

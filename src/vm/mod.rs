@@ -14,7 +14,7 @@ use crate::reporting::{Locations, SourceView};
 
 pub use crate::vm::error::{DetailRuntimeError, RuntimeError};
 pub use crate::vm::opcode::Opcode;
-pub use crate::vm::value::{FunctionImpl, StructTypeImpl, IntoDictValue, IntoIterableValue, IntoValue, Iterable, Value};
+pub use crate::vm::value::{FunctionImpl, StructTypeImpl, IntoDictValue, IntoIterableValue, IntoValue, Iterable, Value, guard_recursive_hash};
 
 use Opcode::{*};
 use RuntimeError::{*};
@@ -126,6 +126,7 @@ impl<R, W> VirtualMachine<R, W> where
             call_stack: vec![CallFrame { return_ip: 0, frame_pointer: 0 }],
             global_count: 0,
             open_upvalues: HashMap::new(),
+
             strings: result.strings,
             globals: result.globals,
             constants: result.constants,
@@ -133,6 +134,7 @@ impl<R, W> VirtualMachine<R, W> where
             structs: result.structs,
             locations: result.locations,
             fields: result.fields,
+
             read,
             write,
             args: args.into_iter().map(|u| u.to_value()).to_list(),
@@ -1580,6 +1582,20 @@ mod test {
     #[test] fn test_split_regex_on_substring_with_wildcard() { run_str("'the horse escaped the barn' . split(' *e *') . print", "['th', 'hors', '', 'scap', 'd th', 'barn']\n"); }
     #[test] fn test_int_default_value_yes() { run_str("int('123', 567) . print", "123\n"); }
     #[test] fn test_int_default_value_no() { run_str("int('yes', 567) . print", "567\n"); }
+    #[test] fn test_dict_insert_self_as_key() { run_str("let x = dict() ; x[x] = 'yes'", "ValueError: Cannot create recursive hash based collection from '{{...}: 'yes'}' of type 'dict'\n  at: line 1 (<test>)\n\n1 | let x = dict() ; x[x] = 'yes'\n2 |                       ^\n"); }
+    #[test] fn test_dict_insert_self_as_value() { run_str("let x = dict() ; x['yes'] = x", ""); }
+    #[test] fn test_set_insert_self() { run_str("let x = set() ; x.push(x)", "ValueError: Cannot create recursive hash based collection from '{{...}}' of type 'set'\n  at: line 1 (<test>)\n\n1 | let x = set() ; x.push(x)\n2 |                  ^^^^^^^^\n"); }
+    #[test] fn test_set_indirect_insert_self() { run_str("let x = set() ; x.push([x])", "ValueError: Cannot create recursive hash based collection from '{[{...}]}' of type 'set'\n  at: line 1 (<test>)\n\n1 | let x = set() ; x.push([x])\n2 |                  ^^^^^^^^^^\n"); }
+    #[test] fn test_recursive_list_repr() { run_str("let x = [] ; x.push(x) ; x.print", "[[...]]\n"); }
+    #[test] fn test_recursive_set_repr() { run_str("let x = set() ; x.push(x) ; x.print", "ValueError: Cannot create recursive hash based collection from '{{...}}' of type 'set'\n  at: line 1 (<test>)\n\n1 | let x = set() ; x.push(x) ; x.print\n2 |                  ^^^^^^^^\n"); }
+    #[test] fn test_recursive_dict_key_repr() { run_str("let x = dict() ; x[x] = 'yes' ; x.print", "ValueError: Cannot create recursive hash based collection from '{{...}: 'yes'}' of type 'dict'\n  at: line 1 (<test>)\n\n1 | let x = dict() ; x[x] = 'yes' ; x.print\n2 |                       ^\n"); }
+    #[test] fn test_recursive_dict_key_insert_repr() { run_str("let x = dict() ; x.insert(x, 'yes') ; x.print", "ValueError: Cannot create recursive hash based collection from '{{...}: 'yes'}' of type 'dict'\n  at: line 1 (<test>)\n\n1 | let x = dict() ; x.insert(x, 'yes') ; x.print\n2 |                   ^^^^^^^^^^^^^^^^^\n"); }
+    #[test] fn test_recursive_dict_value_repr() { run_str("let x = dict() ; x['yes'] = x ; x.print", "{'yes': {...}}\n"); }
+    #[test] fn test_recursive_vector_repr() { run_str("let x = (nil,) ; x[0] = x ; x.print", "((...))\n"); }
+    #[test] fn test_recursive_heap_repr() { run_str("let x = heap() ; x.push(x) ; x.print", "[[...]]\n"); }
+    #[test] fn test_recursive_struct_repr() { run_str("struct S(x) ; let x = S(nil) ; x->x = x ; x.print", "S(x=S(...))\n"); }
+    #[test] fn test_recursive_knot_lists() { run_str("let x = [] ; let y = [x] ; x.push(y) ; x.print", "[[[...]]]\n"); }
+    #[test] fn test_recursive_nested_list_struct_repr() { run_str("struct S(x) ; let x = [S(nil)] ; x[0]->x = [S(x)] ; x.print", "[S(x=[S(x=[...])])]\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }

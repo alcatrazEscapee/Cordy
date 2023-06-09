@@ -5,7 +5,7 @@ use lazy_static::lazy_static;
 
 use crate::vm::{operator, IntoIterableValue, IntoValue, Value, VirtualInterface, RuntimeError};
 use crate::vm::operator::BinaryOp;
-use crate::trace;
+use crate::{trace, vm};
 
 use NativeFunction::{*};
 use RuntimeError::{*};
@@ -739,8 +739,10 @@ pub fn get_slice(a1: Value, a2: Value, a3: Value, a4: Value) -> ValueResult {
 pub fn set_index(a1: &Value, a2: Value, a3: Value) -> Result<(), Box<RuntimeError>> {
 
     if let Value::Dict(it) = a1 {
-        it.unbox_mut().dict.insert(a2, a3);
-        Ok(())
+        match vm::guard_recursive_hash(|| it.unbox_mut().dict.insert(a2, a3)) {
+            true => ValueErrorRecursiveHash(a1.clone()).err(),
+            false => Ok(())
+        }
     } else {
         let mut indexable = a1.as_index()?;
         let index: usize = collections::get_checked_index(indexable.len(), a2.as_int()?)?;

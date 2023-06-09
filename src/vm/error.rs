@@ -39,6 +39,7 @@ pub enum RuntimeError {
     ValueErrorMissingRequiredArgumentInStringFormatting,
     ValueErrorEvalListMustHaveUnitLength(usize),
     ValueErrorCannotCompileRegex(String, String),
+    ValueErrorRecursiveHash(Value),
 
     TypeErrorUnaryOp(UnaryOp, Value),
     TypeErrorBinaryOp(BinaryOp, Value, Value),
