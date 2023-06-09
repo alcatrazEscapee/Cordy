@@ -1,6 +1,6 @@
 # Cordy Standard Library
 
-The Cordy standard library consists of a number of functions which are placed in the global namespace. These are not shadow-able or able to be overriden.
+The Cordy standard library consists of a number of functions which are placed in the global namespace. These are not shadow-able or able to be overridden.
 
 
 ### Type Signatures
@@ -19,7 +19,7 @@ The below type signatures are entirely for documentation purposes, as Cordy does
 
 ### Print `print(any, ...)`
 
-Prints each argument, space seperated and with a single `\n` suffix, to standard output. Non-string types will have `str()` called on them before printing.
+Prints each argument, space separated and with a single `\n` suffix, to standard output. Non-string types will have `str()` called on them before printing.
 
 When called with no arguments, prints a single `\n` character.
 

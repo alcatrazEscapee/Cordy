@@ -11,7 +11,7 @@ The primitive types in Cordy are:
 
 - `nil` (The absence of a value)
 - A boolean (`bool`), which can take the values `true` and `false`.
-- `int`, which is a 64-bit integer. It can be expressed as decimal numbers (`5`), binary (`0b101`), or hexidecimal (`0x5`).
+- `int`, which is a 64-bit integer. It can be expressed as decimal numbers (`5`), binary (`0b101`), or hexadecimal (`0x5`).
 - `str`, which is a UTF-8 string. Like Python, there is no separate `char` data type, instead a string is a sequence of single element strings.
 
 All primitive types are **immutable**. In addition to these, Cordy has a number of [Collection Types](#collection-types), and allows the creation of basic user defined types in the form of [Structs](#structs).
@@ -33,7 +33,7 @@ Expressions in Cordy are similar to C style languages. Cordy has a number of mat
 - `<`, `>`, `>=`, `<=`, `==`, and `!=` compare values. Any values, regardless of types, can be compared for equality or ordering.
   - Note: different types will always compare as equal ordering.
 - `if condition then value_if_true else value_if_false` is a short-circuiting ternary operator.
-  - Note that all boolean comparisons will take the truthy value of it's argument. `nil`, `0`, `false`, `''`, and empty collections are the only falsey values, everything else is truthy.
+  - Note that all boolean comparisons will take the truthy value of it's argument. `nil`, `0`, `false`, `''`, and empty collections are the only falsy values, everything else is truthy.
 - `is` is an operator used to check the type of a value.
 - `in` (along with `not in`) is a special operator used for checking membership in collections, or substrings.
 - `max=` and `min=` are special cases of the builtin functions `max` and `min`, expressed as an assignment operator. `a max= b` is semantically equivalent to `a = if b > a then b else a`, similar for `min=`.
@@ -88,10 +88,10 @@ Cordy has functions as a first class type, so they can be declared anywhere. It 
 // the most basic function, `foo`, which does nothing
 fn foo() {}
 
-// this is an anonymous function
-fn() {}
+// this is an anonymous function, assigned to the variable `f`
+let f = fn() {}
 
-// Like JavaScript, anonymous functions can be wrapped in an IIFE:
+// this is a function which is immediately evaluated
 (fn() { ... })()
 ```
 
@@ -100,7 +100,7 @@ The body of a function can either be a block statement (a series of statements w
 A function will return the last expression present in the function, or whenever a `return` keyword is reached.
 
 ```rust
-// these functions are semantically equivilant
+// these functions are semantically equivalent
 fn three() { 
     3
 }
@@ -122,14 +122,14 @@ let addition = (+)
 
 Note in some cases the additional parenthesis can be omitted, for instance if passing an operator to a function:
 
-```
+```python
 >>> print(+)
 (+)
 ```
 
-One such important native function is `print`, which prints all arguments, space seperated, to standard out, followed by a newline:
+One such important native function is `print`, which prints all arguments, space separated, to standard out, followed by a newline:
 
-```rust
+```python
 // rite of passage!
 print('hello world!')
 ```
@@ -174,7 +174,14 @@ add3(4) // returns 7
 
 Note that function evaluation with `()` is high precedence, whereas function evaluation with `.` is low precedence. This can be used alongside partial functions to great effect:
 
-```rust
+```cpp
+// Note that
+input . map(int)
+
+// is the same as
+map(int, input)
+
+// but the former is more readable in long statements, for example:
 input . map(int) . filter(>0) . reduce(+) . print
 ```
 
@@ -250,7 +257,7 @@ Like a typical `while` loop, it can also have an optional `else` block, which wi
 do {
     // statements
 } while condition else {
-    // onlf if no `break`    
+    // only if no `break`    
 }
 ```
 
@@ -306,7 +313,7 @@ my_dict['hello'] . print
 ```
 
 - `heap`: A min-heap, implemented as a binary heap, with O(log n) access to the minimum element.
-- `vector`: A `list` like data type, but with a fixed length, and where all operations behave in an elementwise fashion.
+- `vector`: A `list` like data type, but with a fixed length, and where all operations behave in an element-wise fashion.
   - Operating on a vector and a constant will apply the constant to each element of the vector:
   - Vectors can be declared in literals like lists, but with `(` parenthesis `)`.
   - Single argument vectors require a trailing comma (i.e. `(1,)`, not `(1)`)
@@ -383,9 +390,9 @@ fib = memoize(fib)
 Decorators can be chained - the innermost decorators will apply first, then the outermost ones. They can also be attached to anonymous functions. The expression of a decorator must resolve to a function, which takes in the original function as an argument, and outputs a new value - most typically a function, but it doesn't need to. For example:
 
 ```rust
-fn iife(f) -> f() // 'Immediately Invoked Function Expression', from JavaScript
+fn run(f) -> f()
 
-@iffe
+@run
 fn do_stuff() { print('hello world') } // prints 'hello world' immediately, and assigns `do_stuff` to `nil`
 ```
 
