@@ -4,7 +4,6 @@ use std::io::{Cursor, Read, Write};
 use std::rc::Rc;
 
 use crate::compiler::{CompileResult, Fields};
-use crate::stdlib;
 use crate::vm::{FunctionImpl, Opcode, StructTypeImpl};
 
 use Opcode::{*};
@@ -15,8 +14,6 @@ type Maybe<T> = Result<T, ()>;
 const SEGMENT_BITS: u8 = 0x7F;
 const SEGMENT_BITS_MASK: u64 = !(SEGMENT_BITS as u64);
 const CONTINUE_BIT: u8 = 0x80;
-
-const MAX_NATIVE_FUNCTION_OPCODE: u8 = 180;
 
 
 /// Encodes a compile result into a series of bytes
@@ -157,139 +154,147 @@ impl Decode<CompileResult> for Decoder { fn decode(&mut self) -> Maybe<CompileRe
 
 
 // ===== Encode + Decode implementations for `Opcode` ===== //
-// Opcodes are serialized using a custom binary encoding
-// - Noop is ignored, as it should never be present in compiled code
-// - Each opcode has a single byte which identifies the type of the opcode. `Unary`, `Binary`, and `NativeFunction` are flattened and appended to the end of the range:
-// - `Unary` maps to indexes [49, 50], `Binary` to indexes [51, 71]`, and `NativeFunction` to indexes [72, 256]
-// - Opcodes with arguments include the argument following the identifier byte (so this is a variable encoding)
+
+/// A stable representation of individual opcodes, which can be converted to and from a `u8`.
+///
+/// We use this intermediary between `Opcode` <---> `Op` <---> `u8` for rwo reasons:
+///
+/// - Conversion to a `u8` can be easily inferred via the natural order of these opcodes, without having to explicitly declare any opcode values.
+/// - It is much more programmer-safe, by matching each `Opcode` <---> `Op` via it's name, than having to make sure each opcode encodes and decodes with it's byte correctly.
+#[repr(u8)]
+enum Op {
+    JumpIfFalse, JumpIfFalsePop, JumpIfTrue, JumpIfTruePop, Jump, Return, Pop, PopN, Dup, Swap, PushLocal, StoreLocal, PushGlobal, StoreGlobal, PushUpValue, StoreUpValue, StoreArray, IncGlobalCount, Closure, CloseLocal, CloseUpValue, LiftUpValue, InitIterable, TestIterable, Nil, True, False, Int, Str, Function, NativeFunction, List, Vector, Set, Dict, Struct, CheckLengthGreaterThan, CheckLengthEqualTo, OpFuncEval, OpIndex, OpIndexPeek, OpSlice, OpSliceWithStep, GetField, GetFieldPeek, GetFieldFunction, SetField, Unary, Binary, Slice, SliceWithStep, Exit, Yield, AssertFailed
+}
 
 
 #[allow(unused_variables)]
 impl Encode for Opcode {
     fn encode(&self, encoder: &mut Encoder) {
         macro_rules! encode {
-            ($op: expr) => { encoder.encode(&($op as u8)) };
-            ($op:expr, $i:expr) => { encoder.encode(&($op as u8)).encode($i) };
+            ($op: expr) => { encoder.encode_u8($op as u8) };
+            ($op:expr, $i:expr) => { encoder.encode_u8($op as u8).encode($i) };
         }
         match self {
             Noop => panic!(),
-            JumpIfFalse(i) => encode!(0, i),
-            JumpIfFalsePop(i) => encode!(1, i),
-            JumpIfTrue(i) => encode!(2, i),
-            JumpIfTruePop(i) => encode!(3, i),
-            Jump(i) => encode!(4, i),
-            Return => encode!(5),
-            Pop => encode!(6),
-            PopN(i) => encode!(7, i),
-            Dup => encode!(8),
-            Swap => encode!(9),
-            PushLocal(i) => encode!(10, i),
-            StoreLocal(i) => encode!(11, i),
-            PushGlobal(i) => encode!(12, i),
-            StoreGlobal(i) => encode!(13, i),
-            PushUpValue(i) => encode!(14, i),
-            StoreUpValue(i) => encode!(15, i),
-            StoreArray => encode!(16),
-            IncGlobalCount => encode!(17),
-            Closure => encode!(18),
-            CloseLocal(i) => encode!(19, i),
-            CloseUpValue(i) => encode!(20, i),
-            LiftUpValue(i) => encode!(21, i),
-            InitIterable => encode!(22),
-            TestIterable => encode!(23),
-            Nil => encode!(24),
-            True => encode!(25),
-            False => encode!(26),
-            Int(i) => encode!(27, i),
-            Str(i) => encode!(28, i),
-            Function(i) => encode!(29, i),
-            NativeFunction(i) => encode!(74 + (*i as u8)), // [72, 256) - currently uses up to MAX_NATIVE_FUNCTION_OPCODE
-            List(i) => encode!(30, i),
-            Vector(i) => encode!(31, i),
-            Set(i) => encode!(32, i),
-            Dict(i) => encode!(33, i),
-            Struct(i) => encode!(34, i),
-            CheckLengthGreaterThan(i) => encode!(35, i),
-            CheckLengthEqualTo(i) => encode!(36, i),
-            OpFuncEval(i) => encode!(37, i),
-            OpIndex => encode!(38),
-            OpIndexPeek => encode!(39),
-            OpSlice => encode!(40),
-            OpSliceWithStep => encode!(41),
-            GetField(i) => encode!(42, i),
-            GetFieldPeek(i) => encode!(43, i),
-            GetFieldFunction(i) => encode!(44, i),
-            SetField(i) => encode!(45, i),
-            Unary(i) => encode!(49 + (*i as u8)), // [49, 50]
-            Binary(i) => encode!(51 + (*i as u8)), // [51, 71]
-            Slice => encode!(72),
-            SliceWithStep => encode!(73),
-            Exit => encode!(46),
-            Yield => encode!(47),
-            AssertFailed => encode!(48),
+            JumpIfFalse(i) => encode!(Op::JumpIfFalse, i),
+            JumpIfFalsePop(i) => encode!(Op::JumpIfFalsePop, i),
+            JumpIfTrue(i) => encode!(Op::JumpIfTrue, i),
+            JumpIfTruePop(i) => encode!(Op::JumpIfTruePop, i),
+            Jump(i) => encode!(Op::Jump, i),
+            Return => encode!(Op::Return),
+            Pop => encode!(Op::Pop),
+            PopN(i) => encode!(Op::PopN, i),
+            Dup => encode!(Op::Dup),
+            Swap => encode!(Op::Swap),
+            PushLocal(i) => encode!(Op::PushLocal, i),
+            StoreLocal(i) => encode!(Op::StoreLocal, i),
+            PushGlobal(i) => encode!(Op::PushGlobal, i),
+            StoreGlobal(i) => encode!(Op::StoreGlobal, i),
+            PushUpValue(i) => encode!(Op::PushUpValue, i),
+            StoreUpValue(i) => encode!(Op::StoreUpValue, i),
+            StoreArray => encode!(Op::StoreArray),
+            IncGlobalCount => encode!(Op::IncGlobalCount),
+            Closure => encode!(Op::Closure),
+            CloseLocal(i) => encode!(Op::CloseLocal, i),
+            CloseUpValue(i) => encode!(Op::CloseUpValue, i),
+            LiftUpValue(i) => encode!(Op::LiftUpValue, i),
+            InitIterable => encode!(Op::InitIterable),
+            TestIterable => encode!(Op::TestIterable),
+            Nil => encode!(Op::Nil),
+            True => encode!(Op::True),
+            False => encode!(Op::False),
+            Int(i) => encode!(Op::Int, i),
+            Str(i) => encode!(Op::Str, i),
+            Function(i) => encode!(Op::Function, i),
+            NativeFunction(i) => encode!(Op::NativeFunction, &(*i as u8)),
+            List(i) => encode!(Op::List, i),
+            Vector(i) => encode!(Op::Vector, i),
+            Set(i) => encode!(Op::Set, i),
+            Dict(i) => encode!(Op::Dict, i),
+            Struct(i) => encode!(Op::Struct, i),
+            CheckLengthGreaterThan(i) => encode!(Op::CheckLengthGreaterThan, i),
+            CheckLengthEqualTo(i) => encode!(Op::CheckLengthEqualTo, i),
+            OpFuncEval(i) => encode!(Op::OpFuncEval, i),
+            OpIndex => encode!(Op::OpIndex),
+            OpIndexPeek => encode!(Op::OpIndexPeek),
+            OpSlice => encode!(Op::OpSlice),
+            OpSliceWithStep => encode!(Op::OpSliceWithStep),
+            GetField(i) => encode!(Op::GetField, i),
+            GetFieldPeek(i) => encode!(Op::GetFieldPeek, i),
+            GetFieldFunction(i) => encode!(Op::GetFieldFunction, i),
+            SetField(i) => encode!(Op::SetField, i),
+            Unary(i) => encode!(Op::Unary, &(*i as u8)),
+            Binary(i) => encode!(Op::Binary, &(*i as u8)),
+            Slice => encode!(Op::Slice),
+            SliceWithStep => encode!(Op::SliceWithStep),
+            Exit => encode!(Op::Exit),
+            Yield => encode!(Op::Yield),
+            AssertFailed => encode!(Op::AssertFailed),
         };
     }
 }
 
 impl Decode<Opcode> for Decoder {
     fn decode(&mut self) -> Maybe<Opcode> {
-        let op = self.decode_u8()?;
-        Ok(match op {
-            0 => JumpIfFalse(self.decode()?),
-            1 => JumpIfFalsePop(self.decode()?),
-            2 => JumpIfTrue(self.decode()?),
-            3 => JumpIfTruePop(self.decode()?),
-            4 => Jump(self.decode()?),
-            5 => Return,
-            6 => Pop,
-            7 => PopN(self.decode()?),
-            8 => Dup,
-            9 => Swap,
-            10 => PushLocal(self.decode()?),
-            11 => StoreLocal(self.decode()?),
-            12 => PushGlobal(self.decode()?),
-            13 => StoreGlobal(self.decode()?),
-            14 => PushUpValue(self.decode()?),
-            15 => StoreUpValue(self.decode()?),
-            16 => StoreArray,
-            17 => IncGlobalCount,
-            18 => Closure,
-            19 => CloseLocal(self.decode()?),
-            20 => CloseUpValue(self.decode()?),
-            21 => LiftUpValue(self.decode()?),
-            22 => InitIterable,
-            23 => TestIterable,
-            24 => Nil,
-            25 => True,
-            26 => False,
-            27 => Int(self.decode()?),
-            28 => Str(self.decode()?),
-            29 => Function(self.decode()?),
-            74..=MAX_NATIVE_FUNCTION_OPCODE => NativeFunction(stdlib::NativeFunction::get(op - 74)),
-            30 => List(self.decode()?),
-            31 => Vector(self.decode()?),
-            32 => Set(self.decode()?),
-            33 => Dict(self.decode()?),
-            34 => Struct(self.decode()?),
-            35 => CheckLengthGreaterThan(self.decode()?),
-            36 => CheckLengthEqualTo(self.decode()?),
-            37 => OpFuncEval(self.decode()?),
-            38 => OpIndex,
-            39 => OpIndexPeek,
-            40 => OpSlice,
-            41 => OpSliceWithStep,
-            42 => GetField(self.decode()?),
-            43 => GetFieldPeek(self.decode()?),
-            44 => GetFieldFunction(self.decode()?),
-            45 => SetField(self.decode()?),
-            49..=50 => Unary(unsafe { std::mem::transmute(op - 49) }),
-            51..=71 => Binary(unsafe { std::mem::transmute(op - 51) }),
-            72 => Slice,
-            73 => SliceWithStep,
-            46 => Exit,
-            47 => Yield,
-            48 => AssertFailed,
-            _ => return Err(()),
+        macro_rules! from_byte {
+            () => { unsafe { std::mem::transmute(self.decode_u8()?) } };
+        }
+
+        Ok(match from_byte!() {
+            Op::JumpIfFalse => JumpIfFalse(self.decode()?),
+            Op::JumpIfFalsePop => JumpIfFalsePop(self.decode()?),
+            Op::JumpIfTrue => JumpIfTrue(self.decode()?),
+            Op::JumpIfTruePop => JumpIfTruePop(self.decode()?),
+            Op::Jump => Jump(self.decode()?),
+            Op::Return => Return,
+            Op::Pop => Pop,
+            Op::PopN => PopN(self.decode()?),
+            Op::Dup => Dup,
+            Op::Swap => Swap,
+            Op::PushLocal => PushLocal(self.decode()?),
+            Op::StoreLocal => StoreLocal(self.decode()?),
+            Op::PushGlobal => PushGlobal(self.decode()?),
+            Op::StoreGlobal => StoreGlobal(self.decode()?),
+            Op::PushUpValue => PushUpValue(self.decode()?),
+            Op::StoreUpValue => StoreUpValue(self.decode()?),
+            Op::StoreArray => StoreArray,
+            Op::IncGlobalCount => IncGlobalCount,
+            Op::Closure => Closure,
+            Op::CloseLocal => CloseLocal(self.decode()?),
+            Op::CloseUpValue => CloseUpValue(self.decode()?),
+            Op::LiftUpValue => LiftUpValue(self.decode()?),
+            Op::InitIterable => InitIterable,
+            Op::TestIterable => TestIterable,
+            Op::Nil => Nil,
+            Op::True => True,
+            Op::False => False,
+            Op::Int => Int(self.decode()?),
+            Op::Str => Str(self.decode()?),
+            Op::Function => Function(self.decode()?),
+            Op::NativeFunction => NativeFunction(from_byte!()),
+            Op::List => List(self.decode()?),
+            Op::Vector => Vector(self.decode()?),
+            Op::Set => Set(self.decode()?),
+            Op::Dict => Dict(self.decode()?),
+            Op::Struct => Struct(self.decode()?),
+            Op::CheckLengthGreaterThan => CheckLengthGreaterThan(self.decode()?),
+            Op::CheckLengthEqualTo => CheckLengthEqualTo(self.decode()?),
+            Op::OpFuncEval => OpFuncEval(self.decode()?),
+            Op::OpIndex => OpIndex,
+            Op::OpIndexPeek => OpIndexPeek,
+            Op::OpSlice => OpSlice,
+            Op::OpSliceWithStep => OpSliceWithStep,
+            Op::GetField => GetField(self.decode()?),
+            Op::GetFieldPeek => GetFieldPeek(self.decode()?),
+            Op::GetFieldFunction => GetFieldFunction(self.decode()?),
+            Op::SetField => SetField(self.decode()?),
+            Op::Unary => Unary(from_byte!()),
+            Op::Binary => Binary(from_byte!()),
+            Op::Slice => Slice,
+            Op::SliceWithStep => SliceWithStep,
+            Op::Exit => Exit,
+            Op::Yield => Yield,
+            Op::AssertFailed => AssertFailed,
         })
     }
 }
@@ -300,19 +305,11 @@ mod tests {
     use std::fmt::Debug;
     use std::io::Cursor;
 
-    use crate::encoder::{Decode, Decoder, Encode, Encoder, MAX_NATIVE_FUNCTION_OPCODE, Maybe};
-    use crate::stdlib::NativeFunction;
+    use crate::encoder::{Decode, Decoder, Encode, Encoder, Maybe};
     use crate::vm::Opcode;
-    use crate::vm::operator::{BinaryOp, UnaryOp};
 
-    #[test] fn test_opcode_jump_if_false() { run(Opcode::JumpIfFalse(5), vec![0, 5]); }
-    #[test] fn test_opcode_exit() { run(Opcode::Exit, vec![46]); }
-    #[test] fn test_opcode_unary_lo() { run(Opcode::Unary(UnaryOp::Minus), vec![49]); }
-    #[test] fn test_opcode_unary_hi() { run(Opcode::Unary(UnaryOp::Not), vec![50]); }
-    #[test] fn test_opcode_binary_lo() { run(Opcode::Binary(BinaryOp::Mul), vec![51]); }
-    #[test] fn test_opcode_binary_hi() { run(Opcode::Binary(BinaryOp::Min), vec![71]); }
-    #[test] fn test_opcode_native_function_lo() { run(Opcode::NativeFunction(NativeFunction::Read), vec![74]); }
-    #[test] fn test_opcode_native_function_hi() { run(Opcode::NativeFunction(NativeFunction::CountZeros), vec![MAX_NATIVE_FUNCTION_OPCODE]); }
+    #[test] fn test_opcode() { run(Opcode::JumpIfFalse(5), vec![0, 5]); }
+    #[test] fn test_opcodes() { run(vec![Opcode::Int(0), Opcode::Pop, Opcode::Exit], vec![3, 27, 0, 6, 51]); }
 
     fn run<E>(e: E, bytes: Vec<u8>) where
         E : Encode + Sized + Eq + Debug,
