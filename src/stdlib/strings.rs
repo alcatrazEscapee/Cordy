@@ -12,16 +12,16 @@ use RuntimeError::{*};
 type ValueResult = Result<Value, Box<RuntimeError>>;
 
 
-pub fn to_lower(a0: Value) -> ValueResult {
-    Ok(a0.as_str()?.to_lowercase().to_value())
+pub fn to_lower(value: Value) -> ValueResult {
+    Ok(value.as_str()?.to_lowercase().to_value())
 }
 
-pub fn to_upper(a0: Value) -> ValueResult {
-    Ok(a0.as_str()?.to_uppercase().to_value())
+pub fn to_upper(value: Value) -> ValueResult {
+    Ok(value.as_str()?.to_uppercase().to_value())
 }
 
-pub fn trim(a0: Value) -> ValueResult {
-    Ok(a0.as_str()?.trim().to_value())
+pub fn trim(value: Value) -> ValueResult {
+    Ok(value.as_str()?.trim().to_value())
 }
 
 pub fn replace<VM: VirtualInterface>(vm: &mut VM, pattern: Value, replacer: Value, target: Value) -> ValueResult {
@@ -140,30 +140,30 @@ impl<'r, 't> Iterator for FancySplit<'r, 't> {
 impl<'r, 't> FusedIterator for FancySplit<'r, 't> {}
 
 
-pub fn to_char(a1: Value) -> ValueResult {
-    match &a1 {
+pub fn to_char(value: Value) -> ValueResult {
+    match &value {
         Int(i) if i > &0 => match char::from_u32(*i as u32) {
             Some(c) => Ok(c.to_value()),
             None => ValueErrorInvalidCharacterOrdinal(*i).err()
         },
         Int(i) => ValueErrorInvalidCharacterOrdinal(*i).err(),
-        _ => TypeErrorArgMustBeInt(a1).err()
+        _ => TypeErrorArgMustBeInt(value).err()
     }
 }
 
-pub fn to_ord(a1: Value) -> ValueResult {
-    match &a1 {
+pub fn to_ord(value: Value) -> ValueResult {
+    match &value {
         Str(s) if s.len() == 1 => Ok(Int(s.chars().next().unwrap() as u32 as i64)),
-        _ => TypeErrorArgMustBeChar(a1).err()
+        _ => TypeErrorArgMustBeChar(value).err()
     }
 }
 
-pub fn to_hex(a1: Value) -> ValueResult {
-    Ok(format!("{:x}", a1.as_int()?).to_value())
+pub fn to_hex(value: Value) -> ValueResult {
+    Ok(format!("{:x}", value.as_int()?).to_value())
 }
 
-pub fn to_bin(a1: Value) -> ValueResult {
-    Ok(format!("{:b}", a1.as_int()?).to_value())
+pub fn to_bin(value: Value) -> ValueResult {
+    Ok(format!("{:b}", value.as_int()?).to_value())
 }
 
 pub fn format_string(literal: &String, args: Value) -> ValueResult {
