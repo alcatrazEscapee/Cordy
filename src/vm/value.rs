@@ -381,6 +381,8 @@ impl Value {
             NativeFunction(it) => Some(it.nargs()),
             PartialNativeFunction(it, args) => Some(it.nargs().map(|u| u - args.len() as u8)),
             Closure(it) => Some(Some(it.func.nargs)),
+            StructType(it) => Some(Some(it.field_names.len() as u8)),
+            Slice(_) => Some(Some(1)),
             _ => None,
         }
     }
@@ -429,7 +431,6 @@ impl Value {
         }
     }
 
-    pub fn is_nil(self: &Self) -> bool { match self { Nil => true, _ => false } }
     pub fn is_bool(self: &Self) -> bool { match self { Bool(_) => true, _ => false } }
     pub fn is_int(self: &Self) -> bool { match self { Int(_) => true, _ => false } }
     pub fn is_str(self: &Self) -> bool { match self { Str(_) => true, _ => false } }
@@ -446,9 +447,11 @@ impl Value {
         }
     }
 
+    /// Returns if the `Value` is function-evaluable.
+    /// Note that single-element lists are not considered functions here.
     pub fn is_function(self: &Self) -> bool {
         match self {
-            Function(_) | PartialFunction(_) | NativeFunction(_) | PartialNativeFunction(_, _) | Closure(_) => true,
+            Function(_) | PartialFunction(_) | NativeFunction(_) | PartialNativeFunction(_, _) | Closure(_) | StructType(_) | Slice(_) => true,
             _ => false
         }
     }
