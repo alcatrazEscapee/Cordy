@@ -156,26 +156,29 @@ pub fn binary_pow(a1: Value, a2: Value) -> ValueResult {
     }
 }
 
-pub fn binary_is(a1: Value, a2: Value) -> ValueResult {
-    match a2 {
-        Nil => Ok(Bool(a1.is_nil())),
+pub fn binary_is(lhs: Value, rhs: Value) -> ValueResult {
+    match rhs {
+        Nil => Ok(Bool(lhs == Nil)),
+        StructType(it) => Ok(Bool(if let Struct(instance) = lhs {
+            instance.unbox().type_index == it.type_index
+        } else { false })),
         Value::NativeFunction(b) => {
             let ret: bool = match b {
-                NativeFunction::Bool => a1.is_bool(),
-                NativeFunction::Int => a1.is_int(),
-                NativeFunction::Str => a1.is_str(),
-                NativeFunction::Function => a1.is_function(),
-                NativeFunction::List => a1.is_list(),
-                NativeFunction::Set => a1.is_set(),
-                NativeFunction::Dict => a1.is_dict(),
-                NativeFunction::Vector => a1.is_vector(),
-                NativeFunction::Iterable => a1.is_iter(),
+                NativeFunction::Bool => lhs.is_bool(),
+                NativeFunction::Int => lhs.is_int(),
+                NativeFunction::Str => lhs.is_str(),
+                NativeFunction::Function => lhs.is_function(),
+                NativeFunction::List => lhs.is_list(),
+                NativeFunction::Set => lhs.is_set(),
+                NativeFunction::Dict => lhs.is_dict(),
+                NativeFunction::Vector => lhs.is_vector(),
+                NativeFunction::Iterable => lhs.is_iter(),
                 NativeFunction::Any => true,
-                _ => return TypeErrorBinaryIs(a1, Value::NativeFunction(b)).err()
+                _ => return TypeErrorBinaryIs(lhs, Value::NativeFunction(b)).err()
             };
             Ok(Bool(ret))
         },
-        _ => return TypeErrorBinaryIs(a1, a2).err()
+        _ => return TypeErrorBinaryIs(lhs, rhs).err()
     }
 }
 

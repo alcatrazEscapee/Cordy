@@ -1634,6 +1634,7 @@ mod test {
     #[test] fn test_use_slice_in_expr_2() { run_str("let x = [::-1] ; '1234' . x . print", "4321\n"); }
     #[test] fn test_use_slice_in_expr_3() { run_str("'hello the world!' . split(' ') . map([2:]) . print", "['llo', 'e', 'rld!']\n"); }
     #[test] fn test_slice_type_of() { run_str("[:] . typeof . print", "function\n"); }
+    #[test] fn test_is_with_struct_instances() { run_str("struct A() ; struct B() let a = A(), b = B() ; [a is A, A is function, a is B, A is A, a is function] . print", "[true, true, false, false, false]\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }
