@@ -56,27 +56,21 @@ impl OffsetAdd<i32> for usize {
 }
 
 
-/// - `Option<...>` because in the case we don't discover any data structures, this stays a null pointer
-/// - `ValuePtr` because we need to do reference based equality when we're checking if we've seen a value before
-pub struct RecursionGuard(Option<Vec<ValuePtr>>);
+pub struct RecursionGuard(Vec<ValuePtr>);
 
 impl RecursionGuard {
-    pub fn new() -> RecursionGuard { RecursionGuard(None) }
+    pub fn new() -> RecursionGuard { RecursionGuard(Vec::new()) }
 
     /// Returns `true` if the value has been seen before, triggering an early exit
     pub fn enter(self: &mut Self, value: &Value) -> bool {
-        let vec = self.0.get_or_insert_with(|| Vec::new());
-        if vec.len() == 10 {
-            return true;
-        }
         let boxed = ValuePtr(value.clone());
-        let ret = vec.contains(&boxed);
-        vec.push(boxed);
+        let ret = self.0.contains(&boxed);
+        self.0.push(boxed);
         ret
     }
 
     pub fn leave(self: &mut Self) {
-        self.0.as_mut().unwrap().pop().unwrap(); // `.unwrap()` is safe as we should always call `enter()` before `leave()`
+        self.0.pop().unwrap(); // `.unwrap()` is safe as we should always call `enter()` before `leave()`
     }
 }
 
