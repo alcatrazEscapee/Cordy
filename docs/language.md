@@ -33,7 +33,7 @@ Expressions in Cordy are similar to C style languages. Cordy has a number of mat
 - `<`, `>`, `>=`, `<=`, `==`, and `!=` compare values. Any values, regardless of types, can be compared for equality or ordering.
   - Note: different types will always compare as equal ordering.
 - `if condition then value_if_true else value_if_false` is a short-circuiting ternary operator.
-  - Note that all boolean comparisons will take the truthy value of it's argument. `nil`, `0`, `false`, `''`, and empty collections are the only falsy values, everything else is truthy.
+  - Note that all boolean comparisons will take the truthy value of it's argument. `nil`, `0`, `false`, `''`, empty collections, and empty `range` and `enumerate` types are the only falsy values, everything else is truthy.
 - `is` is an operator used to check the type of a value.
 - `in` (along with `not in`) is a special operator used for checking membership in collections, or substrings.
 - `max=` and `min=` are special cases of the builtin functions `max` and `min`, expressed as an assignment operator. `a max= b` is semantically equivalent to `a = if b > a then b else a`, similar for `min=`.
@@ -129,9 +129,19 @@ Note in some cases the additional parenthesis can be omitted, for instance if pa
 
 One such important native function is `print`, which prints all arguments, space separated, to standard out, followed by a newline:
 
-```python
+```rust
 // rite of passage!
 print('hello world!')
+```
+
+In addition, special types can be written for writing indexing and slicing. A list with one integral element can be used as a function to index with that element, and slice literals can be written, which can be used as functions to perform slicing operations:
+
+```rust
+// Indexes 'foo' at index 'bar'
+foo . [bar]
+
+// Slices 'foo' with the given slice
+foo . [2:4]
 ```
 
 #### Function Evaluation

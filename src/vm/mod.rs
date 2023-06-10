@@ -566,7 +566,7 @@ impl<R, W> VirtualMachine<R, W> where
                 let a3: Value = self.pop();
                 let a2: Value = self.pop();
                 let a1: Value = self.pop();
-                let ret = stdlib::get_slice(a1, a2, a3, Value::Int(1))?;
+                let ret = stdlib::list_slice(a1, a2, a3, Value::Int(1))?;
                 self.push(ret);
             },
             OpSliceWithStep => {
@@ -575,7 +575,7 @@ impl<R, W> VirtualMachine<R, W> where
                 let a3: Value = self.pop();
                 let a2: Value = self.pop();
                 let a1: Value = self.pop();
-                let ret = stdlib::get_slice(a1, a2, a3, a4)?;
+                let ret = stdlib::list_slice(a1, a2, a3, a4)?;
                 self.push(ret);
             },
 
@@ -616,6 +616,20 @@ impl<R, W> VirtualMachine<R, W> where
                 let ret: Value = op.apply(a1, a2)?;
                 self.push(ret);
             },
+
+            Slice => {
+                trace::trace_interpreter!("slice");
+                let arg2: Value = self.pop();
+                let arg1: Value = self.pop();
+                self.push(Value::slice(arg1, arg2, None)?);
+            },
+            SliceWithStep => {
+                trace::trace_interpreter!("slice with step");
+                let arg3: Value = self.pop();
+                let arg2: Value = self.pop();
+                let arg1: Value = self.pop();
+                self.push(Value::slice(arg1, arg2, Some(arg3))?);
+            }
 
             Exit => return RuntimeExit.err(),
             Yield => {
@@ -784,6 +798,19 @@ impl<R, W> VirtualMachine<R, W> where
                 self.push(result);
                 Ok(FunctionType::Native)
             },
+            ls @ Value::Slice(_) => {
+                trace::trace_interpreter!("invoke_slice");
+                if nargs != 1 {
+                    return ValueIsNotFunctionEvaluable(ls.clone()).err();
+                }
+                let arg = self.pop();
+                let slice = match self.pop() {
+                    Value::Slice(it) => it,
+                    _ => panic!("Stack corruption"),
+                };
+                self.push(slice.apply(arg)?);
+                Ok(FunctionType::Native)
+            }
             Value::StructType(type_impl) => {
                 let type_impl = type_impl.clone();
                 trace::trace_interpreter!("invoke_struct -> {} ({}) with {}", type_impl.name, type_impl.type_index, nargs);
@@ -1596,7 +1623,17 @@ mod test {
     #[test] fn test_recursive_struct_repr() { run_str("struct S(x) ; let x = S(nil) ; x->x = x ; x.print", "S(x=S(...))\n"); }
     #[test] fn test_recursive_knot_lists() { run_str("let x = [] ; let y = [x] ; x.push(y) ; x.print", "[[[...]]]\n"); }
     #[test] fn test_recursive_nested_list_struct_repr() { run_str("struct S(x) ; let x = [S(nil)] ; x[0]->x = [S(x)] ; x.print", "[S(x=[S(x=[...])])]\n"); }
-    #[test] fn test_int_min_and_max() { run_str("[int.min, max(int)] . print", "[-9223372036854775808, 9223372036854775807]\n")}
+    #[test] fn test_int_min_and_max() { run_str("[int.min, max(int)] . print", "[-9223372036854775808, 9223372036854775807]\n") }
+    #[test] fn test_slice_literal_2_no_nil() { run_str("let x = [1:2] ; x . print", "[1:2]\n"); }
+    #[test] fn test_slice_literal_2_all_nil() { run_str("let x = [:] ; x . print", "[:]\n"); }
+    #[test] fn test_slice_literal_3_no_nil() { run_str("let x = [1:2:3] ; x . print", "[1:2:3]\n"); }
+    #[test] fn test_slice_literal_3_all_nil() { run_str("let x = [::] ; x . print", "[:]\n"); }
+    #[test] fn test_slice_literal_3_last_not_nil() { run_str("let x = [::-1] ; x . print", "[::-1]\n"); }
+    #[test] fn test_slice_literal_not_int() { run_str("let x = ['hello':'world'] ; x . print", "TypeError: Expected 'hello' of type 'str' to be a int\n  at: line 1 (<test>)\n\n1 | let x = ['hello':'world'] ; x . print\n2 |         ^^^^^^^^^^^^^^^^^\n"); }
+    #[test] fn test_use_slice_in_expr_1() { run_str("'1234' . [::-1] . print", "4321\n"); }
+    #[test] fn test_use_slice_in_expr_2() { run_str("let x = [::-1] ; '1234' . x . print", "4321\n"); }
+    #[test] fn test_use_slice_in_expr_3() { run_str("'hello the world!' . split(' ') . map([2:]) . print", "['llo', 'e', 'rld!']\n"); }
+    #[test] fn test_slice_type_of() { run_str("[:] . typeof . print", "function\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }

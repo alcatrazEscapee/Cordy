@@ -16,7 +16,7 @@ const SEGMENT_BITS: u8 = 0x7F;
 const SEGMENT_BITS_MASK: u64 = !(SEGMENT_BITS as u64);
 const CONTINUE_BIT: u8 = 0x80;
 
-const MAX_NATIVE_FUNCTION_OPCODE: u8 = 178;
+const MAX_NATIVE_FUNCTION_OPCODE: u8 = 180;
 
 
 /// Encodes a compile result into a series of bytes
@@ -203,7 +203,7 @@ impl Encode for Opcode {
             Int(i) => encode!(27, i),
             Str(i) => encode!(28, i),
             Function(i) => encode!(29, i),
-            NativeFunction(i) => encode!(72 + (*i as u8)), // [72, 256) - currently uses up to MAX_NATIVE_FUNCTION_OPCODE
+            NativeFunction(i) => encode!(74 + (*i as u8)), // [72, 256) - currently uses up to MAX_NATIVE_FUNCTION_OPCODE
             List(i) => encode!(30, i),
             Vector(i) => encode!(31, i),
             Set(i) => encode!(32, i),
@@ -222,6 +222,8 @@ impl Encode for Opcode {
             SetField(i) => encode!(45, i),
             Unary(i) => encode!(49 + (*i as u8)), // [49, 50]
             Binary(i) => encode!(51 + (*i as u8)), // [51, 71]
+            Slice => encode!(72),
+            SliceWithStep => encode!(73),
             Exit => encode!(46),
             Yield => encode!(47),
             AssertFailed => encode!(48),
@@ -263,7 +265,7 @@ impl Decode<Opcode> for Decoder {
             27 => Int(self.decode()?),
             28 => Str(self.decode()?),
             29 => Function(self.decode()?),
-            72..=MAX_NATIVE_FUNCTION_OPCODE => NativeFunction(stdlib::NativeFunction::get(op - 72)),
+            74..=MAX_NATIVE_FUNCTION_OPCODE => NativeFunction(stdlib::NativeFunction::get(op - 74)),
             30 => List(self.decode()?),
             31 => Vector(self.decode()?),
             32 => Set(self.decode()?),
@@ -282,6 +284,8 @@ impl Decode<Opcode> for Decoder {
             45 => SetField(self.decode()?),
             49..=50 => Unary(unsafe { std::mem::transmute(op - 49) }),
             51..=71 => Binary(unsafe { std::mem::transmute(op - 51) }),
+            72 => Slice,
+            73 => SliceWithStep,
             46 => Exit,
             47 => Yield,
             48 => AssertFailed,
@@ -307,7 +311,7 @@ mod tests {
     #[test] fn test_opcode_unary_hi() { run(Opcode::Unary(UnaryOp::Not), vec![50]); }
     #[test] fn test_opcode_binary_lo() { run(Opcode::Binary(BinaryOp::Mul), vec![51]); }
     #[test] fn test_opcode_binary_hi() { run(Opcode::Binary(BinaryOp::Min), vec![71]); }
-    #[test] fn test_opcode_native_function_lo() { run(Opcode::NativeFunction(NativeFunction::Read), vec![72]); }
+    #[test] fn test_opcode_native_function_lo() { run(Opcode::NativeFunction(NativeFunction::Read), vec![74]); }
     #[test] fn test_opcode_native_function_hi() { run(Opcode::NativeFunction(NativeFunction::CountZeros), vec![MAX_NATIVE_FUNCTION_OPCODE]); }
 
     fn run<E>(e: E, bytes: Vec<u8>) where

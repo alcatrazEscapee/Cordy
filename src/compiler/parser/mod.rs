@@ -1040,7 +1040,7 @@ impl Parser<'_> {
                     },
                 }
             },
-            Some(OpenSquareBracket) => self.parse_expr_1_list_literal(),
+            Some(OpenSquareBracket) => self.parse_expr_1_list_or_slice_literal(),
             Some(OpenBrace) => self.parse_expr_1_dict_or_set_literal(),
             Some(At) => self.parse_annotated_expression_function(),
             Some(KeywordFn) => self.parse_expression_function(),
@@ -1227,18 +1227,44 @@ impl Parser<'_> {
         Expr::vector(loc | self.prev_location(), args)
     }
 
-    fn parse_expr_1_list_literal(self: &mut Self) -> Expr {
-        trace::trace_parser!("rule <expr-1-list-literal>");
+    fn parse_expr_1_list_or_slice_literal(self: &mut Self) -> Expr {
+        trace::trace_parser!("rule <expr-1-list-or-slice-literal>");
         let loc_start = self.advance_with(); // Consume `[`
 
-        let mut args: Vec<Expr> = Vec::new();
+        match self.peek() {
+            Some(CloseSquareBracket) => { // Empty list
+                self.advance(); // Consumes `]`
+                return Expr::list(loc_start | self.prev_location(), Vec::new());
+            },
+            Some(Colon) => { // Slice with no first argument
+                return self.parse_expr_1_slice_literal(loc_start, Expr::nil());
+            },
+            _ => {}
+        }
+
+        // Unsure if a slice or a list so far, so we parse the first expression and check for a colon, square bracket, or comma
+        let arg = self.parse_expr_top_level();
+        match self.peek() {
+            Some(CloseSquareBracket) => { // Single element list
+                let loc_end = self.advance_with(); // Consume `]`
+                return Expr::list(loc_start | loc_end, vec![arg]);
+            },
+            Some(Colon) => { // Slice with a first argument
+                return self.parse_expr_1_slice_literal(loc_start, arg);
+            },
+            Some(Comma) => self.skip(), // Consume `,`
+            _ => self.error_with(ExpectedCommaOrEndOfList), // todo: new error type for comma, list, or slice
+        }
+
+        // Parse the next argument, then break into the loop until we exit the list literal
+        let mut args: Vec<Expr> = vec![arg];
         loop {
             match self.peek() {
                 Some(CloseSquareBracket) => break,
                 Some(_) => {
                     args.push(self.parse_expr_top_level());
                     match self.peek() {
-                        Some(Comma) => self.skip(), // Allow trailing commas, as this loops to the top again
+                        Some(Comma) => self.skip(),
                         Some(CloseSquareBracket) => {}, // Skip
                         _ => self.error_with(ExpectedCommaOrEndOfList),
                     }
@@ -1248,6 +1274,44 @@ impl Parser<'_> {
         }
         self.expect(CloseSquareBracket);
         Expr::list(loc_start | self.prev_location(), args)
+    }
+
+    fn parse_expr_1_slice_literal(self: &mut Self, loc_start: Location, arg1: Expr) -> Expr {
+        self.advance(); // Consume `:`
+
+        let arg2: Expr = match self.peek() {
+            Some(Colon) => Expr::nil(), // No second argument, but we have a third argument. Don't consume the colon as it's the seperator
+            Some(CloseSquareBracket) => { // No second argument, so a unbounded slice
+                let loc_end = self.advance_with();
+                return Expr::slice_literal(loc_start | loc_end, arg1, Expr::nil(), None);
+            }
+            _ => self.parse_expr_top_level(), // As we consumed `:`, we require a second expression
+        };
+
+        // Consumed `[` <expression> `:` <expression> so far
+        match self.peek() {
+            Some(CloseSquareBracket) => { // Two argument slice
+                let loc_end = self.advance_with();
+                return Expr::slice_literal(loc_start | loc_end, arg1, arg2, None);
+            },
+            Some(Colon) => {
+                // Three arguments, so continue parsing
+                self.advance();
+            },
+            _ => {
+                self.error_with(ExpectedColonOrEndOfSlice);
+                return Expr::nil();
+            },
+        }
+
+        // Consumed `[` <expression> `:` <expression> `:` so far
+        let arg3: Expr = match self.peek() {
+            Some(CloseSquareBracket) => Expr::nil(),
+            _ => self.parse_expr_top_level(),
+        };
+
+        self.expect(CloseSquareBracket);
+        Expr::slice_literal(loc_start | self.prev_location(), arg1, arg2, Some(arg3))
     }
 
     fn parse_expr_1_dict_or_set_literal(self: &mut Self) -> Expr {

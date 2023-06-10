@@ -20,6 +20,7 @@ pub enum ExprType {
     LValue(LValueReference),
     NativeFunction(NativeFunction),
     Function(u32, Vec<Opcode>),
+    SliceLiteral(Arg, Arg, Box<Option<Expr>>),
 
     // Operators + Functions
     Unary(UnaryOp, Arg),
@@ -94,6 +95,7 @@ impl Expr {
     pub fn set(loc: Location, args: Vec<Expr>) -> Expr { SequenceOp::Set.apply(loc, args) }
     pub fn dict(loc: Location, args: Vec<Expr>) -> Expr { SequenceOp::Dict.apply(loc, args) }
     pub fn vector(loc: Location, args: Vec<Expr>) -> Expr { SequenceOp::Vector.apply(loc, args) }
+    pub fn slice_literal(loc: Location, arg1: Expr, arg2: Expr, arg3: Option<Expr>) -> Expr { Expr(loc, ExprType::SliceLiteral(Box::new(arg1), Box::new(arg2), Box::new(arg3))) }
 
     pub fn not(self: Self, loc: Location) -> Expr { self.unary(loc, UnaryOp::Not) }
     pub fn unary(self: Self, loc: Location, op: UnaryOp) -> Expr { Expr(loc, ExprType::Unary(op, Box::new(self))) }
