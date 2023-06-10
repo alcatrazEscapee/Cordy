@@ -701,13 +701,13 @@ pub fn invoke<VM>(native: NativeFunction, nargs: u8, vm: &mut VM) -> ValueResult
 }
 
 
-pub fn get_index<VM>(vm: &mut VM, a1: Value, a2: Value) -> ValueResult where VM : VirtualInterface {
-    if a1.is_dict() {
-        return get_dict_index(vm, a1, a2);
+pub fn get_index<VM>(vm: &mut VM, target: Value, index: Value) -> ValueResult where VM : VirtualInterface {
+    if target.is_dict() {
+        return get_dict_index(vm, target, index);
     }
 
-    let indexable = a1.as_index()?;
-    let index: usize = collections::get_checked_index(indexable.len(), a2.as_int()?)?;
+    let indexable = target.as_index()?;
+    let index: usize = collections::get_checked_index(indexable.len(), index.as_int()?)?;
 
     Ok(indexable.get_index(index))
 }
@@ -748,18 +748,18 @@ fn get_dict_index<VM>(vm: &mut VM, dict: Value, key: Value) -> ValueResult where
     Ok(dict.dict.entry(key).or_insert(new_value).clone())
 }
 
-pub fn set_index(a1: &Value, a2: Value, a3: Value) -> Result<(), Box<RuntimeError>> {
+pub fn set_index(target: &Value, index: Value, value: Value) -> Result<(), Box<RuntimeError>> {
 
-    if let Value::Dict(it) = a1 {
-        match vm::guard_recursive_hash(|| it.unbox_mut().dict.insert(a2, a3)) {
-            true => ValueErrorRecursiveHash(a1.clone()).err(),
+    if let Value::Dict(it) = target {
+        match vm::guard_recursive_hash(|| it.unbox_mut().dict.insert(index, value)) {
+            true => ValueErrorRecursiveHash(target.clone()).err(),
             false => Ok(())
         }
     } else {
-        let mut indexable = a1.as_index()?;
-        let index: usize = collections::get_checked_index(indexable.len(), a2.as_int()?)?;
+        let mut indexable = target.as_index()?;
+        let index: usize = collections::get_checked_index(indexable.len(), index.as_int()?)?;
 
-        indexable.set_index(index, a3)
+        indexable.set_index(index, value)
     }
 }
 
