@@ -27,6 +27,16 @@ impl<'a> Parser<'a> {
                 self.push(Function(id));
                 self.emit_closure_and_closed_locals(closed_locals)
             },
+            Expr(loc, ExprType::SliceLiteral(arg1, arg2, arg3)) => {
+                self.emit_expr(*arg1);
+                self.emit_expr(*arg2);
+                if let Some(arg3) = *arg3 {
+                    self.emit_expr(arg3);
+                    self.push_with(SliceWithStep, loc);
+                } else {
+                    self.push_with(Slice, loc);
+                }
+            },
             Expr(loc, ExprType::Unary(op, arg)) => {
                 self.emit_expr(*arg);
                 self.push_with(Unary(op), loc);

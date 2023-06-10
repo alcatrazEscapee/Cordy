@@ -23,18 +23,21 @@ pub fn get_checked_index(len: usize, rhs: i64) -> Result<usize, Box<RuntimeError
 }
 
 
-pub fn list_slice(a1: Value, a2: Value, a3: Value, a4: Value) -> ValueResult {
+pub fn list_slice(slice: Value, low: Value, high: Value, step: Value) -> ValueResult {
+    literal_slice(slice, low.as_int_or()?, high.as_int_or()?, step.as_int_or()?)
+}
 
-    let mut slice = a1.as_slice()?;
+pub fn literal_slice(target: Value, low: Option<i64>, high: Option<i64>, step: Option<i64>) -> ValueResult {
+    let mut slice = target.as_slice()?;
     let length: i64 = slice.len() as i64;
 
-    let step: i64 = a4.as_int_or(1)?;
+    let step: i64 = step.unwrap_or(1);
     if step == 0 {
         return ValueErrorStepCannotBeZero.err()
     }
 
-    let low: i64 = a2.as_int_or(if step > 0 { 0 } else { -1 })?;
-    let high: i64 = a3.as_int_or(if step > 0 { length } else { -length - 1 })?;
+    let low: i64 = low.unwrap_or(if step > 0 { 0 } else { -1 });
+    let high: i64 = high.unwrap_or(if step > 0 { length } else { -length - 1 });
 
     let abs_start: i64 = to_index(length, low);
     let abs_stop: i64 = to_index(length, high);

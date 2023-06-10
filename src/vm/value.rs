@@ -10,10 +10,11 @@ use std::str::Chars;
 use indexmap::{IndexMap, IndexSet};
 use itertools::Itertools;
 
-use crate::stdlib::NativeFunction;
-use crate::vm::error::RuntimeError;
 use crate::compiler::Fields;
 use crate::misc::RecursionGuard;
+use crate::stdlib::NativeFunction;
+use crate::stdlib;
+use crate::vm::error::RuntimeError;
 
 use Value::{*};
 use RuntimeError::{*};
@@ -52,6 +53,9 @@ pub enum Value {
     ///
     /// Note that `enumerate()` object needs to be stateless, hence wrapping a `Value`, and not an `IteratorImpl`. When a `enumerate()` is iterated through, i.e. `is_iter()` is invoked on it, the internal value will be converted to the respective iterator at that time.
     Enumerate(Box<Value>),
+
+    /// The type of a native slice literal. Immutable, and holds the slice values. Raises an error on construction if the arguments are not convertable to int.
+    Slice(Box<SliceImpl>),
 
     /// Synthetic Iterator Type - Mutable, but not aliasable.
     /// This will never be user-code-accessible, as it will only be on the stack as a synthetic variable, or in native code.
@@ -102,6 +106,14 @@ impl Value {
         }
     }
 
+    pub fn slice(arg1: Value, arg2: Value, arg3: Option<Value>) -> ValueResult {
+        Ok(Slice(Box::new(SliceImpl {
+            arg1: arg1.as_int_or()?,
+            arg2: arg2.as_int_or()?,
+            arg3: arg3.unwrap_or(Nil).as_int_or()?
+        })))
+    }
+
     /// Converts the `Value` to a `String`. This is equivalent to the stdlib function `str()`
     pub fn to_str(self: &Self) -> String { self.safe_to_str(&mut RecursionGuard::new()) }
 
@@ -127,6 +139,11 @@ impl Value {
                 rc.leave();
                 ret
             }};
+        }
+
+        #[inline]
+        fn to_str(i: Option<i64>) -> String {
+            i.map(|u| u.to_string()).unwrap_or(String::new())
         }
 
         match self {
@@ -183,6 +200,10 @@ impl Value {
 
             Range(r) => if r.step == 0 { String::from("range(empty)") } else { format!("range({}, {}, {})", r.start, r.stop, r.step) },
             Enumerate(v) => format!("enumerate({})", v.safe_to_repr_str(rc)),
+            Slice(v) => match &v.arg3 {
+                Some(arg3) => format!("[{}:{}:{}]", to_str(v.arg1), to_str(v.arg2), arg3.to_string()),
+                None => format!("[{}:{}]", to_str(v.arg1), to_str(v.arg2)),
+            }
 
             Iter(_) => String::from("<synthetic> iterator"),
             Memoized(_) => String::from("<synthetic> memoized"),
@@ -213,6 +234,7 @@ impl Value {
             StructType(_) => "struct type",
             Range(_) => "range",
             Enumerate(_) => "enumerate",
+            Slice(_) => "slice",
             Iter(_) => "iter",
             Memoized(_) => "memoized",
             GetField(_) => "get field",
@@ -239,12 +261,11 @@ impl Value {
             Set(it) => !it.unbox().set.is_empty(),
             Dict(it) => !it.unbox().dict.is_empty(),
             Heap(it) => !it.unbox().heap.is_empty(),
-            Struct(_) | StructType(_) => true,
             Range(it) => !it.is_empty(),
             Enumerate(it) => (**it).as_bool(),
             Iter(_) | Memoized(_) => panic!("{:?} is a synthetic type should not have as_bool() invoked on it", self),
             Vector(v) => v.unbox().is_empty(),
-            GetField(_) | Function(_) | PartialFunction(_) | NativeFunction(_) | PartialNativeFunction(_, _) | Closure(_) => true,
+            _ => true,
         }
     }
 
@@ -257,12 +278,12 @@ impl Value {
         }
     }
 
-    /// Like `as_int()` but converts `nil` to the provided default value
-    pub fn as_int_or(self: &Self, def: i64) -> Result<i64, Box<RuntimeError>> {
+    /// Like `as_int()` but returns an `Option<i64>`, and converts `nil` to `None`
+    pub fn as_int_or(self: &Self) -> Result<Option<i64>, Box<RuntimeError>> {
         match self {
-            Nil => Ok(def),
-            Int(i) => Ok(*i),
-            Bool(b) => Ok(if *b { 1 } else { 0 }),
+            Nil => Ok(None),
+            Int(i) => Ok(Some(*i)),
+            Bool(b) => Ok(Some(if *b { 1 } else { 0 })),
             _ => TypeErrorArgMustBeInt(self.clone()).err(),
         }
     }
@@ -949,6 +970,18 @@ impl RangeImpl {
 }
 
 
+#[derive(Eq, PartialEq, Ord, PartialOrd, Debug, Hash, Clone)]
+pub struct SliceImpl {
+    arg1: Option<i64>,
+    arg2: Option<i64>,
+    arg3: Option<i64>
+}
+
+impl SliceImpl {
+    pub fn apply(self: Self, arg: Value) -> ValueResult {
+        stdlib::literal_slice(arg, self.arg1, self.arg2, self.arg3)
+    }
+}
 
 
 /// ### Iterator Type
@@ -1247,29 +1280,24 @@ mod test {
     }
 
     fn all_values() -> Vec<Value> {
-        let rc = Rc::new(FunctionImpl::new(0, 0, String::new(), vec![]));
-        let vec = VecDeque::new();
-        let set = IndexSet::new();
-        let dict = IndexMap::new();
-        let vec1 = vec![];
-        let vec2 = vec![];
-        let iter = std::iter::empty();
+        let function = Rc::new(FunctionImpl::new(0, 0, String::new(), vec![]));
         vec![
             Value::Nil,
             Value::Bool(true),
             Value::Int(1),
-            vec.to_value(),
-            set.to_value(),
-            dict.to_value(),
-            iter.to_heap(),
-            vec2.to_value(),
+            VecDeque::new().to_value(),
+            IndexSet::new().to_value(),
+            IndexMap::new().to_value(),
+            std::iter::empty().to_heap(),
+            vec![].to_value(),
             Value::range(0, 1, 1).unwrap(),
-            Value::Enumerate(Box::new(vec1.to_value())),
-            Value::Function(rc.clone()),
-            Value::partial(Value::Function(rc.clone()), vec![]),
+            Value::Enumerate(Box::new(vec![].to_value())),
+            Value::slice(Value::Nil, Value::Int(3), None).unwrap(),
+            Value::Function(function.clone()),
+            Value::partial(Value::Function(function.clone()), vec![]),
             Value::NativeFunction(NativeFunction::Print),
             Value::PartialNativeFunction(NativeFunction::Print, Box::new(vec![])),
-            Value::closure(rc.clone())
+            Value::closure(function.clone())
         ]
     }
 }

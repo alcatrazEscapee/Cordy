@@ -115,6 +115,10 @@ pub enum Opcode {
     Unary(UnaryOp),
     Binary(BinaryOp),
 
+    /// Creates a `slice` object, which is used to perform slice operations
+    Slice,
+    SliceWithStep,
+
     // Special
     Exit,
     Yield,

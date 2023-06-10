@@ -7,6 +7,8 @@ use crate::vm::{operator, IntoIterableValue, IntoValue, Value, VirtualInterface,
 use crate::vm::operator::BinaryOp;
 use crate::{trace, vm};
 
+pub use crate::stdlib::collections::{list_slice, literal_slice};
+
 use NativeFunction::{*};
 use RuntimeError::{*};
 
@@ -746,10 +748,6 @@ fn get_dict_index<VM>(vm: &mut VM, dict: Value, key: Value) -> ValueResult where
     Ok(dict.dict.entry(key).or_insert(new_value).clone())
 }
 
-pub fn get_slice(a1: Value, a2: Value, a3: Value, a4: Value) -> ValueResult {
-    collections::list_slice(a1, a2, a3, a4)
-}
-
 pub fn set_index(a1: &Value, a2: Value, a3: Value) -> Result<(), Box<RuntimeError>> {
 
     if let Value::Dict(it) = a1 {
@@ -801,6 +799,7 @@ fn type_of(value: Value) -> Value {
 
         Value::Range(_) => Range.to_value(),
         Value::Enumerate(_) => Enumerate.to_value(),
+        Value::Slice(_) => Function.to_value(),
 
         x @ (Value::Iter(_) | Value::Memoized(_)) => panic!("{:?} is synthetic and cannot have type_of() called on it", x),
 
