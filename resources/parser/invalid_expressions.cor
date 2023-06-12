@@ -5,3 +5,4 @@ do { x = print .. 3 }
 do { x = print 3 }
 do { x = print (4 ,, 5) }
 do { x = print (5 6) }
+do { x = .. 3 }

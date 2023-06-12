@@ -1,5 +1,5 @@
 L1: 0000 IncGlobalCount
-    0001 Function(0) -> FunctionImpl { head: 4, tail: 8, nargs: 3, name: "foo", args: ["a", "b", "c"] }
+    0001 Function(0) -> FunctionImpl { head: 4, tail: 8, name: "foo", args: ["a", "b", "c"], default_args: [] }
 L3: 0002 Pop
     0003 Exit
 L2: 0004 Str(1) -> "world"

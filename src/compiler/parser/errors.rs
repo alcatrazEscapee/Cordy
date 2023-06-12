@@ -56,7 +56,8 @@ impl ParserError {
             LetWithPatternBindingNoExpression |
             BreakOutsideOfLoop |
             ContinueOutsideOfLoop |
-            StructNotInGlobalScope => false,
+            StructNotInGlobalScope |
+            NonDefaultParameterAfterDefaultParameter => false,
 
             Runtime(_) => false,
         }
@@ -109,6 +110,7 @@ pub enum ParserErrorType {
     BreakOutsideOfLoop,
     ContinueOutsideOfLoop,
     StructNotInGlobalScope,
+    NonDefaultParameterAfterDefaultParameter,
 
     Runtime(Box<RuntimeError>),
 }

@@ -686,11 +686,12 @@ impl<R, W> VirtualMachine<R, W> where
                 trace::trace_interpreter!("invoke_func_eval -> {}, nargs = {}", f.as_debug_str(), nargs);
 
                 let func = f.unbox_func();
-                if func.nargs == nargs {
+                if func.in_range(nargs) {
                     // Evaluate directly
-                    self.call_function(func.head, func.nargs);
-                } else if func.nargs > nargs && nargs > 0 {
+                    self.call_function(func.jump_offset(nargs), nargs);
+                } else if func.min_args() > nargs && nargs > 0 {
                     // Evaluate as a partial function
+                    // Note that partially evaluating with zero arguments is illegal
                     let arg: Vec<Value> = self.popn(nargs as usize);
                     let func: Value = self.pop();
                     let partial: Value = Value::partial(func, arg);
@@ -710,7 +711,7 @@ impl<R, W> VirtualMachine<R, W> where
                 };
                 let func = partial.func.unbox_func();
                 let total_nargs: u8 = partial.args.len() as u8 + nargs;
-                if func.nargs > total_nargs {
+                if func.min_args() > total_nargs {
                     // Not enough arguments, so pop the argument and push a new partial function
                     let top = self.stack.len();
                     for arg in self.stack.splice(top - nargs as usize..top, std::iter::empty()) {
@@ -718,11 +719,11 @@ impl<R, W> VirtualMachine<R, W> where
                     }
                     self.pop(); // Should pop the `Nil` we swapped earlier
                     self.push(Value::PartialFunction(Box::new(partial)));
-                } else if func.nargs == total_nargs {
+                } else if func.in_range(total_nargs) {
                     // Exactly enough arguments to invoke the function
                     // Before we call, we need to pop-push to reorder the arguments and setup partial arguments, so we have the correct calling convention
                     let args: Vec<Value> = self.popn(nargs as usize);
-                    let head: usize = func.head;
+                    let head: usize = func.jump_offset(total_nargs);
                     self.pop(); // Should pop the `Nil` we swapped earlier
                     self.push(partial.func);
                     for par in partial.args {
@@ -1204,7 +1205,7 @@ mod test {
     #[test] fn test_bare_operator_compose_and_eval() { run_str("2 . (+)(1) . print", "3\n"); }
     #[test] fn test_bare_operator_compose() { run_str("1 . (2 . (+)) . print", "3\n"); }
     #[test] fn test_reduce_list_1() { run_str("[1, 2, 3] . reduce (+) . print", "6\n"); }
-    #[test] fn test_reduce_list_2() { run_str("[1, 2, 3] . reduce (!) . print", "Function '(!)' requires 1 parameters but 2 were present.\n  at: line 1 (<test>)\n\n1 | [1, 2, 3] . reduce (!) . print\n2 |           ^^^^^^^^^^^^\n"); }
+    #[test] fn test_reduce_list_2() { run_str("[1, 2, 3] . reduce (!) . print", "Function '(!)' requires at least 1 parameters but 2 were present.\n  at: line 1 (<test>)\n\n1 | [1, 2, 3] . reduce (!) . print\n2 |           ^^^^^^^^^^^^\n"); }
     #[test] fn test_str_to_list() { run_str("'funny beans' . list . print", "['f', 'u', 'n', 'n', 'y', ' ', 'b', 'e', 'a', 'n', 's']\n"); }
     #[test] fn test_str_to_set() { run_str("'funny beans' . set . print", "{'f', 'u', 'n', 'y', ' ', 'b', 'e', 'a', 's'}\n"); }
     #[test] fn test_str_to_set_to_sorted() { run_str("'funny' . set . sort . print", "['f', 'n', 'u', 'y']\n"); }
@@ -1539,7 +1540,7 @@ mod test {
     #[test] fn test_typeof_functions() { run_str("[range, fn() -> nil, push(3), ((fn(a, b) -> nil)(1))] . map(typeof) . all(==function) . print", "true\n"); }
     #[test] fn test_compose_with_single_element_list() { run_str("'hello' . [0] . print", "h\n"); }
     #[test] fn test_eval_single_element_list() { run_str("[-1]('hello') . print", "o\n"); }
-    #[test] fn test_optimized_no_arg_function_call() { run_str("abs()(1)", "Function 'abs' requires 1 parameters but 0 were present.\n  at: line 1 (<test>)\n\n1 | abs()(1)\n2 |    ^^\n"); }
+    #[test] fn test_optimized_no_arg_function_call() { run_str("abs()(1)", "Function 'abs' requires at least 1 parameters but 0 were present.\n  at: line 1 (<test>)\n\n1 | abs()(1)\n2 |    ^^\n"); }
     #[test] fn test_top_level_if_then_else_does_not_stack_smash() { run_str("for x in range(2) { if x then x else x }", ""); }
     #[test] fn test_assert_pass() { run_str("assert [1, 2] . len . (==2) ; print('yes!')", "yes!\n")}
     #[test] fn test_assert_pass_with_no_message() { run_str("assert [1, 2] .len . (==2) : print('should not show') ; print('should show')", "should show\n"); }
@@ -1635,6 +1636,10 @@ mod test {
     #[test] fn test_use_slice_in_expr_3() { run_str("'hello the world!' . split(' ') . map([2:]) . print", "['llo', 'e', 'rld!']\n"); }
     #[test] fn test_slice_type_of() { run_str("[:] . typeof . print", "function\n"); }
     #[test] fn test_is_with_struct_instances() { run_str("struct A() ; struct B() let a = A(), b = B() ; [a is A, A is function, a is B, A is A, a is function] . print", "[true, true, false, false, false]\n"); }
+    #[test] fn test_function_with_one_default_arg() { run_str("fn foo(a, b?) { print(a, b) } ; foo('test') ; foo('test', 'bar')", "test nil\ntest bar\n"); }
+    #[test] fn test_function_with_one_default_arg_not_enough() { run_str("fn foo(a, b?) { print(a, b) } ; foo()", "Function 'foo' of type 'function' requires 1 parameters but 0 were present.\n  at: line 1 (<test>)\n\n1 | fn foo(a, b?) { print(a, b) } ; foo()\n2 |                                    ^^\n"); }
+    #[test] fn test_function_with_one_default_arg_too_many() { run_str("fn foo(a, b?) { print(a, b) } ; foo(1, 2, 3)", "Function 'foo' of type 'function' requires 2 parameters but 3 were present.\n  at: line 1 (<test>)\n\n1 | fn foo(a, b?) { print(a, b) } ; foo(1, 2, 3)\n2 |                                    ^^^^^^^^^\n"); }
+    #[test] fn test_function_many_default_args() { run_str("fn foo(a, b = 1, c = 1 + 1, d = 1 * 3) { print(a, b, c, d) } foo('test') ; foo('and', 11) ; foo('other', 11, 22) ; foo('things', 11, 22, 33)", "test 1 2 3\nand 11 2 3\nother 11 22 3\nthings 11 22 33\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }

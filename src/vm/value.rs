@@ -18,6 +18,7 @@ use crate::vm::error::RuntimeError;
 
 use Value::{*};
 use RuntimeError::{*};
+use crate::encoder::{Decode, Decoder, Encode, Encoder};
 
 type ValueResult = Result<Value, Box<RuntimeError>>;
 
@@ -376,11 +377,11 @@ impl Value {
     /// Returns `Some(Some(nargs))` if this value is a function with a known number of arguments
     pub fn unbox_func_args(self: &Self) -> Option<Option<u8>> {
         match self {
-            Function(it) => Some(Some(it.nargs)),
-            PartialFunction(it) => Some(Some(it.func.unbox_func().nargs - it.args.len() as u8)),
+            Function(it) => Some(Some(it.min_args())),
+            PartialFunction(it) => Some(Some(it.func.unbox_func().min_args() - it.args.len() as u8)),
             NativeFunction(it) => Some(it.nargs()),
             PartialNativeFunction(it, args) => Some(it.nargs().map(|u| u - args.len() as u8)),
-            Closure(it) => Some(Some(it.func.nargs)),
+            Closure(it) => Some(Some(it.func.min_args())),
             StructType(it) => Some(Some(it.field_names.len() as u8)),
             Slice(_) => Some(Some(1)),
             _ => None,
@@ -608,20 +609,37 @@ impl<T : Eq + PartialEq + Debug + Clone + Hash> Hash for Mut<T> {
 pub struct FunctionImpl {
     pub head: usize, // Pointer to the first opcode of the function's execution
     pub tail: usize, // Pointer to the final `Return` opcode.
-    pub nargs: u8, // The number of arguments the function takes
 
-    pub name: String, // The name of the function, useful to show in stack traces
-    pub args: Vec<String>, // Names of the arguments
+    name: String, // The name of the function, useful to show in stack traces
+    args: Vec<String>, // Names of the arguments
+    default_args: Vec<usize>, // Jump offsets for each default argument
 }
 
 impl FunctionImpl {
-    pub fn new(head: usize, tail: usize, name: String, args: Vec<String>) -> FunctionImpl {
-        FunctionImpl {
-            head,
-            tail,
-            nargs: args.len() as u8,
-            name,
-            args
+    pub fn new(head: usize, tail: usize, name: String, args: Vec<String>, default_args: Vec<usize>) -> FunctionImpl {
+        FunctionImpl { head, tail, name, args, default_args, }
+    }
+
+    /// The minimum number of required arguments, inclusive.
+    pub fn min_args(self: &Self) -> u8 {
+        (self.args.len() - self.default_args.len()) as u8
+    }
+
+    /// The maximum number of required arguments, inclusive.
+    pub fn max_args(self: &Self) -> u8 {
+        self.args.len() as u8
+    }
+
+    pub fn in_range(self: &Self, nargs: u8) -> bool {
+        self.min_args() <= nargs && nargs <= self.max_args()
+    }
+
+    /// Returns the jump offset of the function
+    /// For typical functions, this is just the `head`, however when default arguments are present, or not, this is offset by the default argument offsets.
+    /// The `nargs` must be legal (between `[min_args(), max_args()]`
+    pub fn jump_offset(self: &Self, nargs: u8) -> usize {
+        self.head + if nargs == self.min_args() { 0 } else {
+            self.default_args[(nargs - self.min_args() - 1) as usize]
         }
     }
 
@@ -633,6 +651,18 @@ impl FunctionImpl {
 impl Hash for FunctionImpl {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.name.hash(state)
+    }
+}
+
+impl Encode for FunctionImpl {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.encode(&self.head).encode(&self.tail).encode(&self.name).encode(&self.args).encode(&self.default_args);
+    }
+}
+
+impl Decode<FunctionImpl> for Decoder {
+    fn decode(&mut self) -> Result<FunctionImpl, ()> {
+        Ok(FunctionImpl::new(self.decode()?, self.decode()?, self.decode()?, self.decode()?, self.decode()?))
     }
 }
 
@@ -1283,7 +1313,7 @@ mod test {
     }
 
     fn all_values() -> Vec<Value> {
-        let function = Rc::new(FunctionImpl::new(0, 0, String::new(), vec![]));
+        let function = Rc::new(FunctionImpl::new(0, 0, String::new(), vec![], vec![]));
         vec![
             Value::Nil,
             Value::Bool(true),

@@ -1,5 +1,5 @@
 L1: 0000 IncGlobalCount
-    0001 Function(0) -> FunctionImpl { head: 11, tail: 18, nargs: 1, name: "foo", args: ["x"] }
+    0001 Function(0) -> FunctionImpl { head: 11, tail: 18, name: "foo", args: ["x"], default_args: [] }
 L7: 0002 PushGlobal(0) -> foo
     0003 Int(2) -> 2
     0004 OpFuncEval(1)
