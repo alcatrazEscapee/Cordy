@@ -464,11 +464,23 @@ pub struct ParserFunctionImpl {
     pub(super) name: String,
     pub(super) args: Vec<String>,
 
+    /// These are indexes into the function code, where the function call position should jump to.
+    /// They are indexed from the first function call (zero default arguments), increasing.
+    /// So `[Nil, Int(1), Int(2), Plus, ...]` would have entries `[1, 4]` as it's argument set, and length is the number of default arguments.
+    pub(super) default_args: Vec<usize>,
+
     /// Bytecode for the function body itself
     pub(super) code: Vec<(Location, Opcode)>,
 
     /// Entries for `locals_reference`, that need to be held until the function code is emitted
     pub(super) locals_reference: Vec<String>,
+}
+
+impl ParserFunctionImpl {
+    /// Marks a default argument as finished.
+    pub(super) fn mark_default_arg(self: &mut Self) {
+        self.default_args.push(self.code.len());
+    }
 }
 
 
@@ -517,6 +529,7 @@ impl<'a> Parser<'a> {
         self.functions.push(ParserFunctionImpl {
             name,
             args: args.iter().map(|u| u.to_code_str()).collect(),
+            default_args: Vec::new(),
             code: Vec::new(),
             locals_reference: Vec::new(),
         });
@@ -669,6 +682,12 @@ impl<'a> Parser<'a> {
             Some(func) => &mut self.functions[func].code,
             None => &mut self.output
         }
+    }
+
+    /// Returns a mutable reference to the current `ParserFunctionImpl`. Will panic if a function is currently not being parsed.
+    pub fn current_function_impl(self: &mut Self) -> &mut ParserFunctionImpl {
+        let func: usize = self.current_locals().func.unwrap();
+        &mut self.functions[func]
     }
 
     /// Returns the locals reference of the current function, like `current_function_mut()`

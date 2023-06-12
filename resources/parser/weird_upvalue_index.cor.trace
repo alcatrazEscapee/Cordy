@@ -1,16 +1,16 @@
 L1: 0000 IncGlobalCount
-    0001 Function(0) -> FunctionImpl { head: 7, tail: 17, nargs: 0, name: "problem", args: [] }
+    0001 Function(0) -> FunctionImpl { head: 7, tail: 17, name: "problem", args: [], default_args: [] }
 L6: 0002 PushGlobal(0) -> problem
     0003 OpFuncEval(0)
     0004 Pop
     0005 Pop
     0006 Exit
 L2: 0007 Nil
-L3: 0008 Function(1) -> FunctionImpl { head: 18, tail: 19, nargs: 0, name: "_", args: [] }
+L3: 0008 Function(1) -> FunctionImpl { head: 18, tail: 19, name: "_", args: [], default_args: [] }
     0009 Closure
     0010 CloseLocal(0)
     0011 Pop
-L4: 0012 Function(2) -> FunctionImpl { head: 20, tail: 21, nargs: 0, name: "_", args: [] }
+L4: 0012 Function(2) -> FunctionImpl { head: 20, tail: 21, name: "_", args: [], default_args: [] }
     0013 Closure
     0014 CloseLocal(0)
     0015 OpFuncEval(0)

@@ -29,8 +29,11 @@ L7: 0026 NativeFunction(Print)
     0028 OpFuncEval(1)
     0029 StoreGlobal(0) -> x
     0030 Pop
-    0031 Pop
-    0032 Exit
+L8: 0031 Nil
+    0032 StoreGlobal(0) -> x
+    0033 Pop
+    0034 Pop
+    0035 Exit
 Expected an expression terminal, got '+' token instead
   at: line 2 (invalid_expressions.cor)
 
@@ -66,3 +69,9 @@ Expected a ',' or ')' after function invocation, got integer '6' instead
 
 7 | do { x = print (5 6) }
 8 |                   ^
+
+Expected an expression terminal, got '.' token instead
+  at: line 8 (invalid_expressions.cor)
+
+8 | do { x = .. 3 }
+9 |          ^

@@ -4,7 +4,7 @@ use std::io::{Cursor, Read, Write};
 use std::rc::Rc;
 
 use crate::compiler::{CompileResult, Fields};
-use crate::vm::{FunctionImpl, Opcode, StructTypeImpl};
+use crate::vm::{Opcode, StructTypeImpl};
 
 use Opcode::{*};
 
@@ -31,11 +31,11 @@ pub fn decode(bytes: Vec<u8>) -> Maybe<CompileResult> {
 
 // ===== Encoder and Decoder Structs ===== //
 
-struct Encoder(Vec<u8>);
-struct Decoder(Cursor<Vec<u8>>);
+pub struct Encoder(Vec<u8>);
+pub struct Decoder(Cursor<Vec<u8>>);
 
 impl Encoder {
-    fn encode<E: Encode + ?Sized>(&mut self, e: &E) -> &mut Self {
+    pub fn encode<E: Encode + ?Sized>(&mut self, e: &E) -> &mut Self {
         e.encode(self);
         self
     }
@@ -79,12 +79,12 @@ impl Decoder {
 }
 
 /// A trait that is responsible for decoding an arbitrary type from a `Decoder`.
-trait Decode<T> {
+pub trait Decode<T> {
     fn decode(&mut self) -> Maybe<T>;
 }
 
 /// A trait that is responsible for encoding an arbitrary type into a sequence of bytes
-trait Encode {
+pub trait Encode {
     fn encode(&self, encoder: &mut Encoder);
 }
 
@@ -102,7 +102,6 @@ impl<T : Encode> Encode for Vec<T> { fn encode(&self, encoder: &mut Encoder) { s
 impl<K : Encode, V : Encode> Encode for HashMap<K, V> { fn encode(&self, encoder: &mut Encoder) { self.len().encode(encoder); for (k, v) in self { k.encode(encoder); v.encode(encoder) } } }
 impl<T1: Encode, T2: Encode> Encode for (T1, T2) { fn encode(&self, encoder: &mut Encoder) { self.0.encode(encoder); self.1.encode(encoder); } }
 
-impl Encode for FunctionImpl { fn encode(&self, encoder: &mut Encoder) { encoder.encode(&self.head).encode(&self.tail).encode(&self.name).encode(&self.args); } }
 impl Encode for StructTypeImpl { fn encode(&self, encoder: &mut Encoder) { encoder.encode(&self.name).encode(&self.field_names).encode(&self.type_index); } }
 impl Encode for Fields { fn encode(&self, encoder: &mut Encoder) { encoder.encode(&self.fields).encode(&self.lookup); } }
 impl Encode for CompileResult { fn encode(self: &Self, encoder: &mut Encoder) { encoder.encode(&self.code).encode(&self.strings).encode(&self.constants).encode(&self.functions).encode(&self.structs).encode(&self.fields); } }
@@ -136,7 +135,6 @@ impl<K, V> Decode<HashMap<K, V>> for Decoder where Decoder : Decode<K> + Decode<
     }
 }
 
-impl Decode<FunctionImpl> for Decoder { fn decode(&mut self) -> Maybe<FunctionImpl> { Ok(FunctionImpl::new(self.decode()?, self.decode()?, self.decode()?, self.decode()?)) } }
 impl Decode<StructTypeImpl> for Decoder { fn decode(&mut self) -> Maybe<StructTypeImpl> { Ok(StructTypeImpl::new(self.decode()?, self.decode()?, self.decode()?)) } }
 impl Decode<Fields> for Decoder { fn decode(&mut self) -> Maybe<Fields> { Ok(Fields { fields: self.decode()?, lookup: self.decode()? }) } }
 impl Decode<CompileResult> for Decoder { fn decode(&mut self) -> Maybe<CompileResult> { Ok(CompileResult {

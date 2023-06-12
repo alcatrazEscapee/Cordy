@@ -221,7 +221,7 @@ impl Parser<'_> {
             }
 
             let tail: usize = self.raw_output.len() - 1;
-            let baked: Rc<FunctionImpl> = Rc::new(FunctionImpl::new(head, tail, func.name, func.args));
+            let baked: Rc<FunctionImpl> = Rc::new(FunctionImpl::new(head, tail, func.name, func.args, func.default_args));
 
             self.baked_functions.push(baked);
         }
@@ -364,7 +364,7 @@ impl Parser<'_> {
         self.advance();
         let maybe_name: Option<String> = self.parse_function_name();
         self.expect(OpenParen);
-        let args: Vec<LValue> = self.parse_function_parameters();
+        let (args, default_args) = self.parse_function_parameters();
         self.expect_resync(CloseParen);
 
         // Named functions are a complicated local variable, and needs to be declared as such
@@ -382,7 +382,7 @@ impl Parser<'_> {
         self.push(Opcode::Function(func));
 
         // Emit the closed locals from the function body right away, because we are not in an expression context
-        let closed_locals = self.parse_function_body(args);
+        let closed_locals = self.parse_function_body(args, default_args);
         self.emit_closure_and_closed_locals(closed_locals);
     }
 
@@ -410,13 +410,13 @@ impl Parser<'_> {
         // Function header - `fn` (<arg>, ...)
         self.advance();
         self.expect(OpenParen);
-        let args: Vec<LValue> = self.parse_function_parameters();
+        let (args, default_args) = self.parse_function_parameters();
         self.expect_resync(CloseParen);
 
         // Expression functions don't declare themselves as a local variable that can be referenced.
         // Instead, as they're part of an expression, they just push a single function instance onto the stack
         let func: u32 = self.declare_function(String::from("_"), &args);
-        let closed_locals = self.parse_function_body(args);
+        let closed_locals = self.parse_function_body(args, default_args);
         Expr::function(func, closed_locals)
     }
 
@@ -431,11 +431,14 @@ impl Parser<'_> {
         }
     }
 
-    fn parse_function_parameters(self: &mut Self) -> Vec<LValue> {
+    /// Returns the pair of `lvalue` parameters, and `Expr` default values, if present.
+    fn parse_function_parameters(self: &mut Self) -> (Vec<LValue>, Vec<Expr>) {
         trace::trace_parser!("rule <function-parameters>");
+
         let mut args: Vec<LValue> = Vec::new();
+        let mut default_args: Vec<Expr> = Vec::new();
         if let Some(CloseParen) = self.peek() {
-            return args; // Special case for no parameters, don't enter the loop
+            return (args, default_args); // Special case for no parameters, don't enter the loop
         }
 
         loop {
@@ -447,8 +450,27 @@ impl Parser<'_> {
                 },
             }
 
+            // Default Arguments
             match self.peek() {
-                Some(Comma) => self.skip(),
+                // Sugar for `= nil`, so mark this as a default argument
+                Some(QuestionMark) => {
+                    self.skip(); // Consume `?`
+                    default_args.push(Expr(Location::empty(), ExprType::Nil));
+                },
+                Some(Equals) => {
+                    self.skip(); // Consume `=`
+                    default_args.push(self.parse_expr_top_level()); // Parse an expression
+                },
+                _ => {
+                    if !default_args.is_empty() {
+                        // Cannot have non-default arguments after default arguments
+                        self.semantic_error(NonDefaultParameterAfterDefaultParameter);
+                    }
+                },
+            }
+
+            match self.peek() {
+                Some(Comma) => self.skip(), // Consume `,`
                 Some(CloseParen) => break,
                 _ => {
                     self.error_with(ExpectedCommaOrEndOfParameters);
@@ -456,10 +478,10 @@ impl Parser<'_> {
                 },
             }
         }
-        args
+        (args, default_args)
     }
 
-    fn parse_function_body(self: &mut Self, args: Vec<LValue>) -> Vec<Opcode> {
+    fn parse_function_body(self: &mut Self, args: Vec<LValue>, default_args: Vec<Expr>) -> Vec<Opcode> {
         trace::trace_parser!("rule <function-body>");
         let prev_pop_status: bool = self.delay_pop_from_expression_statement; // Stack semantics for the delayed pop
 
@@ -470,6 +492,13 @@ impl Parser<'_> {
         self.locals.push(Locals::new(Some(self.functions.len() - 1)));
         self.function_depth += 1;
         self.scope_depth += 1;
+
+        // After the locals have been pushed, we now can push function code
+        // Before the body of the function, we emit code for each default argument, and mark it as such.
+        for arg in default_args {
+            self.emit_expr(arg);
+            self.current_function_impl().mark_default_arg();
+        }
 
         // Collect arguments into pairs of the lvalue, and associated synthetic
         let mut args_with_synthetics: Vec<(LValue, Option<usize>)> = args.into_iter()
@@ -905,6 +934,7 @@ impl Parser<'_> {
         self.emit_expr(expr);
     }
 
+    #[must_use = "For parsing expressions from non-expressions, use parse_expression()"]
     fn parse_expr_top_level(self: &mut Self) -> Expr {
         self.parse_expr_10()
     }

@@ -196,8 +196,8 @@ impl AsError for RuntimeError {
             RuntimeError::RuntimeCompilationError(vec) => format!("Encountered compilation error(s) within 'eval':\n\n{}", vec.join("\n")),
 
             RuntimeError::ValueIsNotFunctionEvaluable(v) => format!("Tried to evaluate {} but it is not a function.", v.as_error()),
-            RuntimeError::IncorrectNumberOfFunctionArguments(f, a) => format!("Function {} requires {} parameters but {} were present.", f.as_error(), f.nargs, a),
-            RuntimeError::IncorrectNumberOfArguments(b, a, e) => format!("Function '{}' requires {} parameters but {} were present.", b.as_error(), e, a),
+            RuntimeError::IncorrectNumberOfFunctionArguments(f, a) => format!("Function {} requires {} parameters but {} were present.", f.as_error(), if *a < f.min_args() { f.min_args() } else { f.max_args() }, a),
+            RuntimeError::IncorrectNumberOfArguments(b, a, e) => format!("Function '{}' requires at least {} parameters but {} were present.", b.as_error(), e, a),
             RuntimeError::IncorrectNumberOfArgumentsVariadicAtLeastOne(b) => format!("Function '{}' requires at least 1 parameter but none were present.", b.as_error()),
             RuntimeError::IncorrectNumberOfStructArguments(s, a, e) => format!("Struct '{}' has {} fields but {} arguments were present", s, e, a),
             RuntimeError::IncorrectNumberOfGetFieldArguments(s, a, e) => format!("Function '(->{})' requires {} parameters but {} were present", s, e, a),
@@ -344,6 +344,7 @@ impl AsError for ParserError {
             ParserErrorType::BreakOutsideOfLoop => String::from("Invalid 'break' statement outside of an enclosing loop"),
             ParserErrorType::ContinueOutsideOfLoop => String::from("Invalid 'continue' statement outside of an enclosing loop"),
             ParserErrorType::StructNotInGlobalScope => String::from("'struct' statements can only be present in global scope."),
+            ParserErrorType::NonDefaultParameterAfterDefaultParameter => String::from("Non-default argument cannot follow default argument."),
 
             ParserErrorType::Runtime(e) => e.as_error(),
         }
@@ -452,6 +453,8 @@ impl AsError for ScanToken {
             ScanToken::Underscore => String::from("'_' token"),
             ScanToken::Semicolon => String::from("';' token"),
             ScanToken::At => String::from("'@' token"),
+            ScanToken::Elipsis => String::from("'...' token"),
+            ScanToken::QuestionMark => String::from("'?' token"),
 
             ScanToken::NewLine => String::from("new line"),
         }
