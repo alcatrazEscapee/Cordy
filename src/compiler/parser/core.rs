@@ -159,35 +159,21 @@ impl<'a> Parser<'a> {
     /// Note that this function only returns a read-only reference to the underlying token, suitable for matching
     /// If the token data needs to be unboxed, i.e. as with `Identifier` tokens, it must be extracted only via `advance()`
     /// This also does not consume newline tokens in the input, rather peeks _past_ them in order to find the next matching token.
-    pub fn peek(self: &mut Self) -> Option<&ScanToken> {
-        if self.error_recovery {
-            return None
-        }
-        for (_, token) in &self.input {
-            if token != &NewLine {
-                return Some(token)
-            } else {
-                self.prevent_expression_statement = false;
-            }
-        }
-        None
-    }
+    pub fn peek(self: &mut Self) -> Option<&ScanToken> { self.peek_lookahead(0) }
+    pub fn peek2(self: &mut Self) -> Option<&ScanToken> { self.peek_lookahead(1) }
+    pub fn peek3(self: &mut Self) -> Option<&ScanToken> { self.peek_lookahead(2) }
 
-    // Like `peek()` but peeks one ahead (making this technically a lookahead 2 parser)
-    pub fn peek2(self: &mut Self) -> Option<&ScanToken> {
-        if self.error_recovery {
-            return None
-        }
-        let mut first: bool = false;
-        for (_, token) in &self.input {
-            if token != &NewLine {
-                if !first {
-                    first = true;
+    fn peek_lookahead(self: &mut Self, mut lookahead: u8) -> Option<&ScanToken> {
+        if !self.error_recovery {
+            for (_, token) in &self.input {
+                if token != &NewLine {
+                    if lookahead == 0 {
+                        return Some(token)
+                    }
+                    lookahead -= 1;
                 } else {
-                    return Some(token)
+                    self.prevent_expression_statement = false;
                 }
-            } else {
-                self.prevent_expression_statement = false;
             }
         }
         None

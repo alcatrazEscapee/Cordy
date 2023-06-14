@@ -4,7 +4,7 @@ use crate::stdlib;
 use crate::stdlib::NativeFunction;
 use crate::vm::ValueResult;
 use crate::vm::error::RuntimeError;
-use crate::vm::value::{IntoIterableValue, IntoValue, Mut, Value};
+use crate::vm::value::{IntoIterableValue, IntoValue, IntoValueResult, Mut, Value};
 
 use RuntimeError::{*};
 use Value::{*};
@@ -46,7 +46,7 @@ impl BinaryOp {
             BinaryOp::And => binary_bitwise_and(lhs, rhs),
             BinaryOp::Or => binary_bitwise_or(lhs, rhs),
             BinaryOp::Xor => binary_bitwise_xor(lhs, rhs),
-            BinaryOp::In => binary_in(lhs, rhs),
+            BinaryOp::In => binary_in(lhs, rhs).to_value(),
             BinaryOp::LessThan => Ok(Bool(lhs < rhs)),
             BinaryOp::GreaterThan => Ok(Bool(lhs > rhs)),
             BinaryOp::LessThanEqual => Ok(Bool(lhs <= rhs)),
@@ -182,15 +182,15 @@ pub fn binary_is(lhs: Value, rhs: Value) -> ValueResult {
     }
 }
 
-pub fn binary_in(a1: Value, a2: Value) -> ValueResult {
+pub fn binary_in(a1: Value, a2: Value) -> Result<bool, Box<RuntimeError>> {
     match (a1, a2) {
-        (Str(l), Str(r)) => Ok(Bool(r.contains(l.as_str()))),
-        (Int(l), Range(r)) => Ok(Bool(r.contains(l))),
-        (l, List(it)) => Ok(Bool(it.unbox().contains(&l))),
-        (l, Set(it)) => Ok(Bool(it.unbox().set.contains(&l))),
-        (l, Dict(it)) => Ok(Bool(it.unbox().dict.contains_key(&l))),
-        (l, Heap(it)) => Ok(Bool(it.unbox().heap.iter().any(|v|v.0 == l))),
-        (l, Vector(it)) => Ok(Bool(it.unbox().contains(&l))),
+        (Str(l), Str(r)) => Ok(r.contains(l.as_str())),
+        (Int(l), Range(r)) => Ok(r.contains(l)),
+        (l, List(it)) => Ok(it.unbox().contains(&l)),
+        (l, Set(it)) => Ok(it.unbox().set.contains(&l)),
+        (l, Dict(it)) => Ok(it.unbox().dict.contains_key(&l)),
+        (l, Heap(it)) => Ok(it.unbox().heap.iter().any(|v|v.0 == l)),
+        (l, Vector(it)) => Ok(it.unbox().contains(&l)),
         (l, r) => TypeErrorBinaryOp(BinaryOp::In, l, r).err()
     }
 }

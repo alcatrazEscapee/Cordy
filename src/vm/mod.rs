@@ -14,7 +14,7 @@ use crate::reporting::{Locations, SourceView};
 
 pub use crate::vm::error::{DetailRuntimeError, RuntimeError};
 pub use crate::vm::opcode::Opcode;
-pub use crate::vm::value::{FunctionImpl, StructTypeImpl, IntoDictValue, IntoIterableValue, IntoValue, Iterable, Value, guard_recursive_hash};
+pub use crate::vm::value::{FunctionImpl, StructTypeImpl, IntoDictValue, IntoIterableValue, IntoValue, IntoValueResult, Iterable, Value, guard_recursive_hash};
 
 use Opcode::{*};
 use RuntimeError::{*};
@@ -1640,6 +1640,12 @@ mod test {
     #[test] fn test_function_with_one_default_arg_not_enough() { run_str("fn foo(a, b?) { print(a, b) } ; foo()", "Function 'foo' of type 'function' requires 1 parameters but 0 were present.\n  at: line 1 (<test>)\n\n1 | fn foo(a, b?) { print(a, b) } ; foo()\n2 |                                    ^^\n"); }
     #[test] fn test_function_with_one_default_arg_too_many() { run_str("fn foo(a, b?) { print(a, b) } ; foo(1, 2, 3)", "Function 'foo' of type 'function' requires 2 parameters but 3 were present.\n  at: line 1 (<test>)\n\n1 | fn foo(a, b?) { print(a, b) } ; foo(1, 2, 3)\n2 |                                    ^^^^^^^^^\n"); }
     #[test] fn test_function_many_default_args() { run_str("fn foo(a, b = 1, c = 1 + 1, d = 1 * 3) { print(a, b, c, d) } foo('test') ; foo('and', 11) ; foo('other', 11, 22) ; foo('things', 11, 22, 33)", "test 1 2 3\nand 11 2 3\nother 11 22 3\nthings 11 22 33\n"); }
+    #[test] fn test_operator_in() { run_str("let f = (in) ; f(1, [1]) . print", "true\n"); }
+    #[test] fn test_operator_not_in() { run_str("let f = (not in) ; f(1, []) . print", "true\n"); }
+    #[test] fn test_operator_in_partial_left() { run_str("let f = (1 in) ; f([1]) . print", "true\n"); }
+    #[test] fn test_operator_in_partial_right() { run_str("let f = (in [1]) ; f(1) . print", "true\n"); }
+    #[test] fn test_operator_not_in_partial_left() { run_str("let f = (1 not in) ; f([]) . print", "true\n"); }
+    #[test] fn test_operator_not_in_partial_right() { run_str("let f = (not in []) ; f(1) . print", "true\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }
