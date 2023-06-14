@@ -97,7 +97,6 @@ impl Expr {
     pub fn vector(loc: Location, args: Vec<Expr>) -> Expr { SequenceOp::Vector.apply(loc, args) }
     pub fn slice_literal(loc: Location, arg1: Expr, arg2: Expr, arg3: Option<Expr>) -> Expr { Expr(loc, ExprType::SliceLiteral(Box::new(arg1), Box::new(arg2), Box::new(arg3))) }
 
-    pub fn not(self: Self, loc: Location) -> Expr { self.unary(loc, UnaryOp::Not) }
     pub fn unary(self: Self, loc: Location, op: UnaryOp) -> Expr { Expr(loc, ExprType::Unary(op, Box::new(self))) }
     pub fn binary(self: Self, loc: Location, op: BinaryOp, rhs: Expr) -> Expr { Expr(loc, ExprType::Binary(op, Box::new(self), Box::new(rhs))) }
     pub fn eval(self: Self, loc: Location, args: Vec<Expr>) -> Expr { Expr(loc, ExprType::Eval(Box::new(self), args)) }

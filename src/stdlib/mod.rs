@@ -64,6 +64,8 @@ pub enum NativeFunction {
     OperatorModSwap,
     OperatorIs,
     OperatorIsSwap,
+    OperatorIsNot,
+    OperatorIsNotSwap,
     OperatorIn,
     OperatorInSwap,
     OperatorNotIn,
@@ -176,7 +178,9 @@ impl NativeFunction {
             OperatorPow => Some(BinaryOp::Pow),
             OperatorMod => Some(BinaryOp::Mod),
             OperatorIs => Some(BinaryOp::Is),
+            OperatorIsNot => Some(BinaryOp::IsNot),
             OperatorIn => Some(BinaryOp::In),
+            OperatorNotIn => Some(BinaryOp::NotIn),
             OperatorAdd => Some(BinaryOp::Add),
             OperatorSub => Some(BinaryOp::Sub),
             OperatorLeftShift => Some(BinaryOp::LeftShift),
@@ -191,6 +195,26 @@ impl NativeFunction {
             OperatorEqual => Some(BinaryOp::Equal),
             OperatorNotEqual => Some(BinaryOp::NotEqual),
             _ => None
+        }
+    }
+
+    pub fn swap_standard_binary_operator(self: Self) -> NativeFunction {
+        match self {
+            OperatorDiv => OperatorDivSwap,
+            OperatorPow => OperatorPowSwap,
+            OperatorMod => OperatorModSwap,
+            OperatorIs => OperatorIsSwap,
+            OperatorIsNot => OperatorIsNotSwap,
+            OperatorIn => OperatorInSwap,
+            OperatorNotIn => OperatorNotInSwap,
+            OperatorAdd => OperatorAddSwap,
+            OperatorLeftShift => OperatorLeftShiftSwap,
+            OperatorRightShift => OperatorRightShiftSwap,
+            OperatorLessThan => OperatorLessThanSwap,
+            OperatorLessThanEqual => OperatorLessThanEqualSwap,
+            OperatorGreaterThan => OperatorGreaterThanSwap,
+            OperatorGreaterThanEqual => OperatorGreaterThanEqualSwap,
+            op => op,
         }
     }
 }
@@ -266,6 +290,8 @@ fn load_native_functions() -> Vec<NativeFunctionInfo> {
     declare!(OperatorModSwap, "(%)", "lhs, rhs", Some(2), true);
     declare!(OperatorIs, "(is)", "lhs, rhs", Some(2), true);
     declare!(OperatorIsSwap, "(is)", "lhs, rhs", Some(2), true);
+    declare!(OperatorIsNot, "(is not)", "lhs, rhs", Some(2), true);
+    declare!(OperatorIsNotSwap, "(is not)", "lhs, rhs", Some(2), true);
     declare!(OperatorIn, "(in)", "lhs, rhs", Some(2), true);
     declare!(OperatorInSwap, "(in)", "lhs, rhs", Some(2), true);
     declare!(OperatorNotIn, "(not in)", "lhs, rhs", Some(2), true);
@@ -600,8 +626,10 @@ pub fn invoke<VM>(native: NativeFunction, nargs: u8, vm: &mut VM) -> ValueResult
         OperatorPowSwap => dispatch!(a1, a2, operator::binary_pow(a2, a1)),
         OperatorMod => dispatch!(a1, a2, operator::binary_mod(a1, a2)),
         OperatorModSwap => dispatch!(a1, a2, operator::binary_mod(a2, a1)),
-        OperatorIs => dispatch!(a1, a2, operator::binary_is(a1, a2)),
-        OperatorIsSwap => dispatch!(a1, a2, operator::binary_is(a2, a1)),
+        OperatorIs => dispatch!(a1, a2, operator::binary_is(a1, a2).to_value()),
+        OperatorIsSwap => dispatch!(a1, a2, operator::binary_is(a2, a1).to_value()),
+        OperatorIsNot => dispatch!(a1, a2, operator::binary_is(a1, a2).map(|u| !u).to_value()),
+        OperatorIsNotSwap => dispatch!(a1, a2, operator::binary_is(a2, a1).map(|u| !u).to_value()),
         OperatorIn => dispatch!(a1, a2, operator::binary_in(a1, a2).to_value()),
         OperatorInSwap => dispatch!(a1, a2, operator::binary_in(a2, a1).to_value()),
         OperatorNotIn => dispatch!(a1, a2, operator::binary_in(a1, a2).map(|u| !u).to_value()),

@@ -19,7 +19,7 @@ pub enum UnaryOp {
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum BinaryOp {
-    Mul, Div, Pow, Mod, Is, Add, Sub, LeftShift, RightShift, And, Or, Xor, In, LessThan, GreaterThan, LessThanEqual, GreaterThanEqual, Equal, NotEqual, Max, Min
+    Mul, Div, Pow, Mod, Is, IsNot, Add, Sub, LeftShift, RightShift, And, Or, Xor, In, NotIn, LessThan, GreaterThan, LessThanEqual, GreaterThanEqual, Equal, NotEqual, Max, Min
 }
 
 impl UnaryOp {
@@ -38,7 +38,8 @@ impl BinaryOp {
             BinaryOp::Div => binary_div(lhs, rhs),
             BinaryOp::Pow => binary_pow(lhs, rhs),
             BinaryOp::Mod => binary_mod(lhs, rhs),
-            BinaryOp::Is => binary_is(lhs, rhs),
+            BinaryOp::Is => binary_is(lhs, rhs).to_value(),
+            BinaryOp::IsNot => binary_is(lhs, rhs).to_value(),
             BinaryOp::Add => binary_add(lhs, rhs),
             BinaryOp::Sub => binary_sub(lhs, rhs),
             BinaryOp::LeftShift => binary_left_shift(lhs, rhs),
@@ -47,6 +48,7 @@ impl BinaryOp {
             BinaryOp::Or => binary_bitwise_or(lhs, rhs),
             BinaryOp::Xor => binary_bitwise_xor(lhs, rhs),
             BinaryOp::In => binary_in(lhs, rhs).to_value(),
+            BinaryOp::NotIn => binary_in(lhs, rhs).map(|u| !u).to_value(),
             BinaryOp::LessThan => Ok(Bool(lhs < rhs)),
             BinaryOp::GreaterThan => Ok(Bool(lhs > rhs)),
             BinaryOp::LessThanEqual => Ok(Bool(lhs <= rhs)),
@@ -156,12 +158,12 @@ pub fn binary_pow(a1: Value, a2: Value) -> ValueResult {
     }
 }
 
-pub fn binary_is(lhs: Value, rhs: Value) -> ValueResult {
+pub fn binary_is(lhs: Value, rhs: Value) -> Result<bool, Box<RuntimeError>> {
     match rhs {
-        Nil => Ok(Bool(lhs == Nil)),
-        StructType(it) => Ok(Bool(if let Struct(instance) = lhs {
+        Nil => Ok(lhs == Nil),
+        StructType(it) => Ok(if let Struct(instance) = lhs {
             instance.unbox().type_index == it.type_index
-        } else { false })),
+        } else { false }),
         Value::NativeFunction(b) => {
             let ret: bool = match b {
                 NativeFunction::Bool => lhs.is_bool(),
@@ -176,7 +178,7 @@ pub fn binary_is(lhs: Value, rhs: Value) -> ValueResult {
                 NativeFunction::Any => true,
                 _ => return TypeErrorBinaryIs(lhs, Value::NativeFunction(b)).err()
             };
-            Ok(Bool(ret))
+            Ok(ret)
         },
         _ => return TypeErrorBinaryIs(lhs, rhs).err()
     }
