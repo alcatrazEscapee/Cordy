@@ -47,7 +47,7 @@ All operators are left associative (except `=` for assigning variables). Their p
 |------------|------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------|
 | 1          | `[]`, `()`, `if then else`                                                                     | Array Access, Function Evaluation, Ternary `if`                                        |
 | 2          | `-`, `!`, `~`, `->`                                                                            | Unary Negation, Logical Not, Bitwise Not, Struct Access                                |
-| 3          | `*`, `/`, `%`, `**`, `is`, `in`, `not in`                                                      | Multiplication, Division, Modulo, Power, Is In, Not In                                 |
+| 3          | `*`, `/`, `%`, `**`, `is`, `is not`, in`, `not in`                                             | Multiplication, Division, Modulo, Power, Is, Is Not, In, Not In                        |
 | 4          | `+`, `-`                                                                                       | Addition, Subtraction                                                                  |
 | 5          | `<<`, `>>`                                                                                     | Left Shift, Right Shift                                                                |
 | 6          | `&`, `∣`, `^`                                                                                  | Bitwise AND, Bitwise OR, Bitwise XOR                                                   |

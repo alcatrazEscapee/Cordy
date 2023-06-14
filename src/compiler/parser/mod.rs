@@ -1093,7 +1093,7 @@ impl Parser<'_> {
         // We *also* know that we will never see a binary operator begin an expression
         let mut unary: Option<NativeFunction> = None;
         let mut binary: Option<NativeFunction> = None;
-        let mut not_in: bool = false;
+        let mut long: bool = false;
         match self.peek() {
             // Unary operators *can* be present at the start of an expression, but we would see something after
             // So, we peek ahead again and see if the next token is a `)` - that's the only way you evaluate unary operators as functions
@@ -1105,17 +1105,20 @@ impl Parser<'_> {
             Some(Pow) => binary = Some(OperatorPow),
             Some(Mod) => binary = Some(OperatorMod),
             Some(KeywordIn) => binary = Some(OperatorIn),
-            Some(KeywordNot) => {
-                // `not in` is an operator with two keywords, so we have to lookahead two here, and use a flag that it's special
-                match self.peek2() {
-                    Some(KeywordIn) => {
-                        binary = Some(OperatorNotIn);
-                        not_in = true;
-                    },
-                    _ => {},
-                }
-            }
-            Some(KeywordIs) => binary = Some(OperatorIs),
+            Some(KeywordNot) => match self.peek2() { // Lookahead two for `not in`
+                Some(KeywordIn) => {
+                    binary = Some(OperatorNotIn);
+                    long = true;
+                },
+                _ => {},
+            },
+            Some(KeywordIs) => match self.peek2() { // Lookahead two for `is not`
+                Some(KeywordNot) => {
+                    binary = Some(OperatorIsNot);
+                    long = true;
+                },
+                _ => binary = Some(OperatorIs),
+            },
             Some(Plus) => binary = Some(OperatorAdd),
             // `-` cannot be a binary operator as it's ambiguous from a unary expression
             Some(LeftShift) => binary = Some(OperatorLeftShift),
@@ -1155,7 +1158,7 @@ impl Parser<'_> {
             }
         } else if let Some(op) = binary {
             let mut loc = self.advance_with(); // The binary operator
-            if not_in { // `not in`, so we need to consume two tokens
+            if long { // `not in` or `is not`, so we need to consume two tokens
                 loc |= self.advance_with();
             }
             match self.peek() {
@@ -1168,25 +1171,9 @@ impl Parser<'_> {
                     // Anything else, and we try and parse an expression and partially evaluate.
                     // Note that this is *right* partial evaluation, i.e. `(< 3)` -> we evaluate the *second* argument of `<`
                     // This actually means we need to transform the operator if it is asymmetric, to one which looks identical, but is actually the operator in reverse.
-                    let op = match op {
-                        OperatorDiv => OperatorDivSwap,
-                        OperatorPow => OperatorPowSwap,
-                        OperatorMod => OperatorModSwap,
-                        OperatorIs => OperatorIsSwap,
-                        OperatorIn => OperatorInSwap,
-                        OperatorNotIn => OperatorNotInSwap,
-                        OperatorAdd => OperatorAddSwap,
-                        OperatorLeftShift => OperatorLeftShiftSwap,
-                        OperatorRightShift => OperatorRightShiftSwap,
-                        OperatorLessThan => OperatorLessThanSwap,
-                        OperatorLessThanEqual => OperatorLessThanEqualSwap,
-                        OperatorGreaterThan => OperatorGreaterThanSwap,
-                        OperatorGreaterThanEqual => OperatorGreaterThanEqualSwap,
-                        op => op,
-                    };
                     let arg = self.parse_expr_top_level(); // Parse the expression following a binary prefix operator
                     self.expect(CloseParen);
-                    Some(Expr::native(loc, op).eval(loc, vec![arg]))
+                    Some(Expr::native(loc, op.swap_standard_binary_operator()).eval(loc, vec![arg]))
                 }
             }
         } else {
@@ -1198,49 +1185,55 @@ impl Parser<'_> {
         trace::trace_parser!("rule <expr-1-partial-operator-right>");
         // If we see the pattern of BinaryOp `)`, then we recognize this as a partial operator, but evaluated from the left hand side instead.
         // For non-symmetric operators, this means we use the normal operator as we partial evaluate the left hand argument (by having the operator on the right)
+        let mut long: bool = false;
         let op = match self.peek() {
-            Some(Mul) => Some(OperatorMul),
-            Some(Div) => Some(OperatorDiv),
-            Some(Pow) => Some(OperatorPow),
-            Some(Mod) => Some(OperatorMod),
-            Some(KeywordIs) => Some(OperatorIs),
-            Some(KeywordIn) => Some(OperatorIn),
-            Some(KeywordNot) => Some(OperatorNotIn),
-            Some(Plus) => Some(OperatorAdd),
+            Some(Mul) => OperatorMul,
+            Some(Div) => OperatorDiv,
+            Some(Pow) => OperatorPow,
+            Some(Mod) => OperatorMod,
+            Some(KeywordIs) => match self.peek2() { // Lookahead for `is not`
+                Some(KeywordNot) => {
+                    long = true;
+                    OperatorIsNot
+                },
+                _ => OperatorIs
+            },
+            Some(KeywordIn) => OperatorIn,
+            Some(KeywordNot) => match self.peek2() { // Lookahead for `not in`
+                Some(KeywordIn) => {
+                    long = true;
+                    OperatorNotIn
+                },
+                _ => return Err(expr)
+            },
+            Some(Plus) => OperatorAdd,
             // `-` cannot be a binary operator as it's ambiguous from a unary expression
-            Some(LeftShift) => Some(OperatorLeftShift),
-            Some(RightShift) => Some(OperatorRightShift),
-            Some(BitwiseAnd) => Some(OperatorBitwiseAnd),
-            Some(BitwiseOr) => Some(OperatorBitwiseOr),
-            Some(BitwiseXor) => Some(OperatorBitwiseXor),
-            Some(LessThan) => Some(OperatorLessThan),
-            Some(LessThanEquals) => Some(OperatorLessThanEqual),
-            Some(GreaterThan) => Some(OperatorGreaterThan),
-            Some(GreaterThanEquals) => Some(OperatorGreaterThanEqual),
-            Some(DoubleEquals) => Some(OperatorEqual),
-            Some(NotEquals) => Some(OperatorNotEqual),
+            Some(LeftShift) => OperatorLeftShift,
+            Some(RightShift) => OperatorRightShift,
+            Some(BitwiseAnd) => OperatorBitwiseAnd,
+            Some(BitwiseOr) => OperatorBitwiseOr,
+            Some(BitwiseXor) => OperatorBitwiseXor,
+            Some(LessThan) => OperatorLessThan,
+            Some(LessThanEquals) => OperatorLessThanEqual,
+            Some(GreaterThan) => OperatorGreaterThan,
+            Some(GreaterThanEquals) => OperatorGreaterThanEqual,
+            Some(DoubleEquals) => OperatorEqual,
+            Some(NotEquals) => OperatorNotEqual,
 
-            _ => None,
+            _ => return Err(expr),
         };
 
-        match (op, self.peek2()) {
-            (Some(op), Some(CloseParen)) => {
-                let loc = self.advance_with(); // The operator
-                self.expect(CloseParen);
-                Ok(Expr::native(loc, op).eval(loc, vec![expr])) // Return Ok(), with our new expression
-            },
-            (Some(OperatorNotIn), Some(KeywordIn)) => {
-                // Special case, for `not in`, we need to peek three ahead to see the `)`
-                match self.peek3() {
-                    Some(CloseParen) => {
-                        let loc = self.advance_with() | self.advance_with(); // Consume `not` and `in`
-                        self.expect(CloseParen);
-                        Ok(Expr::native(loc, OperatorNotIn).eval(loc, vec![expr])) // Return Ok(), with our new expression
-                    },
-                    _ => Err(expr)
-                }
+        // Based on either having a long, or short operator, peek two or three ahead, to see if this is a close paren
+        let is_partial: bool = if long { self.peek3() } else { self.peek2() } == Some(&CloseParen);
+        if is_partial {
+            let mut loc = self.advance_with(); // The operator
+            if long {
+                loc |= self.advance_with(); // For two token operators
             }
-            _ => Err(expr), // Return the expression as an error, indicating we did not parse anything
+            self.expect(CloseParen);
+            Ok(Expr::native(loc, op).eval(loc, vec![expr])) // Return Ok(), with our new expression
+        } else {
+            Err(expr)
         }
     }
 
@@ -1607,35 +1600,44 @@ impl Parser<'_> {
         trace::trace_parser!("rule <expr-3>");
         let mut expr: Expr = self.parse_expr_2_unary();
         loop {
+            let mut long: bool = false;
             let maybe_op: Option<BinaryOp> = match self.peek() {
                 Some(Mul) => Some(BinaryOp::Mul),
                 Some(Div) => Some(BinaryOp::Div),
                 Some(Mod) => Some(BinaryOp::Mod),
                 Some(Pow) => Some(BinaryOp::Pow),
-                Some(KeywordIs) => Some(BinaryOp::Is),
+                Some(KeywordIs) => match self.peek2() {
+                    Some(KeywordNot) => {
+                        long = true;
+                        Some(BinaryOp::IsNot)
+                    },
+                    _ => Some(BinaryOp::Is),
+                },
                 Some(KeywordIn) => Some(BinaryOp::In),
                 Some(KeywordNot) => match self.peek2() {
-                    Some(KeywordIn) => Some(BinaryOp::NotEqual), // Special flag for `not in`, which is implemented as `!(x in y)
+                    Some(KeywordIn) => {
+                        long = true;
+                        Some(BinaryOp::NotIn)
+                    },
                     _ => None,
                 }
                 _ => None
             };
-            if maybe_op.is_some() {
-                if self.peek2() == Some(&CloseParen) {
-                    break
-                }
-                // Special case for `not in )`, we need to peek three ahead to check for right partial evaluation
-                if maybe_op == Some(BinaryOp::NotEqual) && self.peek3() == Some(&CloseParen) {
-                    break
-                }
+            if maybe_op.is_some() && (if long { self.peek3() } else { self.peek2() }) == Some(&CloseParen) {
+                break;
             }
             match maybe_op {
-                Some(BinaryOp::NotEqual) => {
-                    let loc = self.advance_with() | self.advance_with();
-                    expr = expr.binary(loc, BinaryOp::In, self.parse_expr_2_unary()).not(loc);
-                }
                 Some(op) => {
-                    let loc = self.advance_with();
+                    // Based on `long`, might need to peek two or three ahead to verify if this is a partial evaluation, instead of operator.
+                    if (if long { self.peek3() } else { self.peek2() }) == Some(&CloseParen) {
+                        break
+                    }
+
+                    // Otherwise, treat as a normal operator
+                    let mut loc = self.advance_with();
+                    if long {
+                        loc |= self.advance_with();
+                    }
                     expr = expr.binary(loc, op, self.parse_expr_2_unary());
                 },
                 None => break

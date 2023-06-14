@@ -1646,6 +1646,12 @@ mod test {
     #[test] fn test_operator_in_partial_right() { run_str("let f = (in [1]) ; f(1) . print", "true\n"); }
     #[test] fn test_operator_not_in_partial_left() { run_str("let f = (1 not in) ; f([]) . print", "true\n"); }
     #[test] fn test_operator_not_in_partial_right() { run_str("let f = (not in []) ; f(1) . print", "true\n"); }
+    #[test] fn test_operator_is() { run_str("let f = (is) ; f(1, int) . print", "true\n"); }
+    #[test] fn test_operator_not_is() { run_str("let f = (is not) ; f(1, str) . print", "true\n"); }
+    #[test] fn test_operator_is_partial_left() { run_str("let f = (1 is) ; f(int) . print", "true\n"); }
+    #[test] fn test_operator_is_partial_right() { run_str("let f = (is int) ; f(1) . print", "true\n"); }
+    #[test] fn test_operator_not_is_partial_left() { run_str("let f = (1 is not) ; f(str) . print", "true\n"); }
+    #[test] fn test_operator_not_is_partial_right() { run_str("let f = (is not str) ; f(1) . print", "true\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }
