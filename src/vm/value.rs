@@ -535,6 +535,16 @@ impl<'a> IntoValue for Sliceable<'a> {
     }
 }
 
+pub trait IntoValueResult {
+    fn to_value(self) -> ValueResult;
+}
+
+impl<T : IntoValue> IntoValueResult for Result<T, Box<RuntimeError>> {
+    fn to_value(self) -> ValueResult {
+        self.map(|u| u.to_value())
+    }
+}
+
 
 /// A trait which is responsible for wrapping conversions from a `Iterator<Item=Value>` into `IntoValue`, which then converts to a `Value`.
 pub trait IntoIterableValue {

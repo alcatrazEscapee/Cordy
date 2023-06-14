@@ -1093,6 +1093,7 @@ impl Parser<'_> {
         // We *also* know that we will never see a binary operator begin an expression
         let mut unary: Option<NativeFunction> = None;
         let mut binary: Option<NativeFunction> = None;
+        let mut not_in: bool = false;
         match self.peek() {
             // Unary operators *can* be present at the start of an expression, but we would see something after
             // So, we peek ahead again and see if the next token is a `)` - that's the only way you evaluate unary operators as functions
@@ -1103,6 +1104,17 @@ impl Parser<'_> {
             Some(Div) => binary = Some(OperatorDiv),
             Some(Pow) => binary = Some(OperatorPow),
             Some(Mod) => binary = Some(OperatorMod),
+            Some(KeywordIn) => binary = Some(OperatorIn),
+            Some(KeywordNot) => {
+                // `not in` is an operator with two keywords, so we have to lookahead two here, and use a flag that it's special
+                match self.peek2() {
+                    Some(KeywordIn) => {
+                        binary = Some(OperatorNotIn);
+                        not_in = true;
+                    },
+                    _ => {},
+                }
+            }
             Some(KeywordIs) => binary = Some(OperatorIs),
             Some(Plus) => binary = Some(OperatorAdd),
             // `-` cannot be a binary operator as it's ambiguous from a unary expression
@@ -1142,7 +1154,10 @@ impl Parser<'_> {
                 _ => None
             }
         } else if let Some(op) = binary {
-            let loc = self.advance_with(); // The unary operator
+            let mut loc = self.advance_with(); // The binary operator
+            if not_in { // `not in`, so we need to consume two tokens
+                loc |= self.advance_with();
+            }
             match self.peek() {
                 Some(CloseParen) => {
                     // No expression follows this operator, so we have `(` <op> `)`, which just returns the operator itself
@@ -1158,6 +1173,8 @@ impl Parser<'_> {
                         OperatorPow => OperatorPowSwap,
                         OperatorMod => OperatorModSwap,
                         OperatorIs => OperatorIsSwap,
+                        OperatorIn => OperatorInSwap,
+                        OperatorNotIn => OperatorNotInSwap,
                         OperatorAdd => OperatorAddSwap,
                         OperatorLeftShift => OperatorLeftShiftSwap,
                         OperatorRightShift => OperatorRightShiftSwap,
@@ -1187,6 +1204,8 @@ impl Parser<'_> {
             Some(Pow) => Some(OperatorPow),
             Some(Mod) => Some(OperatorMod),
             Some(KeywordIs) => Some(OperatorIs),
+            Some(KeywordIn) => Some(OperatorIn),
+            Some(KeywordNot) => Some(OperatorNotIn),
             Some(Plus) => Some(OperatorAdd),
             // `-` cannot be a binary operator as it's ambiguous from a unary expression
             Some(LeftShift) => Some(OperatorLeftShift),
@@ -1210,6 +1229,17 @@ impl Parser<'_> {
                 self.expect(CloseParen);
                 Ok(Expr::native(loc, op).eval(loc, vec![expr])) // Return Ok(), with our new expression
             },
+            (Some(OperatorNotIn), Some(KeywordIn)) => {
+                // Special case, for `not in`, we need to peek three ahead to see the `)`
+                match self.peek3() {
+                    Some(CloseParen) => {
+                        let loc = self.advance_with() | self.advance_with(); // Consume `not` and `in`
+                        self.expect(CloseParen);
+                        Ok(Expr::native(loc, OperatorNotIn).eval(loc, vec![expr])) // Return Ok(), with our new expression
+                    },
+                    _ => Err(expr)
+                }
+            }
             _ => Err(expr), // Return the expression as an error, indicating we did not parse anything
         }
     }
@@ -1590,8 +1620,14 @@ impl Parser<'_> {
                 }
                 _ => None
             };
-            if maybe_op.is_some() && self.peek2() == Some(&CloseParen) {
-                break
+            if maybe_op.is_some() {
+                if self.peek2() == Some(&CloseParen) {
+                    break
+                }
+                // Special case for `not in )`, we need to peek three ahead to check for right partial evaluation
+                if maybe_op == Some(BinaryOp::NotEqual) && self.peek3() == Some(&CloseParen) {
+                    break
+                }
             }
             match maybe_op {
                 Some(BinaryOp::NotEqual) => {

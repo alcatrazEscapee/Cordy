@@ -3,7 +3,7 @@ use std::fs;
 use indexmap::{IndexMap, IndexSet};
 use lazy_static::lazy_static;
 
-use crate::vm::{operator, IntoIterableValue, IntoValue, Value, VirtualInterface, RuntimeError};
+use crate::vm::{operator, IntoIterableValue, IntoValue, IntoValueResult, Value, VirtualInterface, RuntimeError};
 use crate::vm::operator::BinaryOp;
 use crate::{trace, vm};
 
@@ -66,6 +66,8 @@ pub enum NativeFunction {
     OperatorIsSwap,
     OperatorIn,
     OperatorInSwap,
+    OperatorNotIn,
+    OperatorNotInSwap,
     OperatorAdd,
     OperatorAddSwap,
     OperatorSub, // Cannot be referenced as (- <expr>)
@@ -266,6 +268,8 @@ fn load_native_functions() -> Vec<NativeFunctionInfo> {
     declare!(OperatorIsSwap, "(is)", "lhs, rhs", Some(2), true);
     declare!(OperatorIn, "(in)", "lhs, rhs", Some(2), true);
     declare!(OperatorInSwap, "(in)", "lhs, rhs", Some(2), true);
+    declare!(OperatorNotIn, "(not in)", "lhs, rhs", Some(2), true);
+    declare!(OperatorNotInSwap, "(not in)", "lhs, rhs", Some(2), true);
     declare!(OperatorAdd, "(+)", "lhs, rhs", Some(2), true);
     declare!(OperatorAddSwap, "(+)", "lhs, rhs", Some(2), true);
     declare!(OperatorSub, "(-)", "lhs, rhs", Some(2), true); // Cannot be referenced as (- <expr>)
@@ -598,8 +602,10 @@ pub fn invoke<VM>(native: NativeFunction, nargs: u8, vm: &mut VM) -> ValueResult
         OperatorModSwap => dispatch!(a1, a2, operator::binary_mod(a2, a1)),
         OperatorIs => dispatch!(a1, a2, operator::binary_is(a1, a2)),
         OperatorIsSwap => dispatch!(a1, a2, operator::binary_is(a2, a1)),
-        OperatorIn => dispatch!(a1, a2, operator::binary_in(a1, a2)),
-        OperatorInSwap => dispatch!(a1, a2, operator::binary_in(a2, a1)),
+        OperatorIn => dispatch!(a1, a2, operator::binary_in(a1, a2).to_value()),
+        OperatorInSwap => dispatch!(a1, a2, operator::binary_in(a2, a1).to_value()),
+        OperatorNotIn => dispatch!(a1, a2, operator::binary_in(a1, a2).map(|u| !u).to_value()),
+        OperatorNotInSwap => dispatch!(a1, a2, operator::binary_in(a2, a1).map(|u| !u).to_value()),
         OperatorAdd => dispatch!(a1, a2, operator::binary_add(a1, a2)),
         OperatorAddSwap => dispatch!(a1, a2, operator::binary_add(a2, a1)),
         OperatorSub => dispatch!(a1, a2, operator::binary_sub(a1, a2)),
