@@ -401,7 +401,7 @@ impl Parser<'_> {
                 Expr::nil()
             },
         };
-        func.eval(loc_start | loc_end, vec![arg]) // Evaluate the annotation
+        func.eval(loc_start | loc_end, vec![arg], false) // Evaluate the annotation
     }
 
     fn parse_expression_function(self: &mut Self) -> Expr {
@@ -1173,7 +1173,7 @@ impl Parser<'_> {
                     // This actually means we need to transform the operator if it is asymmetric, to one which looks identical, but is actually the operator in reverse.
                     let arg = self.parse_expr_top_level(); // Parse the expression following a binary prefix operator
                     self.expect(CloseParen);
-                    Some(Expr::native(loc, op.swap_standard_binary_operator()).eval(loc, vec![arg]))
+                    Some(Expr::native(loc, op.swap_standard_binary_operator()).eval(loc, vec![arg], false))
                 }
             }
         } else {
@@ -1231,7 +1231,7 @@ impl Parser<'_> {
                 loc |= self.advance_with(); // For two token operators
             }
             self.expect(CloseParen);
-            Ok(Expr::native(loc, op).eval(loc, vec![expr])) // Return Ok(), with our new expression
+            Ok(Expr::native(loc, op).eval(loc, vec![expr], false)) // Return Ok(), with our new expression
         } else {
             Err(expr)
         }
@@ -1469,7 +1469,7 @@ impl Parser<'_> {
                     match self.peek() {
                         Some(CloseParen) => {
                             loc_start |= self.advance_with();
-                            expr = expr.eval(loc_start, vec![]);
+                            expr = expr.eval(loc_start, vec![], false);
                         },
                         Some(_) => {
                             // Special case: if we can parse a partially-evaluated operator expression, we do so
@@ -1477,23 +1477,24 @@ impl Parser<'_> {
                             // If we parse something here, this will have consumed everything, otherwise we parse an expression as per usual
                             if let Some(partial_expr) = self.parse_expr_1_partial_operator_left() {
                                 // We still need to treat this as a function evaluation, however, because we pretended we didn't need to see the outer parenthesis
-                                expr = expr.eval(loc_start | self.prev_location(), vec![partial_expr]);
+                                expr = expr.eval(loc_start | self.prev_location(), vec![partial_expr], false);
                                 continue;
                             } else {
                                 // First argument
-                                let mut args: Vec<Expr> = vec![self.parse_expr_top_level()];
+                                let mut any_unroll: bool = false;
+                                let mut args: Vec<Expr> = vec![self.parse_expr_2_function_arg(&mut any_unroll)];
 
                                 // Other arguments
                                 while let Some(Comma) = self.peek() {
                                     self.advance();
-                                    args.push(self.parse_expr_top_level());
+                                    args.push(self.parse_expr_2_function_arg(&mut any_unroll));
                                 }
                                 match self.peek() {
                                     Some(CloseParen) => self.skip(),
                                     _ => self.error_with(ExpectedCommaOrEndOfArguments),
                                 }
 
-                                expr = expr.eval(loc_start | self.prev_location(), args)
+                                expr = expr.eval(loc_start | self.prev_location(), args, any_unroll)
                             }
                         }
                         _ => self.error_with(ExpectedCommaOrEndOfArguments),
@@ -1577,6 +1578,22 @@ impl Parser<'_> {
             expr = expr.unary(loc, op)
         }
 
+        expr
+    }
+
+    fn parse_expr_2_function_arg(self: &mut Self, any_unroll: &mut bool) -> Expr {
+        let mut unroll = false;
+        let first = !*any_unroll;
+        if let Some(Ellipsis) = self.peek() {
+            self.advance(); // Consume `...`
+            unroll = true;
+            *any_unroll = true;
+        }
+        let loc = self.prev_location();
+        let mut expr = self.parse_expr_top_level();
+        if unroll {
+            expr = expr.unroll(loc, first);
+        }
         expr
     }
 

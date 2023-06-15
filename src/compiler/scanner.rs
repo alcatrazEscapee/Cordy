@@ -145,7 +145,7 @@ pub enum ScanToken {
     Underscore,
     Semicolon,
     At,
-    Elipsis,
+    Ellipsis,
     QuestionMark,
 
     NewLine,
@@ -378,7 +378,7 @@ impl<'a> Scanner<'a> {
                        '.' => match self.peek() {
                            Some('=') => self.push_skip(2, DotEquals),
                            Some('.') => match self.advance_peek() {
-                               Some('.') => self.push_skip(3, Elipsis),
+                               Some('.') => self.push_skip(3, Ellipsis),
                                _ => {
                                    self.cursor -= 1;
                                    self.push(1, Dot);
@@ -543,7 +543,7 @@ mod tests {
     #[test] fn test_other_arithmetic_operators() { run_str("% %= ** *= **= * *=", vec![Mod, ModEquals, Pow, MulEquals, PowEquals, Mul, MulEquals]); }
     #[test] fn test_bitwise_operators() { run_str("| ^ & &= |= ^=", vec![BitwiseOr, BitwiseXor, BitwiseAnd, AndEquals, OrEquals, XorEquals]); }
     #[test] fn test_groupings() { run_str("( [ { } ] )", vec![OpenParen, OpenSquareBracket, OpenBrace, CloseBrace, CloseSquareBracket, CloseParen]); }
-    #[test] fn test_syntax() { run_str(". .. ... .= , -> - > : @", vec![Dot, Dot, Dot, Elipsis, DotEquals, Comma, Arrow, Minus, GreaterThan, Colon, At]); }
+    #[test] fn test_syntax() { run_str(". .. ... .= , -> - > : @", vec![Dot, Dot, Dot, Ellipsis, DotEquals, Comma, Arrow, Minus, GreaterThan, Colon, At]); }
 
     fn run_str(text: &str, expected: Vec<ScanToken>) {
         let result: ScanResult = scanner::scan(&String::from(text));

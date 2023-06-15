@@ -58,13 +58,17 @@ impl<'a> Parser<'a> {
                     SequenceOp::Vector => Vector(nargs),
                 }, loc)
             },
-            Expr(loc, ExprType::Eval(f, args)) => {
+            Expr(loc, ExprType::Unroll(arg, first)) => {
+                self.emit_expr(*arg);
+                self.push_with(OpUnroll(first), loc);
+            },
+            Expr(loc, ExprType::Eval(f, args, any_unroll)) => {
                 let nargs: u8 = args.len() as u8;
                 self.emit_expr(*f);
                 for arg in args {
                     self.emit_expr(arg);
                 }
-                self.push_with(OpFuncEval(nargs), loc);
+                self.push_with(if any_unroll { OpFuncEvalUnrolled(nargs) } else { OpFuncEval(nargs) }, loc);
             },
             Expr(loc, ExprType::Compose(arg, f)) => {
                 self.emit_expr(*arg);
