@@ -32,7 +32,7 @@ impl Loop {
 
 
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Locals {
     /// The local variables in the current function.
     /// Top level local variables are considered global, even though they still might be block scoped ('true global' are top level function in no block scope, as they can never go out of scope).
@@ -65,7 +65,7 @@ impl Locals {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Fields {
     /// A mapping of `field name` to `field index`. This is used to record unique fields.
     /// For example, `struct Foo(a, b, c)` would generate the fields `"a"`, `"b"`, and `"c"` at index `0`, `1`, and `2`, respectively.
@@ -100,7 +100,7 @@ impl Fields {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct UpValue {
     /// `true` = local variable in enclosing function, `false` = upvalue in enclosing function
     pub(super) is_local: bool,

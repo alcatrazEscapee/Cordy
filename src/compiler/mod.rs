@@ -47,16 +47,11 @@ pub fn compile(enable_optimization: bool, view: &SourceView) -> Result<CompileRe
 /// This is used for incremental REPL structure. The result will have a `Print` instead of a delayed pop (if needed), and end with a `Yield` instruction instead of `Exit`.
 pub fn incremental_compile(view: &SourceView, mut params: CompileParameters) -> IncrementalCompileResult {
     // Stage changes, so an error or aborted compile doesn't overwrite the current valid compile state
-    // Doing this for code and locations (since those are 1-1 ordering) is sufficient
-    let code_len: usize = params.code.len();
-    let locations_len: usize = params.locations.len();
-
+    let state: CompileState = params.save();
     let ret: IncrementalCompileResult = try_incremental_compile(view, &mut params, parser::RULE_REPL, true);
 
-    if !ret.is_success() {
-        // Revert staged changes
-        params.code.truncate(code_len);
-        params.locations.truncate(locations_len);
+    if !ret.is_success() { // Revert staged changes
+        params.restore(state);
     }
 
     ret
@@ -123,9 +118,62 @@ pub struct CompileParameters<'a> {
     globals: &'a mut Vec<String>,
 }
 
+/// This is a cloned, static version of `CompileParameters`. The sole purpose is to create a save state, and restore after.
+/// This save-restore is used during incremental compiles that get aborted.
+///
+/// - `locals`, `fields` are mutable and require the full state to be saved.
+/// - `code`, `strings`, `constants`, `structs`, `locations`, `globals` are append-only, and thus we can optimize by only saving the length, and restoring by truncating.
+/// - `functions` are only modified during teardown, during conversion from un-baked functions, to baked functions, and so no save/restore state is needed
+struct CompileState {
+    code: usize,
+    locals: Vec<Locals>,
+    fields: Fields,
+    strings: usize,
+    constants: usize,
+    structs: usize,
+    locations: usize,
+    globals: usize,
+}
+
 impl<'a> CompileParameters<'a> {
-    pub fn new(enable_optimization: bool, code: &'a mut Vec<Opcode>, locals: &'a mut Vec<Locals>, fields: &'a mut Fields, strings: &'a mut Vec<String>, constants: &'a mut Vec<i64>, functions: &'a mut Vec<Rc<FunctionImpl>>, structs: &'a mut Vec<Rc<StructTypeImpl>>, locations: &'a mut Locations, globals: &'a mut Vec<String>) -> CompileParameters<'a> {
+
+    pub fn new(
+        enable_optimization: bool,
+        code: &'a mut Vec<Opcode>,
+        locals: &'a mut Vec<Locals>,
+        fields: &'a mut Fields,
+        strings: &'a mut Vec<String>,
+        constants: &'a mut Vec<i64>,
+        functions: &'a mut Vec<Rc<FunctionImpl>>,
+        structs: &'a mut Vec<Rc<StructTypeImpl>>,
+        locations: &'a mut Locations,
+        globals: &'a mut Vec<String>
+    ) -> CompileParameters<'a> {
         CompileParameters { enable_optimization, code, locals, fields, strings, constants, functions, structs, locations, globals }
+    }
+
+    fn save(self: &Self) -> CompileState {
+        CompileState {
+            code: self.code.len(),
+            locals: self.locals.clone(),
+            fields: self.fields.clone(),
+            strings: self.strings.len(),
+            constants: self.constants.len(),
+            structs: self.structs.len(),
+            locations: self.locations.len(),
+            globals: self.globals.len(),
+        }
+    }
+
+    fn restore(self: &mut Self, state: CompileState) {
+        self.code.truncate(state.code);
+        *self.locals = state.locals;
+        *self.fields = state.fields;
+        self.strings.truncate(state.strings);
+        self.constants.truncate(state.constants);
+        self.structs.truncate(state.structs);
+        self.locations.truncate(state.locations);
+        self.globals.truncate(state.globals);
     }
 }
 
