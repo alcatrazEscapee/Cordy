@@ -536,7 +536,7 @@ impl<R, W> VirtualMachine<R, W> where
             OpFuncEvalUnrolled(nargs) => {
                 trace::trace_interpreter!("op func evaluate (unrolled) n = {}", nargs);
                 let unrolled_nargs: i32 = self.unroll_stack.pop().unwrap();
-                self.invoke_func_eval((nargs as i32 + unrolled_nargs) as u8)?;
+                self.invoke_func_eval(nargs.add_offset(unrolled_nargs))?;
             }
 
             CheckLengthGreaterThan(len) => {
@@ -682,7 +682,7 @@ impl<R, W> VirtualMachine<R, W> where
         op
     }
 
-    fn invoke_func_and_spin(self: &mut Self, nargs: u8) -> ValueResult {
+    fn invoke_func_and_spin(self: &mut Self, nargs: u32) -> ValueResult {
         match self.invoke_func_eval(nargs)? {
             FunctionType::Native => {},
             FunctionType::User => self.run_frame()?
@@ -696,7 +696,7 @@ impl<R, W> VirtualMachine<R, W> where
     /// The arguments and function will be popped and the return value will be left on the top of the stack.
     ///
     /// Returns a `Result` which may contain an error which occurred during function evaluation.
-    fn invoke_func_eval(self: &mut Self, nargs: u8) -> Result<FunctionType, Box<RuntimeError>> {
+    fn invoke_func_eval(self: &mut Self, nargs: u32) -> Result<FunctionType, Box<RuntimeError>> {
         let f: &Value = self.peek(nargs as usize);
         match f {
             f @ (Value::Function(_) | Value::Closure(_)) => {
@@ -727,7 +727,7 @@ impl<R, W> VirtualMachine<R, W> where
                     _ => panic!("Stack corruption")
                 };
                 let func = partial.func.unbox_func();
-                let total_nargs: u8 = partial.args.len() as u8 + nargs;
+                let total_nargs: u32 = partial.args.len() as u32 + nargs;
                 if func.min_args() > total_nargs {
                     // Not enough arguments, so pop the argument and push a new partial function
                     let top = self.stack.len();
@@ -783,7 +783,7 @@ impl<R, W> VirtualMachine<R, W> where
                 // The partial args will contain the vector [argN, argN-1, ... arg1]
                 // After this, the vm stack should contain the args [..., arg1, arg2, ... argM]
                 let j: usize = self.stack.len() - nargs as usize;
-                let partial_args: u8 = args.len() as u8;
+                let partial_args = args.len() as u32;
                 self.stack.splice(j..j, args.into_iter().rev());
 
                 match stdlib::invoke(binding, nargs + partial_args, self) {
@@ -832,7 +832,7 @@ impl<R, W> VirtualMachine<R, W> where
             Value::StructType(type_impl) => {
                 let type_impl = type_impl.clone();
                 trace::trace_interpreter!("invoke_struct -> {} ({}) with {}", type_impl.name, type_impl.type_index, nargs);
-                let expected_args = type_impl.field_names.len() as u8;
+                let expected_args = type_impl.field_names.len() as u32;
                 if nargs != expected_args {
                     return IncorrectNumberOfStructArguments(type_impl.name.clone(), nargs, expected_args).err()
                 }
@@ -865,7 +865,7 @@ impl<R, W> VirtualMachine<R, W> where
     }
 
     /// Calls a user function by building a `CallFrame` and jumping to the function's `head` IP
-    fn call_function(self: &mut Self, head: usize, nargs: u8) {
+    fn call_function(self: &mut Self, head: usize, nargs: u32) {
         let frame = CallFrame {
             return_ip: self.ip,
             frame_pointer: self.stack.len() - (nargs as usize),
@@ -917,7 +917,7 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
         for arg in args {
             self.push(arg.clone());
         }
-        self.invoke_func_and_spin(args.len() as u8)
+        self.invoke_func_and_spin(args.len() as u32)
     }
 
     fn invoke_eval(self: &mut Self, text: &String) -> ValueResult {
@@ -1686,6 +1686,7 @@ mod test {
     #[test] fn test_func_unroll_15() { run_str("print(...[print(...[1, 2, 3])])", "1 2 3\nnil\n"); }
     #[test] fn test_func_unroll_16() { run_str("print(...[], ...[print(...[], 'second', ...[], ...[print('first', ...[])])], ...[], ...[print('third')])", "first\nsecond nil\nthird\nnil nil\n"); }
     #[test] fn test_func_unroll_17() { run_str("print(1, ...[2, print('a', ...[1, 2, 3], 'e'), -2], 3)", "a 1 2 3 e\n1 2 nil -2 3\n"); }
+    #[test] fn test_eval_many_arguments() { run_str("sum(...range(1 + 1000)) . print", "500500\n");}
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }
