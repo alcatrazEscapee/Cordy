@@ -217,7 +217,7 @@ default_argument('hello') // prints 'hello world'
 default_argument('hello', 'earth') // prints 'hello earth'
 ```
 
-Note that default argument values are constructed each time, and are not mutable, i.e. unlike in Python:
+Note that default argument values are constructed each time, and are not mutable across function calls, unlike in Python:
 
 ```rust
 fn foo(a = []) {
@@ -226,7 +226,7 @@ fn foo(a = []) {
 }
 
 foo() // prints ['yes']
-foo() // prints['yes']
+foo() // prints ['yes']
 ```
 
 Functions can be called with **unrolled arguments**. This unrolls an iterable into a sequence of function arguments, by prepending a `...` to the argument in question. This is like the unary `*` operator in Python:
@@ -242,17 +242,20 @@ foo(...[], 1, ...[2], 3, ...[]) // An empty iterable is treated as adding no new
 
 #### Closures
 
-Functions can reference local and global variables outside of themselves, mutate them, and assign to them. Closures capture the *value* of variables at the time of the closure being closed.
+Functions can reference local and global variables outside of themselves, mutate them, and assign to them. Closures are able to reference and mutate captured variables, even after they have fallen out of scope of the original declaration.
 
 ```rust
-fn foo() {
+fn make_box() {
     let x = 'hello'
-    fn bar() -> x = 'goodbye'
-    fn baz() -> x . print
-    baz() // prints 'hello'
-    bar()
-    baz() // prints 'goodbye'
+    fn foo() -> x = 'goodbye'
+    fn bar() -> x.print
+    (foo, bar)
 }
+let foo, bar = make_box()
+
+bar() // prints 'hello'
+foo()
+bar() // prints 'goodbye'
 ```
 
 Variables declared in loops are captured each iteration of the loop. So the following code:
