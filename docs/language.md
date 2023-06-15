@@ -195,6 +195,51 @@ map(int, input)
 input . map(int) . filter(>0) . reduce(+) . print
 ```
 
+#### More Function Syntax
+
+Functions can define optional and default arguments. All optional and default arguments must come after all other arguments in the function. Functions can be invoked with or without their optional or default arguments, which will take the default value `nil` (for optional arguments), or the default value (for default arguments).
+
+Optional arguments are declared by appending a `?` to the argument in the function declaration:
+
+```rust
+fn optional_argument(a, b?) -> print(a, b)
+
+optional_argument('hello') // prints 'hello nil'
+optional_argument('hello', 'world') // prints 'hello world'
+```
+
+Default arguments are declared by appending an `=` followed by an expression to the argument in the function declaration:
+
+```rust
+fn default_argument(a, b = 'world') -> print(a, b)
+
+default_argument('hello') // prints 'hello world'
+default_argument('hello', 'earth') // prints 'hello earth'
+```
+
+Note that default argument values are constructed each time, and are not mutable, i.e. unlike in Python:
+
+```rust
+fn foo(a = []) {
+    a.push('yes')
+    print(a)
+}
+
+foo() // prints ['yes']
+foo() // prints['yes']
+```
+
+Functions can be called with **unrolled arguments**. This unrolls an iterable into a sequence of function arguments, by prepending a `...` to the argument in question. This is like the unary `*` operator in Python:
+
+```rust
+fn foo(a, b, c) -> print(a, b, c)
+
+// All of the below call `foo(1, 2, 3)`, and print '1 2 3'
+foo(...[1, 2, 3]) // unrolls each list element as an argument
+foo(...[1, 2], 3) // they can be used with normal arguments, in any order
+foo(...[], 1, ...[2], 3, ...[]) // An empty iterable is treated as adding no new arguments
+```
+
 #### Closures
 
 Functions can reference local and global variables outside of themselves, mutate them, and assign to them. Closures capture the *value* of variables at the time of the closure being closed.

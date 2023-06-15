@@ -55,8 +55,9 @@ impl Optimize for Expr {
             },
 
             Expr(loc, ExprType::Sequence(op, args)) => op.apply(loc, args.optimize()),
+            Expr(loc, ExprType::Unroll(arg, first)) => arg.optimize().unroll(loc, first),
 
-            Expr(loc, ExprType::Eval(f, args)) => {
+            Expr(loc, ExprType::Eval(f, args, any_unroll)) => {
                 let f: Expr = f.optimize();
                 let mut args: Vec<Expr> = args.optimize();
 
@@ -74,19 +75,19 @@ impl Optimize for Expr {
                         if let Expr(_, ExprType::NativeFunction(NativeFunction::Int)) = args[0] {
                             Expr::int(if native_f == NativeFunction::Min { i64::MIN } else { i64::MAX })
                         } else {
-                            f.eval(loc, args)
+                            f.eval(loc, args, any_unroll)
                         }
                     },
 
                     // If we can assert the inner function is partial, then we can merge the two calls
                     // Note this does not require any reordering of the arguments
                     // This re-calls `.optimize()` as we might be able to replace the operator on the constant-eval'd function
-                    Expr(_, ExprType::Eval(f_inner, mut args_inner)) if f_inner.is_partial(args_inner.len()) => {
+                    Expr(_, ExprType::Eval(f_inner, mut args_inner, any_unroll)) if f_inner.is_partial(args_inner.len()) => {
                         args_inner.append(&mut args);
-                        f_inner.eval(loc, args_inner).optimize()
+                        f_inner.eval(loc, args_inner, any_unroll).optimize()
                     },
 
-                    f => f.eval(loc, args)
+                    f => f.eval(loc, args, any_unroll)
                 }
             },
 
@@ -110,7 +111,7 @@ impl Optimize for Expr {
                         // If possible, reorder f, arg
                         // Then re-call optimization with the new eval
                         if f.can_reorder(&arg) {
-                            f.eval(loc, vec![arg]).optimize()
+                            f.eval(loc, vec![arg], false).optimize()
                         } else {
                             arg.compose(loc, f)
                         }
@@ -176,9 +177,10 @@ impl Expr {
             ExprType::Unary(_, arg) => arg.purity(),
             ExprType::Binary(_, lhs, rhs) | ExprType::LogicalOr(lhs, rhs) | ExprType::LogicalAnd(lhs, rhs) => lhs.purity().min(rhs.purity()),
             ExprType::Sequence(_, args) => args.iter().map(|u| u.purity()).min().unwrap_or(Purity::Strong),
+            ExprType::Unroll(arg, _) => arg.purity(),
             ExprType::IfThenElse(condition, if_true, if_false) => condition.purity().min(if_true.purity()).min(if_false.purity()),
 
-            ExprType::Eval(f, args) => match f.is_partial(args.len()) {
+            ExprType::Eval(f, args, any_unroll) => match !*any_unroll && f.is_partial(args.len()) {
                 true => f.purity().min(args.iter().map(|u| u.purity()).min().unwrap_or(Purity::Strong)),
                 false => Purity::None,
             },

@@ -455,7 +455,7 @@ impl AsError for ScanToken {
             ScanToken::Underscore => String::from("'_' token"),
             ScanToken::Semicolon => String::from("';' token"),
             ScanToken::At => String::from("'@' token"),
-            ScanToken::Elipsis => String::from("'...' token"),
+            ScanToken::Ellipsis => String::from("'...' token"),
             ScanToken::QuestionMark => String::from("'?' token"),
 
             ScanToken::NewLine => String::from("new line"),

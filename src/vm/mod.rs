@@ -36,6 +36,7 @@ pub struct VirtualMachine<R, W> {
     pub call_stack: Vec<CallFrame>,
     global_count: usize,
     open_upvalues: HashMap<usize, Rc<Cell<UpValue>>>,
+    unroll_stack: Vec<i32>,
 
     strings: Vec<String>,
     globals: Vec<String>,
@@ -126,6 +127,7 @@ impl<R, W> VirtualMachine<R, W> where
             call_stack: vec![CallFrame { return_ip: 0, frame_pointer: 0 }],
             global_count: 0,
             open_upvalues: HashMap::new(),
+            unroll_stack: Vec::new(),
 
             strings: result.strings,
             globals: result.globals,
@@ -514,13 +516,28 @@ impl<R, W> VirtualMachine<R, W> where
                 self.push(Value::StructType(self.structs[type_index as usize].clone()));
             },
 
+            OpUnroll(first) => {
+                if first {
+                    self.unroll_stack.push(0);
+                }
+                let arg: Value = self.pop();
+                let mut len: i32 = -1; // An empty unrolled argument contributes an offset of -1 + <number of elements unrolled>
+                for e in arg.as_iter()? {
+                    self.push(e);
+                    len += 1;
+                }
+                *self.unroll_stack.last_mut().unwrap() += len;
+            }
+
             OpFuncEval(nargs) => {
                 trace::trace_interpreter!("op function evaluate n = {}", nargs);
-                match self.invoke_func_eval(nargs) {
-                    Err(e) => return e.err(),
-                    _ => {},
-                }
+                self.invoke_func_eval(nargs)?;
             },
+            OpFuncEvalUnrolled(nargs) => {
+                trace::trace_interpreter!("op func evaluate (unrolled) n = {}", nargs);
+                let unrolled_nargs: i32 = self.unroll_stack.pop().unwrap();
+                self.invoke_func_eval((nargs as i32 + unrolled_nargs) as u8)?;
+            }
 
             CheckLengthGreaterThan(len) => {
                 let len = self.constants[len as usize] as usize;
@@ -1652,6 +1669,23 @@ mod test {
     #[test] fn test_operator_is_partial_right() { run_str("let f = (is int) ; f(1) . print", "true\n"); }
     #[test] fn test_operator_not_is_partial_left() { run_str("let f = (1 is not) ; f(str) . print", "true\n"); }
     #[test] fn test_operator_not_is_partial_right() { run_str("let f = (is not str) ; f(1) . print", "true\n"); }
+    #[test] fn test_func_unroll_1() { run_str("fn foo(a, b, c) -> print(a, b, c) ; foo(...['hello', 'the', 'world'])", "hello the world\n"); }
+    #[test] fn test_func_unroll_2() { run_str("fn foo(a, b, c) -> print(a, b, c) ; foo(1, 2, 3, ...[])", "1 2 3\n"); }
+    #[test] fn test_func_unroll_3() { run_str("fn foo(a, b, c) -> print(a, b, c) ; foo(1, ...[], 2, ...[], 3)", "1 2 3\n"); }
+    #[test] fn test_func_unroll_4() { run_str("fn foo(a, b, c) -> print(a, b, c) ; foo(...'ab', 'c')", "a b c\n"); }
+    #[test] fn test_func_unroll_5() { run_str("fn foo(a, b, c, d) -> print(a, b, c, d) ; foo(...'ab', ...'cd')", "a b c d\n"); }
+    #[test] fn test_func_unroll_6() { run_str("fn foo(a, b, c, d) -> print(a, b, c, d) ; foo(...'a', ...'bc', ...'d')", "a b c d\n"); }
+    #[test] fn test_func_unroll_7() { run_str("fn foo(a, b, c, d) -> print(a, b, c, d) ; foo('a', ...'bc', 'd')", "a b c d\n"); }
+    #[test] fn test_func_unroll_8() { run_str("fn foo(a, b, c) -> print(a, b, c) ; foo(1, ...'ab')", "1 a b\n"); }
+    #[test] fn test_func_unroll_9() { run_str("fn foo(a, b, c) -> print(a, b, c) ; foo(...'ab', 3)", "a b 3\n"); }
+    #[test] fn test_func_unroll_10() { run_str("fn foo(a, b, c) -> print(a, b, c) ; foo(1, 2, ...[3, 4])", "Function 'foo' of type 'function' requires 3 parameters but 4 were present.\n  at: line 1 (<test>)\n\n1 | fn foo(a, b, c) -> print(a, b, c) ; foo(1, 2, ...[3, 4])\n2 |                                        ^^^^^^^^^^^^^^^^^\n"); }
+    #[test] fn test_func_unroll_11() { run_str("fn foo(a, b, c) -> print(a, b, c) ; foo(1, 2, ...[]) is function . print", "true\n"); }
+    #[test] fn test_func_unroll_12() { run_str("sum([1, 2, 3, 4, 5]) . print", "15\n"); }
+    #[test] fn test_func_unroll_13() { run_str("sum(...[1, 2, 3, 4, 5]) . print", "15\n"); }
+    #[test] fn test_func_unroll_14() { run_str("print(...[1, 2, 3])", "1 2 3\n"); }
+    #[test] fn test_func_unroll_15() { run_str("print(...[print(...[1, 2, 3])])", "1 2 3\nnil\n"); }
+    #[test] fn test_func_unroll_16() { run_str("print(...[], ...[print(...[], 'second', ...[], ...[print('first', ...[])])], ...[], ...[print('third')])", "first\nsecond nil\nthird\nnil nil\n"); }
+    #[test] fn test_func_unroll_17() { run_str("print(1, ...[2, print('a', ...[1, 2, 3], 'e'), -2], 3)", "a 1 2 3 e\n1 2 nil -2 3\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }

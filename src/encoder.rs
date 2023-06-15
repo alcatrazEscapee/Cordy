@@ -161,7 +161,7 @@ impl Decode<CompileResult> for Decoder { fn decode(&mut self) -> Maybe<CompileRe
 /// - It is much more programmer-safe, by matching each `Opcode` <---> `Op` via it's name, than having to make sure each opcode encodes and decodes with it's byte correctly.
 #[repr(u8)]
 enum Op {
-    JumpIfFalse, JumpIfFalsePop, JumpIfTrue, JumpIfTruePop, Jump, Return, Pop, PopN, Dup, Swap, PushLocal, StoreLocal, PushGlobal, StoreGlobal, PushUpValue, StoreUpValue, StoreArray, IncGlobalCount, Closure, CloseLocal, CloseUpValue, LiftUpValue, InitIterable, TestIterable, Nil, True, False, Int, Str, Function, NativeFunction, List, Vector, Set, Dict, Struct, CheckLengthGreaterThan, CheckLengthEqualTo, OpFuncEval, OpIndex, OpIndexPeek, OpSlice, OpSliceWithStep, GetField, GetFieldPeek, GetFieldFunction, SetField, Unary, Binary, Slice, SliceWithStep, Exit, Yield, AssertFailed
+    JumpIfFalse, JumpIfFalsePop, JumpIfTrue, JumpIfTruePop, Jump, Return, Pop, PopN, Dup, Swap, PushLocal, StoreLocal, PushGlobal, StoreGlobal, PushUpValue, StoreUpValue, StoreArray, IncGlobalCount, Closure, CloseLocal, CloseUpValue, LiftUpValue, InitIterable, TestIterable, Nil, True, False, Int, Str, Function, NativeFunction, List, Vector, Set, Dict, Struct, OpUnroll, CheckLengthGreaterThan, CheckLengthEqualTo, OpFuncEval, OpFuncEvalUnrolled, OpIndex, OpIndexPeek, OpSlice, OpSliceWithStep, GetField, GetFieldPeek, GetFieldFunction, SetField, Unary, Binary, Slice, SliceWithStep, Exit, Yield, AssertFailed
 }
 
 
@@ -210,9 +210,11 @@ impl Encode for Opcode {
             Set(i) => encode!(Op::Set, i),
             Dict(i) => encode!(Op::Dict, i),
             Struct(i) => encode!(Op::Struct, i),
+            OpUnroll(i) => encode!(Op::OpUnroll, &if *i { 1 } else { 0 }),
             CheckLengthGreaterThan(i) => encode!(Op::CheckLengthGreaterThan, i),
             CheckLengthEqualTo(i) => encode!(Op::CheckLengthEqualTo, i),
             OpFuncEval(i) => encode!(Op::OpFuncEval, i),
+            OpFuncEvalUnrolled(i) => encode!(Op::OpFuncEvalUnrolled, i),
             OpIndex => encode!(Op::OpIndex),
             OpIndexPeek => encode!(Op::OpIndexPeek),
             OpSlice => encode!(Op::OpSlice),
@@ -275,9 +277,11 @@ impl Decode<Opcode> for Decoder {
             Op::Set => Set(self.decode()?),
             Op::Dict => Dict(self.decode()?),
             Op::Struct => Struct(self.decode()?),
+            Op::OpUnroll => OpUnroll(self.decode_u8()? == 1u8),
             Op::CheckLengthGreaterThan => CheckLengthGreaterThan(self.decode()?),
             Op::CheckLengthEqualTo => CheckLengthEqualTo(self.decode()?),
             Op::OpFuncEval => OpFuncEval(self.decode()?),
+            Op::OpFuncEvalUnrolled => OpFuncEvalUnrolled(self.decode()?),
             Op::OpIndex => OpIndex,
             Op::OpIndexPeek => OpIndexPeek,
             Op::OpSlice => OpSlice,
@@ -307,7 +311,7 @@ mod tests {
     use crate::vm::Opcode;
 
     #[test] fn test_opcode() { run(Opcode::JumpIfFalse(5), vec![0, 5]); }
-    #[test] fn test_opcodes() { run(vec![Opcode::Int(0), Opcode::Pop, Opcode::Exit], vec![3, 27, 0, 6, 51]); }
+    #[test] fn test_opcodes() { run(vec![Opcode::Int(0), Opcode::Pop, Opcode::Exit], vec![3, 27, 0, 6, 53]); }
 
     fn run<E>(e: E, bytes: Vec<u8>) where
         E : Encode + Sized + Eq + Debug,

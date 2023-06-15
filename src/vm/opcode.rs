@@ -98,6 +98,11 @@ pub enum Opcode {
     ///
     /// Implementation Note: In order to implement function composition (the `.` operator), this is preceded with a `Swap` opcode to reverse the order of the argument and function to be called.
     OpFuncEval(u8),
+    OpFuncEvalUnrolled(u8),
+
+    /// Unrolls an iterable on the stack. Used in combination with `OpFuncEvalUnrolled` to call functions with `...`
+    /// The argument is if this unroll is the first one we've seen in the *current function invocation*. If so, it pushes a new counter onto the stack.
+    OpUnroll(bool),
 
     /// Takes a stack of `[index, list, ...]`, pops the top two elements, and pushes `list[index]`
     OpIndex,

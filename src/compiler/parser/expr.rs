@@ -26,7 +26,8 @@ pub enum ExprType {
     Unary(UnaryOp, Arg),
     Binary(BinaryOp, Arg, Arg),
     Sequence(SequenceOp, Vec<Expr>),
-    Eval(Arg, Vec<Expr>),
+    Unroll(Arg, bool), // first: bool
+    Eval(Arg, Vec<Expr>, bool), // any_unroll: bool
     Compose(Arg, Arg),
     LogicalAnd(Arg, Arg),
     LogicalOr(Arg, Arg),
@@ -99,7 +100,8 @@ impl Expr {
 
     pub fn unary(self: Self, loc: Location, op: UnaryOp) -> Expr { Expr(loc, ExprType::Unary(op, Box::new(self))) }
     pub fn binary(self: Self, loc: Location, op: BinaryOp, rhs: Expr) -> Expr { Expr(loc, ExprType::Binary(op, Box::new(self), Box::new(rhs))) }
-    pub fn eval(self: Self, loc: Location, args: Vec<Expr>) -> Expr { Expr(loc, ExprType::Eval(Box::new(self), args)) }
+    pub fn unroll(self: Self, loc: Location, first: bool) -> Expr { Expr(loc, ExprType::Unroll(Box::new(self), first)) }
+    pub fn eval(self: Self, loc: Location, args: Vec<Expr>, any_unroll: bool) -> Expr { Expr(loc, ExprType::Eval(Box::new(self), args, any_unroll)) }
     pub fn compose(self: Self, loc: Location, f: Expr) -> Expr { Expr(loc, ExprType::Compose(Box::new(self), Box::new(f))) }
     pub fn index(self: Self, loc: Location, index: Expr) -> Expr { Expr(loc, ExprType::Index(Box::new(self), Box::new(index))) }
     pub fn slice(self: Self, loc: Location, arg1: Expr, arg2: Expr) -> Expr { Expr(loc, ExprType::Slice(Box::new(self), Box::new(arg1), Box::new(arg2))) }
