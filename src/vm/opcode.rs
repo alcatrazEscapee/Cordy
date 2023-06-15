@@ -97,8 +97,8 @@ pub enum Opcode {
     /// - Upon reaching a `Return` opcode, everything above and including `frame_pointer() - 1` will be popped off the stack, and the return value will be pushed onto the stack (replacing the spot where the function was).
     ///
     /// Implementation Note: In order to implement function composition (the `.` operator), this is preceded with a `Swap` opcode to reverse the order of the argument and function to be called.
-    OpFuncEval(u8),
-    OpFuncEvalUnrolled(u8),
+    OpFuncEval(u32),
+    OpFuncEvalUnrolled(u32),
 
     /// Unrolls an iterable on the stack. Used in combination with `OpFuncEvalUnrolled` to call functions with `...`
     /// The argument is if this unroll is the first one we've seen in the *current function invocation*. If so, it pushes a new counter onto the stack.

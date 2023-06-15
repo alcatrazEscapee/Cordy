@@ -375,14 +375,14 @@ impl Value {
     /// Returns `None` if this value is not a function
     /// Returns `Some(None)` if this value is a function with an unknown number of arguments
     /// Returns `Some(Some(nargs))` if this value is a function with a known number of arguments
-    pub fn unbox_func_args(self: &Self) -> Option<Option<u8>> {
+    pub fn unbox_func_args(self: &Self) -> Option<Option<u32>> {
         match self {
             Function(it) => Some(Some(it.min_args())),
-            PartialFunction(it) => Some(Some(it.func.unbox_func().min_args() - it.args.len() as u8)),
+            PartialFunction(it) => Some(Some(it.func.unbox_func().min_args() - it.args.len() as u32)),
             NativeFunction(it) => Some(it.nargs()),
-            PartialNativeFunction(it, args) => Some(it.nargs().map(|u| u - args.len() as u8)),
+            PartialNativeFunction(it, args) => Some(it.nargs().map(|u| u - args.len() as u32)),
             Closure(it) => Some(Some(it.func.min_args())),
-            StructType(it) => Some(Some(it.field_names.len() as u8)),
+            StructType(it) => Some(Some(it.field_names.len() as u32)),
             Slice(_) => Some(Some(1)),
             _ => None,
         }
@@ -631,23 +631,23 @@ impl FunctionImpl {
     }
 
     /// The minimum number of required arguments, inclusive.
-    pub fn min_args(self: &Self) -> u8 {
-        (self.args.len() - self.default_args.len()) as u8
+    pub fn min_args(self: &Self) -> u32 {
+        (self.args.len() - self.default_args.len()) as u32
     }
 
     /// The maximum number of required arguments, inclusive.
-    pub fn max_args(self: &Self) -> u8 {
-        self.args.len() as u8
+    pub fn max_args(self: &Self) -> u32 {
+        self.args.len() as u32
     }
 
-    pub fn in_range(self: &Self, nargs: u8) -> bool {
+    pub fn in_range(self: &Self, nargs: u32) -> bool {
         self.min_args() <= nargs && nargs <= self.max_args()
     }
 
     /// Returns the jump offset of the function
     /// For typical functions, this is just the `head`, however when default arguments are present, or not, this is offset by the default argument offsets.
     /// The `nargs` must be legal (between `[min_args(), max_args()]`
-    pub fn jump_offset(self: &Self, nargs: u8) -> usize {
+    pub fn jump_offset(self: &Self, nargs: u32) -> usize {
         self.head + if nargs == self.min_args() { 0 } else {
             self.default_args[(nargs - self.min_args() - 1) as usize]
         }

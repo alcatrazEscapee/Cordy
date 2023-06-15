@@ -156,7 +156,7 @@ pub enum NativeFunction {
 impl NativeFunction {
     pub fn get(op: u8) -> NativeFunction { NATIVE_FUNCTIONS[op as usize].native }
 
-    pub fn nargs(self: &Self) -> Option<u8> {
+    pub fn nargs(self: &Self) -> Option<u32> {
         NATIVE_FUNCTIONS[*self as usize].nargs
     }
 
@@ -224,12 +224,12 @@ struct NativeFunctionInfo {
     native: NativeFunction,
     name: &'static str,
     args: &'static str,
-    nargs: Option<u8>,
+    nargs: Option<u32>,
     hidden: bool,
 }
 
 impl NativeFunctionInfo {
-    fn new(native: NativeFunction, name: &'static str, args: &'static str, nargs: Option<u8>, hidden: bool) -> NativeFunctionInfo {
+    fn new(native: NativeFunction, name: &'static str, args: &'static str, nargs: Option<u32>, hidden: bool) -> NativeFunctionInfo {
         NativeFunctionInfo { native, name, args, nargs, hidden }
     }
 }
@@ -385,7 +385,7 @@ fn load_native_functions() -> Vec<NativeFunctionInfo> {
 /// `allow` usages here are due to macro expansion of the `dispatch!()` cases.
 #[allow(unused_mut)]
 #[allow(unused_variables)]
-pub fn invoke<VM>(native: NativeFunction, nargs: u8, vm: &mut VM) -> ValueResult where VM : VirtualInterface
+pub fn invoke<VM>(native: NativeFunction, nargs: u32, vm: &mut VM) -> ValueResult where VM : VirtualInterface
 {
     trace::trace_interpreter!("stdlib::invoke() func={}, nargs={}", native.name(), nargs);
 
@@ -804,7 +804,7 @@ pub fn format_string(string: &String, args: Value) -> ValueResult {
 
 
 /// Not unused - invoked via the dispatch!() macro above
-fn wrap_as_partial<VM>(native: NativeFunction, nargs: u8, vm: &mut VM) -> Value where VM : VirtualInterface {
+fn wrap_as_partial<VM>(native: NativeFunction, nargs: u32, vm: &mut VM) -> Value where VM : VirtualInterface {
     // vm stack will contain [..., arg1, arg2, ... argN]
     // popping in order will populate the vector with [argN, argN-1, ... arg1]
     let mut args: Vec<Value> = Vec::with_capacity(nargs as usize);

@@ -63,7 +63,7 @@ impl<'a> Parser<'a> {
                 self.push_with(OpUnroll(first), loc);
             },
             Expr(loc, ExprType::Eval(f, args, any_unroll)) => {
-                let nargs: u8 = args.len() as u8;
+                let nargs: u32 = args.len() as u32;
                 self.emit_expr(*f);
                 for arg in args {
                     self.emit_expr(arg);

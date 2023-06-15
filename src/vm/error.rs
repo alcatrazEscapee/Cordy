@@ -16,11 +16,11 @@ pub enum RuntimeError {
 
     ValueIsNotFunctionEvaluable(Value),
 
-    IncorrectNumberOfFunctionArguments(FunctionImpl, u8),
-    IncorrectNumberOfArguments(NativeFunction, u8, u8), // actual, expected
+    IncorrectNumberOfFunctionArguments(FunctionImpl, u32),
+    IncorrectNumberOfArguments(NativeFunction, u32, u32), // actual, expected
     IncorrectNumberOfArgumentsVariadicAtLeastOne(NativeFunction),
-    IncorrectNumberOfStructArguments(String, u8, u8), // actual, expected
-    IncorrectNumberOfGetFieldArguments(String, u8, u8), // actual, expected
+    IncorrectNumberOfStructArguments(String, u32, u32), // actual, expected
+    IncorrectNumberOfGetFieldArguments(String, u32, u32), // actual, expected
 
     ValueErrorIndexOutOfBounds(i64, usize),
     ValueErrorStepCannotBeZero,
