@@ -233,7 +233,7 @@ impl LValue {
 
     /// Resolves each identifier as a local variable that is currently declared.
     /// This will raise semantic errors for undeclared variables.
-    pub fn resolve_locals(self: &mut Self, parser: &mut Parser) {
+    pub(super) fn resolve_locals(self: &mut Self, parser: &mut Parser) {
         match self {
             LValue::Named(it) | LValue::VarNamed(it) => {
                 let name: String = it.as_named();
@@ -250,7 +250,7 @@ impl LValue {
 
     /// Declares all variables associated with this `LValue` as locals in the current scope.
     /// Will panic if the `LValue` has terms which are not `LValueReference::Named`.
-    pub fn declare_locals(self: &mut Self, parser: &mut Parser) {
+    pub(super) fn declare_locals(self: &mut Self, parser: &mut Parser) {
         match self {
             LValue::Named(it) | LValue::VarNamed(it) => {
                 let name: String = it.as_named();
@@ -272,7 +272,7 @@ impl LValue {
     /// If the pattern needs more or less, which would normally be handled via destructuring, this will declare a synthetic variable instead.
     ///
     /// If a synthetic local was needed, returns the index of the local as `Some(local)`. Otherwise returns `None`
-    pub fn declare_single_local(self: &mut Self, parser: &mut Parser) -> Option<usize> {
+    pub(super) fn declare_single_local(self: &mut Self, parser: &mut Parser) -> Option<usize> {
         match self {
             LValue::Named(_) | LValue::VarNamed(_) => {
                 self.declare_locals(parser);
@@ -282,7 +282,7 @@ impl LValue {
         }
     }
 
-    pub fn declare_pattern_locals(self: &mut Self, parser: &mut Parser) {
+    pub(super) fn declare_pattern_locals(self: &mut Self, parser: &mut Parser) {
         match self {
             LValue::Terms(lvalue) => {
                 for term in lvalue {
@@ -295,7 +295,7 @@ impl LValue {
 
     /// Initializes all local variables associated with this `LValue`. This allows them to be referenced in expressions.
     /// Also emits `IncGlobalCount` opcodes for globally declared variables.
-    pub fn initialize_locals(self: &mut Self, parser: &mut Parser) {
+    pub(super) fn initialize_locals(self: &mut Self, parser: &mut Parser) {
         match self {
             LValue::Named(LValueReference::Local(local)) |
             LValue::VarNamed(LValueReference::Local(local)) => parser.init_local(*local as usize),
@@ -315,7 +315,7 @@ impl LValue {
     ///
     /// - Instead of emitting `Nil`, we don't emit anything as part of default value initialization.
     /// - Instead of destructuring, we either leave the value in-place (for a `<name>` `LValue`), or immediately pop (for a `_` `LValue`)
-    pub fn emit_default_values(self: &Self, parser: &mut Parser, in_place: bool) {
+    pub(super) fn emit_default_values(self: &Self, parser: &mut Parser, in_place: bool) {
         match self {
             LValue::Terms(terms) => {
                 for term in terms {
@@ -334,7 +334,7 @@ impl LValue {
     ///
     /// If `in_expr` is `true`, this will assume the top level destructuring is part of an expression, and the last `Pop` token won't be emitted.
     /// This leaves the stack untouched after destructuring, with the iterable still on top.
-    pub fn emit_destructuring(self: Self, parser: &mut Parser, in_place: bool, in_expression: bool) {
+    pub(super) fn emit_destructuring(self: Self, parser: &mut Parser, in_place: bool, in_expression: bool) {
         match self {
             LValue::Empty | LValue::VarEmpty => {
                 if !in_expression {

@@ -778,7 +778,7 @@ impl Ord for SetImpl {
 
 /// `set()` is one object which can enter into a recursive hash situation:
 /// ```cordy
-/// let x = dict()
+/// let x = set()
 /// x.push(x)
 /// ```
 ///
@@ -810,12 +810,12 @@ thread_local! {
     static FLAG_RECURSIVE_HASH: Cell<bool> = Cell::new(false);
 }
 
-/// Returns `true` if a recursive hash error occurred.
+/// Returns `Err` if a recursive hash error occurred, `Ok` otherwise.
 #[inline]
-pub fn guard_recursive_hash<T, F : FnOnce() -> T>(f: F) -> bool {
+pub fn guard_recursive_hash<T, F : FnOnce() -> T>(f: F) -> Result<(), ()> {
     FLAG_RECURSIVE_HASH.with(|cell| cell.set(false));
     f();
-    FLAG_RECURSIVE_HASH.with(|cell| cell.get())
+    if FLAG_RECURSIVE_HASH.with(|cell| cell.get()) { Err(()) } else { Ok(()) }
 }
 
 
