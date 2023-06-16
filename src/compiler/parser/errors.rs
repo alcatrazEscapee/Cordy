@@ -49,7 +49,8 @@ impl ParserError {
             LocalVariableConflictWithNativeFunction(_) |
             UndeclaredIdentifier(_) |
             DuplicateFieldName(_) |
-            InvalidFieldName(_) => false,
+            InvalidFieldName(_) |
+            InvalidLValue(_) => false,
 
             InvalidAssignmentTarget |
             MultipleVariadicTermsInPattern |
@@ -57,7 +58,8 @@ impl ParserError {
             BreakOutsideOfLoop |
             ContinueOutsideOfLoop |
             StructNotInGlobalScope |
-            NonDefaultParameterAfterDefaultParameter => false,
+            NonDefaultParameterAfterDefaultParameter |
+            ParameterAfterVarParameter => false,
 
             Runtime(_) => false,
         }
@@ -103,6 +105,7 @@ pub enum ParserErrorType {
     UndeclaredIdentifier(String),
     DuplicateFieldName(String),
     InvalidFieldName(String),
+    InvalidLValue(String),
 
     InvalidAssignmentTarget,
     MultipleVariadicTermsInPattern,
@@ -111,6 +114,7 @@ pub enum ParserErrorType {
     ContinueOutsideOfLoop,
     StructNotInGlobalScope,
     NonDefaultParameterAfterDefaultParameter,
+    ParameterAfterVarParameter,
 
     Runtime(Box<RuntimeError>),
 }

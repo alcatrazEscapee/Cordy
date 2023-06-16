@@ -240,9 +240,33 @@ foo(...[1, 2], 3) // they can be used with normal arguments, in any order
 foo(...[], 1, ...[2], 3, ...[]) // An empty iterable is treated as adding no new arguments
 ```
 
+Finally, in addition to argument unrolling in function calls, function declarations support [pattern matching](#pattern-matching) as arguments. An argument can be directly defined as a pattern variable, for example:
+
+```rust
+fn(pair) {
+    let x, y = pair
+}
+// is identical to
+fn ((x, y)) {
+    //...
+}
+```
+
+In addition to this, they support bare `*` arguments like in Python. These must be the last argument in the function, and they collect all arguments into a vector when called:
+
+```rust
+// Note that `b` will be a vector of all arguments exclusing the first
+// It may be empty
+fn foo(a, *b) -> print(a, ...b)
+
+foo('hello') // prints 'hello'
+foo('hello', 'world') // prints 'hello world'
+foo('hello', 'world', 'and', 'others') // prints 'hello world and others'
+```
+
 #### Closures
 
-Functions can reference local and global variables outside of themselves, mutate them, and assign to them. Closures are able to reference and mutate captured variables, even after they have fallen out of scope of the original declaration.
+Functions can reference local and global variables outside themselves, mutate them, and assign to them. Closures are able to reference and mutate captured variables, even after they have fallen out of scope of the original declaration.
 
 ```rust
 fn make_box() {

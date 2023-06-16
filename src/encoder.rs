@@ -90,6 +90,7 @@ pub trait Encode {
 
 // ===== Encode + Decode Trait Implementations ===== //
 
+impl Encode for bool { fn encode(&self, encoder: &mut Encoder) { encoder.encode_u8(if *self { 1 } else { 0 }); } }
 impl Encode for u8 { fn encode(&self, encoder: &mut Encoder) { encoder.encode_u8(*self); } }
 impl Encode for u32 { fn encode(&self, encoder: &mut Encoder) { encoder.encode_uv(*self as u64); } }
 impl Encode for i32 { fn encode(&self, encoder: &mut Encoder) { encoder.encode_uv(*self as u64); } }
@@ -107,6 +108,7 @@ impl Encode for Fields { fn encode(&self, encoder: &mut Encoder) { encoder.encod
 impl Encode for CompileResult { fn encode(self: &Self, encoder: &mut Encoder) { encoder.encode(&self.code).encode(&self.strings).encode(&self.constants).encode(&self.functions).encode(&self.structs).encode(&self.fields); } }
 
 
+impl Decode<bool> for Decoder { fn decode(&mut self) -> Maybe<bool> { self.decode_u8().map(|u| u == 1u8) } }
 impl Decode<u8> for Decoder { fn decode(&mut self) -> Maybe<u8> { self.decode_u8() } }
 impl Decode<u32> for Decoder { fn decode(&mut self) -> Maybe<u32> { self.decode_uv().map(|u| u as u32) } }
 impl Decode<i32> for Decoder { fn decode(&mut self) -> Maybe<i32> { self.decode_uv().map(|u| u as i32) } }
@@ -210,7 +212,7 @@ impl Encode for Opcode {
             Set(i) => encode!(Op::Set, i),
             Dict(i) => encode!(Op::Dict, i),
             Struct(i) => encode!(Op::Struct, i),
-            OpUnroll(i) => encode!(Op::OpUnroll, &if *i { 1 } else { 0 }),
+            OpUnroll(i) => encode!(Op::OpUnroll, i),
             CheckLengthGreaterThan(i) => encode!(Op::CheckLengthGreaterThan, i),
             CheckLengthEqualTo(i) => encode!(Op::CheckLengthEqualTo, i),
             OpFuncEval(i) => encode!(Op::OpFuncEval, i),

@@ -469,6 +469,9 @@ pub struct ParserFunctionImpl {
     /// So `[Nil, Int(1), Int(2), Plus, ...]` would have entries `[1, 4]` as it's argument set, and length is the number of default arguments.
     pub(super) default_args: Vec<usize>,
 
+    /// If the last argument in this function is a varadic argument, meaning it needs special behavior when invoked with >= `max_args()`
+    pub(super) var_arg: bool,
+
     /// Bytecode for the function body itself
     pub(super) code: Vec<(Location, Opcode)>,
 
@@ -525,11 +528,12 @@ impl<'a> Parser<'a> {
     /// Returns the function ID, which is the runtime identifier for the function
     ///
     /// **N.B.** The function ID is not an index into `self.functions`, due to the existence of `self.baked_functions`
-    pub fn declare_function(self: &mut Self, name: String, args: &Vec<LValue>) -> u32 {
+    pub fn declare_function(self: &mut Self, name: String, args: &Vec<LValue>, var_arg: bool) -> u32 {
         self.functions.push(ParserFunctionImpl {
             name,
             args: args.iter().map(|u| u.to_code_str()).collect(),
             default_args: Vec::new(),
+            var_arg,
             code: Vec::new(),
             locals_reference: Vec::new(),
         });
