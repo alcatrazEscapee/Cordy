@@ -435,11 +435,12 @@ impl Parser<'_> {
     fn parse_function_parameters(self: &mut Self) -> (Vec<LValue>, Vec<Expr>) {
         trace::trace_parser!("rule <function-parameters>");
 
+        if let Some(CloseParen) = self.peek() {
+            return (Vec::new(), Vec::new())
+        }
+
         let mut args: Vec<LValue> = Vec::new();
         let mut default_args: Vec<Expr> = Vec::new();
-        if let Some(CloseParen) = self.peek() {
-            return (args, default_args); // Special case for no parameters, don't enter the loop
-        }
 
         loop {
             match self.parse_lvalue() {
@@ -469,13 +470,8 @@ impl Parser<'_> {
                 },
             }
 
-            match self.peek() {
-                Some(Comma) => self.skip(), // Consume `,`
-                Some(CloseParen) => break,
-                _ => {
-                    self.error_with(ExpectedCommaOrEndOfParameters);
-                    break
-                },
+            if self.parse_optional_trailing_comma(CloseParen, ExpectedCommaOrEndOfParameters) {
+                break
             }
         }
         (args, default_args)
@@ -1245,38 +1241,20 @@ impl Parser<'_> {
         // Vector literal `(` <expr> `,` [ <expr> [ `,` <expr> ] * ] ? `)`
         // Note that this might be a single element vector literal, which includes a trailing comma
         self.advance(); // Consume `,`
-        match self.peek() {
-            Some(CloseParen) => {
-                loc |= self.advance_with(); // Consume `)`
-                return Expr::vector(loc, args)
-            },
-            _ => {},
+        if let Some(CloseParen) = self.peek() {
+            loc |= self.advance_with(); // Consume `)`
+            return Expr::vector(loc, args)
         }
 
         // Otherwise, it must be > 1
         loop {
             args.push(self.parse_expr_top_level());
-            match self.peek() {
-                Some(CloseParen) => {
-                    self.advance(); // Consume `)`, then exit
-                    break
-                }
-                Some(Comma) => {
-                    self.advance();
-                    match self.peek() { // Check again, to allow trailing comma
-                        Some(CloseParen) => {
-                            self.advance();
-                            break
-                        },
-                        _ => {},
-                    }
-                },
-                _ => {
-                    self.error_with(ExpectedCommaOrEndOfVector);
-                    break
-                }
+            if self.parse_optional_trailing_comma(CloseParen, ExpectedCommaOrEndOfVector) {
+                break
             }
         }
+        self.expect_resync(CloseParen);
+
         Expr::vector(loc | self.prev_location(), args)
     }
 
@@ -1305,27 +1283,20 @@ impl Parser<'_> {
             Some(Colon) => { // Slice with a first argument
                 return self.parse_expr_1_slice_literal(loc_start, arg);
             },
-            Some(Comma) => self.skip(), // Consume `,`
+            Some(Comma) => {}, // Don't consume the comma just yet
             _ => self.error_with(ExpectedCommaOrEndOfList), // todo: new error type for comma, list, or slice
         }
 
         // Parse the next argument, then break into the loop until we exit the list literal
         let mut args: Vec<Expr> = vec![arg];
         loop {
-            match self.peek() {
-                Some(CloseSquareBracket) => break,
-                Some(_) => {
-                    args.push(self.parse_expr_top_level());
-                    match self.peek() {
-                        Some(Comma) => self.skip(),
-                        Some(CloseSquareBracket) => {}, // Skip
-                        _ => self.error_with(ExpectedCommaOrEndOfList),
-                    }
-                },
-                None => break,
+            if self.parse_optional_trailing_comma(CloseSquareBracket, ExpectedCommaOrEndOfList) {
+                break;
             }
+            args.push(self.parse_expr_top_level());
         }
         self.expect(CloseSquareBracket);
+
         Expr::list(loc_start | self.prev_location(), args)
     }
 
@@ -1394,34 +1365,18 @@ impl Parser<'_> {
             _ => false,
         };
 
-        match self.peek() {
-            Some(Comma) => self.skip(), // Skip a comma, so we're either at end or next value to get into the loop below
-            _ => {},
-        }
-
         loop {
-            match self.peek() {
-                Some(CloseBrace) => break,
-                Some(_) => {
-                    args.push(self.parse_expr_top_level());
-                    if is_dict {
-                        self.expect(Colon);
-                        args.push(self.parse_expr_top_level());
-                    }
-                    match self.peek() {
-                        Some(Comma) => self.skip(), // Allow trailing commas, as this loops to the top again
-                        Some(CloseBrace) => {}, // Skip
-                        _ => if is_dict {
-                            self.error_with(ExpectedCommaOrEndOfDict)
-                        } else {
-                            self.error_with(ExpectedCommaOrEndOfSet)
-                        },
-                    }
-                },
-                None => break,
+            if self.parse_optional_trailing_comma(CloseBrace, if is_dict { ExpectedCommaOrEndOfDict } else { ExpectedCommaOrEndOfSet }) {
+                break;
+            }
+            args.push(self.parse_expr_top_level());
+            if is_dict {
+                self.expect(Colon);
+                args.push(self.parse_expr_top_level());
             }
         }
-        self.expect(CloseBrace);
+        self.expect_resync(CloseBrace);
+
         loc |= self.prev_location();
         if is_dict { Expr::dict(loc, args) } else { Expr::set(loc, args) }
     }
@@ -1480,21 +1435,7 @@ impl Parser<'_> {
                                 expr = expr.eval(loc_start | self.prev_location(), vec![partial_expr], false);
                                 continue;
                             } else {
-                                // First argument
-                                let mut any_unroll: bool = false;
-                                let mut args: Vec<Expr> = vec![self.parse_expr_2_function_arg(&mut any_unroll)];
-
-                                // Other arguments
-                                while let Some(Comma) = self.peek() {
-                                    self.advance();
-                                    args.push(self.parse_expr_2_function_arg(&mut any_unroll));
-                                }
-                                match self.peek() {
-                                    Some(CloseParen) => self.skip(),
-                                    _ => self.error_with(ExpectedCommaOrEndOfArguments),
-                                }
-
-                                expr = expr.eval(loc_start | self.prev_location(), args, any_unroll)
+                                expr = self.parse_expr_2_unary_function_call(loc_start, expr)
                             }
                         }
                         _ => self.error_with(ExpectedCommaOrEndOfArguments),
@@ -1581,20 +1522,34 @@ impl Parser<'_> {
         expr
     }
 
-    fn parse_expr_2_function_arg(self: &mut Self, any_unroll: &mut bool) -> Expr {
-        let mut unroll = false;
-        let first = !*any_unroll;
-        if let Some(Ellipsis) = self.peek() {
-            self.advance(); // Consume `...`
-            unroll = true;
-            *any_unroll = true;
+    fn parse_expr_2_unary_function_call(self: &mut Self, loc_start: Location, expr: Expr) -> Expr {
+        // First argument
+        let mut any_unroll: bool = false;
+        let mut args: Vec<Expr> = Vec::new();
+
+        loop {
+            let mut unroll = false;
+            let first = !any_unroll;
+            if let Some(Ellipsis) = self.peek() {
+                self.skip(); // Consume `...`
+                unroll = true;
+                any_unroll = true;
+            }
+            let loc = self.prev_location();
+            let mut arg = self.parse_expr_top_level();
+            if unroll {
+                arg = arg.unroll(loc, first);
+            }
+            args.push(arg);
+
+            if self.parse_optional_trailing_comma(CloseParen, ExpectedCommaOrEndOfArguments) {
+                break;
+            }
         }
-        let loc = self.prev_location();
-        let mut expr = self.parse_expr_top_level();
-        if unroll {
-            expr = expr.unroll(loc, first);
-        }
-        expr
+
+        self.expect_resync(CloseParen);
+
+        expr.eval(loc_start | self.prev_location(), args, any_unroll)
     }
 
     /// Parses a `-> <field>` - either returns a `(Location, field_index)` pairing, or `None` and raises a parse error.
@@ -2045,6 +2000,7 @@ mod tests {
     #[test] fn test_multiple_undeclared_variables() { run("multiple_undeclared_variables"); }
     #[test] fn test_pattern_expression() { run("pattern_expression"); }
     #[test] fn test_pattern_expression_nested() { run("pattern_expression_nested"); }
+    #[test] fn test_trailing_commas() { run("trailing_commas"); }
     #[test] fn test_weird_expression_statements() { run("weird_expression_statements"); }
     #[test] fn test_weird_closure_not_a_closure() { run("weird_closure_not_a_closure"); }
     #[test] fn test_weird_locals() { run("weird_locals"); }

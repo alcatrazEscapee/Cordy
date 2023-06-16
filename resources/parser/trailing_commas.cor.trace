@@ -1,0 +1,105 @@
+L02: 0000 NativeFunction(Print)
+     0001 OpFuncEval(0)
+     0002 Pop
+L03: 0003 NativeFunction(Print)
+     0004 Int(1) -> 1
+     0005 OpFuncEval(1)
+     0006 Pop
+L04: 0007 NativeFunction(Print)
+     0008 Int(1) -> 1
+     0009 OpFuncEval(1)
+     0010 Pop
+L05: 0011 NativeFunction(Print)
+     0012 Int(1) -> 1
+     0013 Int(2) -> 2
+     0014 OpFuncEval(2)
+     0015 Pop
+L06: 0016 NativeFunction(Print)
+     0017 Int(1) -> 1
+     0018 Int(2) -> 2
+     0019 OpFuncEval(2)
+     0020 Pop
+L11: 0021 Int(1) -> 1
+     0022 Vector(1)
+     0023 Pop
+L12: 0024 Int(1) -> 1
+     0025 Int(2) -> 2
+     0026 Vector(2)
+     0027 Pop
+L13: 0028 Int(1) -> 1
+     0029 Int(2) -> 2
+     0030 Vector(2)
+     0031 Pop
+L16: 0032 List(0)
+     0033 Pop
+L17: 0034 Int(1) -> 1
+     0035 List(1)
+     0036 Pop
+L18: 0037 Int(1) -> 1
+     0038 List(1)
+     0039 Pop
+L19: 0040 Int(1) -> 1
+     0041 Int(2) -> 2
+     0042 List(2)
+     0043 Pop
+L20: 0044 Int(1) -> 1
+     0045 Int(2) -> 2
+     0046 List(2)
+     0047 Pop
+L24: 0048 Int(1) -> 1
+     0049 Set(1)
+     0050 Pop
+L25: 0051 Int(1) -> 1
+     0052 Set(1)
+     0053 Pop
+L26: 0054 Int(1) -> 1
+     0055 Int(2) -> 2
+     0056 Set(2)
+     0057 Pop
+L27: 0058 Int(1) -> 1
+     0059 Int(2) -> 2
+     0060 Set(2)
+     0061 Pop
+L30: 0062 Dict(0)
+     0063 Pop
+L31: 0064 Int(1) -> 1
+     0065 Int(1) -> 1
+     0066 Dict(2)
+     0067 Pop
+L32: 0068 Int(1) -> 1
+     0069 Int(1) -> 1
+     0070 Dict(2)
+     0071 Pop
+L33: 0072 Int(1) -> 1
+     0073 Int(1) -> 1
+     0074 Int(2) -> 2
+     0075 Int(2) -> 2
+     0076 Dict(4)
+     0077 Pop
+L34: 0078 Int(1) -> 1
+     0079 Int(1) -> 1
+     0080 Int(2) -> 2
+     0081 Int(2) -> 2
+     0082 Dict(4)
+     0083 Pop
+L37: 0084 Function(0) -> FunctionImpl { head: 95, tail: 96, name: "_", args: [], default_args: [] }
+     0085 Pop
+L38: 0086 Function(1) -> FunctionImpl { head: 97, tail: 98, name: "_", args: ["a"], default_args: [] }
+     0087 Pop
+L39: 0088 Function(2) -> FunctionImpl { head: 99, tail: 100, name: "_", args: ["a"], default_args: [] }
+     0089 Pop
+L40: 0090 Function(3) -> FunctionImpl { head: 101, tail: 102, name: "_", args: ["a", "b"], default_args: [] }
+     0091 Pop
+L41: 0092 Function(4) -> FunctionImpl { head: 103, tail: 104, name: "_", args: ["a", "b"], default_args: [] }
+     0093 Pop
+     0094 Exit
+L37: 0095 Nil
+     0096 Return
+L38: 0097 Nil
+     0098 Return
+L39: 0099 Nil
+     0100 Return
+L40: 0101 Nil
+     0102 Return
+L41: 0103 Nil
+     0104 Return
