@@ -1,0 +1,41 @@
+// Function parameters
+print()
+print(1)
+print(1,)
+print(1,2)
+print(1,2,)
+
+// Vector literals
+// () illegal
+// (1) illegal (not a vector literal)
+(1,)
+(1,2)
+(1,2,)
+
+// List literals
+[]
+[1]
+[1,]
+[1,2]
+[1,2,]
+
+// Set literals
+// {} is an empty dict, not set
+{1}
+{1,}
+{1,2}
+{1,2,}
+
+// Dict literals
+{}
+{1: 1}
+{1: 1,}
+{1: 1, 2: 2}
+{1: 1, 2: 2,}
+
+// Function Arguments
+(fn() -> nil)
+(fn(a) -> nil)
+(fn(a,) -> nil)
+(fn(a,b) -> nil)
+(fn(a,b,) -> nil)
