@@ -339,6 +339,7 @@ impl AsError for ParserError {
             ParserErrorType::UndeclaredIdentifier(e) => format!("Undeclared identifier: '{}'", e),
             ParserErrorType::DuplicateFieldName(e) => format!("Duplicate field name: '{}'", e),
             ParserErrorType::InvalidFieldName(e) => format!("Invalid or unknown field name: '{}'", e),
+            ParserErrorType::InvalidLValue(e) => format!("Invalid value used as a function parameter: '{}'", e),
 
             ParserErrorType::InvalidAssignmentTarget => format!("The left hand side of an assignment expression must be a variable, array access, or property access"),
             ParserErrorType::MultipleVariadicTermsInPattern => format!("Pattern is not allowed to have more than one variadic (i.e. '*') term."),
@@ -347,6 +348,7 @@ impl AsError for ParserError {
             ParserErrorType::ContinueOutsideOfLoop => String::from("Invalid 'continue' statement outside of an enclosing loop"),
             ParserErrorType::StructNotInGlobalScope => String::from("'struct' statements can only be present in global scope."),
             ParserErrorType::NonDefaultParameterAfterDefaultParameter => String::from("Non-default argument cannot follow default argument."),
+            ParserErrorType::ParameterAfterVarParameter => String::from("Variadic parameter must be the last one in the function."),
 
             ParserErrorType::Runtime(e) => e.as_error(),
         }

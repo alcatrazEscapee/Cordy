@@ -485,11 +485,7 @@ impl<R, W> VirtualMachine<R, W> where
                 // Vector values are present on the stack in-order
                 // So we need to splice the last n values of the stack into it's own vector
                 trace::trace_interpreter!("push vector n={}", length);
-                let start: usize = self.stack.len() - length as usize;
-                let end: usize = self.stack.len();
-                trace::trace_interpreter_stack!("stack splice {}..{} into list", start, end);
-                let vector: Value = self.stack.splice(start..end, std::iter::empty()).to_vector();
-                self.push(vector);
+                self.push_stack_into_vector(length);
             },
             Set(length) => {
                 // Set values are present on the stack in-order
@@ -705,7 +701,7 @@ impl<R, W> VirtualMachine<R, W> where
                 let func = f.unbox_func();
                 if func.in_range(nargs) {
                     // Evaluate directly
-                    self.call_function(func.jump_offset(nargs), nargs);
+                    self.call_function(func.jump_offset(nargs), nargs, func.num_var_args(nargs));
                 } else if func.min_args() > nargs && nargs > 0 {
                     // Evaluate as a partial function
                     // Note that partially evaluating with zero arguments is illegal
@@ -741,6 +737,7 @@ impl<R, W> VirtualMachine<R, W> where
                     // Before we call, we need to pop-push to reorder the arguments and setup partial arguments, so we have the correct calling convention
                     let args: Vec<Value> = self.popn(nargs as usize);
                     let head: usize = func.jump_offset(total_nargs);
+                    let num_var_args: Option<u32> = func.num_var_args(nargs);
                     self.pop(); // Should pop the `Nil` we swapped earlier
                     self.push(partial.func);
                     for par in partial.args {
@@ -749,7 +746,7 @@ impl<R, W> VirtualMachine<R, W> where
                     for arg in args {
                         self.push(arg);
                     }
-                    self.call_function(head, total_nargs);
+                    self.call_function(head, total_nargs, num_var_args);
 
                 } else {
                     return IncorrectNumberOfFunctionArguments((**func).clone(), total_nargs).err()
@@ -864,14 +861,29 @@ impl<R, W> VirtualMachine<R, W> where
         }
     }
 
+    /// Collects the top `length` elements of the stack into a vector, in order.
+    fn push_stack_into_vector(self: &mut Self, length: u32) {
+        let start: usize = self.stack.len() - length as usize;
+        let end: usize = self.stack.len();
+        trace::trace_interpreter_stack!("stack splice {}..{} into list", start, end);
+        let vector: Value = self.stack.splice(start..end, std::iter::empty()).to_vector();
+        self.push(vector);
+    }
+
     /// Calls a user function by building a `CallFrame` and jumping to the function's `head` IP
-    fn call_function(self: &mut Self, head: usize, nargs: u32) {
+    fn call_function(self: &mut Self, head: usize, nargs: u32, num_var_args: Option<u32>) {
         let frame = CallFrame {
             return_ip: self.ip,
             frame_pointer: self.stack.len() - (nargs as usize),
         };
         self.ip = head;
         self.call_stack.push(frame);
+
+        if let Some(num_var_args) = num_var_args {
+            trace::trace_interpreter!("collect varargs {}", num_var_args);
+            self.push_stack_into_vector(num_var_args)
+        }
+
         trace::trace_interpreter!("call stack = {}", self.debug_call_stack());
     }
 
@@ -924,7 +936,7 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
         let eval_head: usize = self.code.len();
 
         self.eval_compile(text)?;
-        self.call_function(eval_head, 0);
+        self.call_function(eval_head, 0, None);
         self.run_frame()?;
         let ret = self.pop();
         self.push(Value::Nil); // `eval` executes as a user function but is called like a native function, this prevents stack fuckery
@@ -1549,10 +1561,9 @@ mod test {
     #[test] fn test_for_else_break() { run_str("for c in 'abcd' { if c == 'b' { break } } else { print('hello') } print('world')", "world\n"); }
     #[test] fn test_for_else_no_break() { run_str("for c in 'abcd' { if c == 'B' { break } } else { print('hello') }", "hello\n"); }
     #[test] fn test_top_level_if_then_else() { run_str("if true then print('hello') else print('goodbye')", "hello\n"); }
-    #[test] fn test_weird_pattern_function_arg() { run_str("(1, 2) . (fn(_, *_) -> 'hello') (3) . print", "hello\n"); }
-    #[test] fn test_repr_of_function() { run_str("(fn(_, *_, x) -> nil) . repr . print", "fn _(_, *_, x)\n"); }
-    #[test] fn test_repr_of_partial_function() { run_str("(fn(_, *_, x) -> nil)(1) . repr . print", "fn _(_, *_, x)\n"); }
-    #[test] fn test_repr_of_closure() { run_str("fn box(x) -> fn(_, *_, y) -> x ; box(nil) . repr . print", "fn _(_, *_, y)\n"); }
+    #[test] fn test_repr_of_function() { run_str("(fn((_, *_), x) -> nil) . repr . print", "fn _((_, *_), x)\n"); }
+    #[test] fn test_repr_of_partial_function() { run_str("(fn((_, *_), x) -> nil)(1) . repr . print", "fn _((_, *_), x)\n"); }
+    #[test] fn test_repr_of_closure() { run_str("fn box(x) -> fn((_, *_), y) -> x ; box(nil) . repr . print", "fn _((_, *_), y)\n"); }
     #[test] fn test_typeof_of_basic_types() { run_str("[nil, 0, false, 'test', [], {1}, {1: 2}, heap(), (1, 2), range(30), enumerate([])] . map(typeof) . map(print)", "nil\nint\nbool\nstr\nlist\nset\ndict\nheap\nvector\nrange\nenumerate\n"); }
     #[test] fn test_typeof_functions() { run_str("[range, fn() -> nil, push(3), ((fn(a, b) -> nil)(1))] . map(typeof) . all(==function) . print", "true\n"); }
     #[test] fn test_compose_with_single_element_list() { run_str("'hello' . [0] . print", "h\n"); }
@@ -1686,7 +1697,16 @@ mod test {
     #[test] fn test_func_unroll_15() { run_str("print(...[print(...[1, 2, 3])])", "1 2 3\nnil\n"); }
     #[test] fn test_func_unroll_16() { run_str("print(...[], ...[print(...[], 'second', ...[], ...[print('first', ...[])])], ...[], ...[print('third')])", "first\nsecond nil\nthird\nnil nil\n"); }
     #[test] fn test_func_unroll_17() { run_str("print(1, ...[2, print('a', ...[1, 2, 3], 'e'), -2], 3)", "a 1 2 3 e\n1 2 nil -2 3\n"); }
-    #[test] fn test_eval_many_arguments() { run_str("sum(...range(1 + 1000)) . print", "500500\n");}
+    #[test] fn test_eval_many_arguments() { run_str("sum(...range(1 + 1000)) . print", "500500\n"); }
+    #[test] fn test_func_var_args_1() { run_str("fn foo(*a) -> print(a) ; foo()", "()\n"); }
+    #[test] fn test_func_var_args_2() { run_str("fn foo(*a) -> print(a) ; foo(1)", "(1)\n"); }
+    #[test] fn test_func_var_args_3() { run_str("fn foo(*a) -> print(a) ; foo(1, 2)", "(1, 2)\n"); }
+    #[test] fn test_func_var_args_4() { run_str("fn foo(*a) -> print(a) ; foo(1, 2, 3)", "(1, 2, 3)\n"); }
+    #[test] fn test_func_var_args_5() { run_str("fn foo(a, b?, *c) -> print(a, b, c) ; foo(1)", "1 nil ()\n"); }
+    #[test] fn test_func_var_args_6() { run_str("fn foo(a, b?, *c) -> print(a, b, c) ; foo(1, 2)", "1 2 ()\n"); }
+    #[test] fn test_func_var_args_7() { run_str("fn foo(a, b?, *c) -> print(a, b, c) ; foo(1, 2, 3)", "1 2 (3)\n"); }
+    #[test] fn test_func_var_args_8() { run_str("fn foo(a, b?, *c) -> print(a, b, c) ; foo(1, 2, 3, 4)", "1 2 (3, 4)\n"); }
+    #[test] fn test_func_var_args_9() { run_str("fn foo(a, b?, *c) -> print(a, b, c) ; foo(1, 2, 3, 4, 5)", "1 2 (3, 4, 5)\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }

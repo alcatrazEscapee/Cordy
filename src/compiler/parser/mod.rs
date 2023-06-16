@@ -221,7 +221,7 @@ impl Parser<'_> {
             }
 
             let tail: usize = self.raw_output.len() - 1;
-            let baked: Rc<FunctionImpl> = Rc::new(FunctionImpl::new(head, tail, func.name, func.args, func.default_args));
+            let baked: Rc<FunctionImpl> = Rc::new(FunctionImpl::new(head, tail, func.name, func.args, func.default_args, func.var_arg));
 
             self.baked_functions.push(baked);
         }
@@ -357,6 +357,13 @@ impl Parser<'_> {
     }
 
     fn parse_named_function(self: &mut Self) {
+        // Before we enter this rule, we instead check if we see `fn` `(`, which would imply this is actually part of an expression
+        // If so, we shortcut into that
+        if let Some(OpenParen) = self.peek2() {
+            self.parse_expression_statement();
+            return
+        }
+
         trace::trace_parser!("rule <named-function>");
 
         // Function header - `fn <name> (<arg>, ...)
@@ -364,7 +371,7 @@ impl Parser<'_> {
         self.advance();
         let maybe_name: Option<String> = self.parse_function_name();
         self.expect(OpenParen);
-        let (args, default_args) = self.parse_function_parameters();
+        let (args, default_args, var_arg) = self.parse_function_parameters();
         self.expect_resync(CloseParen);
 
         // Named functions are a complicated local variable, and needs to be declared as such
@@ -378,7 +385,7 @@ impl Parser<'_> {
             })
             .unwrap_or_else(|| String::from("<invalid>"));
 
-        let func: u32 = self.declare_function(name, &args);
+        let func: u32 = self.declare_function(name, &args, var_arg);
         self.push(Opcode::Function(func));
 
         // Emit the closed locals from the function body right away, because we are not in an expression context
@@ -410,12 +417,12 @@ impl Parser<'_> {
         // Function header - `fn` (<arg>, ...)
         self.advance();
         self.expect(OpenParen);
-        let (args, default_args) = self.parse_function_parameters();
+        let (args, default_args, var_arg) = self.parse_function_parameters();
         self.expect_resync(CloseParen);
 
         // Expression functions don't declare themselves as a local variable that can be referenced.
         // Instead, as they're part of an expression, they just push a single function instance onto the stack
-        let func: u32 = self.declare_function(String::from("_"), &args);
+        let func: u32 = self.declare_function(String::from("_"), &args, var_arg);
         let closed_locals = self.parse_function_body(args, default_args);
         Expr::function(func, closed_locals)
     }
@@ -432,23 +439,33 @@ impl Parser<'_> {
     }
 
     /// Returns the pair of `lvalue` parameters, and `Expr` default values, if present.
-    fn parse_function_parameters(self: &mut Self) -> (Vec<LValue>, Vec<Expr>) {
+    fn parse_function_parameters(self: &mut Self) -> (Vec<LValue>, Vec<Expr>, bool) {
         trace::trace_parser!("rule <function-parameters>");
 
         if let Some(CloseParen) = self.peek() {
-            return (Vec::new(), Vec::new())
+            return (Vec::new(), Vec::new(), false)
         }
 
         let mut args: Vec<LValue> = Vec::new();
         let mut default_args: Vec<Expr> = Vec::new();
+        let mut var_arg: bool = false;
 
         loop {
             match self.parse_lvalue() {
-                Some(lvalue) => args.push(lvalue),
-                _ => {
-                    self.error_with(ExpectedParameterOrEndOfList);
-                    break
+                Some(lvalue @ (LValue::VarEmpty | LValue::Empty)) => self.semantic_error(InvalidLValue(lvalue.to_code_str())),
+                Some(LValue::VarNamed(reference)) => {
+                    // A `*<name>` argument gets treated as a default argument value of an empty vector, and we set the `var_arg` flag
+                    args.push(LValue::Named(reference)); // Convert to a `Named()`
+                    default_args.push(Expr::vector(Location::empty(), Vec::new()));
+                    var_arg = true;
+                }
+                Some(lvalue) => {
+                    if var_arg {
+                        self.semantic_error(ParameterAfterVarParameter);
+                    }
+                    args.push(lvalue)
                 },
+                _ => self.error_with(ExpectedParameterOrEndOfList),
             }
 
             // Default Arguments
@@ -462,11 +479,8 @@ impl Parser<'_> {
                     self.skip(); // Consume `=`
                     default_args.push(self.parse_expr_top_level()); // Parse an expression
                 },
-                _ => {
-                    if !default_args.is_empty() {
-                        // Cannot have non-default arguments after default arguments
-                        self.semantic_error(NonDefaultParameterAfterDefaultParameter);
-                    }
+                _ => if !var_arg && !default_args.is_empty() {
+                    self.semantic_error(NonDefaultParameterAfterDefaultParameter);
                 },
             }
 
@@ -474,7 +488,7 @@ impl Parser<'_> {
                 break
             }
         }
-        (args, default_args)
+        (args, default_args, var_arg)
     }
 
     fn parse_function_body(self: &mut Self, args: Vec<LValue>, default_args: Vec<Expr>) -> Vec<Opcode> {
@@ -1956,7 +1970,6 @@ mod tests {
     #[test] fn test_let_no_identifier() { run_err("let =", "Expected a variable binding, either a name, or '_', or pattern (i.e. 'x, (_, y), *z'), got '=' token instead\n  at: line 1 (<test>)\n\n1 | let =\n2 |     ^\n"); }
     #[test] fn test_let_expression_eof() { run_err("let x =", "Expected an expression terminal, got end of input instead\n  at: line 1 (<test>)\n\n1 | let x =\n2 |         ^^^\n"); }
     #[test] fn test_let_no_expression() { run_err("let x = &", "Expected an expression terminal, got '&' token instead\n  at: line 1 (<test>)\n\n1 | let x = &\n2 |         ^\n"); }
-    #[test] fn test_top_level_fn_no_name() { run_err("fn () {}", "Expecting a function name after 'fn' keyword, got '(' token instead\n  at: line 1 (<test>)\n\n1 | fn () {}\n2 |    ^\n"); }
     #[test] fn test_expression_function_with_name() { run_err("(fn hello() {})", "Expected a '(' token, got identifier 'hello' instead\n  at: line 1 (<test>)\n\n1 | (fn hello() {})\n2 |     ^^^^^\n"); }
     #[test] fn test_top_level_function_in_error_recovery_mode() { run_err("+ fn hello() {}", "Expected an expression terminal, got '+' token instead\n  at: line 1 (<test>)\n\n1 | + fn hello() {}\n2 | ^\n"); }
 

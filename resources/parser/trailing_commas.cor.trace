@@ -82,15 +82,15 @@ L34: 0078 Int(1) -> 1
      0081 Int(2) -> 2
      0082 Dict(4)
      0083 Pop
-L37: 0084 Function(0) -> FunctionImpl { head: 95, tail: 96, name: "_", args: [], default_args: [] }
+L37: 0084 Function(0) -> FunctionImpl { head: 95, tail: 96, name: "_", args: [], default_args: [], var_arg: false }
      0085 Pop
-L38: 0086 Function(1) -> FunctionImpl { head: 97, tail: 98, name: "_", args: ["a"], default_args: [] }
+L38: 0086 Function(1) -> FunctionImpl { head: 97, tail: 98, name: "_", args: ["a"], default_args: [], var_arg: false }
      0087 Pop
-L39: 0088 Function(2) -> FunctionImpl { head: 99, tail: 100, name: "_", args: ["a"], default_args: [] }
+L39: 0088 Function(2) -> FunctionImpl { head: 99, tail: 100, name: "_", args: ["a"], default_args: [], var_arg: false }
      0089 Pop
-L40: 0090 Function(3) -> FunctionImpl { head: 101, tail: 102, name: "_", args: ["a", "b"], default_args: [] }
+L40: 0090 Function(3) -> FunctionImpl { head: 101, tail: 102, name: "_", args: ["a", "b"], default_args: [], var_arg: false }
      0091 Pop
-L41: 0092 Function(4) -> FunctionImpl { head: 103, tail: 104, name: "_", args: ["a", "b"], default_args: [] }
+L41: 0092 Function(4) -> FunctionImpl { head: 103, tail: 104, name: "_", args: ["a", "b"], default_args: [], var_arg: false }
      0093 Pop
      0094 Exit
 L37: 0095 Nil

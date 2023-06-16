@@ -34,8 +34,8 @@ print(1,2,)
 {1: 1, 2: 2,}
 
 // Function Arguments
-(fn() -> nil)
-(fn(a) -> nil)
-(fn(a,) -> nil)
-(fn(a,b) -> nil)
-(fn(a,b,) -> nil)
+fn() -> nil
+fn(a) -> nil
+fn(a,) -> nil
+fn(a,b) -> nil
+fn(a,b,) -> nil

@@ -623,11 +623,12 @@ pub struct FunctionImpl {
     name: String, // The name of the function, useful to show in stack traces
     args: Vec<String>, // Names of the arguments
     default_args: Vec<usize>, // Jump offsets for each default argument
+    var_arg: bool, // If the last argument in this function is variadic
 }
 
 impl FunctionImpl {
-    pub fn new(head: usize, tail: usize, name: String, args: Vec<String>, default_args: Vec<usize>) -> FunctionImpl {
-        FunctionImpl { head, tail, name, args, default_args, }
+    pub fn new(head: usize, tail: usize, name: String, args: Vec<String>, default_args: Vec<usize>, var_arg: bool) -> FunctionImpl {
+        FunctionImpl { head, tail, name, args, default_args, var_arg, }
     }
 
     /// The minimum number of required arguments, inclusive.
@@ -641,14 +642,27 @@ impl FunctionImpl {
     }
 
     pub fn in_range(self: &Self, nargs: u32) -> bool {
-        self.min_args() <= nargs && nargs <= self.max_args()
+        self.min_args() <= nargs && (self.var_arg || nargs <= self.max_args())
+    }
+
+    /// Returns the number of variadic arguments that need to be collected, before invoking the function, if needed.
+    pub fn num_var_args(self: &Self, nargs: u32) -> Option<u32> {
+        if self.var_arg && nargs >= self.max_args() {
+            Some(nargs + 1 - self.max_args())
+        } else {
+            None
+        }
     }
 
     /// Returns the jump offset of the function
     /// For typical functions, this is just the `head`, however when default arguments are present, or not, this is offset by the default argument offsets.
     /// The `nargs` must be legal (between `[min_args(), max_args()]`
     pub fn jump_offset(self: &Self, nargs: u32) -> usize {
-        self.head + if nargs == self.min_args() { 0 } else {
+        self.head + if nargs == self.min_args() {
+            0
+        } else if self.var_arg && nargs >= self.max_args() {
+            *self.default_args.last().unwrap()
+        } else {
             self.default_args[(nargs - self.min_args() - 1) as usize]
         }
     }
@@ -672,7 +686,7 @@ impl Encode for FunctionImpl {
 
 impl Decode<FunctionImpl> for Decoder {
     fn decode(&mut self) -> Result<FunctionImpl, ()> {
-        Ok(FunctionImpl::new(self.decode()?, self.decode()?, self.decode()?, self.decode()?, self.decode()?))
+        Ok(FunctionImpl::new(self.decode()?, self.decode()?, self.decode()?, self.decode()?, self.decode()?, self.decode()?))
     }
 }
 
@@ -1323,7 +1337,7 @@ mod test {
     }
 
     fn all_values() -> Vec<Value> {
-        let function = Rc::new(FunctionImpl::new(0, 0, String::new(), vec![], vec![]));
+        let function = Rc::new(FunctionImpl::new(0, 0, String::new(), vec![], vec![], false));
         vec![
             Value::Nil,
             Value::Bool(true),
