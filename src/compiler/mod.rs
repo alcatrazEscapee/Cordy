@@ -5,7 +5,7 @@ use crate::compiler::scanner::ScanResult;
 use crate::reporting::{Locations, SourceView};
 use crate::vm::{FunctionImpl, Opcode, RuntimeError, StructTypeImpl};
 
-pub use crate::compiler::parser::{Locals, Fields, ParserError, ParserErrorType};
+pub use crate::compiler::parser::{Locals, Fields, ParserError, ParserErrorType, default};
 pub use crate::compiler::scanner::{ScanError, ScanErrorType, ScanToken};
 
 use Opcode::{*};
@@ -13,9 +13,6 @@ use Opcode::{*};
 mod scanner;
 mod parser;
 
-pub fn default() -> CompileResult {
-    parser::default()
-}
 
 pub fn compile(enable_optimization: bool, view: &SourceView) -> Result<CompileResult, Vec<String>> {
     let mut errors: Vec<String> = Vec::new();

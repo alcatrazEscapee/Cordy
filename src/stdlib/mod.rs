@@ -786,8 +786,8 @@ pub fn set_index(target: &Value, index: Value, value: Value) -> Result<(), Box<R
 
     if let Value::Dict(it) = target {
         match vm::guard_recursive_hash(|| it.unbox_mut().dict.insert(index, value)) {
-            true => ValueErrorRecursiveHash(target.clone()).err(),
-            false => Ok(())
+            Err(_) => ValueErrorRecursiveHash(target.clone()).err(),
+            Ok(_) => Ok(())
         }
     } else {
         let mut indexable = target.as_index()?;

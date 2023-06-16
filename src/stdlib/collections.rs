@@ -349,8 +349,8 @@ pub fn push(value: Value, target: Value) -> ValueResult {
     match &target {
         List(v) => { v.unbox_mut().push_back(value); Ok(target) }
         Set(v) => match vm::guard_recursive_hash(|| v.unbox_mut().set.insert(value)) {
-            true => ValueErrorRecursiveHash(target).err(),
-            false => Ok(target)
+            Err(_) => ValueErrorRecursiveHash(target).err(),
+            Ok(_) => Ok(target)
         }
         Heap(v) => { v.unbox_mut().heap.push(Reverse(value)); Ok(target) }
         _ => TypeErrorArgMustBeIterable(target).err()
@@ -380,8 +380,8 @@ pub fn insert(index: Value, value: Value, target: Value) -> ValueResult {
             }
         },
         Dict(v) => match vm::guard_recursive_hash(|| v.unbox_mut().dict.insert(index, value)) {
-            true => ValueErrorRecursiveHash(target).err(),
-            false => Ok(target)
+            Err(_) => ValueErrorRecursiveHash(target).err(),
+            Ok(_) => Ok(target)
         },
         _ => TypeErrorArgMustBeIndexable(target).err()
     }

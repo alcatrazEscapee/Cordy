@@ -22,10 +22,10 @@ use ParserErrorType::{*};
 use ScanToken::{*};
 
 
-pub const RULE_REPL: ParseRule = |parser| parser.parse_incremental_repl();
-pub const RULE_EVAL: ParseRule = |parser| parser.parse_incremental_eval();
+pub(super) const RULE_REPL: ParseRule = |parser| parser.parse_incremental_repl();
+pub(super) const RULE_EVAL: ParseRule = |parser| parser.parse_incremental_eval();
 
-pub type ParseRule = fn(&mut Parser) -> ();
+pub(super) type ParseRule = fn(&mut Parser) -> ();
 
 mod core;
 mod errors;
@@ -43,12 +43,12 @@ pub fn default() -> CompileResult {
 
 
 /// Parse a complete `CompileResult` from the given `ScanResult`
-pub fn parse(enable_optimization: bool, scan_result: ScanResult) -> CompileResult {
+pub(super) fn parse(enable_optimization: bool, scan_result: ScanResult) -> CompileResult {
     parse_rule(enable_optimization, scan_result.tokens, |parser| parser.parse())
 }
 
 
-pub fn parse_incremental(scan_result: ScanResult, params: &mut CompileParameters, rule: ParseRule) -> Vec<ParserError> {
+pub(super) fn parse_incremental(scan_result: ScanResult, params: &mut CompileParameters, rule: ParseRule) -> Vec<ParserError> {
     let mut errors: Vec<ParserError> = Vec::new();
 
     rule(&mut Parser::new(params.enable_optimization, scan_result.tokens, params.code, params.locals, params.fields, &mut errors, params.strings, params.constants, params.functions, params.structs, params.locations, &mut Vec::new(), params.globals));
@@ -79,7 +79,7 @@ fn parse_rule(enable_optimization: bool, tokens: Vec<(Location, ScanToken)>, rul
 }
 
 
-pub struct Parser<'a> {
+pub(super) struct Parser<'a> {
     enable_optimization: bool,
 
     input: VecDeque<(Location, ScanToken)>,
