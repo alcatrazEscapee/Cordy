@@ -12,17 +12,6 @@ use Value::{*};
 type ValueResult = Result<Value, Box<RuntimeError>>;
 
 
-/// Converts a `i64` index into a bounds-checked, `usize` index which can safely be used to index (via `Value.to_index().get_index()`) a `Value`
-pub fn get_checked_index(len: usize, rhs: i64) -> Result<usize, Box<RuntimeError>> {
-    let index: usize = to_index(len as i64, rhs) as usize;
-    if index < len {
-        Ok(index)
-    } else {
-        ValueErrorIndexOutOfBounds(rhs, len).err()
-    }
-}
-
-
 pub fn list_slice(slice: Value, low: Value, high: Value, step: Value) -> ValueResult {
     literal_slice(slice, low.as_int_or()?, high.as_int_or()?, step.as_int_or()?)
 }
@@ -58,7 +47,7 @@ pub fn literal_slice(target: Value, low: Option<i64>, high: Option<i64>, step: O
 
 
 #[inline(always)]
-fn to_index(len: i64, pos_or_neg: i64) -> i64 {
+pub fn to_index(len: i64, pos_or_neg: i64) -> i64 {
     if pos_or_neg >= 0 {
         pos_or_neg
     } else {

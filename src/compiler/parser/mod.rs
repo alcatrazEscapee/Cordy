@@ -1298,7 +1298,7 @@ impl Parser<'_> {
                 return self.parse_expr_1_slice_literal(loc_start, arg);
             },
             Some(Comma) => {}, // Don't consume the comma just yet
-            _ => self.error_with(ExpectedCommaOrEndOfList), // todo: new error type for comma, list, or slice
+            _ => self.error_with(ExpectedCommaOrEndOfList),
         }
 
         // Parse the next argument, then break into the loop until we exit the list literal

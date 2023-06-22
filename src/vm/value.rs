@@ -11,6 +11,7 @@ use indexmap::{IndexMap, IndexSet};
 use itertools::Itertools;
 
 use crate::compiler::Fields;
+use crate::encoder::{Decode, Decoder, Encode, Encoder};
 use crate::misc::RecursionGuard;
 use crate::stdlib::NativeFunction;
 use crate::stdlib;
@@ -18,7 +19,6 @@ use crate::vm::error::RuntimeError;
 
 use Value::{*};
 use RuntimeError::{*};
-use crate::encoder::{Decode, Decoder, Encode, Encoder};
 
 type ValueResult = Result<Value, Box<RuntimeError>>;
 
@@ -465,7 +465,8 @@ impl Value {
             (Heap(l), Heap(r)) => l.ptr_eq(r),
             (Vector(l), Vector(r)) => l.ptr_eq(r),
             (Struct(l), Struct(r)) => l.ptr_eq(r),
-            _ => self == other
+            _ if mem::discriminant(self) != mem::discriminant(other) => false,
+            _ => panic!("Value::ptr_eq() should only be called on boxed mutable pointer types"),
         }
     }
 }
@@ -1260,12 +1261,21 @@ impl<'a> Indexable<'a> {
         }
     }
 
+    /// Takes a convertable-to-int value, representing a bounded index in `[-len, len)`, and converts to a real index in `[0, len)`, or raises an error.
+    pub fn check_index(self: &Self, value: Value) -> Result<usize, Box<RuntimeError>> {
+        let index: i64 = value.as_int()?;
+        let len: usize = self.len();
+        let raw: usize = stdlib::to_index(len as i64, index) as usize;
+        if raw < len {
+            Ok(raw)
+        } else {
+            ValueErrorIndexOutOfBounds(index, len).err()
+        }
+    }
+
     pub fn get_index(self: &Self, index: usize) -> Value {
         match self {
-            Indexable::Str(it) => {
-                let c = it.chars().nth(index).unwrap();
-                c.to_value()
-            }
+            Indexable::Str(it) => it.chars().nth(index).unwrap().to_value(),
             Indexable::List(it) => (&it[index]).clone(),
             Indexable::Vector(it) => (&it[index]).clone(),
         }
