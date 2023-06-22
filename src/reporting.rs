@@ -8,6 +8,8 @@ use crate::vm::operator::{BinaryOp, UnaryOp};
 
 pub type Locations = Vec<Location>;
 
+const EMPTY: Location = Location { start: 0, width: 0 };
+
 
 /// A closed interval of a source code location.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -19,19 +21,25 @@ pub struct Location {
 }
 
 impl Location {
+    /// Creates a new location from a given start cursor and width
     pub fn new(start: usize, width: usize) -> Location {
         Location { start, width }
     }
 
+    /// Returns a sentinel empty location
+    #[inline]
     pub fn empty() -> Location {
-        Location::new(0, 0)
+        EMPTY
     }
 
-    pub fn as_opt(self: Self) -> Option<Location> {
-        if self.width > 0 { Some(self) } else { None }
-    }
+    /// Returns the start pointer of the location, inclusive
     pub fn start(self: &Self) -> usize { self.start }
+
+    /// Returns the end pointer of the location, inclusive
     pub fn end(self: &Self) -> usize { self.start + self.width - 1 }
+
+    // Returns `true` if the location is empty, i.e. zero width
+    pub fn is_empty(self: &Self) -> bool { self.width == 0 }
 }
 
 impl BitOr for Location {
@@ -62,10 +70,14 @@ impl BitOrAssign for Location {
 pub struct SourceView<'a> {
     name: &'a String,
 
-    pub text: &'a String,
+    text: &'a String,
 
     lines: Vec<&'a str>,
     starts: Vec<usize>,
+}
+
+impl<'a> SourceView<'a> {
+    pub fn text(self: &Self) -> &'a String { self.text }
 }
 
 /// A simple common trait for converting arbitrary objects to human-readable errors
@@ -114,9 +126,10 @@ impl<'a> SourceView<'a> {
     }
 
     pub fn lineno(self: &Self, loc: Location) -> usize {
-        match loc.as_opt() {
-            Some(loc) => self.starts.partition_point(|u| u <= &loc.start) - 1,
-            None => self.len() - 1
+        if loc.is_empty() {
+            self.len() - 1
+        } else {
+            self.starts.partition_point(|u| u <= &loc.start) - 1
         }
     }
 
@@ -126,7 +139,7 @@ impl<'a> SourceView<'a> {
         let start_lineno = self.lineno(loc);
         let mut end_lineno = start_lineno;
 
-        if let Some(loc) = loc.as_opt() {
+        if !loc.is_empty() {
             while self.starts[end_lineno + 1] < loc.end() {
                 end_lineno += 1;
             }
@@ -157,12 +170,11 @@ impl<'a> SourceView<'a> {
             text.push('\n');
         }
 
-        let (start_col, end_col) = match loc.as_opt() {
-            Some(loc) => (loc.start - self.starts[start_lineno], loc.end() - self.starts[end_lineno]),
-            None => {
-                let last_col = self.lines[end_lineno].len();
-                (last_col + 1, last_col + 3)
-            }
+        let (start_col, end_col) = if loc.is_empty() {
+            let last_col: usize = self.lines[end_lineno].len();
+            (last_col + 1, last_col + 3)
+        } else {
+            (loc.start - self.starts[start_lineno], loc.end() - self.starts[end_lineno])
         };
 
         text.push_str(format!("{:width$} |", end_lineno + 2, width = width).as_str());

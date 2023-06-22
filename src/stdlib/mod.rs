@@ -7,7 +7,7 @@ use crate::vm::{operator, IntoIterableValue, IntoValue, IntoValueResult, Value, 
 use crate::vm::operator::BinaryOp;
 use crate::{trace, vm};
 
-pub use crate::stdlib::collections::{list_slice, literal_slice};
+pub use crate::stdlib::collections::{list_slice, literal_slice, to_index};
 
 use NativeFunction::{*};
 use RuntimeError::{*};
@@ -741,7 +741,7 @@ pub fn get_index<VM>(vm: &mut VM, target: Value, index: Value) -> ValueResult wh
     }
 
     let indexable = target.as_index()?;
-    let index: usize = collections::get_checked_index(indexable.len(), index.as_int()?)?;
+    let index: usize = indexable.check_index(index)?;
 
     Ok(indexable.get_index(index))
 }
@@ -791,7 +791,7 @@ pub fn set_index(target: &Value, index: Value, value: Value) -> Result<(), Box<R
         }
     } else {
         let mut indexable = target.as_index()?;
-        let index: usize = collections::get_checked_index(indexable.len(), index.as_int()?)?;
+        let index: usize = indexable.check_index(index)?;
 
         indexable.set_index(index, value)
     }

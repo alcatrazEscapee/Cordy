@@ -18,7 +18,7 @@ pub fn compile(enable_optimization: bool, view: &SourceView) -> Result<CompileRe
     let mut errors: Vec<String> = Vec::new();
 
     // Scan
-    let scan_result: ScanResult = scanner::scan(view.text);
+    let scan_result: ScanResult = scanner::scan(view.text());
     if !scan_result.errors.is_empty() {
         for error in &scan_result.errors {
             errors.push(view.format(error));
@@ -75,7 +75,7 @@ fn try_incremental_compile(view: &SourceView, params: &mut CompileParameters, ru
     let mut errors: Vec<String> = Vec::new();
 
     // Scan
-    let scan_result: ScanResult = scanner::scan(view.text);
+    let scan_result: ScanResult = scanner::scan(view.text());
     if !scan_result.errors.is_empty() {
         for error in &scan_result.errors {
             if error.is_eof() && abort_in_eof && errors.is_empty() {
