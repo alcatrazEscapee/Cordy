@@ -1707,6 +1707,7 @@ mod test {
     #[test] fn test_func_var_args_7() { run_str("fn foo(a, b?, *c) -> print(a, b, c) ; foo(1, 2, 3)", "1 2 (3)\n"); }
     #[test] fn test_func_var_args_8() { run_str("fn foo(a, b?, *c) -> print(a, b, c) ; foo(1, 2, 3, 4)", "1 2 (3, 4)\n"); }
     #[test] fn test_func_var_args_9() { run_str("fn foo(a, b?, *c) -> print(a, b, c) ; foo(1, 2, 3, 4, 5)", "1 2 (3, 4, 5)\n"); }
+    #[test] fn test_malicious_eval_error() { run_str("eval('%sfn() -> print + 1' % (' ' * 100))()", "\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }
