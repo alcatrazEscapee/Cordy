@@ -1,86 +1,20 @@
 use std::{fs, io};
-use std::io::Write;
-use rustyline::{DefaultEditor, Editor};
-use rustyline::error::ReadlineError;
 
-use cordy::{compiler, encoder};
-use cordy::compiler::{CompileResult, IncrementalCompileResult, Locals};
+use cordy::{compiler, encoder, repl};
+use cordy::compiler::CompileResult;
 use cordy::{AsError, SourceView};
 use cordy::vm::{ExitType, VirtualMachine};
 
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    match if args.len() == 1 { run_repl() } else { run_main(args) } {
+    match if args.len() == 1 {
+        repl::run_repl()
+    } else {
+        run_main(args)
+    } {
         Ok(()) => {},
         Err(e) => eprintln!("{}", e)
-    }
-}
-
-fn run_repl() -> Result<(), String> {
-    println!("Welcome to Cordy! (exit with 'exit' or Ctrl-C)");
-
-    let name = &String::from("<stdin>");
-    let mut editor: DefaultEditor = Editor::new().unwrap();
-    let mut buffer: String = String::new();
-    let mut continuation: bool = false;
-
-    // Retain local variables through the entire lifetime of the REPL
-    let mut locals = Locals::empty();
-    let mut vm = VirtualMachine::new(compiler::default(), &b""[..], io::stdout(), vec![]);
-
-    loop {
-        io::stdout().flush().unwrap();
-        let line: String = match editor.readline(if continuation { "... " } else { ">>> " }) {
-            Ok(line) => {
-                editor.add_history_entry(line.as_str()).unwrap();
-                line
-            },
-            Err(ReadlineError::Interrupted) | Err(ReadlineError::Eof) => return Ok(()),
-            Err(e) => return Err(format!("Error: {}", e)),
-        };
-
-        match line.as_str() {
-            "" => continue,
-            "#stack" => {
-                println!("{}", vm.debug_stack());
-                continue
-            },
-            "#call-stack" => {
-                println!("{}", vm.debug_call_stack());
-                continue
-            },
-            _ => {},
-        }
-
-        buffer.push_str(line.as_str());
-        buffer.push('\n');
-        continuation = false;
-
-        let view: SourceView = SourceView::new(&name, &buffer);
-        match vm.incremental_compile(&view, &mut locals) {
-            IncrementalCompileResult::Success => {},
-            IncrementalCompileResult::Errors(errors) => {
-                for e in errors {
-                    println!("{}", e);
-                }
-                buffer.clear();
-                continue
-            },
-            IncrementalCompileResult::Aborted => {
-                continuation = true;
-                continue
-            }
-        }
-
-        match vm.run_until_completion() {
-            ExitType::Exit | ExitType::Return => return Ok(()),
-            ExitType::Yield => {},
-            ExitType::Error(error) => println!("{}", view.format(&error)),
-        }
-
-        buffer.clear();
-        vm.run_recovery(locals[0].len());
     }
 }
 
