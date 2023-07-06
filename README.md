@@ -12,9 +12,7 @@ cordy [options] <file> [program arguments...]
 When invoked with no arguments, this will open a REPL for the Cordy language (exit with 'exit' or Ctrl-C)
 Options:
   -h --help        : Show this message and then exit
-  -c --compile     : Compile only. Outputs the compiled program to <file>.o
   -d --disassembly : Dump the disassembly view. Use -o to dump to a file.
-  -e --execute     : Execute the provided file as a compiled binary (with -c), rather than compling a text file
   -o --optimize    : Enables compiler optimizations
 ```
 
