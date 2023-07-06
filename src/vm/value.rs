@@ -11,7 +11,6 @@ use indexmap::{IndexMap, IndexSet};
 use itertools::Itertools;
 
 use crate::compiler::Fields;
-use crate::encoder::{Decode, Decoder, Encode, Encoder};
 use crate::misc::RecursionGuard;
 use crate::stdlib::NativeFunction;
 use crate::stdlib;
@@ -676,18 +675,6 @@ impl FunctionImpl {
 impl Hash for FunctionImpl {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.name.hash(state)
-    }
-}
-
-impl Encode for FunctionImpl {
-    fn encode(&self, encoder: &mut Encoder) {
-        encoder.encode(&self.head).encode(&self.tail).encode(&self.name).encode(&self.args).encode(&self.default_args);
-    }
-}
-
-impl Decode<FunctionImpl> for Decoder {
-    fn decode(&mut self) -> Result<FunctionImpl, ()> {
-        Ok(FunctionImpl::new(self.decode()?, self.decode()?, self.decode()?, self.decode()?, self.decode()?, self.decode()?))
     }
 }
 
