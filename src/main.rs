@@ -1,6 +1,6 @@
 use std::{fs, io};
 
-use cordy::{compiler, encoder, repl};
+use cordy::{compiler, repl};
 use cordy::compiler::CompileResult;
 use cordy::SourceView;
 use cordy::vm::{ExitType, VirtualMachine};
@@ -25,33 +25,19 @@ fn run_main(args: Vec<String>) -> Result<(), String> {
         Err(Some(err)) => return Err(err),
     };
 
-    match mode {
-        Mode::Execute => {
-            let bytes: Vec<u8> = fs::read(&name).map_err(|_| format!("Unable to read file: '{}'", &name))?;
-            let compiled: CompileResult = encoder::decode(bytes).map_err(|_| format!("Unable to interpret file as valid Cordy bytecode"))?;
-            run_vm(compiled, program_args, None)
-        },
-        _ => {
-            let text: String = fs::read_to_string(&name).map_err(|_| format!("Unable to read file '{}'", name))?;
-            let view: SourceView = SourceView::new(name, text);
-            let compiled: CompileResult = compiler::compile(enable_optimization, &view).map_err(|e| e.join("\n"))?;
 
-            match mode {
-                Mode::Disassembly => {
-                    for line in compiled.disassemble(&view) {
-                        println!("{}", line);
-                    }
-                    Ok(())
-                },
-                Mode::Compile => {
-                    let bytes = encoder::encode(&compiled);
-                    let name = format!("{}.o", view.name());
-                    fs::write(&name, bytes).map_err(|_| format!("Unable to write compiled code to file."))?;
-                    Ok(())
-                },
-                _ => run_vm(compiled, program_args, Some(view))
+    let text: String = fs::read_to_string(&name).map_err(|_| format!("Unable to read file '{}'", name))?;
+    let view: SourceView = SourceView::new(name, text);
+    let compiled: CompileResult = compiler::compile(enable_optimization, &view).map_err(|e| e.join("\n"))?;
+
+    match mode {
+        Mode::Disassembly => {
+            for line in compiled.disassemble(&view) {
+                println!("{}", line);
             }
+            Ok(())
         },
+        Mode::Default => run_vm(compiled, program_args, Some(view))
     }
 }
 
@@ -71,9 +57,7 @@ fn parse_args(args: Vec<String>) -> Result<(String, Mode, bool, Vec<String>), Op
                 print_help();
                 return Err(None);
             },
-            "-c" | "--compile" => mode.set(Mode::Compile)?,
             "-d" | "--disassembly" => mode.set(Mode::Disassembly)?,
-            "-e" | "--execute" => mode.set(Mode::Execute)?,
             "-o" | "--optimize" => {
                 enable_optimization = true;
             },
@@ -104,19 +88,18 @@ fn print_help() {
     println!("When invoked with no arguments, this will open a REPL for the Cordy language (exit with 'exit' or Ctrl-C)");
     println!("Options:");
     println!("  -h --help        : Show this message and then exit");
-    println!("  -c --compile     : Compile only. Outputs the compiled program to <file>.o");
     println!("  -d --disassembly : Dump the disassembly view. Use -o to dump to a file.");
     println!("  -o --optimize    : Enables compiler optimizations");
 }
 
 
 #[derive(Eq, PartialEq)]
-enum Mode { Default, Compile, Disassembly, Execute }
+enum Mode { Default, Disassembly }
 
 impl Mode {
     fn set(&mut self, new: Mode) -> Result<(), String> {
         if *self != Mode::Default {
-            Err(String::from("Must only specify one of --compile, --disassembly, or --execute"))
+            Err(String::from("Must only specify one of --disassembly"))
         } else {
             *self = new;
             Ok(())
