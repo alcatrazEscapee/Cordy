@@ -2,7 +2,7 @@ use std::{fs, io};
 
 use cordy::{compiler, encoder, repl};
 use cordy::compiler::CompileResult;
-use cordy::{AsError, SourceView};
+use cordy::SourceView;
 use cordy::vm::{ExitType, VirtualMachine};
 
 
@@ -19,7 +19,7 @@ fn main() {
 }
 
 fn run_main(args: Vec<String>) -> Result<(), String> {
-    let (mut name, mode, enable_optimization, program_args) = match parse_args(args) {
+    let (name, mode, enable_optimization, program_args) = match parse_args(args) {
         Ok(args) => args,
         Err(None) => return Ok(()),
         Err(Some(err)) => return Err(err),
@@ -33,7 +33,7 @@ fn run_main(args: Vec<String>) -> Result<(), String> {
         },
         _ => {
             let text: String = fs::read_to_string(&name).map_err(|_| format!("Unable to read file '{}'", name))?;
-            let view: SourceView = SourceView::new(&name, &text);
+            let view: SourceView = SourceView::new(name, text);
             let compiled: CompileResult = compiler::compile(enable_optimization, &view).map_err(|e| e.join("\n"))?;
 
             match mode {
@@ -45,8 +45,7 @@ fn run_main(args: Vec<String>) -> Result<(), String> {
                 },
                 Mode::Compile => {
                     let bytes = encoder::encode(&compiled);
-
-                    name.push_str(".o");
+                    let name = format!("{}.o", view.name());
                     fs::write(&name, bytes).map_err(|_| format!("Unable to write compiled code to file."))?;
                     Ok(())
                 },
@@ -89,16 +88,13 @@ fn parse_args(args: Vec<String>) -> Result<(String, Mode, bool, Vec<String>), Op
 }
 
 fn run_vm(compiled: CompileResult, program_args: Vec<String>, view: Option<SourceView>) -> Result<(), String> {
-    match {
-        let stdin = io::stdin().lock();
-        let stdout = io::stdout();
-        let mut vm = VirtualMachine::new(compiled, stdin, stdout, program_args);
-        vm.run_until_completion()
-    } {
-        ExitType::Error(error) => Err(match view {
-            Some(view) => format!("{}", view.format(&error)),
-            None =>  error.as_error(),
-        }),
+
+    let stdin = io::stdin().lock();
+    let stdout = io::stdout();
+    let mut vm = VirtualMachine::new(compiled, view.unwrap(), stdin, stdout, program_args);
+
+    match vm.run_until_completion() {
+        ExitType::Error(error) => Err(format!("{}", vm.view().format(&error))),
         _ => Ok(())
     }
 }
@@ -110,7 +106,6 @@ fn print_help() {
     println!("  -h --help        : Show this message and then exit");
     println!("  -c --compile     : Compile only. Outputs the compiled program to <file>.o");
     println!("  -d --disassembly : Dump the disassembly view. Use -o to dump to a file.");
-    println!("  -e --execute     : Execute the provided file as a compiled binary (with -c), rather than compling a text file");
     println!("  -o --optimize    : Enables compiler optimizations");
 }
 

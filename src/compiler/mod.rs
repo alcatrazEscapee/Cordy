@@ -18,7 +18,7 @@ pub fn compile(enable_optimization: bool, view: &SourceView) -> Result<CompileRe
     let mut errors: Vec<String> = Vec::new();
 
     // Scan
-    let scan_result: ScanResult = scanner::scan(view.text());
+    let scan_result: ScanResult = scanner::scan(view);
     if !scan_result.errors.is_empty() {
         for error in &scan_result.errors {
             errors.push(view.format(error));
@@ -42,10 +42,10 @@ pub fn compile(enable_optimization: bool, view: &SourceView) -> Result<CompileRe
 /// Performs an incremental compile, given the following input parameters.
 ///
 /// This is used for incremental REPL structure. The result will have a `Print` instead of a delayed pop (if needed), and end with a `Yield` instruction instead of `Exit`.
-pub fn incremental_compile(view: &SourceView, mut params: CompileParameters) -> IncrementalCompileResult {
+pub fn incremental_compile(mut params: CompileParameters) -> IncrementalCompileResult {
     // Stage changes, so an error or aborted compile doesn't overwrite the current valid compile state
     let state: CompileState = params.save();
-    let ret: IncrementalCompileResult = try_incremental_compile(view, &mut params, parser::RULE_REPL, true);
+    let ret: IncrementalCompileResult = try_incremental_compile(&mut params, parser::RULE_REPL, true);
 
     if !ret.is_success() { // Revert staged changes
         params.restore(state);
@@ -61,27 +61,24 @@ pub fn incremental_compile(view: &SourceView, mut params: CompileParameters) -> 
 ///
 /// This is the API used to run an `eval()` statement.
 pub fn eval_compile(text: &String, mut params: CompileParameters) -> Result<(), Box<RuntimeError>> {
-
-    let name: String = String::from("<eval>");
-    let view: SourceView = SourceView::new(&name, text);
-    let ret: IncrementalCompileResult = try_incremental_compile(&view, &mut params, parser::RULE_EVAL, false);
-
-    ret.as_ok_or_runtime_error()
+    params.view.push(String::from("<eval>"), text.clone());
+    try_incremental_compile(&mut params, parser::RULE_EVAL, false)
+        .as_ok_or_runtime_error()
 }
 
 
 
-fn try_incremental_compile(view: &SourceView, params: &mut CompileParameters, rule: ParseRule, abort_in_eof: bool) -> IncrementalCompileResult {
+fn try_incremental_compile(params: &mut CompileParameters, rule: ParseRule, abort_in_eof: bool) -> IncrementalCompileResult {
     let mut errors: Vec<String> = Vec::new();
 
     // Scan
-    let scan_result: ScanResult = scanner::scan(view.text());
+    let scan_result: ScanResult = scanner::scan(params.view);
     if !scan_result.errors.is_empty() {
         for error in &scan_result.errors {
             if error.is_eof() && abort_in_eof && errors.is_empty() {
                 return IncrementalCompileResult::Aborted;
             }
-            errors.push(view.format(error));
+            errors.push(params.view.format(error));
         }
         return IncrementalCompileResult::Errors(errors);
     }
@@ -93,7 +90,7 @@ fn try_incremental_compile(view: &SourceView, params: &mut CompileParameters, ru
             if error.is_eof() && abort_in_eof && errors.is_empty() {
                 return IncrementalCompileResult::Aborted;
             }
-            errors.push(view.format(error));
+            errors.push(params.view.format(error));
         }
         return IncrementalCompileResult::Errors(errors);
     }
@@ -113,6 +110,7 @@ pub struct CompileParameters<'a> {
     structs: &'a mut Vec<Rc<StructTypeImpl>>,
     locations: &'a mut Locations,
     globals: &'a mut Vec<String>,
+    view: &'a mut SourceView,
 }
 
 /// This is a cloned, static version of `CompileParameters`. The sole purpose is to create a save state, and restore after.
@@ -144,9 +142,10 @@ impl<'a> CompileParameters<'a> {
         functions: &'a mut Vec<Rc<FunctionImpl>>,
         structs: &'a mut Vec<Rc<StructTypeImpl>>,
         locations: &'a mut Locations,
-        globals: &'a mut Vec<String>
+        globals: &'a mut Vec<String>,
+        view: &'a mut SourceView,
     ) -> CompileParameters<'a> {
-        CompileParameters { enable_optimization, code, locals, fields, strings, constants, functions, structs, locations, globals }
+        CompileParameters { enable_optimization, code, locals, fields, strings, constants, functions, structs, locations, globals, view }
     }
 
     fn save(self: &Self) -> CompileState {

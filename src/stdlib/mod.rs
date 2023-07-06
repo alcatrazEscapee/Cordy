@@ -844,14 +844,14 @@ fn type_of(value: Value) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use crate::{compiler, stdlib};
+    use crate::{compiler, SourceView, stdlib};
     use crate::vm::{IntoValue, Value, VirtualInterface, VirtualMachine};
 
     #[test]
     fn test_consistency_condition() {
         // Asserts that `nargs < native.nargs()` is a sufficient condition for declaring a function is consistent
         let mut buffer = Vec::new();
-        let mut vm = VirtualMachine::new(compiler::default(), &b""[..], &mut buffer, vec![]);
+        let mut vm = VirtualMachine::new(compiler::default(), SourceView::new(String::new(), String::new()), &b""[..], &mut buffer, vec![]);
 
         for native in stdlib::NATIVE_FUNCTIONS.iter() {
             match native.nargs {

@@ -14,7 +14,7 @@ use crate::trace;
 use crate::reporting::{Location, Locations};
 
 pub use crate::compiler::parser::errors::{ParserError, ParserErrorType};
-pub use crate::compiler::parser::semantic::{Locals, Fields};
+pub use crate::compiler::parser::semantic::{Fields, Locals};
 
 use NativeFunction::{*};
 use Opcode::{*};
@@ -1903,13 +1903,11 @@ impl Parser<'_> {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-
     use crate::compiler::{CompileResult, parser, scanner};
     use crate::compiler::scanner::ScanResult;
     use crate::reporting::SourceView;
     use crate::stdlib::NativeFunction;
-    use crate::trace;
+    use crate::misc;
     use crate::vm::Opcode;
     use crate::vm::operator::{BinaryOp, UnaryOp};
 
@@ -2029,7 +2027,7 @@ mod tests {
 
 
     fn run_expr(text: &'static str, expected: Vec<Opcode>) {
-        let result: ScanResult = scanner::scan(&String::from(text));
+        let result: ScanResult = scanner::scan(&SourceView::new(String::new(), String::from(text)));
         assert!(result.errors.is_empty());
 
         let compile = parser::parse(false, result);
@@ -2054,11 +2052,8 @@ mod tests {
     }
 
     fn run_err(text: &'static str, expected: &'static str) {
-        let text: String = String::from(text);
-        let name: String = String::from("<test>");
-        let view: SourceView = SourceView::new(&name, &text);
-
-        let scan_result: ScanResult = scanner::scan(&text);
+        let view: SourceView = SourceView::new(String::from("<test>"), String::from(text));
+        let scan_result: ScanResult = scanner::scan(&view);
         assert!(scan_result.errors.is_empty());
 
         let compile: CompileResult = parser::parse(false, scan_result);
@@ -2073,22 +2068,19 @@ mod tests {
     }
 
     fn run(path: &'static str) {
-        let root: PathBuf = trace::get_test_resource_path("parser", path);
-        let text: String = trace::get_test_resource_src(&root);
-        let name: String = format!("{}.cor", path);
-        let view: SourceView = SourceView::new(&name, &text);
-
-        let scan_result: ScanResult = scanner::scan(&text);
+        let resource = misc::test::get_resource("parser", path);
+        let view: SourceView = resource.view();
+        let scan_result: ScanResult = scanner::scan(&view);
         assert!(scan_result.errors.is_empty());
 
         let parse_result: CompileResult = parser::parse(false, scan_result);
-        let mut lines: Vec<String> = parse_result.disassemble(&view);
+        let mut actual: Vec<String> = parse_result.disassemble(&view);
         if !parse_result.errors.is_empty() {
             for error in &parse_result.errors {
-                lines.push(view.format(error));
+                actual.push(view.format(error));
             }
         }
 
-        trace::compare_test_resource_content(&root, lines);
+        resource.compare(actual)
     }
 }

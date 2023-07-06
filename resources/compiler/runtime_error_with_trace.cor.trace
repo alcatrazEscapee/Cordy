@@ -2,7 +2,7 @@ in h()
 in g()
 in f()
 TypeError: Cannot add 'print' of type 'native function' and '1' of type 'int'
-  at: line 6 (<test>)
+  at: line 6 (runtime_error_with_trace.cor)
   at: `fn f()` (line 11)
   at: `fn g()` (line 16)
   at: `fn h()` (line 19)

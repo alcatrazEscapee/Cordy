@@ -4,17 +4,20 @@ use std::num::ParseIntError;
 use std::str::Chars;
 
 use crate::reporting::{AsErrorWithContext, Location};
+use crate::SourceView;
 
 use self::ScanErrorType::{*};
 use self::ScanToken::{*};
 
 
-pub fn scan(text: &String) -> ScanResult {
+pub fn scan(view: &SourceView) -> ScanResult {
+    let text = view.text();
     let mut scanner: Scanner = Scanner {
         chars: text.chars().peekable(),
         tokens: Vec::new(),
         errors: Vec::new(),
         cursor: 0,
+        index: view.index(),
     };
     scanner.scan();
     ScanResult {
@@ -157,6 +160,7 @@ struct Scanner<'a> {
     tokens: Vec<(Location, ScanToken)>,
     errors: Vec<ScanError>,
     cursor: usize,
+    index: u32,
 }
 
 
@@ -278,7 +282,7 @@ impl<'a> Scanner<'a> {
                                        // It makes it much easier to read.
                                        self.errors.push(ScanError {
                                            error: UnterminatedStringLiteral,
-                                           loc: Location::new(start, self.cursor - start + 1)
+                                           loc: Location::new(start, (self.cursor - start) as u32 + 1, self.index)
                                        });
                                        break
                                    }
@@ -510,19 +514,17 @@ impl<'a> Scanner<'a> {
     }
 
     fn location(self: &Self, width: usize) -> Location {
-        Location::new(self.cursor - width, width)
+        Location::new(self.cursor - width, width as u32, self.index)
     }
 }
 
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-
     use crate::compiler::scanner;
     use crate::compiler::scanner::{ScanResult, ScanToken};
     use crate::reporting::SourceView;
-    use crate::trace;
+    use crate::misc;
 
     use ScanToken::{*};
 
@@ -545,8 +547,17 @@ mod tests {
     #[test] fn test_groupings() { run_str("( [ { } ] )", vec![OpenParen, OpenSquareBracket, OpenBrace, CloseBrace, CloseSquareBracket, CloseParen]); }
     #[test] fn test_syntax() { run_str(". .. ... .= , -> - > : @", vec![Dot, Dot, Dot, Ellipsis, DotEquals, Comma, Arrow, Minus, GreaterThan, Colon, At]); }
 
+
+    #[test] fn test_hello_world() { run("hello_world"); }
+    #[test] fn test_invalid_character() { run("invalid_character"); }
+    #[test] fn test_invalid_numeric_value() { run("invalid_numeric_value"); }
+    #[test] fn test_string_with_newlines() { run("string_with_newlines"); }
+    #[test] fn test_unterminated_string_literal() { run("unterminated_string_literal"); }
+
+
     fn run_str(text: &str, expected: Vec<ScanToken>) {
-        let result: ScanResult = scanner::scan(&String::from(text));
+        let view: SourceView = SourceView::new(String::new(), String::from(text));
+        let result: ScanResult = scanner::scan(&view);
         let actual: Vec<ScanToken> = result.tokens
             .into_iter()
             .map(|c| c.1)
@@ -556,39 +567,29 @@ mod tests {
         assert_eq!(expected, actual);
     }
 
-
-    #[test] fn test_hello_world() { run("hello_world"); }
-    #[test] fn test_invalid_character() { run("invalid_character"); }
-    #[test] fn test_invalid_numeric_value() { run("invalid_numeric_value"); }
-    #[test] fn test_string_with_newlines() { run("string_with_newlines"); }
-    #[test] fn test_unterminated_string_literal() { run("unterminated_string_literal"); }
-
-
     fn run(path: &'static str) {
-        let root: PathBuf = trace::get_test_resource_path("scanner", path);
-        let text: String = trace::get_test_resource_src(&root);
-        let result: ScanResult = scanner::scan(&text);
-        let name: String = String::from(path);
-        let formatter: SourceView = SourceView::new(&name, &text);
+        let resource = misc::test::get_resource("scanner", path);
+        let view = resource.view();
+        let result: ScanResult = scanner::scan(&view);
 
-        let mut lines: Vec<String> = Vec::new();
+        let mut actual: Vec<String> = Vec::new();
         if !result.tokens.is_empty() {
-            lines.push(String::from("=== Scan Tokens ===\n"));
+            actual.push(String::from("=== Scan Tokens ===\n"));
             for token in result.tokens {
-                lines.push(format!("{:?}", token.1));
+                actual.push(format!("{:?}", token.1));
             }
         }
         if !result.errors.is_empty() {
-            lines.push(String::from("\n=== Scan Errors ===\n"));
+            actual.push(String::from("\n=== Scan Errors ===\n"));
             for error in &result.errors {
-                lines.push(format!("{:?}", error));
+                actual.push(format!("{:?}", error));
             }
-            lines.push(String::from("\n=== Formatted Scan Errors ===\n"));
+            actual.push(String::from("\n=== Formatted Scan Errors ===\n"));
             for error in &result.errors {
-                lines.push(formatter.format(error))
+                actual.push(view.format(error))
             }
         }
 
-        trace::compare_test_resource_content(&root, lines);
+        resource.compare(actual);
     }
 }
