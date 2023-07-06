@@ -26,13 +26,12 @@ pub trait Repl {
 /// If `repeat_input` is true, everything written to input will be written directly back to output via the VM's `println` functions
 /// This is used for testing purposes, as the `writer` must be given soley to the VM for output purposes.
 fn run<R : Repl, W: Write>(mut reader: R, writer: W, repeat_input: bool) -> Result<(), String> {
-    let name = &String::from("<stdin>");
-    let mut buffer: String = String::new();
     let mut continuation: bool = false;
 
     // Retain local variables through the entire lifetime of the REPL
+    let view: SourceView = SourceView::new(String::from("<stdin>"), String::new());
     let mut locals = Locals::empty();
-    let mut vm = VirtualMachine::new(compiler::default(), &b""[..], writer, vec![]);
+    let mut vm = VirtualMachine::new(compiler::default(), view, &b""[..], writer, vec![]);
 
     loop {
         let prompt: &'static str = if continuation { "... " } else { ">>> " };
@@ -60,18 +59,20 @@ fn run<R : Repl, W: Write>(mut reader: R, writer: W, repeat_input: bool) -> Resu
             _ => {},
         }
 
+        let buffer = vm.view_mut().text_mut();
+
         buffer.push_str(line.as_str());
         buffer.push('\n');
         continuation = false;
 
-        let view: SourceView = SourceView::new(name, &buffer);
-        match vm.incremental_compile(&view, &mut locals) {
+
+        match vm.incremental_compile(&mut locals) {
             IncrementalCompileResult::Success => {},
             IncrementalCompileResult::Errors(errors) => {
                 for e in errors {
                     vm.println(e);
                 }
-                buffer.clear();
+                vm.view_mut().push(String::from("<stdin>"), String::new());
                 continue
             },
             IncrementalCompileResult::Aborted => {
@@ -83,10 +84,10 @@ fn run<R : Repl, W: Write>(mut reader: R, writer: W, repeat_input: bool) -> Resu
         match vm.run_until_completion() {
             ExitType::Exit | ExitType::Return => return Ok(()),
             ExitType::Yield => {},
-            ExitType::Error(error) => vm.println(view.format(&error)),
+            ExitType::Error(error) => vm.println(vm.view().format(&error)),
         }
 
-        buffer.clear();
+        vm.view_mut().push(String::from("<stdin>"), String::new());
         vm.run_recovery(locals[0].len());
     }
 }
@@ -201,9 +202,15 @@ nil
 fn foo() -> print + 1
 foo()
 ", "\
->>> fn foo() -> print + 1\
->>> foo()\
-error\
+>>> fn foo() -> print + 1
+>>> foo()
+TypeError: Cannot add 'print' of type 'native function' and '1' of type 'int'
+  at: line 1 (<stdin>)
+  at: `fn foo()` (line 1)
+
+1 | fn foo() -> print + 1
+2 |                   ^
+
 ")}
 
     fn run(inputs: &'static str, outputs: &'static str) {

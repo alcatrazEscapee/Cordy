@@ -1,3 +1,4 @@
+use std::cell::{Ref, RefCell};
 use std::ops::{BitOr, BitOrAssign};
 use std::rc::Rc;
 
@@ -8,35 +9,35 @@ use crate::vm::operator::{BinaryOp, UnaryOp};
 
 pub type Locations = Vec<Location>;
 
-const EMPTY: Location = Location { start: 0, width: 0 };
 
-
-/// A closed interval of a source code location.
+/// `Location` represents a position in the source code.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct Location {
     /// Start character index, inclusive
     start: usize,
     /// Total width of the location. A width of `0` indicates this is an empty location.
-    width: usize,
+    width: u32,
+    /// Index of this location.
+    /// The index refers to which source view the location refers to, which may matter if there are more than one (for example, in `eval` or incremental compiles)
+    index: u32,
 }
 
 impl Location {
     /// Creates a new location from a given start cursor and width
-    pub fn new(start: usize, width: usize) -> Location {
-        Location { start, width }
+    pub fn new(start: usize, width: u32, index: u32) -> Location {
+        Location { start, width, index }
     }
 
     /// Returns a sentinel empty location
-    #[inline]
     pub fn empty() -> Location {
-        EMPTY
+        Location::new(0, 0, 0)
     }
 
     /// Returns the start pointer of the location, inclusive
     pub fn start(self: &Self) -> usize { self.start }
 
     /// Returns the end pointer of the location, inclusive
-    pub fn end(self: &Self) -> usize { self.start + self.width - 1 }
+    pub fn end(self: &Self) -> usize { self.start + self.width as usize - 1 }
 
     // Returns `true` if the location is empty, i.e. zero width
     pub fn is_empty(self: &Self) -> bool { self.width == 0 }
@@ -46,39 +47,203 @@ impl BitOr for Location {
     type Output = Location;
 
     fn bitor(self, rhs: Self) -> Self::Output {
+        debug_assert_eq!(self.index, rhs.index);
+
         let start = self.start.min(rhs.start);
         let end = self.end().max(rhs.end());
-        Location::new(start, end - start + 1)
+        Location::new(start, (end - start + 1) as u32, self.index)
     }
 }
 
 impl BitOrAssign for Location {
     fn bitor_assign(&mut self, rhs: Self) {
+        debug_assert_eq!(self.index, rhs.index);
+
         let start = self.start.min(rhs.start);
         let end = self.end().max(rhs.end());
 
         self.start = start;
-        self.width = end - start + 1;
+        self.width = (end - start + 1) as u32;
+    }
+}
+
+
+/// An indexed view of source code, in the form of a vector of all source code entries.
+///
+/// Entries are indexed according to the `index` field in a `Location`.
+/// New locations are always created at the highest index.
+#[derive(Debug)]
+pub struct SourceView(Vec<SourceEntry>);
+
+#[derive(Debug)]
+struct SourceEntry {
+    /// The name of the entry.
+    /// For external inputs this will be the name of the file, for incremental compiles this can be `<eval>`, `<stdin>`, etc.
+    name: String,
+
+    /// The raw text source code of the entry.
+    /// This is the sequence which `Location`s are indexes into.
+    text: String,
+
+    /// Lazily populated index data
+    index: RefCell<Option<SourceIndex>>,
+}
+
+#[derive(Debug)]
+struct SourceIndex {
+    /// The raw text, split into lines, with `\r` and `\n` characters removed.
+    lines: Vec<String>,
+
+    /// A vector of starting character indices.
+    /// `starts[i]` represents the location index of the first character in this line.
+    starts: Vec<usize>,
+}
+
+impl SourceView {
+
+    pub fn new(name: String, text: String) -> SourceView {
+        let mut view = SourceView(Vec::new());
+        view.push(name, text);
+        view
+    }
+
+    /// Returns the name of the currently active entry.
+    pub fn name(self: &Self) -> &String {
+        &self.0.last().unwrap().name
+    }
+
+    /// Returns the source code of the currently active entry.
+    pub fn text(self: &Self) -> &String {
+        &self.0.last().unwrap().text
+    }
+
+    /// Returns a mutable reference to the source code buffer of the currently active entry.
+    pub fn text_mut(self: &mut Self) -> &mut String {
+        &mut self.0.last_mut().unwrap().text
+    }
+
+    /// Returns the currently active entry index.
+    pub fn index(self: &Self) -> u32 {
+        self.0.len() as u32 - 1
+    }
+
+    /// Returns the length (number of lines) of the currently active entry.
+    pub fn len(self: &Self) -> usize {
+        self.0.last().unwrap().index().lines.len()
+    }
+
+    pub fn lineno(self: &Self, loc: Location) -> usize {
+        self.0[loc.index as usize].lineno(loc)
+    }
+
+    pub fn push(self: &mut Self, name: String, text: String) {
+        self.0.push(SourceEntry { name, text, index: RefCell::new(None) });
+    }
+
+    pub fn format<E : AsErrorWithContext>(self: &Self, error: &E) -> String {
+        self.0[error.location().index as usize].format(self, error)
+    }
+}
+
+
+impl SourceEntry {
+
+    pub fn lineno(self: &Self, loc: Location) -> usize {
+        if loc.is_empty() {
+            self.index().lines.len() - 1
+        } else {
+            self.index().starts.partition_point(|u| u <= &loc.start) - 1
+        }
+    }
+
+    fn format<E : AsErrorWithContext>(self: &Self, view: &SourceView, error: &E) -> String {
+        let mut text = error.as_error();
+        let index: Ref<'_, SourceIndex> = self.index();
+        let loc = error.location();
+        let start_lineno = self.lineno(loc);
+        let mut end_lineno = start_lineno;
+
+        if !loc.is_empty() {
+            while index.starts[end_lineno + 1] < loc.end() {
+                end_lineno += 1;
+            }
+        }
+
+        debug_assert!(start_lineno < index.lines.len());
+        debug_assert!(end_lineno >= start_lineno && end_lineno < index.lines.len());
+
+        let lineno = if start_lineno == end_lineno {
+            format!("{}", start_lineno + 1)
+        } else {
+            format!("{} - {}", start_lineno + 1, end_lineno + 1)
+        };
+
+        let width: usize = format!("{}", end_lineno + 2).len();
+
+        text.push_str(format!("\n  at: line {} ({})\n", lineno, self.name).as_str());
+        error.add_stack_trace_elements(view, &mut text);
+        text.push('\n');
+
+        for i in start_lineno..=end_lineno {
+            let line = &index.lines[i];
+            text.push_str(format!("{:width$} |", i + 1, width = width).as_str());
+            if !line.is_empty() {
+                text.push(' ');
+                text.push_str(line.as_str());
+            }
+            text.push('\n');
+        }
+
+        let (start_col, end_col) = if loc.is_empty() {
+            let last_col: usize = index.lines[end_lineno].len();
+            (last_col + 1, last_col + 3)
+        } else {
+            (loc.start - index.starts[start_lineno], loc.end() - index.starts[end_lineno])
+        };
+
+        text.push_str(format!("{:width$} |", end_lineno + 2, width = width).as_str());
+
+        if start_lineno == end_lineno {
+            // Single line error, so point to the exact column start + end
+            for _ in 0..=start_col { text.push(' '); }
+            for _ in start_col..=end_col { text.push('^'); }
+        } else {
+            // For multi-line errors, just point directly up across the entire bottom line
+            let longest_line_len: usize = (start_lineno..=end_lineno)
+                .map(|u| index.lines[u].len())
+                .max()
+                .unwrap();
+            if longest_line_len > 0 {
+                text.push(' ');
+                for _ in 0..longest_line_len { text.push('^'); }
+            }
+        }
+        text.push('\n');
+        text
+    }
+
+    fn index(self: &Self) -> Ref<'_, SourceIndex> {
+        if self.index.borrow().is_none() {
+            let mut lines: Vec<String> = Vec::new();
+            let mut starts: Vec<usize> = Vec::new();
+            let mut start = 0;
+
+            for line in self.text.split('\n') {
+                lines.push(String::from(line.strip_suffix('\r').unwrap_or(line)));
+                starts.push(start);
+                start += line.len() + 1;
+            }
+
+            starts.push(start);
+
+            *self.index.borrow_mut() = Some(SourceIndex { starts, lines })
+        }
+        Ref::map(self.index.borrow(), |u| u.as_ref().unwrap())
     }
 }
 
 
 
-/// Indexed source code information.
-/// This is used to report errors in a readable fashion, by resolving `Location` references to a line and column number.
-#[derive(Debug, Clone)]
-pub struct SourceView<'a> {
-    name: &'a String,
-
-    text: &'a String,
-
-    lines: Vec<&'a str>,
-    starts: Vec<usize>,
-}
-
-impl<'a> SourceView<'a> {
-    pub fn text(self: &Self) -> &'a String { self.text }
-}
 
 /// A simple common trait for converting arbitrary objects to human-readable errors
 /// This could be implemented directly on the types, but using the trait allows all end-user-exposed text to be concentrated in this module.
@@ -94,109 +259,6 @@ pub trait AsErrorWithContext: AsError {
     /// When formatting a `RuntimeError`, allows inserting additional stack trace elements.
     /// This is appended *after* the initial `at: line X (source file)` line is appended.
     fn add_stack_trace_elements(self: &Self, _: &SourceView, _: &mut String) {}
-}
-
-
-
-impl<'a> SourceView<'a> {
-
-    pub fn new(name: &'a String, text: &'a String) -> SourceView<'a> {
-        let mut lines: Vec<&'a str> = Vec::new();
-        let mut starts: Vec<usize> = Vec::new();
-        let mut start = 0;
-
-        for line in text.split('\n') {
-            lines.push(line.strip_suffix('\r').unwrap_or(line));
-            starts.push(start);
-            start += line.len() + 1;
-        }
-
-        starts.push(start);
-
-        SourceView {
-            name,
-            text,
-            lines,
-            starts,
-        }
-    }
-
-    pub fn len(self: &Self) -> usize {
-        self.lines.len()
-    }
-
-    pub fn lineno(self: &Self, loc: Location) -> usize {
-        if loc.is_empty() {
-            self.len() - 1
-        } else {
-            self.starts.partition_point(|u| u <= &loc.start) - 1
-        }
-    }
-
-    pub fn format<E : AsErrorWithContext>(self: &Self, error: &E) -> String {
-        let mut text = error.as_error();
-        let loc = error.location();
-        let start_lineno = self.lineno(loc);
-        let mut end_lineno = start_lineno;
-
-        if !loc.is_empty() {
-            while self.starts[end_lineno + 1] < loc.end() {
-                end_lineno += 1;
-            }
-        }
-
-        debug_assert!(start_lineno < self.lines.len());
-        debug_assert!(end_lineno >= start_lineno && end_lineno < self.lines.len());
-
-        let lineno = if start_lineno == end_lineno {
-            format!("{}", start_lineno + 1)
-        } else {
-            format!("{} - {}", start_lineno + 1, end_lineno + 1)
-        };
-
-        let width: usize = format!("{}", end_lineno + 2).len();
-
-        text.push_str(format!("\n  at: line {} ({})\n", lineno, self.name).as_str());
-        error.add_stack_trace_elements(self, &mut text);
-        text.push('\n');
-
-        for i in start_lineno..=end_lineno {
-            let line = self.lines[i];
-            text.push_str(format!("{:width$} |", i + 1, width = width).as_str());
-            if !line.is_empty() {
-                text.push(' ');
-                text.push_str(line);
-            }
-            text.push('\n');
-        }
-
-        let (start_col, end_col) = if loc.is_empty() {
-            let last_col: usize = self.lines[end_lineno].len();
-            (last_col + 1, last_col + 3)
-        } else {
-            (loc.start - self.starts[start_lineno], loc.end() - self.starts[end_lineno])
-        };
-
-        text.push_str(format!("{:width$} |", end_lineno + 2, width = width).as_str());
-
-        if start_lineno == end_lineno {
-            // Single line error, so point to the exact column start + end
-            for _ in 0..=start_col { text.push(' '); }
-            for _ in start_col..=end_col { text.push('^'); }
-        } else {
-            // For multi-line errors, just point directly up across the entire bottom line
-            let longest_line_len: usize = (start_lineno..=end_lineno)
-                .map(|u| self.lines[u].len())
-                .max()
-                .unwrap();
-            if longest_line_len > 0 {
-                text.push(' ');
-                for _ in 0..longest_line_len { text.push('^'); }
-            }
-        }
-        text.push('\n');
-        text
-    }
 }
 
 
@@ -484,15 +546,15 @@ mod tests {
 
     #[test]
     fn test_or_location() {
-        let l1 = Location::new(0, 5);
-        let l2 = Location::new(8, 2);
+        let l1 = Location::new(0, 5, 0);
+        let l2 = Location::new(8, 2, 0);
 
-        assert_eq!(l1 | l2, Location::new(0, 10));
+        assert_eq!(l1 | l2, Location::new(0, 10, 0));
 
-        let mut l3 = Location::new(2, 4);
+        let mut l3 = Location::new(2, 4, 0);
         l3 |= l1;
 
-        assert_eq!(l3, Location::new(0, 6));
+        assert_eq!(l3, Location::new(0, 6, 0));
     }
 
     #[test]
@@ -592,10 +654,9 @@ mod tests {
     impl AsErrorWithContext for MockError { fn location(self: &Self) -> Location { self.1 } }
 
     fn run(start: usize, end: usize, expected: &'static str) {
-        let name = String::from("<test>");
         let text = String::from("first += line\nsecond line?\nthird line\r\nwindows line\n\nempty\r\n\r\nmore empty");
-        let src = SourceView::new(&name, &text);
-        let error = src.format(&MockError("Error", Location::new(start, end - start + 1)));
+        let src = SourceView::new(String::from("<test>"), text);
+        let error = src.format(&MockError("Error", Location::new(start, (end - start + 1) as u32, 0)));
 
         assert_eq!(error.as_str(), expected);
     }

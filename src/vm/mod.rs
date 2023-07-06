@@ -10,11 +10,11 @@ use crate::compiler::{CompileParameters, CompileResult, Fields, IncrementalCompi
 use crate::stdlib::NativeFunction;
 use crate::vm::value::{PartialFunctionImpl, UpValue};
 use crate::misc::OffsetAdd;
-use crate::reporting::{Locations, SourceView};
+use crate::reporting::{Location, SourceView};
 
 pub use crate::vm::error::{DetailRuntimeError, RuntimeError};
 pub use crate::vm::opcode::Opcode;
-pub use crate::vm::value::{FunctionImpl, StructTypeImpl, IntoDictValue, IntoIterableValue, IntoValue, IntoValueResult, Iterable, Value, guard_recursive_hash};
+pub use crate::vm::value::{FunctionImpl, guard_recursive_hash, IntoDictValue, IntoIterableValue, IntoValue, IntoValueResult, Iterable, StructTypeImpl, Value};
 
 use Opcode::{*};
 use RuntimeError::{*};
@@ -32,8 +32,8 @@ mod error;
 pub struct VirtualMachine<R, W> {
     ip: usize,
     code: Vec<Opcode>,
-    pub stack: Vec<Value>,
-    pub call_stack: Vec<CallFrame>,
+    stack: Vec<Value>,
+    call_stack: Vec<CallFrame>,
     global_count: usize,
     open_upvalues: HashMap<usize, Rc<Cell<UpValue>>>,
     unroll_stack: Vec<i32>,
@@ -43,9 +43,10 @@ pub struct VirtualMachine<R, W> {
     constants: Vec<i64>,
     functions: Vec<Rc<FunctionImpl>>,
     structs: Vec<Rc<StructTypeImpl>>,
-    locations: Locations,
+    locations: Vec<Location>,
     fields: Fields,
 
+    view: SourceView,
     read: R,
     write: W,
     args: Value,
@@ -119,7 +120,7 @@ impl<R, W> VirtualMachine<R, W> where
     R: BufRead,
     W: Write {
 
-    pub fn new(result: CompileResult, read: R, write: W, args: Vec<String>) -> VirtualMachine<R, W> {
+    pub fn new(result: CompileResult, view: SourceView, read: R, write: W, args: Vec<String>) -> VirtualMachine<R, W> {
         VirtualMachine {
             ip: 0,
             code: result.code,
@@ -137,15 +138,24 @@ impl<R, W> VirtualMachine<R, W> where
             locations: result.locations,
             fields: result.fields,
 
+            view,
             read,
             write,
             args: args.into_iter().map(|u| u.to_value()).to_list(),
         }
     }
 
+    pub fn view(self: &Self) -> &SourceView {
+        &self.view
+    }
+
+    pub fn view_mut(self: &mut Self) -> &mut SourceView {
+        &mut self.view
+    }
+
     /// Bridge method to `compiler::incremental_compile`
-    pub fn incremental_compile(self: &mut Self, view: &SourceView, locals: &mut Vec<Locals>) -> IncrementalCompileResult {
-        compiler::incremental_compile(view, self.as_compile_parameters(false, locals))
+    pub fn incremental_compile(self: &mut Self, locals: &mut Vec<Locals>) -> IncrementalCompileResult {
+        compiler::incremental_compile(self.as_compile_parameters(false, locals))
     }
 
     /// Bridge method to `compiler::eval_compile`
@@ -155,7 +165,7 @@ impl<R, W> VirtualMachine<R, W> where
     }
 
     fn as_compile_parameters<'a, 'b: 'a, 'c: 'a>(self: &'b mut Self, enable_optimization: bool, locals: &'c mut Vec<Locals>) -> CompileParameters<'a> {
-        CompileParameters::new(enable_optimization, &mut self.code, locals, &mut self.fields, &mut self.strings, &mut self.constants, &mut self.functions, &mut self.structs, &mut self.locations, &mut self.globals)
+        CompileParameters::new(enable_optimization, &mut self.code, locals, &mut self.fields, &mut self.strings, &mut self.constants, &mut self.functions, &mut self.structs, &mut self.locations, &mut self.globals, &mut self.view)
     }
 
     pub fn run_until_completion(self: &mut Self) -> ExitType {
@@ -1013,9 +1023,7 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
 
 #[cfg(test)]
 mod test {
-    use std::path::PathBuf;
-
-    use crate::{compiler, trace};
+    use crate::{compiler, misc};
     use crate::reporting::SourceView;
     use crate::vm::{ExitType, VirtualMachine};
 
@@ -1707,7 +1715,8 @@ mod test {
     #[test] fn test_func_var_args_7() { run_str("fn foo(a, b?, *c) -> print(a, b, c) ; foo(1, 2, 3)", "1 2 (3)\n"); }
     #[test] fn test_func_var_args_8() { run_str("fn foo(a, b?, *c) -> print(a, b, c) ; foo(1, 2, 3, 4)", "1 2 (3, 4)\n"); }
     #[test] fn test_func_var_args_9() { run_str("fn foo(a, b?, *c) -> print(a, b, c) ; foo(1, 2, 3, 4, 5)", "1 2 (3, 4, 5)\n"); }
-    #[test] fn test_malicious_eval_error() { run_str("eval('%sfn() -> print + 1' % (' ' * 100))()", "\n"); }
+    #[test] fn test_malicious_eval_error_1() { run_str("eval('%sprint + 1' % (' ' * 100))", "TypeError: Cannot add 'print' of type 'native function' and '1' of type 'int'\n  at: line 1 (<eval>)\n  at: `<script>` (line 1)\n\n1 |                                                                                                     print + 1\n2 |                                                                                                           ^\n"); }
+    #[test] fn test_malicious_eval_error_2() { run_str("eval('%sfn() -> print + 1' % (' ' * 100))()", "TypeError: Cannot add 'print' of type 'native function' and '1' of type 'int'\n  at: line 1 (<eval>)\n  at: `fn _()` (line 1)\n\n1 |                                                                                                     fn() -> print + 1\n2 |                                                                                                                   ^\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }
@@ -1751,9 +1760,7 @@ mod test {
 
 
     fn run_str(text: &'static str, expected: &'static str) {
-        let text: String = String::from(text);
-        let name: String = String::from("<test>");
-        let view: SourceView = SourceView::new(&name, &text);
+        let view: SourceView = SourceView::new(String::from("<test>"), String::from(text));
         let compile = compiler::compile(true, &view);
 
         if compile.is_err() {
@@ -1768,25 +1775,25 @@ mod test {
         }
 
         let mut buf: Vec<u8> = Vec::new();
-        let mut vm = VirtualMachine::new(compile, &b""[..], &mut buf, vec![]);
+        let mut vm = VirtualMachine::new(compile, view, &b""[..], &mut buf, vec![]);
 
         let result: ExitType = vm.run_until_completion();
         assert!(vm.stack.is_empty() || result.is_early_exit());
 
+        let view: SourceView = vm.view;
         let mut output: String = String::from_utf8(buf).unwrap();
 
         if let ExitType::Error(error) = result {
             output.push_str(view.format(&error).as_str());
         }
 
+        dbg!(view);
         assert_eq!(output.as_str(), expected);
     }
 
     fn run(path: &'static str) {
-        let root: PathBuf = trace::get_test_resource_path("compiler", path);
-        let text: String = trace::get_test_resource_src(&root);
-        let name: String = String::from("<test>");
-        let view: SourceView = SourceView::new(&name, &text);
+        let resource = misc::test::get_resource("compiler", path);
+        let view: SourceView = resource.view();
         let compile= compiler::compile(true, &view);
 
         if compile.is_err() {
@@ -1801,17 +1808,18 @@ mod test {
         }
 
         let mut buf: Vec<u8> = Vec::new();
-        let mut vm = VirtualMachine::new(compile, &b""[..], &mut buf, vec![]);
+        let mut vm = VirtualMachine::new(compile, view, &b""[..], &mut buf, vec![]);
 
         let result: ExitType = vm.run_until_completion();
         assert!(vm.stack.is_empty() || result.is_early_exit());
 
+        let view: SourceView = vm.view;
         let mut output: String = String::from_utf8(buf).unwrap();
 
         if let ExitType::Error(error) = result {
             output.push_str(view.format(&error).as_str());
         }
 
-        trace::compare_test_resource_content(&root, output.split("\n").map(|s| String::from(s)).collect::<Vec<String>>());
+        resource.compare(output.split("\n").map(String::from).collect::<Vec<String>>());
     }
 }
