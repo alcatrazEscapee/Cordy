@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 
-use crate::stdlib;
-use crate::stdlib::NativeFunction;
+use crate::core;
+use crate::core::NativeFunction;
 use crate::vm::ValueResult;
 use crate::vm::error::RuntimeError;
 use crate::vm::value::{IntoIterableValue, IntoValue, IntoValueResult, Mut, Value};
@@ -132,7 +132,7 @@ pub fn binary_mod(a1: Value, a2: Value) -> ValueResult {
                 ValueErrorValueMustBePositive(i2).err()
             }
         }
-        (Str(l), r) => stdlib::format_string(&*l, r),
+        (Str(l), r) => core::format_string(&*l, r),
         (Vector(l), Vector(r)) => apply_vector_binary(l, r, binary_mod),
         (Vector(l), r) => apply_vector_binary_scalar_rhs(l, r, binary_mod),
         (l, Vector(r)) => apply_vector_binary_scalar_lhs(l, r, binary_mod),

@@ -24,7 +24,7 @@ pub trait Repl {
 }
 
 /// If `repeat_input` is true, everything written to input will be written directly back to output via the VM's `println` functions
-/// This is used for testing purposes, as the `writer` must be given soley to the VM for output purposes.
+/// This is used for testing purposes, as the `writer` must be given solely to the VM for output purposes.
 fn run<R : Repl, W: Write>(mut reader: R, writer: W, repeat_input: bool) -> Result<(), String> {
     let mut continuation: bool = false;
 
@@ -213,8 +213,37 @@ TypeError: Cannot add 'print' of type 'native function' and '1' of type 'int'
 
 ")}
 
+    #[test] fn test_locals_are_retained_between_incremental_compiles() { run("\
+let x = 2, y = 4
+#stack
+x
+x + y
+y += x
+let z = y * 2
+z
+#stack
+", "\
+>>> let x = 2, y = 4
+>>> #stack
+: [4: int, 2: int]
+>>> x
+2
+>>> x + y
+6
+>>> y += x
+6
+>>> let z = y * 2
+>>> z
+12
+>>> #stack
+: [12: int, 6: int, 2: int]
+")}
+
     fn run(inputs: &'static str, outputs: &'static str) {
-        let repl: Vec<String> = inputs.lines().rev().map(String::from).collect();
+        let repl: Vec<String> = inputs.lines()
+            .rev() // rev() because we pop from the end, but list them sequentially.
+            .map(String::from)
+            .collect();
         let mut buf: Vec<u8> = Vec::new();
         let result = repl::run(repl, &mut buf, true);
 

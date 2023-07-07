@@ -7,7 +7,7 @@ use crate::vm::{operator, IntoIterableValue, IntoValue, IntoValueResult, Value, 
 use crate::vm::operator::BinaryOp;
 use crate::{trace, vm};
 
-pub use crate::stdlib::collections::{list_slice, literal_slice, to_index};
+pub use crate::core::collections::{list_slice, literal_slice, to_index};
 
 use NativeFunction::{*};
 use RuntimeError::{*};
@@ -387,7 +387,7 @@ fn load_native_functions() -> Vec<NativeFunctionInfo> {
 #[allow(unused_variables)]
 pub fn invoke<VM>(native: NativeFunction, nargs: u32, vm: &mut VM) -> ValueResult where VM : VirtualInterface
 {
-    trace::trace_interpreter!("stdlib::invoke() func={}, nargs={}", native.name(), nargs);
+    trace::trace_interpreter!("core::invoke native={}, nargs={}", native.name(), nargs);
 
     // Dispatch macros for 0, 1, 2, 3 and variadic functions.
     // Most of these will support partial evaluation where the function allows it.
@@ -420,34 +420,35 @@ pub fn invoke<VM>(native: NativeFunction, nargs: u32, vm: &mut VM) -> ValueResul
                     let ret = $ret;
                     ret
                 },
-                _ => IncorrectNumberOfArguments(native, nargs, 0).err()
+                _ => IncorrectArgumentsNativeFunction(native, nargs).err()
             }
         };
         ($a1:ident, $ret:expr) => { // f(a1)
             match nargs {
+                0 => Ok(wrap_as_partial(native, nargs, vm)),
                 1 => {
                     let $a1: Value = vm.pop();
                     let ret = $ret;
                     ret
                 },
-                _ => IncorrectNumberOfArguments(native, nargs, 1).err()
+                _ => IncorrectArgumentsNativeFunction(native, nargs).err()
             }
         };
         ($a1:ident, $a2:ident, $ret:expr) => { // f(a1, a2)
             match nargs {
-                1 => Ok(wrap_as_partial(native, nargs, vm)),
+                0 | 1 => Ok(wrap_as_partial(native, nargs, vm)),
                 2 => {
                     let $a2: Value = vm.pop();
                     let $a1: Value = vm.pop();
                     let ret = $ret;
                     ret
                 },
-                _ => IncorrectNumberOfArguments(native, nargs, 2).err()
+                _ => IncorrectArgumentsNativeFunction(native, nargs).err()
             }
         };
         ($a1:ident, $a2:ident, $a3:ident, $ret:expr) => { // f(a1, a2, a3)
             match nargs {
-                1 | 2 => Ok(wrap_as_partial(native, nargs, vm)),
+                0 | 1 | 2 => Ok(wrap_as_partial(native, nargs, vm)),
                 3 => {
                     let $a3: Value = vm.pop();
                     let $a2: Value = vm.pop();
@@ -455,7 +456,7 @@ pub fn invoke<VM>(native: NativeFunction, nargs: u32, vm: &mut VM) -> ValueResul
                     let ret = $ret;
                     ret
                 },
-                _ => IncorrectNumberOfArguments(native, nargs, 3).err()
+                _ => IncorrectArgumentsNativeFunction(native, nargs).err()
             }
         };
         ($ret0:expr, $a1:ident, $ret1:expr) => { // f(), f(a1)
@@ -469,11 +470,12 @@ pub fn invoke<VM>(native: NativeFunction, nargs: u32, vm: &mut VM) -> ValueResul
                     let ret = $ret1;
                     ret
                 },
-                _ => IncorrectNumberOfArguments(native, nargs, 1).err()
+                _ => IncorrectArgumentsNativeFunction(native, nargs).err()
             }
         };
         ($a1:ident, $ret1:expr, $a2:ident, $ret2:expr) => { // f(a1), f(a1, a2)
             match nargs {
+                0 => Ok(wrap_as_partial(native, nargs, vm)),
                 1 => {
                     let $a1: Value = vm.pop();
                     let ret = $ret1;
@@ -485,11 +487,12 @@ pub fn invoke<VM>(native: NativeFunction, nargs: u32, vm: &mut VM) -> ValueResul
                     let ret = $ret2;
                     ret
                 },
-                _ => IncorrectNumberOfArguments(native, nargs, 1).err()
+                _ => IncorrectArgumentsNativeFunction(native, nargs).err()
             }
         };
         ($a1:ident, $ret1:expr, $a2:ident, $ret2:expr, $a3:ident, $ret3:expr) => { // f(a1), f(a1, a2), f(a1, a2, a3)
             match nargs {
+                0 => Ok(wrap_as_partial(native, nargs, vm)),
                 1 => {
                     let $a1: Value = vm.pop();
                     let ret = $ret1;
@@ -508,7 +511,7 @@ pub fn invoke<VM>(native: NativeFunction, nargs: u32, vm: &mut VM) -> ValueResul
                     let ret = $ret3;
                     ret
                 }
-                _ => IncorrectNumberOfArguments(native, nargs, 1).err()
+                _ => IncorrectArgumentsNativeFunction(native, nargs).err()
             }
         };
     }
@@ -544,7 +547,7 @@ pub fn invoke<VM>(native: NativeFunction, nargs: u32, vm: &mut VM) -> ValueResul
         };
         ($an:ident, $ret_n:expr) => { // f(an), f(an, ...)  *single argument is expanded as iterable
             match nargs {
-                0 => IncorrectNumberOfArgumentsVariadicAtLeastOne(native).err(),
+                0 => IncorrectArgumentsNativeFunction(native, 0).err(),
                 1 => match vm.pop().as_iter() {
                     Ok($an) => $ret_n,
                     Err(e) => Err(e),
@@ -589,18 +592,9 @@ pub fn invoke<VM>(native: NativeFunction, nargs: u32, vm: &mut VM) -> ValueResul
             Value::Str(s1) => Ok(fs::read_to_string(s1.as_ref()).unwrap().replace("\r", "").to_value()), // todo: error handling?
             _ => TypeErrorArgMustBeStr(a1).err(),
         }),
-        WriteText => dispatch!(a1, a2, match (&a1, &a2) {
-            (Value::Str(s1), Value::Str(s2)) => {
-                fs::write(s1.as_ref(), s2.as_ref()).unwrap();
-                Ok(Value::Nil)
-            },
-            (l, r) => {
-                if !l.is_str() {
-                    return TypeErrorArgMustBeStr(l.clone()).err()
-                } else {
-                    return TypeErrorArgMustBeStr(r.clone()).err()
-                }
-            },
+        WriteText => dispatch!(a1, a2, {
+            fs::write(a1.as_str()?, a2.as_str()?).unwrap();
+            Ok(Value::Nil)
         }),
         Env => dispatch!(Ok(vm.get_envs()), a1, Ok(vm.get_env(a1.as_str()?))),
         Argv => dispatch!(Ok(vm.get_args())),
@@ -673,7 +667,7 @@ pub fn invoke<VM>(native: NativeFunction, nargs: u32, vm: &mut VM) -> ValueResul
         Enumerate => dispatch!(a1, Ok(Value::Enumerate(Box::new(a1)))),
         Sum => dispatch_varargs!(an, collections::sum(an)),
         Min => match nargs {
-            0 => IncorrectNumberOfArgumentsVariadicAtLeastOne(native).err(),
+            0 => IncorrectArgumentsNativeFunction(native, 0).err(),
             1 => match vm.pop() {
                 Value::NativeFunction(Int) => Ok(Value::Int(i64::MIN)),
                 an => collections::min(an.as_iter()?),
@@ -682,7 +676,7 @@ pub fn invoke<VM>(native: NativeFunction, nargs: u32, vm: &mut VM) -> ValueResul
         },
         MinBy => dispatch!(a1, a2, collections::min_by(vm, a1, a2)),
         Max => match nargs {
-            0 => IncorrectNumberOfArgumentsVariadicAtLeastOne(native).err(),
+            0 => IncorrectArgumentsNativeFunction(native, 0).err(),
             1 => match vm.pop() {
                 Value::NativeFunction(Int) => Ok(Value::Int(i64::MAX)),
                 an => collections::max(an.as_iter()?),
@@ -730,7 +724,7 @@ pub fn invoke<VM>(native: NativeFunction, nargs: u32, vm: &mut VM) -> ValueResul
         CountOnes => dispatch!(a1, math::count_ones(a1)),
         CountZeros => dispatch!(a1, math::count_zeros(a1)),
 
-        _ => ValueIsNotFunctionEvaluable(Value::NativeFunction(native)).err(),
+        Function | Iterable => ValueIsNotFunctionEvaluable(Value::NativeFunction(native)).err()
     }
 }
 
@@ -844,7 +838,7 @@ fn type_of(value: Value) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use crate::{compiler, SourceView, stdlib};
+    use crate::{compiler, SourceView, core};
     use crate::vm::{IntoValue, Value, VirtualInterface, VirtualMachine};
 
     #[test]
@@ -853,7 +847,7 @@ mod tests {
         let mut buffer = Vec::new();
         let mut vm = VirtualMachine::new(compiler::default(), SourceView::new(String::new(), String::new()), &b""[..], &mut buffer, vec![]);
 
-        for native in stdlib::NATIVE_FUNCTIONS.iter() {
+        for native in core::NATIVE_FUNCTIONS.iter() {
             match native.nargs {
                 Some(n) => {
                     for nargs in 1..n {
@@ -864,7 +858,7 @@ mod tests {
                             vm.push(arg);
                         }
 
-                        let ret = stdlib::invoke(native.native, nargs, &mut vm);
+                        let ret = core::invoke(native.native, nargs, &mut vm);
 
                         assert_eq!(ret.clone().ok(), Some(Value::PartialNativeFunction(native.native, Box::new(args))), "Native function {:?} with nargs={:?}, args={:?} is not consistent, returned result {:?} instead", native.name, native.nargs, nargs, ret);
 

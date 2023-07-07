@@ -9,7 +9,7 @@ use std::fmt::Debug;
 use itertools::Itertools;
 
 use crate::compiler::parser::{Parser, ParserError, ParserErrorType};
-use crate::stdlib;
+use crate::core;
 use crate::vm::Opcode;
 use crate::reporting::Location;
 
@@ -204,7 +204,7 @@ pub enum LValueReference {
     Invalid,
 
     /// `NativeFunction()` is not an `LValue`, however it is included as it is a possible resolution for a declared variable.
-    NativeFunction(stdlib::NativeFunction),
+    NativeFunction(core::NativeFunction),
 }
 
 
@@ -546,7 +546,7 @@ impl<'a> Parser<'a> {
     pub fn declare_local(self: &mut Self, name: String) -> Option<usize> {
 
         // Lookup the name as a binding - if it is, it will be denied as we don't allow shadowing global native functions
-        if let Some(_) = stdlib::find_native_function(&name) {
+        if let Some(_) = core::find_native_function(&name) {
             self.semantic_error(LocalVariableConflictWithNativeFunction(name.clone()));
             return None
         }
@@ -713,7 +713,7 @@ impl<'a> Parser<'a> {
     ///
     /// **Note:** If this returns `LValueReference::Invalid`, a semantic error will have already been raised.
     pub fn resolve_identifier(self: &mut Self, name: String) -> LValueReference {
-        if let Some(b) = stdlib::find_native_function(&name) {
+        if let Some(b) = core::find_native_function(&name) {
             return LValueReference::NativeFunction(b);
         }
 

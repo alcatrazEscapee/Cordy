@@ -34,6 +34,4 @@ macro_rules! trace_interpreter_stack {
     };
 }
 
-pub(crate) use trace_parser;
-pub(crate) use trace_interpreter;
-pub(crate) use trace_interpreter_stack;
+pub(crate) use {trace_parser, trace_interpreter, trace_interpreter_stack};

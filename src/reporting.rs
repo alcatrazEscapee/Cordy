@@ -1,9 +1,8 @@
 use std::cell::{Ref, RefCell};
 use std::ops::{BitOr, BitOrAssign};
-use std::rc::Rc;
 
 use crate::compiler::{ParserError, ParserErrorType, ScanError, ScanErrorType, ScanToken};
-use crate::stdlib::NativeFunction;
+use crate::core::NativeFunction;
 use crate::vm::{FunctionImpl, RuntimeError, Value};
 use crate::vm::operator::{BinaryOp, UnaryOp};
 
@@ -270,9 +269,9 @@ impl AsError for RuntimeError {
             RuntimeError::RuntimeCompilationError(vec) => format!("Encountered compilation error(s) within 'eval':\n\n{}", vec.join("\n")),
 
             RuntimeError::ValueIsNotFunctionEvaluable(v) => format!("Tried to evaluate {} but it is not a function.", v.as_error()),
-            RuntimeError::IncorrectNumberOfFunctionArguments(f, a) => format!("Function {} requires {} parameters but {} were present.", f.as_error(), if *a < f.min_args() { f.min_args() } else { f.max_args() }, a),
-            RuntimeError::IncorrectNumberOfArguments(b, a, e) => format!("Function '{}' requires at least {} parameters but {} were present.", b.as_error(), e, a),
-            RuntimeError::IncorrectNumberOfArgumentsVariadicAtLeastOne(b) => format!("Function '{}' requires at least 1 parameter but none were present.", b.as_error()),
+            RuntimeError::IncorrectArgumentsUserFunction(f, n) => format!("Incorrect number of arguments for {}, got {}", f.as_error(), n),
+            RuntimeError::IncorrectArgumentsNativeFunction(f, n) => format!("Incorrect number of arguments for {}, got {}", f.as_error(), n),
+
             RuntimeError::IncorrectNumberOfStructArguments(s, a, e) => format!("Struct '{}' has {} fields but {} arguments were present", s, e, a),
             RuntimeError::IncorrectNumberOfGetFieldArguments(s, a, e) => format!("Function '(->{})' requires {} parameters but {} were present", s, e, a),
 
@@ -331,7 +330,7 @@ impl AsError for Value {
 
 impl AsError for FunctionImpl {
     fn as_error(self: &Self) -> String {
-        Value::Function(Rc::new(self.clone())).as_error()
+        self.as_str()
     }
 }
 
@@ -376,7 +375,7 @@ impl AsError for BinaryOp {
 
 impl AsError for NativeFunction {
     fn as_error(self: &Self) -> String {
-        String::from(self.name())
+        format!("native fn {}({})", self.name(), self.args())
     }
 }
 

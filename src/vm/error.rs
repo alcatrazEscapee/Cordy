@@ -1,7 +1,7 @@
 use std::rc::Rc;
 use crate::reporting::{AsError, AsErrorWithContext, Location, Locations, SourceView};
 
-use crate::stdlib::NativeFunction;
+use crate::core::NativeFunction;
 use crate::vm::CallFrame;
 use crate::vm::operator::{BinaryOp, UnaryOp};
 use crate::vm::value::{FunctionImpl, Value};
@@ -16,9 +16,9 @@ pub enum RuntimeError {
 
     ValueIsNotFunctionEvaluable(Value),
 
-    IncorrectNumberOfFunctionArguments(FunctionImpl, u32),
-    IncorrectNumberOfArguments(NativeFunction, u32, u32), // actual, expected
-    IncorrectNumberOfArgumentsVariadicAtLeastOne(NativeFunction),
+    IncorrectArgumentsUserFunction(FunctionImpl, u32),
+    IncorrectArgumentsNativeFunction(NativeFunction, u32),
+
     IncorrectNumberOfStructArguments(String, u32, u32), // actual, expected
     IncorrectNumberOfGetFieldArguments(String, u32, u32), // actual, expected
 
