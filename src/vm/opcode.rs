@@ -1,4 +1,4 @@
-use crate::stdlib::NativeFunction;
+use crate::core::NativeFunction;
 use crate::vm::operator::{BinaryOp, UnaryOp};
 use crate::vm::value::LiteralType;
 use crate::util::OffsetAdd;

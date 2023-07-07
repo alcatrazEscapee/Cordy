@@ -4,7 +4,7 @@ pub mod compiler;
 pub mod repl;
 pub mod vm;
 
-mod stdlib;
+mod core;
 mod reporting;
 mod trace;
 mod util;

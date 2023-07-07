@@ -5,9 +5,9 @@ use std::iter::Empty;
 use std::rc::Rc;
 use std::vec::Splice;
 
-use crate::{compiler, util, stdlib, trace};
+use crate::{compiler, util, core, trace};
 use crate::compiler::{CompileParameters, CompileResult, Fields, IncrementalCompileResult, Locals};
-use crate::stdlib::NativeFunction;
+use crate::core::NativeFunction;
 use crate::vm::value::{Literal, PartialFunctionImpl, UpValue};
 use crate::util::OffsetAdd;
 use crate::reporting::{Location, SourceView};
@@ -207,7 +207,7 @@ impl<R, W> VirtualMachine<R, W> where
 
     /// Executes a single instruction
     fn run_instruction(self: &mut Self, op: Opcode) -> AnyResult {
-        trace::trace_interpreter!("{:?}", op);
+        trace::trace_interpreter!("vm::run op={:?}", op);
         match op {
             Noop => panic!("Noop should only be emitted as a temporary instruction"),
 
@@ -245,7 +245,6 @@ impl<R, W> VirtualMachine<R, W> where
                 self.ip = jump;
             },
             Return => {
-                trace::trace_interpreter!("return -> {}", self.return_ip());
                 // Functions leave their return value as the top of the stack
                 // Below that will be the functions locals, and the function itself
                 // The frame pointer points to the first local of the function
@@ -259,7 +258,6 @@ impl<R, W> VirtualMachine<R, W> where
 
                 self.ip = self.return_ip();
                 self.call_stack.pop().unwrap();
-                trace::trace_interpreter!("call stack = {}", self.debug_call_stack());
             },
 
             // Stack Manipulations
@@ -284,18 +282,18 @@ impl<R, W> VirtualMachine<R, W> where
             PushLocal(local) => {
                 // Locals are offset by the frame pointer, and don't need to check existence, as we don't allow late binding.
                 let local = self.frame_pointer() + local as usize;
-                trace::trace_interpreter!("push local {} : {}", local, self.stack[local].as_debug_str());
+                trace::trace_interpreter!("vm::run PushLocal index={}, local={}", local, self.stack[local].as_debug_str());
                 self.push(self.stack[local].clone());
             }
             StoreLocal(local) => {
                 let local: usize = self.frame_pointer() + local as usize;
-                trace::trace_interpreter!("store local {} : {} -> {}", local, self.stack.last().unwrap().as_debug_str(), self.stack[local].as_debug_str());
+                trace::trace_interpreter!("vm::run StoreLocal index={}, value={}, prev={}", local, self.stack.last().unwrap().as_debug_str(), self.stack[local].as_debug_str());
                 self.stack[local] = self.peek(0).clone();
             },
             PushGlobal(local) => {
                 // Globals are absolute offsets, and allow late binding, which means we have to check the global count before referencing.
                 let local: usize = local as usize;
-                trace::trace_interpreter!("push global {} : {}", local, self.stack[local].as_debug_str());
+                trace::trace_interpreter!("vm::run PushGlobal index={}, value={}", local, self.stack[local].as_debug_str());
                 if local < self.global_count {
                     self.push(self.stack[local].clone());
                 } else {
@@ -304,7 +302,7 @@ impl<R, W> VirtualMachine<R, W> where
             },
             StoreGlobal(local) => {
                 let local: usize = local as usize;
-                trace::trace_interpreter!("store global {} : {} -> {}", local, self.stack.last().unwrap().as_debug_str(), self.stack[local].as_debug_str());
+                trace::trace_interpreter!("vm::run StoreGlobal index={}, value={}, prev={}", local, self.stack.last().unwrap().as_debug_str(), self.stack[local].as_debug_str());
                 if local < self.global_count {
                     self.stack[local] = self.peek(0).clone();
                 } else {
@@ -325,11 +323,11 @@ impl<R, W> VirtualMachine<R, W> where
                     UpValue::Open(index) => self.stack[index].clone(),
                     UpValue::Closed(value) => value,
                 };
-                trace::trace_interpreter!("push upvalue {} : {}", index, value.as_debug_str());
+                trace::trace_interpreter!("vm::run PushUpValue index={}, value={}", index, value.as_debug_str());
                 self.push(value);
             },
             StoreUpValue(index) => {
-                trace::trace_interpreter!("store upvalue {} : {} -> {}", index, self.stack.last().unwrap().as_debug_str(), self.stack[index as usize].as_debug_str());
+                trace::trace_interpreter!("vm::run StoreUpValue index={}, value={}, prev={}", index, self.stack.last().unwrap().as_debug_str(), self.stack[index as usize].as_debug_str());
                 let fp = self.frame_pointer() - 1;
                 let value = self.peek(0).clone();
                 let upvalue: Rc<Cell<UpValue>> = match &mut self.stack[fp] {
@@ -353,11 +351,11 @@ impl<R, W> VirtualMachine<R, W> where
             },
 
             StoreArray => {
-                trace::trace_interpreter!("store array array = {}, index = {}, value = {}", self.stack[self.stack.len() - 3].as_debug_str(), self.stack[self.stack.len() - 2].as_debug_str(), self.stack.last().unwrap().as_debug_str());
+                trace::trace_interpreter!("vm::run StoreArray array={}, index={}, value={}", self.stack[self.stack.len() - 3].as_debug_str(), self.stack[self.stack.len() - 2].as_debug_str(), self.stack.last().unwrap().as_debug_str());
                 let a3: Value = self.pop();
                 let a2: Value = self.pop();
                 let a1: &Value = self.peek(0); // Leave this on the stack when done
-                stdlib::set_index(a1, a2, a3)?;
+                core::set_index(a1, a2, a3)?;
             },
 
             IncGlobalCount => {
@@ -373,7 +371,7 @@ impl<R, W> VirtualMachine<R, W> where
 
             CloseLocal(index) => {
                 let local: usize = self.frame_pointer() + index as usize;
-                trace::trace_interpreter!("close local {} -> stack[{}] = {} into {}", index, local, self.stack[local].as_debug_str(), self.stack.last().unwrap().as_debug_str());
+                trace::trace_interpreter!("vm::run CloseLocal index={}, local={}, value={}, closure={}", index, local, self.stack[local].as_debug_str(), self.stack.last().unwrap().as_debug_str());
                 let upvalue: Rc<Cell<UpValue>> = self.open_upvalues.entry(local)
                     .or_insert_with(|| Rc::new(Cell::new(UpValue::Open(local))))
                     .clone();
@@ -383,7 +381,7 @@ impl<R, W> VirtualMachine<R, W> where
                 }
             },
             CloseUpValue(index) => {
-                trace::trace_interpreter!("close upvalue {} into {} from {}", index, self.stack.last().unwrap().as_debug_str(), &self.stack[self.frame_pointer() - 1].as_debug_str());
+                trace::trace_interpreter!("vm::run CloseUpValue index={}, value={}, closure={}", index, self.stack.last().unwrap().as_debug_str(), &self.stack[self.frame_pointer() - 1].as_debug_str());
                 let fp = self.frame_pointer() - 1;
                 let index: usize = index as usize;
                 let upvalue: Rc<Cell<UpValue>> = match &mut self.stack[fp] {
@@ -498,11 +496,11 @@ impl<R, W> VirtualMachine<R, W> where
             }
 
             OpFuncEval(nargs) => {
-                self.invoke_func_eval(nargs)?;
+                self.invoke(nargs)?;
             },
             OpFuncEvalUnrolled(nargs) => {
                 let unrolled_nargs: i32 = self.unroll_stack.pop().unwrap();
-                self.invoke_func_eval(nargs.add_offset(unrolled_nargs))?;
+                self.invoke(nargs.add_offset(unrolled_nargs))?;
             }
 
             CheckLengthGreaterThan(len) => {
@@ -531,20 +529,20 @@ impl<R, W> VirtualMachine<R, W> where
             OpIndex => {
                 let a2: Value = self.pop();
                 let a1: Value = self.pop();
-                let ret = stdlib::get_index(self, a1, a2)?;
+                let ret = core::get_index(self, a1, a2)?;
                 self.push(ret);
             },
             OpIndexPeek => {
                 let a2: Value = self.peek(0).clone();
                 let a1: Value = self.peek(1).clone();
-                let ret = stdlib::get_index(self, a1, a2)?;
+                let ret = core::get_index(self, a1, a2)?;
                 self.push(ret);
             },
             OpSlice => {
                 let a3: Value = self.pop();
                 let a2: Value = self.pop();
                 let a1: Value = self.pop();
-                let ret = stdlib::list_slice(a1, a2, a3, Value::Int(1))?;
+                let ret = core::list_slice(a1, a2, a3, Value::Int(1))?;
                 self.push(ret);
             },
             OpSliceWithStep => {
@@ -552,7 +550,7 @@ impl<R, W> VirtualMachine<R, W> where
                 let a3: Value = self.pop();
                 let a2: Value = self.pop();
                 let a1: Value = self.pop();
-                let ret = stdlib::list_slice(a1, a2, a3, a4)?;
+                let ret = core::list_slice(a1, a2, a3, a4)?;
                 self.push(ret);
             },
 
@@ -634,8 +632,8 @@ impl<R, W> VirtualMachine<R, W> where
         op
     }
 
-    fn invoke_func_and_spin(self: &mut Self, nargs: u32) -> ValueResult {
-        match self.invoke_func_eval(nargs)? {
+    fn invoke_and_spin(self: &mut Self, nargs: u32) -> ValueResult {
+        match self.invoke(nargs)? {
             FunctionType::Native => {},
             FunctionType::User => self.run_frame()?
         }
@@ -648,30 +646,27 @@ impl<R, W> VirtualMachine<R, W> where
     /// The arguments and function will be popped and the return value will be left on the top of the stack.
     ///
     /// Returns a `Result` which may contain an error which occurred during function evaluation.
-    fn invoke_func_eval(self: &mut Self, nargs: u32) -> Result<FunctionType, Box<RuntimeError>> {
+    fn invoke(self: &mut Self, nargs: u32) -> Result<FunctionType, Box<RuntimeError>> {
         let f: &Value = self.peek(nargs as usize);
+        trace::trace_interpreter!("vm::invoke func={:?}, nargs={}", f, nargs);
         match f {
             f @ (Value::Function(_) | Value::Closure(_)) => {
-                trace::trace_interpreter!("invoke_func_eval -> {}, nargs = {}", f.as_debug_str(), nargs);
-
                 let func = f.unbox_func();
                 if func.in_range(nargs) {
                     // Evaluate directly
                     self.call_function(func.jump_offset(nargs), nargs, func.num_var_args(nargs));
-                } else if func.min_args() > nargs && nargs > 0 {
+                } else if func.min_args() > nargs {
                     // Evaluate as a partial function
-                    // Note that partially evaluating with zero arguments is illegal
                     let arg: Vec<Value> = self.popn(nargs);
                     let func: Value = self.pop();
                     let partial: Value = Value::partial(func, arg);
                     self.push(partial);
                 } else {
-                    return IncorrectNumberOfFunctionArguments((**func).clone(), nargs).err();
+                    return IncorrectArgumentsUserFunction((**func).clone(), nargs).err();
                 }
                 Ok(FunctionType::User)
             },
             Value::PartialFunction(_) => {
-                trace::trace_interpreter!("invoke_func_eval -> {}, nargs = {}", f.as_debug_str(), nargs);
                 // Surgically extract the partial binding from the stack
                 let i: usize = self.stack.len() - nargs as usize - 1;
                 let mut partial: PartialFunctionImpl = match std::mem::replace(&mut self.stack[i], Value::Nil) {
@@ -704,13 +699,12 @@ impl<R, W> VirtualMachine<R, W> where
                     self.call_function(head, total_nargs, num_var_args);
 
                 } else {
-                    return IncorrectNumberOfFunctionArguments((**func).clone(), total_nargs).err()
+                    return IncorrectArgumentsUserFunction((**func).clone(), total_nargs).err()
                 }
                 Ok(FunctionType::User)
             },
             Value::NativeFunction(b) => {
-                trace::trace_interpreter!("invoke_func_eval -> {}, nargs = {}", Value::NativeFunction(b.clone()).as_debug_str(), nargs);
-                match stdlib::invoke(*b, nargs, self) {
+                match core::invoke(*b, nargs, self) {
                     Ok(v) => {
                         self.pop();
                         self.push(v)
@@ -719,11 +713,10 @@ impl<R, W> VirtualMachine<R, W> where
                 }
                 Ok(FunctionType::Native)
             },
-            Value::PartialNativeFunction(b, _) => {
-                trace::trace_interpreter!("invoke_func_eval -> {}, nargs = {}", Value::NativeFunction(b.clone()).as_debug_str(), nargs);
+            Value::PartialNativeFunction(native, _) => {
                 // Need to consume the arguments and set up the stack for calling as if all partial arguments were just pushed
                 // Surgically extract the binding via std::mem::replace
-                let binding: NativeFunction = *b;
+                let native: NativeFunction = *native;
                 let i: usize = self.stack.len() - 1 - nargs as usize;
                 let args: Vec<Value> = match std::mem::replace(&mut self.stack[i], Value::Nil) {
                     Value::PartialNativeFunction(_, x) => *x,
@@ -738,7 +731,7 @@ impl<R, W> VirtualMachine<R, W> where
                 let partial_args = args.len() as u32;
                 self.stack.splice(j..j, args.into_iter().rev());
 
-                match stdlib::invoke(binding, nargs + partial_args, self) {
+                match core::invoke(native, nargs + partial_args, self) {
                     Ok(v) => {
                         self.pop();
                         self.push(v);
@@ -746,11 +739,10 @@ impl<R, W> VirtualMachine<R, W> where
                     Err(e) => return Err(e),
                 }
                 Ok(FunctionType::Native)
-            },
+            }
             ls @ Value::List(_) => {
                 // This is somewhat horrifying, but it could be optimized in constant cases later, in all cases where this syntax is actually used
                 // As a result this code should almost never enter as it should be optimized away.
-                trace::trace_interpreter!("invoke_list -> {}, nargs = {}, ", ls.as_debug_str(), nargs);
                 if nargs != 1 {
                     return ValueIsNotFunctionEvaluable(ls.clone()).err();
                 }
@@ -764,12 +756,11 @@ impl<R, W> VirtualMachine<R, W> where
                     return ValueErrorEvalListMustHaveUnitLength(list.len()).err()
                 }
                 let index = list[0].clone();
-                let result = stdlib::get_index(self, arg, index)?;
+                let result = core::get_index(self, arg, index)?;
                 self.push(result);
                 Ok(FunctionType::Native)
             },
             ls @ Value::Slice(_) => {
-                trace::trace_interpreter!("invoke_slice");
                 if nargs != 1 {
                     return ValueIsNotFunctionEvaluable(ls.clone()).err();
                 }
@@ -783,7 +774,6 @@ impl<R, W> VirtualMachine<R, W> where
             }
             Value::StructType(type_impl) => {
                 let type_impl = type_impl.clone();
-                trace::trace_interpreter!("invoke_struct -> {} ({}) with {}", type_impl.name, type_impl.type_index, nargs);
                 let expected_args = type_impl.field_names.len() as u32;
                 if nargs != expected_args {
                     return IncorrectNumberOfStructArguments(type_impl.name.clone(), nargs, expected_args).err()
@@ -799,7 +789,6 @@ impl<R, W> VirtualMachine<R, W> where
             },
             Value::GetField(field_index) => {
                 let field_index = *field_index;
-                trace::trace_interpreter!("invoke_get_field {}", field_index);
                 if nargs != 1 {
                     return IncorrectNumberOfGetFieldArguments(self.fields.get_field_name(field_index), nargs, 1).err()
                 }
@@ -826,12 +815,9 @@ impl<R, W> VirtualMachine<R, W> where
         self.call_stack.push(frame);
 
         if let Some(num_var_args) = num_var_args {
-            trace::trace_interpreter!("collect varargs {}", num_var_args);
             let args = splice(&mut self.stack, num_var_args).to_vector();
             self.push(args);
         }
-
-        trace::trace_interpreter!("call stack = {}", self.debug_call_stack());
     }
 
 
@@ -855,20 +841,20 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
 
     fn invoke_func0(self: &mut Self, f: Value) -> ValueResult {
         self.push(f);
-        self.invoke_func_and_spin(0)
+        self.invoke_and_spin(0)
     }
 
     fn invoke_func1(self: &mut Self, f: Value, a1: Value) -> ValueResult {
         self.push(f);
         self.push(a1);
-        self.invoke_func_and_spin(1)
+        self.invoke_and_spin(1)
     }
 
     fn invoke_func2(self: &mut Self, f: Value, a1: Value, a2: Value) -> ValueResult {
         self.push(f);
         self.push(a1);
         self.push(a2);
-        self.invoke_func_and_spin(2)
+        self.invoke_and_spin(2)
     }
 
     fn invoke_func(self: &mut Self, f: Value, args: &Vec<Value>) -> ValueResult {
@@ -876,7 +862,7 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
         for arg in args {
             self.push(arg.clone());
         }
-        self.invoke_func_and_spin(args.len() as u32)
+        self.invoke_and_spin(args.len() as u32)
     }
 
     fn invoke_eval(self: &mut Self, text: &String) -> ValueResult {
@@ -1187,9 +1173,15 @@ mod test {
     #[test] fn test_partial_function_composition_4() { run_str("fn foo(a, b, c) { c . print } foo (1) (2) (3)", "3\n"); }
     #[test] fn test_partial_function_composition_5() { run_str("fn foo(a, b, c) { c . print } foo (1, 2) (3)", "3\n"); }
     #[test] fn test_partial_function_composition_6() { run_str("fn foo(a, b, c) { c . print } foo (1) (2, 3)", "3\n"); }
+    #[test] fn test_partial_function_zero_arg_user_function() { run_str("fn foo(a, b) {} ; foo() . repr . print", "fn foo(a, b)\n"); }
+    #[test] fn test_partial_function_zero_arg_native_function() { run_str("len() . repr . print", "fn len(x)\n"); }
+    #[test] fn test_partial_function_zero_arg_operator_function() { run_str("(+)() . repr . print", "fn (+)(lhs, rhs)\n"); }
+    #[test] fn test_partial_function_zero_arg_partial_user_function() { run_str("fn foo(a, b) {} ; foo(1)() . repr . print", "fn foo(a, b)\n"); }
+    #[test] fn test_partial_function_zero_arg_partial_native_function() { run_str("push(1)() . repr . print", "fn push(value, collection)\n"); }
+    #[test] fn test_partial_function_zero_arg_partial_operator_function() { run_str("(+)(1)() . repr . print", "fn (+)(lhs, rhs)\n"); }
     #[test] fn test_function_with_one_default_arg() { run_str("fn foo(a, b?) { print(a, b) } ; foo('test') ; foo('test', 'bar')", "test nil\ntest bar\n"); }
-    #[test] fn test_function_with_one_default_arg_not_enough() { run_str("fn foo(a, b?) { print(a, b) } ; foo()", "Function 'foo' of type 'function' requires 1 parameters but 0 were present.\n  at: line 1 (<test>)\n\n1 | fn foo(a, b?) { print(a, b) } ; foo()\n2 |                                    ^^\n"); }
-    #[test] fn test_function_with_one_default_arg_too_many() { run_str("fn foo(a, b?) { print(a, b) } ; foo(1, 2, 3)", "Function 'foo' of type 'function' requires 2 parameters but 3 were present.\n  at: line 1 (<test>)\n\n1 | fn foo(a, b?) { print(a, b) } ; foo(1, 2, 3)\n2 |                                    ^^^^^^^^^\n"); }
+    #[test] fn test_function_with_one_default_arg_not_enough() { run_str("fn foo(a, b?) { print(a, b) } ; foo()", ""); }
+    #[test] fn test_function_with_one_default_arg_too_many() { run_str("fn foo(a, b?) { print(a, b) } ; foo(1, 2, 3)", "Incorrect number of arguments for fn foo(a, b), got 3\n  at: line 1 (<test>)\n\n1 | fn foo(a, b?) { print(a, b) } ; foo(1, 2, 3)\n2 |                                    ^^^^^^^^^\n"); }
     #[test] fn test_function_many_default_args() { run_str("fn foo(a, b = 1, c = 1 + 1, d = 1 * 3) { print(a, b, c, d) } foo('test') ; foo('and', 11) ; foo('other', 11, 22) ; foo('things', 11, 22, 33)", "test 1 2 3\nand 11 2 3\nother 11 22 3\nthings 11 22 33\n"); }
     #[test] fn test_function_unroll_1() { run_str("fn foo(a, b, c) -> print(a, b, c) ; foo(...['hello', 'the', 'world'])", "hello the world\n"); }
     #[test] fn test_function_unroll_2() { run_str("fn foo(a, b, c) -> print(a, b, c) ; foo(1, 2, 3, ...[])", "1 2 3\n"); }
@@ -1200,7 +1192,7 @@ mod test {
     #[test] fn test_function_unroll_7() { run_str("fn foo(a, b, c, d) -> print(a, b, c, d) ; foo('a', ...'bc', 'd')", "a b c d\n"); }
     #[test] fn test_function_unroll_8() { run_str("fn foo(a, b, c) -> print(a, b, c) ; foo(1, ...'ab')", "1 a b\n"); }
     #[test] fn test_function_unroll_9() { run_str("fn foo(a, b, c) -> print(a, b, c) ; foo(...'ab', 3)", "a b 3\n"); }
-    #[test] fn test_function_unroll_10() { run_str("fn foo(a, b, c) -> print(a, b, c) ; foo(1, 2, ...[3, 4])", "Function 'foo' of type 'function' requires 3 parameters but 4 were present.\n  at: line 1 (<test>)\n\n1 | fn foo(a, b, c) -> print(a, b, c) ; foo(1, 2, ...[3, 4])\n2 |                                        ^^^^^^^^^^^^^^^^^\n"); }
+    #[test] fn test_function_unroll_10() { run_str("fn foo(a, b, c) -> print(a, b, c) ; foo(1, 2, ...[3, 4])", "Incorrect number of arguments for fn foo(a, b, c), got 4\n  at: line 1 (<test>)\n\n1 | fn foo(a, b, c) -> print(a, b, c) ; foo(1, 2, ...[3, 4])\n2 |                                        ^^^^^^^^^^^^^^^^^\n"); }
     #[test] fn test_function_unroll_11() { run_str("fn foo(a, b, c) -> print(a, b, c) ; foo(1, 2, ...[]) is function . print", "true\n"); }
     #[test] fn test_function_unroll_12() { run_str("sum([1, 2, 3, 4, 5]) . print", "15\n"); }
     #[test] fn test_function_unroll_13() { run_str("sum(...[1, 2, 3, 4, 5]) . print", "15\n"); }
@@ -1470,6 +1462,8 @@ mod test {
     #[test] fn test_set_literal_unroll_once() { run_str("{...{1, 2, 3}} . print", "{1, 2, 3}\n"); }
     #[test] fn test_set_literal_unroll_multiple() { run_str("{...{1, 2, 3}, ...{4, 5}} . print", "{1, 2, 3, 4, 5}\n"); }
     #[test] fn test_set_literal_unroll_multiple_and_empty() { run_str("{...{}, 0, ...{1, 2, 3}, ...{4, 5}, ...set(), 6} . print", "{0, 1, 2, 3, 4, 5, 6}\n"); }
+    #[test] fn test_set_literal_unroll_from_dict_implicit() { run_str("{...{(1, 1), (2, 2)}} . print", "{(1, 1), (2, 2)}\n"); }
+    #[test] fn test_set_literal_unroll_from_dict_explicit() { run_str("{...{(1, 1), (2, 2)}, 3} . print", "{(1, 1), (2, 2), 3}\n"); }
     #[test] fn test_set_from_str() { run_str("'funny beans' . set . print", "{'f', 'u', 'n', 'y', ' ', 'b', 'e', 'a', 's'}\n"); }
     #[test] fn test_set_pop_empty() { run_str("let x = set() , y = x . pop ; (x, y) . print", "ValueError: Expected value to be a non empty iterable\n  at: line 1 (<test>)\n\n1 | let x = set() , y = x . pop ; (x, y) . print\n2 |                       ^^^^^\n"); }
     #[test] fn test_set_pop() { run_str("let x = {1, 2, 3} , y = x . pop ; (x, y) . print", "({1, 2}, 3)\n"); }
@@ -1484,6 +1478,12 @@ mod test {
     #[test] fn test_dict_empty_constructor() { run_str("dict() . print", "{}\n"); }
     #[test] fn test_dict_literal_single() { run_str("{'hello': 'world'} . print", "{'hello': 'world'}\n"); }
     #[test] fn test_dict_literal_multiple() { run_str("{1: 'a', 2: 'b', 3: 'c'} . print", "{1: 'a', 2: 'b', 3: 'c'}\n"); }
+    #[test] fn test_dict_literal_unroll_at_start() { run_str("{...{1: 1, 2: 2}, 3: 3} . print", "{1: 1, 2: 2, 3: 3}\n"); }
+    #[test] fn test_dict_literal_unroll_at_end() { run_str("{0: 0, ...{1: 1, 2: 2}} . print", "{0: 0, 1: 1, 2: 2}\n"); }
+    #[test] fn test_dict_literal_unroll_multiple() { run_str("{...{1: 1, 2: 2}, 3: 3, ...{4: 4}} . print", "{1: 1, 2: 2, 3: 3, 4: 4}\n"); }
+    #[test] fn test_dict_literal_unroll_multiple_and_empty() { run_str("{...{}, 0: 0, ...{1: 1, 2: 2, 3: 3}, ...{4: 4, 5: 5}, ...set(), ...dict(), 6: 6} . print", "{0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6}\n"); }
+    #[test] fn test_dict_literal_unroll_from_set() { run_str("{...{(1, 1), (2, 2)}, 3: 3} . print", "{1: 1, 2: 2, 3: 3}\n"); }
+    #[test] fn test_dict_literal_unroll_from_not_pair() { run_str("{...{1, 2, 3}, 4: 4}", "ValueError: Cannot collect key-value pair '1' of type 'int' into a dict\n  at: line 1 (<test>)\n\n1 | {...{1, 2, 3}, 4: 4}\n2 |  ^^^\n"); }
     #[test] fn test_dict_get_and_set() { run_str("let d = dict() ; d['hi'] = 'yes' ; d['hi'] . print", "yes\n"); }
     #[test] fn test_dict_get_when_not_present() { run_str("let d = dict() ; d['hello']", "ValueError: Key 'hello' of type 'str' not found in dictionary\n  at: line 1 (<test>)\n\n1 | let d = dict() ; d['hello']\n2 |                   ^^^^^^^^^\n"); }
     #[test] fn test_dict_get_when_not_present_with_default() { run_str("let d = dict() . default('haha') ; d['hello'] . print", "haha\n"); }
@@ -1528,7 +1528,7 @@ mod test {
     #[test] fn test_len_str() { run_str("'12345' . len . print", "5\n"); }
     #[test] fn test_sum_list() { run_str("[1, 2, 3, 4] . sum . print", "10\n"); }
     #[test] fn test_sum_values() { run_str("sum(1, 3, 5, 7) . print", "16\n"); }
-    #[test] fn test_sum_no_arg() { run_str("sum()", "Function 'sum' requires at least 1 parameter but none were present.\n  at: line 1 (<test>)\n\n1 | sum()\n2 |    ^^\n"); }
+    #[test] fn test_sum_no_arg() { run_str("sum()", "Incorrect number of arguments for native fn sum(...), got 0\n  at: line 1 (<test>)\n\n1 | sum()\n2 |    ^^\n"); }
     #[test] fn test_sum_empty_list() { run_str("[] . sum . print", "0\n"); }
     #[test] fn test_map() { run_str("[1, 2, 3] . map(str) . repr . print", "['1', '2', '3']\n") }
     #[test] fn test_map_lambda() { run_str("[-1, 2, -3] . map(fn(x) -> x . abs) . print", "[1, 2, 3]\n") }
@@ -1536,7 +1536,7 @@ mod test {
     #[test] fn test_filter_lambda() { run_str("[2, 3, 4, 5, 6] . filter (fn(x) -> x % 2 == 0) . print", "[2, 4, 6]\n") }
     #[test] fn test_reduce_with_operator() { run_str("[1, 2, 3, 4, 5, 6] . reduce (*) . print", "720\n"); }
     #[test] fn test_reduce_with_function() { run_str("[1, 2, 3, 4, 5, 6] . reduce (fn(a, b) -> a * b) . print", "720\n"); }
-    #[test] fn test_reduce_with_unary_operator() { run_str("[1, 2, 3] . reduce (!) . print", "Function '(!)' requires at least 1 parameters but 2 were present.\n  at: line 1 (<test>)\n\n1 | [1, 2, 3] . reduce (!) . print\n2 |           ^^^^^^^^^^^^\n"); }
+    #[test] fn test_reduce_with_unary_operator() { run_str("[1, 2, 3] . reduce (!) . print", "Incorrect number of arguments for native fn (!)(x), got 2\n  at: line 1 (<test>)\n\n1 | [1, 2, 3] . reduce (!) . print\n2 |           ^^^^^^^^^^^^\n"); }
     #[test] fn test_reduce_with_sum() { run_str("[1, 2, 3, 4, 5, 6] . reduce (sum) . print", "21\n"); }
     #[test] fn test_reduce_with_empty() { run_str("[] . reduce(+) . print", "ValueError: Expected value to be a non empty iterable\n  at: line 1 (<test>)\n\n1 | [] . reduce(+) . print\n2 |    ^^^^^^^^^^^\n"); }
     #[test] fn test_sorted() { run_str("[6, 2, 3, 7, 2, 1] . sort . print", "[1, 2, 2, 3, 6, 7]\n"); }
@@ -1668,7 +1668,6 @@ mod test {
     #[test] fn test_typeof_struct_constructor() { run_str("struct Foo(a, b) Foo . typeof . print", "function\n"); }
     #[test] fn test_typeof_struct_instance() { run_str("struct Foo(a, b) Foo(1, 2) . typeof . print", "struct Foo(a, b)\n"); }
     #[test] fn test_typeof_slice() { run_str("[:] . typeof . print", "function\n"); }
-    #[test] fn test_abs_requires_one_arg() { run_str("abs()(1)", "Function 'abs' requires at least 1 parameters but 0 were present.\n  at: line 1 (<test>)\n\n1 | abs()(1)\n2 |    ^^\n"); }
     #[test] fn test_count_ones() { run_str("0b11011011 . count_ones . print", "6\n"); }
     #[test] fn test_count_zeros() { run_str("0 . count_zeros . print", "64\n"); }
     #[test] fn test_env_exists() { run_str("env . repr . print", "fn env(...)\n"); }

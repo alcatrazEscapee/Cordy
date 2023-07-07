@@ -7,7 +7,7 @@ use crate::compiler::parser::expr::{Expr, ExprType};
 use crate::compiler::parser::semantic::{LateBoundGlobal, LValue, LValueReference, ParserFunctionImpl, Reference};
 use crate::compiler::parser::optimizer::Optimize;
 use crate::compiler::scanner::{ScanResult, ScanToken};
-use crate::stdlib::NativeFunction;
+use crate::core::NativeFunction;
 use crate::vm::{FunctionImpl, Opcode, StructTypeImpl};
 use crate::vm::operator::{BinaryOp, UnaryOp};
 use crate::trace;
@@ -1924,7 +1924,7 @@ mod tests {
     use crate::compiler::{CompileResult, parser, scanner};
     use crate::compiler::scanner::ScanResult;
     use crate::reporting::SourceView;
-    use crate::stdlib::NativeFunction;
+    use crate::core::NativeFunction;
     use crate::test_util;
     use crate::vm::Opcode;
     use crate::vm::operator::{BinaryOp, UnaryOp};

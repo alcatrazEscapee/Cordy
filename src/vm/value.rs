@@ -12,8 +12,8 @@ use itertools::Itertools;
 
 use crate::compiler::Fields;
 use crate::util::RecursionGuard;
-use crate::stdlib::NativeFunction;
-use crate::stdlib;
+use crate::core;
+use crate::core::NativeFunction;
 use crate::vm::error::RuntimeError;
 
 use Value::{*};
@@ -1036,7 +1036,7 @@ pub struct SliceImpl {
 
 impl SliceImpl {
     pub fn apply(self: Self, arg: Value) -> ValueResult {
-        stdlib::literal_slice(arg, self.arg1, self.arg2, self.arg3)
+        core::literal_slice(arg, self.arg1, self.arg2, self.arg3)
     }
 }
 
@@ -1264,7 +1264,7 @@ impl<'a> Indexable<'a> {
     pub fn check_index(self: &Self, value: Value) -> Result<usize, Box<RuntimeError>> {
         let index: i64 = value.as_int()?;
         let len: usize = self.len();
-        let raw: usize = stdlib::to_index(len as i64, index) as usize;
+        let raw: usize = core::to_index(len as i64, index) as usize;
         if raw < len {
             Ok(raw)
         } else {
@@ -1384,7 +1384,7 @@ mod test {
     use std::collections::VecDeque;
     use std::rc::Rc;
     use indexmap::{IndexMap, IndexSet};
-    use crate::stdlib::NativeFunction;
+    use crate::core::NativeFunction;
     use crate::vm::error::RuntimeError;
     use crate::vm::value::{FunctionImpl, IntoIterableValue, IntoValue, Value};
 

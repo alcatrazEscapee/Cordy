@@ -1,5 +1,5 @@
 use crate::compiler::parser::expr::{Expr, ExprType};
-use crate::stdlib::NativeFunction;
+use crate::core::NativeFunction;
 use crate::vm::{IntoValue, LiteralType, RuntimeError, Value};
 use crate::vm::operator::BinaryOp;
 

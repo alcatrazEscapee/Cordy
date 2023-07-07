@@ -1,6 +1,6 @@
 use crate::compiler::parser::semantic::{LValue, LValueReference};
 use crate::reporting::Location;
-use crate::stdlib::NativeFunction;
+use crate::core::NativeFunction;
 use crate::vm::{LiteralType, Opcode, RuntimeError, Value, ValueResult};
 use crate::vm::operator::{BinaryOp, UnaryOp};
 
