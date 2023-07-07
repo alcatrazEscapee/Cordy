@@ -3,7 +3,7 @@ use std::ops::{BitOr, BitOrAssign};
 
 use crate::compiler::{ParserError, ParserErrorType, ScanError, ScanErrorType, ScanToken};
 use crate::core::NativeFunction;
-use crate::vm::{FunctionImpl, RuntimeError, Value};
+use crate::vm::{FunctionImpl, RuntimeError, StructTypeImpl, Value};
 use crate::vm::operator::{BinaryOp, UnaryOp};
 
 pub type Locations = Vec<Location>;
@@ -271,9 +271,8 @@ impl AsError for RuntimeError {
             RuntimeError::ValueIsNotFunctionEvaluable(v) => format!("Tried to evaluate {} but it is not a function.", v.as_error()),
             RuntimeError::IncorrectArgumentsUserFunction(f, n) => format!("Incorrect number of arguments for {}, got {}", f.as_error(), n),
             RuntimeError::IncorrectArgumentsNativeFunction(f, n) => format!("Incorrect number of arguments for {}, got {}", f.as_error(), n),
-
-            RuntimeError::IncorrectNumberOfStructArguments(s, a, e) => format!("Struct '{}' has {} fields but {} arguments were present", s, e, a),
-            RuntimeError::IncorrectNumberOfGetFieldArguments(s, a, e) => format!("Function '(->{})' requires {} parameters but {} were present", s, e, a),
+            RuntimeError::IncorrectArgumentsGetField(s, n) => format!("Incorrect number of arguments for native (->'{}'), got {}", s, n),
+            RuntimeError::IncorrectArgumentsStruct(s, n) => format!("Incorrect number of arguments for {}, got {}", s.as_error(), n),
 
             RuntimeError::ValueErrorIndexOutOfBounds(i, ln) => format!("Index '{}' is out of bounds for list of length [0, {})", i, ln),
             RuntimeError::ValueErrorStepCannotBeZero => String::from("ValueError: 'step' argument cannot be zero"),
@@ -329,6 +328,12 @@ impl AsError for Value {
 }
 
 impl AsError for FunctionImpl {
+    fn as_error(self: &Self) -> String {
+        self.as_str()
+    }
+}
+
+impl AsError for StructTypeImpl {
     fn as_error(self: &Self) -> String {
         self.as_str()
     }

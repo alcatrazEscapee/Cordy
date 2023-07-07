@@ -931,7 +931,7 @@ impl Hash for StructImpl {
 }
 
 /// The `Value` type for a struct constructor. It is a single instance, immutable object which only holds metadata about the struct itself.
-#[derive(Debug, Eq)]
+#[derive(Debug, Clone, Eq)]
 pub struct StructTypeImpl {
     pub name: String,
     pub field_names: Vec<String>,
@@ -942,6 +942,10 @@ pub struct StructTypeImpl {
 impl StructTypeImpl {
     pub fn new(name: String, field_names: Vec<String>, type_index: u32) -> StructTypeImpl {
         StructTypeImpl { name, field_names, type_index }
+    }
+
+    pub fn as_str(self: &Self) -> String {
+        format!("struct {}({})", self.name, self.field_names.join(", "))
     }
 }
 

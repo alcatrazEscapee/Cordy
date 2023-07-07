@@ -657,10 +657,13 @@ impl<R, W> VirtualMachine<R, W> where
                     self.call_function(func.jump_offset(nargs), nargs, func.num_var_args(nargs));
                 } else if func.min_args() > nargs {
                     // Evaluate as a partial function
-                    let arg: Vec<Value> = self.popn(nargs);
-                    let func: Value = self.pop();
-                    let partial: Value = Value::partial(func, arg);
-                    self.push(partial);
+                    // Special case if nargs == 0, we can avoid creating a partial wrapper and doing any stack manipulations
+                    if nargs > 0 {
+                        let arg: Vec<Value> = self.popn(nargs);
+                        let func: Value = self.pop();
+                        let partial: Value = Value::partial(func, arg);
+                        self.push(partial);
+                    }
                 } else {
                     return IncorrectArgumentsUserFunction((**func).clone(), nargs).err();
                 }
@@ -776,7 +779,7 @@ impl<R, W> VirtualMachine<R, W> where
                 let type_impl = type_impl.clone();
                 let expected_args = type_impl.field_names.len() as u32;
                 if nargs != expected_args {
-                    return IncorrectNumberOfStructArguments(type_impl.name.clone(), nargs, expected_args).err()
+                    return IncorrectArgumentsStruct((*type_impl).clone(), nargs).err()
                 }
 
                 let args: Vec<Value> = self.popn(nargs);
@@ -790,7 +793,7 @@ impl<R, W> VirtualMachine<R, W> where
             Value::GetField(field_index) => {
                 let field_index = *field_index;
                 if nargs != 1 {
-                    return IncorrectNumberOfGetFieldArguments(self.fields.get_field_name(field_index), nargs, 1).err()
+                    return IncorrectArgumentsGetField(self.fields.get_field_name(field_index), nargs).err()
                 }
 
                 let arg: Value = self.pop();
@@ -1022,6 +1025,8 @@ mod test {
     #[test] fn test_struct_more_partial_get_field() { run_str("struct Foo(foo) ; let x = Foo('hello') ; print([x, Foo('')] . filter(->foo) . len)", "1\n"); }
     #[test] fn test_struct_recursive_repr() { run_str("struct S(x) ; let x = S(nil) ; x->x = x ; x.print", "S(x=S(...))\n"); }
     #[test] fn test_struct_operator_is() { run_str("struct A() ; struct B() let a = A(), b = B() ; [a is A, A is function, a is B, A is A, a is function] . print", "[true, true, false, false, false]\n"); }
+    #[test] fn test_struct_construct_not_enough_arguments() { run_str("struct Foo(a, b, c) ; Foo(1)(2) . print ; ", "Incorrect number of arguments for struct Foo(a, b, c), got 1\n  at: line 1 (<test>)\n\n1 | struct Foo(a, b, c) ; Foo(1)(2) . print ; \n2 |                          ^^^\n"); }
+    #[test] fn test_struct_construct_too_many_arguments() { run_str("struct Foo(a, b, c) ; Foo(1, 2, 3, 4) . print", "Incorrect number of arguments for struct Foo(a, b, c), got 4\n  at: line 1 (<test>)\n\n1 | struct Foo(a, b, c) ; Foo(1, 2, 3, 4) . print\n2 |                          ^^^^^^^^^^^^\n"); }
     #[test] fn test_local_vars_01() { run_str("let x=0 do { x.print }", "0\n"); }
     #[test] fn test_local_vars_02() { run_str("let x=0 do { let x=1; x.print }", "1\n"); }
     #[test] fn test_local_vars_03() { run_str("let x=0 do { x.print let x=1 }", "0\n"); }
@@ -1179,6 +1184,9 @@ mod test {
     #[test] fn test_partial_function_zero_arg_partial_user_function() { run_str("fn foo(a, b) {} ; foo(1)() . repr . print", "fn foo(a, b)\n"); }
     #[test] fn test_partial_function_zero_arg_partial_native_function() { run_str("push(1)() . repr . print", "fn push(value, collection)\n"); }
     #[test] fn test_partial_function_zero_arg_partial_operator_function() { run_str("(+)(1)() . repr . print", "fn (+)(lhs, rhs)\n"); }
+    #[test] fn test_partial_function_zero_arg_user_not_optimized() { run_str("fn f(x) -> x() ; f(f(f(f))) . repr . print", "fn f(x)\n"); }
+    #[test] fn test_partial_function_zero_arg_native_not_optimized() { run_str("fn f(x) -> x() ; f(f(f(len))) . repr . print", "fn len(x)\n"); }
+    #[test] fn test_partial_function_zero_arg_operator_not_optimized() { run_str("fn f(x) -> x() ; f(f(f(+))) . repr . print", "fn (+)(lhs, rhs)\n"); }
     #[test] fn test_function_with_one_default_arg() { run_str("fn foo(a, b?) { print(a, b) } ; foo('test') ; foo('test', 'bar')", "test nil\ntest bar\n"); }
     #[test] fn test_function_with_one_default_arg_not_enough() { run_str("fn foo(a, b?) { print(a, b) } ; foo()", ""); }
     #[test] fn test_function_with_one_default_arg_too_many() { run_str("fn foo(a, b?) { print(a, b) } ; foo(1, 2, 3)", "Incorrect number of arguments for fn foo(a, b), got 3\n  at: line 1 (<test>)\n\n1 | fn foo(a, b?) { print(a, b) } ; foo(1, 2, 3)\n2 |                                    ^^^^^^^^^\n"); }

@@ -799,6 +799,10 @@ pub fn format_string(string: &String, args: Value) -> ValueResult {
 
 /// Not unused - invoked via the dispatch!() macro above
 fn wrap_as_partial<VM>(native: NativeFunction, nargs: u32, vm: &mut VM) -> Value where VM : VirtualInterface {
+    if nargs == 0 {
+        // Special case for 0-arg invoke, don't create a partial wrapper
+        return Value::NativeFunction(native)
+    }
     // vm stack will contain [..., arg1, arg2, ... argN]
     // popping in order will populate the vector with [argN, argN-1, ... arg1]
     let mut args: Vec<Value> = Vec::with_capacity(nargs as usize);

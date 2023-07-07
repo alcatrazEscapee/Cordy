@@ -2,7 +2,7 @@ use std::rc::Rc;
 use crate::reporting::{AsError, AsErrorWithContext, Location, Locations, SourceView};
 
 use crate::core::NativeFunction;
-use crate::vm::CallFrame;
+use crate::vm::{CallFrame, StructTypeImpl};
 use crate::vm::operator::{BinaryOp, UnaryOp};
 use crate::vm::value::{FunctionImpl, Value};
 
@@ -18,9 +18,8 @@ pub enum RuntimeError {
 
     IncorrectArgumentsUserFunction(FunctionImpl, u32),
     IncorrectArgumentsNativeFunction(NativeFunction, u32),
-
-    IncorrectNumberOfStructArguments(String, u32, u32), // actual, expected
-    IncorrectNumberOfGetFieldArguments(String, u32, u32), // actual, expected
+    IncorrectArgumentsGetField(String, u32),
+    IncorrectArgumentsStruct(StructTypeImpl, u32),
 
     ValueErrorIndexOutOfBounds(i64, usize),
     ValueErrorStepCannotBeZero,
