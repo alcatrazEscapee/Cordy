@@ -11,7 +11,7 @@ use indexmap::{IndexMap, IndexSet};
 use itertools::Itertools;
 
 use crate::compiler::Fields;
-use crate::misc::RecursionGuard;
+use crate::util::RecursionGuard;
 use crate::stdlib::NativeFunction;
 use crate::stdlib;
 use crate::vm::error::RuntimeError;
@@ -83,7 +83,7 @@ impl Value {
 
     // Constructors
 
-    pub fn partial(func: Value, args: Vec<Value>) -> Value { PartialFunction(Box::new(PartialFunctionImpl { func, args: args.into_iter().map(|v| Box::new(v)).collect() }))}
+    pub fn partial(func: Value, args: Vec<Value>) -> Value { PartialFunction(Box::new(PartialFunctionImpl { func, args }))}
     pub fn closure(func: Rc<FunctionImpl>) -> Value { Closure(Box::new(ClosureImpl { func, environment: Vec::new() })) }
     pub fn instance(type_impl: Rc<StructTypeImpl>, values: Vec<Value>) -> Value { Struct(Mut::new(StructImpl { type_index: type_impl.type_index, type_impl, values }))}
 
@@ -358,6 +358,18 @@ impl Value {
             List(it) => Ok(Sliceable::List(it.unbox(), VecDeque::new())),
             Vector(it) => Ok(Sliceable::Vector(it.unbox(), Vec::new())),
             _ => TypeErrorArgMustBeSliceable(self.clone()).err()
+        }
+    }
+
+    /// Converts this `Value` into a `(Value, Value)` if possible, supported for two-element `List` and `Vector`s
+    pub fn as_pair(self: &Self) -> Result<(Value, Value), Box<RuntimeError>> {
+        match match self {
+            List(it) => it.unbox().iter().cloned().collect_tuple(),
+            Vector(it) => it.unbox().iter().cloned().collect_tuple(),
+            _ => None
+        } {
+            Some(it) => Ok(it),
+            None => ValueErrorCannotCollectIntoDict(self.clone()).err()
         }
     }
 
@@ -683,7 +695,7 @@ impl Hash for FunctionImpl {
 pub struct PartialFunctionImpl {
     /// The `Value` must be either a `Function` or `Closure`
     pub func: Value,
-    pub args: Vec<Box<Value>>,
+    pub args: Vec<Value>,
 }
 
 impl Hash for PartialFunctionImpl {
@@ -1303,6 +1315,65 @@ impl<'a> Sliceable<'a> {
                 Sliceable::List(src, dest) => dest.push_back((&src[index]).clone()),
                 Sliceable::Vector(src, dest) => dest.push((&src[index]).clone()),
             }
+        }
+    }
+}
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum LiteralType {
+    List, Vector, Set, Dict
+}
+
+
+pub enum Literal {
+    List(VecDeque<Value>),
+    Vector(Vec<Value>),
+    Set(IndexSet<Value>),
+    Dict(IndexMap<Value, Value>),
+}
+
+impl Literal {
+    pub fn new(op: LiteralType, size_hint: u32) -> Literal {
+        match op {
+            LiteralType::List => Literal::List(VecDeque::with_capacity(size_hint as usize)),
+            LiteralType::Vector => Literal::Vector(Vec::with_capacity(size_hint as usize)),
+            LiteralType::Set => Literal::Set(IndexSet::with_capacity(size_hint as usize)),
+            LiteralType::Dict => Literal::Dict(IndexMap::with_capacity(size_hint as usize)),
+        }
+    }
+
+    pub fn accumulate<I : Iterator<Item=Value>>(self: &mut Self, mut iter: I) {
+        match self {
+            Literal::List(it) => for value in iter { it.push_back(value); },
+            Literal::Vector(it) => for value in iter { it.push(value); },
+            Literal::Set(it) => for value in iter { it.insert(value); }
+            Literal::Dict(it) => while let Some(key) = iter.next() {
+                let value = iter.next().unwrap();
+                it.insert(key, value);
+            },
+        };
+    }
+
+    pub fn unroll<I : Iterator<Item=Value>>(self: &mut Self, iter: I) -> Result<(), Box<RuntimeError>> {
+        match self {
+            Literal::Dict(it) => for value in iter {
+                let (key, value) = value.as_pair()?;
+                it.insert(key, value);
+            },
+            _ => self.accumulate(iter),
+        };
+        Ok(())
+    }
+}
+
+impl IntoValue for Literal {
+    fn to_value(self) -> Value {
+        match self {
+            Literal::List(it) => it.to_value(),
+            Literal::Vector(it) => it.to_value(),
+            Literal::Set(it) => it.to_value(),
+            Literal::Dict(it) => it.to_value(),
         }
     }
 }

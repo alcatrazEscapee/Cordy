@@ -59,7 +59,8 @@ impl ParserError {
             ContinueOutsideOfLoop |
             StructNotInGlobalScope |
             NonDefaultParameterAfterDefaultParameter |
-            ParameterAfterVarParameter => false,
+            ParameterAfterVarParameter |
+            UnrollNotAllowedInSlice => false,
 
             Runtime(_) => false,
         }
@@ -115,6 +116,7 @@ pub enum ParserErrorType {
     StructNotInGlobalScope,
     NonDefaultParameterAfterDefaultParameter,
     ParameterAfterVarParameter,
+    UnrollNotAllowedInSlice,
 
     Runtime(Box<RuntimeError>),
 }

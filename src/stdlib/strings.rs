@@ -3,7 +3,7 @@ use std::str::Chars;
 use fancy_regex::{Captures, Matches, Regex};
 
 use crate::vm::{IntoIterableValue, IntoValue, Iterable, Value, RuntimeError, VirtualInterface};
-use crate::misc;
+use crate::util;
 
 use Value::{*};
 use RuntimeError::{*};
@@ -32,9 +32,9 @@ pub fn replace<VM: VirtualInterface>(vm: &mut VM, pattern: Value, replacer: Valu
             let mut err = None;
             let replaced: Value = regex.replace_all(text, |captures: &Captures| {
                 let arg: Value = as_result(captures);
-                misc::yield_result(&mut err, || vm.invoke_func1(replacer.clone(), arg)?.as_str().cloned(), String::new())
+                util::yield_result(&mut err, || vm.invoke_func1(replacer.clone(), arg)?.as_str().cloned(), String::new())
             }).to_value();
-            misc::join_result(replaced, err)
+            util::join_result(replaced, err)
         },
         Some(None) => TypeErrorArgMustBeReplaceFunction(replacer).err(),
         _ => Ok(regex.replace_all(text, replacer.as_str()?).to_value())

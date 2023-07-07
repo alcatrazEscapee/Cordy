@@ -1,4 +1,4 @@
-use crate::compiler::parser::expr::{Expr, ExprType, SequenceOp};
+use crate::compiler::parser::expr::{Expr, ExprType};
 use crate::compiler::parser::Parser;
 use crate::vm::Opcode;
 use crate::vm::operator::BinaryOp;
@@ -46,17 +46,32 @@ impl<'a> Parser<'a> {
                 self.emit_expr(*rhs);
                 self.push_with(Binary(op), loc);
             },
-            Expr(loc, ExprType::Sequence(op, args)) => {
-                let nargs: u32 = args.len() as u32;
+            Expr(loc, ExprType::Literal(op, args)) => {
+                self.push(LiteralBegin(op, args.len() as u32));
+
+                let mut acc_args: u32 = 0;
                 for arg in args {
-                    self.emit_expr(arg);
+                    match arg {
+                        Expr(arg_loc, ExprType::Unroll(unroll_arg, _)) => {
+                            if acc_args > 0 {
+                                self.push(LiteralAcc(acc_args));
+                                acc_args = 0;
+                            }
+                            self.emit_expr(*unroll_arg);
+                            self.push_with(LiteralUnroll, arg_loc);
+                        },
+                        _ => {
+                            self.emit_expr(arg);
+                            acc_args += 1
+                        },
+                    }
                 }
-                self.push_with(match op {
-                    SequenceOp::List => List(nargs),
-                    SequenceOp::Set => Set(nargs),
-                    SequenceOp::Dict => Dict(nargs),
-                    SequenceOp::Vector => Vector(nargs),
-                }, loc)
+
+                if acc_args > 0 {
+                    self.push(LiteralAcc(acc_args));
+                }
+
+                self.push_with(LiteralEnd, loc);
             },
             Expr(loc, ExprType::Unroll(arg, first)) => {
                 self.emit_expr(*arg);

@@ -1,6 +1,6 @@
 L2: 0000 Nil
     0001 Nil
-L3: 0002 Function(0) -> FunctionImpl { head: 18, tail: 21, name: "trigger", args: [], default_args: [], var_arg: false }
+L3: 0002 Function(0) -> FunctionImpl { head: 18, tail: 23, name: "trigger", args: [], default_args: [], var_arg: false }
     0003 Closure
     0004 CloseLocal(0)
     0005 CloseLocal(1)
@@ -13,12 +13,14 @@ L4: 0006 LiftUpValue(1)
     0012 PopN(3)
 L5: 0013 Jump(0)
 L7: 0014 IncGlobalCount
-    0015 Function(1) -> FunctionImpl { head: 22, tail: 23, name: "bomb", args: [], default_args: [], var_arg: false }
+    0015 Function(1) -> FunctionImpl { head: 24, tail: 25, name: "bomb", args: [], default_args: [], var_arg: false }
     0016 Pop
     0017 Exit
-L3: 0018 PushUpValue(0)
-    0019 PushUpValue(1)
-    0020 Vector(2)
-    0021 Return
-L7: 0022 Nil
+L3: 0018 LiteralBegin(Vector, 2)
+    0019 PushUpValue(0)
+    0020 PushUpValue(1)
+    0021 LiteralAcc(2)
+    0022 LiteralEnd
     0023 Return
+L7: 0024 Nil
+    0025 Return

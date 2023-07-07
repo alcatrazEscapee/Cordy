@@ -1,6 +1,6 @@
-use crate::compiler::parser::expr::{Expr, ExprType, SequenceOp};
+use crate::compiler::parser::expr::{Expr, ExprType};
 use crate::stdlib::NativeFunction;
-use crate::vm::{IntoValue, RuntimeError, Value};
+use crate::vm::{IntoValue, LiteralType, RuntimeError, Value};
 use crate::vm::operator::BinaryOp;
 
 /// A trait for objects which are able to be optimized via a recursive self-transformation
@@ -54,7 +54,7 @@ impl Optimize for Expr {
                 }
             },
 
-            Expr(loc, ExprType::Sequence(op, args)) => op.apply(loc, args.optimize()),
+            Expr(loc, ExprType::Literal(op, args)) => Expr(loc, ExprType::Literal(op, args.optimize())),
             Expr(loc, ExprType::Unroll(arg, first)) => arg.optimize().unroll(loc, first),
 
             Expr(loc, ExprType::Eval(f, args, any_unroll)) => {
@@ -96,7 +96,7 @@ impl Optimize for Expr {
                 let f: Expr = f.optimize();
 
                 match f {
-                    Expr(_, ExprType::Sequence(SequenceOp::List, mut args)) => {
+                    Expr(_, ExprType::Literal(LiteralType::List, mut args)) if !any_unroll(&args) => {
                         // Found `a . [b, ...]`
                         // We can compile-time check this list contains a single element, and rephrase this as `a[b]`
                         let nargs: usize = args.len();
@@ -176,7 +176,7 @@ impl Expr {
 
             ExprType::Unary(_, arg) => arg.purity(),
             ExprType::Binary(_, lhs, rhs) | ExprType::LogicalOr(lhs, rhs) | ExprType::LogicalAnd(lhs, rhs) => lhs.purity().min(rhs.purity()),
-            ExprType::Sequence(_, args) => args.iter().map(|u| u.purity()).min().unwrap_or(Purity::Strong),
+            ExprType::Literal(_, args) => args.iter().map(|u| u.purity()).min().unwrap_or(Purity::Strong),
             ExprType::Unroll(arg, _) => arg.purity(),
             ExprType::IfThenElse(condition, if_true, if_false) => condition.purity().min(if_true.purity()).min(if_false.purity()),
 
@@ -203,6 +203,10 @@ impl Expr {
             _ => false
         }
     }
+}
+
+fn any_unroll(args: &Vec<Expr>) -> bool {
+    args.iter().any(|u| u.is_unroll())
 }
 
 
