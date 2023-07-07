@@ -1,7 +1,7 @@
 use crate::compiler::parser::semantic::{LValue, LValueReference};
 use crate::reporting::Location;
 use crate::stdlib::NativeFunction;
-use crate::vm::{Opcode, RuntimeError, Value, ValueResult};
+use crate::vm::{LiteralType, Opcode, RuntimeError, Value, ValueResult};
 use crate::vm::operator::{BinaryOp, UnaryOp};
 
 #[derive(Debug, Clone)]
@@ -25,7 +25,7 @@ pub enum ExprType {
     // Operators + Functions
     Unary(UnaryOp, Arg),
     Binary(BinaryOp, Arg, Arg),
-    Sequence(SequenceOp, Vec<Expr>),
+    Literal(LiteralType, Vec<Expr>),
     Unroll(Arg, bool), // first: bool
     Eval(Arg, Vec<Expr>, bool), // any_unroll: bool
     Compose(Arg, Arg),
@@ -51,18 +51,6 @@ pub enum ExprType {
     // Error
     RuntimeError(Box<RuntimeError>),
 }
-
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub enum SequenceOp {
-    List, Set, Dict, Vector
-}
-
-impl SequenceOp {
-    pub fn apply(self: Self, loc: Location, args: Vec<Expr>) -> Expr {
-        Expr(loc, ExprType::Sequence(self, args))
-    }
-}
-
 
 
 impl Expr {
@@ -92,11 +80,12 @@ impl Expr {
     pub fn assign_array(loc: Location, array: Expr, index: Expr, rhs: Expr) -> Expr { Expr(loc, ExprType::ArrayAssignment(Box::new(array), Box::new(index), Box::new(rhs))) }
     pub fn assign_op_array(loc: Location, array: Expr, index: Expr, op: BinaryOp, rhs: Expr) -> Expr { Expr(loc, ExprType::ArrayOpAssignment(Box::new(array), Box::new(index), op, Box::new(rhs))) }
 
-    pub fn list(loc: Location, args: Vec<Expr>) -> Expr { SequenceOp::List.apply(loc, args) }
-    pub fn set(loc: Location, args: Vec<Expr>) -> Expr { SequenceOp::Set.apply(loc, args) }
-    pub fn dict(loc: Location, args: Vec<Expr>) -> Expr { SequenceOp::Dict.apply(loc, args) }
-    pub fn vector(loc: Location, args: Vec<Expr>) -> Expr { SequenceOp::Vector.apply(loc, args) }
-    pub fn slice_literal(loc: Location, arg1: Expr, arg2: Expr, arg3: Option<Expr>) -> Expr { Expr(loc, ExprType::SliceLiteral(Box::new(arg1), Box::new(arg2), Box::new(arg3))) }
+    pub fn list(loc: Location, args: Vec<Expr>) -> Expr { Expr(loc, ExprType::Literal(LiteralType::List, args)) }
+    pub fn vector(loc: Location, args: Vec<Expr>) -> Expr { Expr(loc, ExprType::Literal(LiteralType::Vector, args)) }
+    pub fn set(loc: Location, args: Vec<Expr>) -> Expr { Expr(loc, ExprType::Literal(LiteralType::Set, args)) }
+    pub fn dict(loc: Location, args: Vec<Expr>) -> Expr { Expr(loc, ExprType::Literal(LiteralType::Dict, args)) }
+
+    pub fn raw_slice(loc: Location, arg1: Expr, arg2: Expr, arg3: Option<Expr>) -> Expr { Expr(loc, ExprType::SliceLiteral(Box::new(arg1), Box::new(arg2), Box::new(arg3))) }
 
     pub fn unary(self: Self, loc: Location, op: UnaryOp) -> Expr { Expr(loc, ExprType::Unary(op, Box::new(self))) }
     pub fn binary(self: Self, loc: Location, op: BinaryOp, rhs: Expr) -> Expr { Expr(loc, ExprType::Binary(op, Box::new(self), Box::new(rhs))) }
@@ -140,4 +129,6 @@ impl Expr {
             Err(e) => Expr::error(loc, e),
         }
     }
+
+    pub fn is_unroll(self: &Self) -> bool { match self { Expr(_, ExprType::Unroll(_, _)) => true, _ => false } }
 }

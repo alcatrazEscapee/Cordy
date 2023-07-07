@@ -423,6 +423,7 @@ impl AsError for ParserError {
             ParserErrorType::StructNotInGlobalScope => String::from("'struct' statements can only be present in global scope."),
             ParserErrorType::NonDefaultParameterAfterDefaultParameter => String::from("Non-default argument cannot follow default argument."),
             ParserErrorType::ParameterAfterVarParameter => String::from("Variadic parameter must be the last one in the function."),
+            ParserErrorType::UnrollNotAllowedInSlice => String::from("Unrolled expression with '...' not allowed in slice literal."),
 
             ParserErrorType::Runtime(e) => e.as_error(),
         }

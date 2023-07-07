@@ -1,20 +1,20 @@
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::io::{BufRead, Write};
+use std::iter::Empty;
 use std::rc::Rc;
+use std::vec::Splice;
 
-use itertools::Itertools;
-
-use crate::{compiler, misc, stdlib, trace};
+use crate::{compiler, util, stdlib, trace};
 use crate::compiler::{CompileParameters, CompileResult, Fields, IncrementalCompileResult, Locals};
 use crate::stdlib::NativeFunction;
-use crate::vm::value::{PartialFunctionImpl, UpValue};
-use crate::misc::OffsetAdd;
+use crate::vm::value::{Literal, PartialFunctionImpl, UpValue};
+use crate::util::OffsetAdd;
 use crate::reporting::{Location, SourceView};
 
 pub use crate::vm::error::{DetailRuntimeError, RuntimeError};
 pub use crate::vm::opcode::Opcode;
-pub use crate::vm::value::{FunctionImpl, guard_recursive_hash, IntoDictValue, IntoIterableValue, IntoValue, IntoValueResult, Iterable, StructTypeImpl, Value};
+pub use crate::vm::value::{FunctionImpl, guard_recursive_hash, IntoDictValue, IntoIterableValue, IntoValue, IntoValueResult, Iterable, LiteralType, StructTypeImpl, Value};
 
 use Opcode::{*};
 use RuntimeError::{*};
@@ -34,6 +34,7 @@ pub struct VirtualMachine<R, W> {
     code: Vec<Opcode>,
     stack: Vec<Value>,
     call_stack: Vec<CallFrame>,
+    literal_stack: Vec<Literal>,
     global_count: usize,
     open_upvalues: HashMap<usize, Rc<Cell<UpValue>>>,
     unroll_stack: Vec<i32>,
@@ -97,7 +98,7 @@ pub trait VirtualInterface {
     // Stack Manipulation
     fn peek(self: &Self, offset: usize) -> &Value;
     fn pop(self: &mut Self) -> Value;
-    fn popn(self: &mut Self, n: usize) -> Vec<Value>;
+    fn popn(self: &mut Self, n: u32) -> Vec<Value>;
     fn push(self: &mut Self, value: Value);
 }
 
@@ -126,6 +127,7 @@ impl<R, W> VirtualMachine<R, W> where
             code: result.code,
             stack: Vec::with_capacity(256), // Just guesses, not hard limits
             call_stack: vec![CallFrame { return_ip: 0, frame_pointer: 0 }],
+            literal_stack: Vec::with_capacity(16),
             global_count: 0,
             open_upvalues: HashMap::new(),
             unroll_stack: Vec::new(),
@@ -205,13 +207,13 @@ impl<R, W> VirtualMachine<R, W> where
 
     /// Executes a single instruction
     fn run_instruction(self: &mut Self, op: Opcode) -> AnyResult {
+        trace::trace_interpreter!("{:?}", op);
         match op {
             Noop => panic!("Noop should only be emitted as a temporary instruction"),
 
             // Flow Control
             JumpIfFalse(ip) => {
                 let jump: usize = self.ip.add_offset(ip);
-                trace::trace_interpreter!("jump if false {} -> {}", self.stack.last().unwrap().as_debug_str(), jump);
                 let a1: &Value = self.peek(0);
                 if !a1.as_bool() {
                     self.ip = jump;
@@ -219,7 +221,6 @@ impl<R, W> VirtualMachine<R, W> where
             },
             JumpIfFalsePop(ip) => {
                 let jump: usize = self.ip.add_offset(ip);
-                trace::trace_interpreter!("jump if false pop {} -> {}", self.stack.last().unwrap().as_debug_str(), jump);
                 let a1: Value = self.pop();
                 if !a1.as_bool() {
                     self.ip = jump;
@@ -227,7 +228,6 @@ impl<R, W> VirtualMachine<R, W> where
             },
             JumpIfTrue(ip) => {
                 let jump: usize = self.ip.add_offset(ip);
-                trace::trace_interpreter!("jump if true {} -> {}", self.stack.last().unwrap().as_debug_str(), jump);
                 let a1: &Value = self.peek(0);
                 if a1.as_bool() {
                     self.ip = jump;
@@ -235,7 +235,6 @@ impl<R, W> VirtualMachine<R, W> where
             },
             JumpIfTruePop(ip) => {
                 let jump: usize = self.ip.add_offset(ip);
-                trace::trace_interpreter!("jump if true pop {} -> {}", self.stack.last().unwrap().as_debug_str(), jump);
                 let a1: Value = self.pop();
                 if a1.as_bool() {
                     self.ip = jump;
@@ -243,7 +242,6 @@ impl<R, W> VirtualMachine<R, W> where
             },
             Jump(ip) => {
                 let jump: usize = self.ip.add_offset(ip);
-                trace::trace_interpreter!("jump -> {}", jump);
                 self.ip = jump;
             },
             Return => {
@@ -253,11 +251,10 @@ impl<R, W> VirtualMachine<R, W> where
                 // The frame pointer points to the first local of the function
                 // [prev values ... function, local0, local1, ... localN, ret_val ]
                 //                            ^frame pointer
-                // So, we pop the return value, splice the difference between the frame pointer and the top, then push the return value
+                // So, we pop the return value, truncate the difference between the frame pointer and the top, then push the return value
                 let ret: Value = self.pop();
                 self.stack.truncate(self.frame_pointer() - 1);
-                trace::trace_interpreter_stack!("drop frame");
-                trace::trace_interpreter_stack!("{}", self.debug_stack());
+                trace::trace_interpreter_stack!("drop frame {}", self.debug_stack());
                 self.push(ret);
 
                 self.ip = self.return_ip();
@@ -267,21 +264,17 @@ impl<R, W> VirtualMachine<R, W> where
 
             // Stack Manipulations
             Pop => {
-                trace::trace_interpreter!("stack pop {}", self.stack.last().unwrap().as_debug_str());
                 self.pop();
             },
             PopN(n) => {
-                trace::trace_interpreter!("stack popn {}", n);
                 for _ in 0..n {
                     self.pop();
                 }
             },
             Dup => {
-                trace::trace_interpreter!("dup {}", self.stack.last().unwrap().as_debug_str());
                 self.push(self.peek(0).clone());
             },
             Swap => {
-                trace::trace_interpreter!("swap {} <-> {}", self.stack.last().unwrap().as_debug_str(), self.stack[self.stack.len() - 2].as_debug_str());
                 let a1: Value = self.pop();
                 let a2: Value = self.pop();
                 self.push(a1);
@@ -368,12 +361,10 @@ impl<R, W> VirtualMachine<R, W> where
             },
 
             IncGlobalCount => {
-                trace::trace_interpreter!("inc global count -> {}", self.global_count + 1);
                 self.global_count += 1;
             },
 
             Closure => {
-                trace::trace_interpreter!("close closure {}", self.stack.last().unwrap().as_debug_str());
                 match self.pop() {
                     Value::Function(f) => self.push(Value::closure(f)),
                     _ => panic!("Malformed bytecode"),
@@ -407,7 +398,6 @@ impl<R, W> VirtualMachine<R, W> where
             },
 
             LiftUpValue(index) => {
-                trace::trace_interpreter!("lift upvalue {}", self.stack.last().unwrap().as_debug_str());
                 let index = self.frame_pointer() + index as usize;
                 match self.open_upvalues.remove(&index) {
                     Some(upvalue) => {
@@ -424,12 +414,10 @@ impl<R, W> VirtualMachine<R, W> where
             },
 
             InitIterable => {
-                trace::trace_interpreter!("init iterable {}", self.stack.last().unwrap().as_debug_str());
                 let iter = self.pop().as_iter()?;
                 self.push(Value::Iter(Box::new(iter)));
             },
             TestIterable => {
-                trace::trace_interpreter!("test iterable {}", self.stack.last().unwrap().as_debug_str());
                 let top: usize = self.stack.len() - 1;
                 let iter = &mut self.stack[top];
                 match iter {
@@ -448,77 +436,51 @@ impl<R, W> VirtualMachine<R, W> where
 
             // Push Operations
             Nil => {
-                trace::trace_interpreter!("push nil");
                 self.push(Value::Nil);
             },
             True => {
-                trace::trace_interpreter!("push true");
                 self.push(true.to_value());
             },
             False => {
-                trace::trace_interpreter!("push false");
                 self.push(false.to_value());
             },
             Int(cid) => {
                 let cid: usize = cid as usize;
                 let value: i64 = self.constants[cid];
-                trace::trace_interpreter!("push constant {} -> {}", cid, value);
                 self.push(value.to_value());
             }
             Str(sid) => {
                 let sid: usize = sid as usize;
                 let str: String = self.strings[sid].clone();
-                trace::trace_interpreter!("push {} -> '{}'", sid, str);
                 self.push(str.to_value());
             },
             Function(fid) => {
                 let fid: usize = fid as usize;
                 let func = Value::Function(Rc::clone(&self.functions[fid]));
-                trace::trace_interpreter!("push {} -> {}", fid, func.as_debug_str());
                 self.push(func);
             },
             NativeFunction(b) => {
-                trace::trace_interpreter!("push {}", Value::NativeFunction(b).as_debug_str());
                 self.push(Value::NativeFunction(b));
             },
-            List(length) => {
-                // List values are present on the stack in-order
-                // So we need to splice the last n values of the stack into it's own list
-                trace::trace_interpreter!("push list n={}", length);
-                let start: usize = self.stack.len() - length as usize;
-                let end: usize = self.stack.len();
-                trace::trace_interpreter_stack!("stack splice {}..{} into list", start, end);
-                let list: Value = self.stack.splice(start..end, std::iter::empty()).to_list();
-                self.push(list);
+
+            LiteralBegin(op, length) => {
+                self.literal_stack.push(Literal::new(op, length));
             },
-            Vector(length) => {
-                // Vector values are present on the stack in-order
-                // So we need to splice the last n values of the stack into it's own vector
-                trace::trace_interpreter!("push vector n={}", length);
-                self.push_stack_into_vector(length);
+            LiteralAcc(length) => {
+                let top = self.literal_stack.last_mut().unwrap();
+                top.accumulate(splice(&mut self.stack, length));
             },
-            Set(length) => {
-                // Set values are present on the stack in-order
-                // So we need to splice the last n values of the stack into it's own set
-                trace::trace_interpreter!("push set n={}", length);
-                let start: usize = self.stack.len() - length as usize;
-                let end: usize = self.stack.len();
-                trace::trace_interpreter_stack!("stack splice {}..{} into set", start, end);
-                let set: Value = self.stack.splice(start..end, std::iter::empty()).to_set();
-                self.push(set);
+            LiteralUnroll => {
+                let arg = self.pop();
+                let top = self.literal_stack.last_mut().unwrap();
+                top.unroll(arg.as_iter()?)?;
             },
-            Dict(length) => {
-                // Dict values are present on the stack in-order, in flat key-value order.
-                // So we need to splice the last n*2 values of the stack into it's own dict.
-                trace::trace_interpreter!("push set n={}", length);
-                let start: usize = self.stack.len() - length as usize;
-                let end: usize = self.stack.len();
-                trace::trace_interpreter_stack!("stack splice {}..{} into dict", start, end);
-                let dict: Value = self.stack.splice(start..end, std::iter::empty()).tuples().to_dict();
-                self.push(dict);
+            LiteralEnd => {
+                let top = self.literal_stack.pop().unwrap();
+                self.push(top.to_value());
             },
+
             Struct(type_index) => {
-                trace::trace_interpreter!("push struct {} ({})", self.structs[type_index as usize].name, type_index);
                 self.push(Value::StructType(self.structs[type_index as usize].clone()));
             },
 
@@ -536,18 +498,15 @@ impl<R, W> VirtualMachine<R, W> where
             }
 
             OpFuncEval(nargs) => {
-                trace::trace_interpreter!("op function evaluate n = {}", nargs);
                 self.invoke_func_eval(nargs)?;
             },
             OpFuncEvalUnrolled(nargs) => {
-                trace::trace_interpreter!("op func evaluate (unrolled) n = {}", nargs);
                 let unrolled_nargs: i32 = self.unroll_stack.pop().unwrap();
                 self.invoke_func_eval(nargs.add_offset(unrolled_nargs))?;
             }
 
             CheckLengthGreaterThan(len) => {
                 let len = self.constants[len as usize] as usize;
-                trace::trace_interpreter!("check len > {}", len);
                 let a1: &Value = self.peek(0);
                 let actual = match a1.len() {
                     Ok(len) => len,
@@ -559,7 +518,6 @@ impl<R, W> VirtualMachine<R, W> where
             },
             CheckLengthEqualTo(len) => {
                 let len = self.constants[len as usize] as usize;
-                trace::trace_interpreter!("check len == {}", len);
                 let a1: &Value = self.peek(0);
                 let actual = match a1.len() {
                     Ok(len) => len,
@@ -571,21 +529,18 @@ impl<R, W> VirtualMachine<R, W> where
             },
 
             OpIndex => {
-                trace::trace_interpreter!("op []");
                 let a2: Value = self.pop();
                 let a1: Value = self.pop();
                 let ret = stdlib::get_index(self, a1, a2)?;
                 self.push(ret);
             },
             OpIndexPeek => {
-                trace::trace_interpreter!("op [] peek");
                 let a2: Value = self.peek(0).clone();
                 let a1: Value = self.peek(1).clone();
                 let ret = stdlib::get_index(self, a1, a2)?;
                 self.push(ret);
             },
             OpSlice => {
-                trace::trace_interpreter!("op [:]");
                 let a3: Value = self.pop();
                 let a2: Value = self.pop();
                 let a1: Value = self.pop();
@@ -593,7 +548,6 @@ impl<R, W> VirtualMachine<R, W> where
                 self.push(ret);
             },
             OpSliceWithStep => {
-                trace::trace_interpreter!("op [::]");
                 let a4: Value = self.pop();
                 let a3: Value = self.pop();
                 let a2: Value = self.pop();
@@ -603,23 +557,19 @@ impl<R, W> VirtualMachine<R, W> where
             },
 
             GetField(field_index) => {
-                trace::trace_interpreter!("get field {}", field_index);
                 let a1: Value = self.pop();
                 let ret: Value = a1.get_field(&self.fields, field_index)?;
                 self.push(ret);
             },
             GetFieldPeek(field_index) => {
-                trace::trace_interpreter!("get field peek {}", field_index);
                 let a1: Value = self.peek(0).clone();
                 let ret: Value = a1.get_field(&self.fields, field_index)?;
                 self.push(ret);
             },
             GetFieldFunction(field_index) => {
-                trace::trace_interpreter!("push get field {}", field_index);
                 self.push(Value::GetField(field_index));
             },
             SetField(field_index) => {
-                trace::trace_interpreter!("set field {}", field_index);
                 let a2: Value = self.pop();
                 let a1: Value = self.pop();
                 let ret: Value = a1.set_field(&self.fields, field_index, a2)?;
@@ -627,13 +577,11 @@ impl<R, W> VirtualMachine<R, W> where
             },
 
             Unary(op) => {
-                trace::trace_interpreter!("op unary {:?}", op);
                 let a1: Value = self.pop();
                 let ret: Value = op.apply(a1)?;
                 self.push(ret);
             },
             Binary(op) => {
-                trace::trace_interpreter!("op binary {:?}", op);
                 let a2: Value = self.pop();
                 let a1: Value = self.pop();
                 let ret: Value = op.apply(a1, a2)?;
@@ -641,13 +589,11 @@ impl<R, W> VirtualMachine<R, W> where
             },
 
             Slice => {
-                trace::trace_interpreter!("slice");
                 let arg2: Value = self.pop();
                 let arg1: Value = self.pop();
                 self.push(Value::slice(arg1, arg2, None)?);
             },
             SliceWithStep => {
-                trace::trace_interpreter!("slice with step");
                 let arg3: Value = self.pop();
                 let arg2: Value = self.pop();
                 let arg1: Value = self.pop();
@@ -715,7 +661,7 @@ impl<R, W> VirtualMachine<R, W> where
                 } else if func.min_args() > nargs && nargs > 0 {
                     // Evaluate as a partial function
                     // Note that partially evaluating with zero arguments is illegal
-                    let arg: Vec<Value> = self.popn(nargs as usize);
+                    let arg: Vec<Value> = self.popn(nargs);
                     let func: Value = self.pop();
                     let partial: Value = Value::partial(func, arg);
                     self.push(partial);
@@ -736,24 +682,23 @@ impl<R, W> VirtualMachine<R, W> where
                 let total_nargs: u32 = partial.args.len() as u32 + nargs;
                 if func.min_args() > total_nargs {
                     // Not enough arguments, so pop the argument and push a new partial function
-                    let top = self.stack.len();
-                    for arg in self.stack.splice(top - nargs as usize..top, std::iter::empty()) {
-                        partial.args.push(Box::new(arg));
+                    for arg in splice(&mut self.stack, nargs) {
+                        partial.args.push(arg);
                     }
                     self.pop(); // Should pop the `Nil` we swapped earlier
                     self.push(Value::PartialFunction(Box::new(partial)));
                 } else if func.in_range(total_nargs) {
                     // Exactly enough arguments to invoke the function
                     // Before we call, we need to pop-push to reorder the arguments and setup partial arguments, so we have the correct calling convention
-                    let args: Vec<Value> = self.popn(nargs as usize);
+                    let iter = self.popn(nargs);
                     let head: usize = func.jump_offset(total_nargs);
                     let num_var_args: Option<u32> = func.num_var_args(nargs);
                     self.pop(); // Should pop the `Nil` we swapped earlier
                     self.push(partial.func);
                     for par in partial.args {
-                        self.push(*par);
+                        self.push(par);
                     }
-                    for arg in args {
+                    for arg in iter {
                         self.push(arg);
                     }
                     self.call_function(head, total_nargs, num_var_args);
@@ -844,7 +789,7 @@ impl<R, W> VirtualMachine<R, W> where
                     return IncorrectNumberOfStructArguments(type_impl.name.clone(), nargs, expected_args).err()
                 }
 
-                let args: Vec<Value> = self.popn(nargs as usize);
+                let args: Vec<Value> = self.popn(nargs);
                 let instance: Value = Value::instance(type_impl, args);
 
                 self.pop(); // The struct type
@@ -871,15 +816,6 @@ impl<R, W> VirtualMachine<R, W> where
         }
     }
 
-    /// Collects the top `length` elements of the stack into a vector, in order.
-    fn push_stack_into_vector(self: &mut Self, length: u32) {
-        let start: usize = self.stack.len() - length as usize;
-        let end: usize = self.stack.len();
-        trace::trace_interpreter_stack!("stack splice {}..{} into list", start, end);
-        let vector: Value = self.stack.splice(start..end, std::iter::empty()).to_vector();
-        self.push(vector);
-    }
-
     /// Calls a user function by building a `CallFrame` and jumping to the function's `head` IP
     fn call_function(self: &mut Self, head: usize, nargs: u32, num_var_args: Option<u32>) {
         let frame = CallFrame {
@@ -891,7 +827,8 @@ impl<R, W> VirtualMachine<R, W> where
 
         if let Some(num_var_args) = num_var_args {
             trace::trace_interpreter!("collect varargs {}", num_var_args);
-            self.push_stack_into_vector(num_var_args)
+            let args = splice(&mut self.stack, num_var_args).to_vector();
+            self.push(args);
         }
 
         trace::trace_interpreter!("call stack = {}", self.debug_call_stack());
@@ -962,7 +899,7 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
     fn read_line(self: &mut Self) -> String {
         let mut buf = String::new();
         self.read.read_line(&mut buf).unwrap();
-        misc::strip_line_ending(&mut buf);
+        util::strip_line_ending(&mut buf);
         buf
     }
 
@@ -1004,10 +941,8 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
     }
 
     /// Pops the top N values off the stack, in order
-    fn popn(self: &mut Self, n: usize) -> Vec<Value> {
-        trace::trace_interpreter_stack!("popn({}) -> {}, ...", n, self.stack.last().unwrap().as_debug_str());
-        let length: usize = self.stack.len();
-        let ret = self.stack.splice(length - n..length, std::iter::empty()).collect();
+    fn popn(self: &mut Self, n: u32) -> Vec<Value> {
+        let ret = splice(&mut self.stack, n as u32).collect();
         trace::trace_interpreter_stack!("{}", self.debug_stack());
         ret
     }
@@ -1020,117 +955,87 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
     }
 }
 
+/// Iterates the top `n` values of the provided stack, in-order, removing them from the stack.
+///
+/// **N.B.** This is not implemented as a method on `VirtualMachine` as we want to take a partial borrow only of
+/// `&mut self.stack` when called, and which means we can interact with other methods on the VM (e.g. the literal stack).
+fn splice(stack: &mut Vec<Value>, n: u32) -> Splice<Empty<Value>> {
+    let start: usize = stack.len() - n as usize;
+    let end: usize = stack.len();
+    stack.splice(start..end, std::iter::empty())
+}
+
 
 #[cfg(test)]
 mod test {
-    use crate::{compiler, misc};
+    use crate::{compiler, test_util};
     use crate::reporting::SourceView;
     use crate::vm::{ExitType, VirtualMachine};
 
-    #[test] fn test_str_empty() { run_str("", ""); }
-    #[test] fn test_str_hello_world() { run_str("print('hello world!')", "hello world!\n"); }
-    #[test] fn test_str_empty_print() { run_str("print()", "\n"); }
-    #[test] fn test_str_strings() { run_str("print('first', 'second', 'third')", "first second third\n"); }
-    #[test] fn test_str_other_args() { run_str("print(nil, -1, 1, true, false, 'test', print)", "nil -1 1 true false test print\n"); }
-    #[test] fn test_str_unary_ops() { run_str("print(-1, --1, ---1, !3, !!3, !true, !!true)", "-1 1 -1 -4 3 false true\n"); }
-    #[test] fn test_str_add_str() { run_str("print(('a' + 'b') + (3 + 4) + (' hello' + 3) + (' and' + true + nil))", "ab7 hello3 andtruenil\n"); }
-    #[test] fn test_str_mul_str() { run_str("print('abc' * 3)", "abcabcabc\n"); }
-    #[test] fn test_str_add_sub_mul_div_int() { run_str("print(5 - 3, 12 + 5, 3 * 9, 16 / 3)", "2 17 27 5\n"); }
-    #[test] fn test_str_div_mod_int() { run_str("print(3 / 2, 3 / 3, -3 / 2, 10 % 3, 11 % 3, 12 % 3)", "1 1 -2 1 2 0\n"); }
-    #[test] fn test_str_div_by_zero() { run_str("print(15 / 0)", "Compile Error:\n\nValueError: Expected value to be non-zero\n  at: line 1 (<test>)\n\n1 | print(15 / 0)\n2 |          ^\n"); }
-    #[test] fn test_str_mod_by_zero() { run_str("print(15 % 0)", "Compile Error:\n\nValueError: Expected value '0: int' to be positive\n  at: line 1 (<test>)\n\n1 | print(15 % 0)\n2 |          ^\n"); }
-    #[test] fn test_str_left_right_shift() { run_str("print(1 << 10, 16 >> 1, 16 << -1, 1 >> -10)", "1024 8 8 1024\n"); }
-    #[test] fn test_str_compare_ints_1() { run_str("print(1 < 3, -5 < -10, 6 > 7, 6 > 4)", "true false false true\n"); }
-    #[test] fn test_str_compare_ints_2() { run_str("print(1 <= 3, -5 < -10, 3 <= 3, 2 >= 2, 6 >= 7, 6 >= 4, 6 <= 6, 8 >= 8)", "true false true true false true true true\n"); }
-    #[test] fn test_str_equal_ints() { run_str("print(1 == 3, -5 == -10, 3 != 3, 2 == 2, 6 != 7)", "false false false true true\n"); }
-    #[test] fn test_str_compare_bools_1() { run_str("print(false < false, false < true, true < false, true < true)", "false true false false\n"); }
-    #[test] fn test_str_compare_bools_2() { run_str("print(false <= false, false >= true, true >= false, true <= true)", "true false true true\n"); }
-    #[test] fn test_str_bitwise_ops() { run_str("print(0b111 & 0b100, 0b1100 | 0b1010, 0b1100 ^ 0b1010)", "4 14 6\n"); }
-    #[test] fn test_str_compose() { run_str("print . print", "print\n"); }
-    #[test] fn test_str_compose_str() { run_str("'hello world' . print", "hello world\n"); }
-    #[test] fn test_str_if_01() { run_str("if 1 < 2 { print('yes') } else { print ('no') }", "yes\n"); }
-    #[test] fn test_str_if_02() { run_str("if 1 < -2 { print('yes') } else { print ('no') }", "no\n"); }
-    #[test] fn test_str_if_03() { run_str("if true { print('yes') } print('and also')", "yes\nand also\n"); }
-    #[test] fn test_str_if_04() { run_str("if 1 < -2 { print('yes') } print('and also')", "and also\n"); }
-    #[test] fn test_str_if_05() { run_str("if 0 { print('yes') }", ""); }
-    #[test] fn test_str_if_06() { run_str("if 1 { print('yes') }", "yes\n"); }
-    #[test] fn test_str_if_07() { run_str("if 'string' { print('yes') }", "yes\n"); }
-    #[test] fn test_str_if_08() { run_str("if 1 < 0 { print('yes') } elif 1 { print('hi') } else { print('hehe') }", "hi\n"); }
-    #[test] fn test_str_if_09() { run_str("if 1 < 0 { print('yes') } elif 2 < 0 { print('hi') } else { print('hehe') }", "hehe\n"); }
-    #[test] fn test_str_if_10() { run_str("if 1 { print('yes') } elif true { print('hi') } else { print('hehe') }", "yes\n"); }
-    #[test] fn test_str_short_circuiting_1() { run_str("if true and print('yes') { print('no') }", "yes\n"); }
-    #[test] fn test_str_short_circuiting_2() { run_str("if false and print('also no') { print('no') }", ""); }
-    #[test] fn test_str_short_circuiting_3() { run_str("if true and (print('yes') or true) { print('also yes') }", "yes\nalso yes\n"); }
-    #[test] fn test_str_short_circuiting_4() { run_str("if false or print('yes') { print('no') }", "yes\n"); }
-    #[test] fn test_str_short_circuiting_5() { run_str("if true or print('no') { print('yes') }", "yes\n"); }
-    #[test] fn test_str_partial_func_1() { run_str("'apples and bananas' . replace ('a', 'o') . print", "opples ond bononos\n"); }
-    #[test] fn test_str_partial_func_2() { run_str("'apples and bananas' . replace ('a') ('o') . print", "opples ond bononos\n"); }
-    #[test] fn test_str_partial_func_3() { run_str("print('apples and bananas' . replace ('a') ('o'))", "opples ond bononos\n"); }
-    #[test] fn test_str_partial_func_4() { run_str("let x = replace ('a', 'o') ; 'apples and bananas' . x . print", "opples ond bononos\n"); }
-    #[test] fn test_str_partial_func_5() { run_str("let x = replace ('a', 'o') ; print(x('apples and bananas'))", "opples ond bononos\n"); }
-    #[test] fn test_str_partial_func_6() { run_str("('o' . replace('a')) ('apples and bananas') . print", "opples ond bononos\n"); }
-    #[test] fn test_str_list_len() { run_str("[1, 2, 3] . len . print", "3\n"); }
-    #[test] fn test_str_str_len() { run_str("'12345' . len . print", "5\n"); }
-    #[test] fn test_str_list_print() { run_str("[1, 2, '3'] . print", "[1, 2, '3']\n"); }
-    #[test] fn test_str_list_repr_print() { run_str("['1', 2, '3'] . repr . print", "['1', 2, '3']\n"); }
-    #[test] fn test_str_list_add() { run_str("[1, 2, 3] + [4, 5, 6] . print", "[1, 2, 3, 4, 5, 6]\n"); }
-    #[test] fn test_str_empty_list() { run_str("[] . print", "[]\n"); }
-    #[test] fn test_str_list_and_index() { run_str("[1, 2, 3] [1] . print", "2\n"); }
-    #[test] fn test_str_list_index_out_of_bounds() { run_str("[1, 2, 3] [3] . print", "Index '3' is out of bounds for list of length [0, 3)\n  at: line 1 (<test>)\n\n1 | [1, 2, 3] [3] . print\n2 |           ^^^\n"); }
-    #[test] fn test_str_list_index_negative() { run_str("[1, 2, 3] [-1] . print", "3\n"); }
-    #[test] fn test_str_list_slice_01() { run_str("[1, 2, 3, 4] [:] . print", "[1, 2, 3, 4]\n"); }
-    #[test] fn test_str_list_slice_02() { run_str("[1, 2, 3, 4] [::] . print", "[1, 2, 3, 4]\n"); }
-    #[test] fn test_str_list_slice_03() { run_str("[1, 2, 3, 4] [::1] . print", "[1, 2, 3, 4]\n"); }
-    #[test] fn test_str_list_slice_04() { run_str("[1, 2, 3, 4] [1:] . print", "[2, 3, 4]\n"); }
-    #[test] fn test_str_list_slice_05() { run_str("[1, 2, 3, 4] [:2] . print", "[1, 2]\n"); }
-    #[test] fn test_str_list_slice_06() { run_str("[1, 2, 3, 4] [0:] . print", "[1, 2, 3, 4]\n"); }
-    #[test] fn test_str_list_slice_07() { run_str("[1, 2, 3, 4] [:4] . print", "[1, 2, 3, 4]\n"); }
-    #[test] fn test_str_list_slice_08() { run_str("[1, 2, 3, 4] [1:3] . print", "[2, 3]\n"); }
-    #[test] fn test_str_list_slice_09() { run_str("[1, 2, 3, 4] [2:4] . print", "[3, 4]\n"); }
-    #[test] fn test_str_list_slice_10() { run_str("[1, 2, 3, 4] [0:2] . print", "[1, 2]\n"); }
-    #[test] fn test_str_list_slice_11() { run_str("[1, 2, 3, 4] [:-1] . print", "[1, 2, 3]\n"); }
-    #[test] fn test_str_list_slice_12() { run_str("[1, 2, 3, 4] [:-2] . print", "[1, 2]\n"); }
-    #[test] fn test_str_list_slice_13() { run_str("[1, 2, 3, 4] [-2:] . print", "[3, 4]\n"); }
-    #[test] fn test_str_list_slice_14() { run_str("[1, 2, 3, 4] [-3:] . print", "[2, 3, 4]\n"); }
-    #[test] fn test_str_list_slice_15() { run_str("[1, 2, 3, 4] [::2] . print", "[1, 3]\n"); }
-    #[test] fn test_str_list_slice_16() { run_str("[1, 2, 3, 4] [::3] . print", "[1, 4]\n"); }
-    #[test] fn test_str_list_slice_17() { run_str("[1, 2, 3, 4] [::4] . print", "[1]\n"); }
-    #[test] fn test_str_list_slice_18() { run_str("[1, 2, 3, 4] [1::2] . print", "[2, 4]\n"); }
-    #[test] fn test_str_list_slice_19() { run_str("[1, 2, 3, 4] [1:3:2] . print", "[2]\n"); }
-    #[test] fn test_str_list_slice_20() { run_str("[1, 2, 3, 4] [:-1:2] . print", "[1, 3]\n"); }
-    #[test] fn test_str_list_slice_21() { run_str("[1, 2, 3, 4] [1:-1:3] . print", "[2]\n"); }
-    #[test] fn test_str_list_slice_22() { run_str("[1, 2, 3, 4] [::-1] . print", "[4, 3, 2, 1]\n"); }
-    #[test] fn test_str_list_slice_23() { run_str("[1, 2, 3, 4] [1::-1] . print", "[2, 1]\n"); }
-    #[test] fn test_str_list_slice_24() { run_str("[1, 2, 3, 4] [:2:-1] . print", "[4]\n"); }
-    #[test] fn test_str_list_slice_25() { run_str("[1, 2, 3, 4] [3:1:-1] . print", "[4, 3]\n"); }
-    #[test] fn test_str_list_slice_26() { run_str("[1, 2, 3, 4] [-1:-2:-1] . print", "[4]\n"); }
-    #[test] fn test_str_list_slice_27() { run_str("[1, 2, 3, 4] [-2::-1] . print", "[3, 2, 1]\n"); }
-    #[test] fn test_str_list_slice_28() { run_str("[1, 2, 3, 4] [:-3:-1] . print", "[4, 3]\n"); }
-    #[test] fn test_str_list_slice_29() { run_str("[1, 2, 3, 4] [::-2] . print", "[4, 2]\n"); }
-    #[test] fn test_str_list_slice_30() { run_str("[1, 2, 3, 4] [::-3] . print", "[4, 1]\n"); }
-    #[test] fn test_str_list_slice_31() { run_str("[1, 2, 3, 4] [::-4] . print", "[4]\n"); }
-    #[test] fn test_str_list_slice_32() { run_str("[1, 2, 3, 4] [-2::-2] . print", "[3, 1]\n"); }
-    #[test] fn test_str_list_slice_33() { run_str("[1, 2, 3, 4] [-3::-2] . print", "[2]\n"); }
-    #[test] fn test_str_list_slice_34() { run_str("[1, 2, 3, 4] [1:1] . print", "[]\n"); }
-    #[test] fn test_str_list_slice_35() { run_str("[1, 2, 3, 4] [-1:-1] . print", "[]\n"); }
-    #[test] fn test_str_list_slice_36() { run_str("[1, 2, 3, 4] [-1:1:] . print", "[]\n"); }
-    #[test] fn test_str_list_slice_37() { run_str("[1, 2, 3, 4] [1:1:-1] . print", "[]\n"); }
-    #[test] fn test_str_list_slice_38() { run_str("[1, 2, 3, 4] [-2:2:-3] . print", "[]\n"); }
-    #[test] fn test_str_list_slice_39() { run_str("[1, 2, 3, 4] [-1:1:-1] . print", "[4, 3]\n"); }
-    #[test] fn test_str_list_slice_40() { run_str("[1, 2, 3, 4] [1:-1:-1] . print", "[]\n"); }
-    #[test] fn test_str_list_slice_41() { run_str("[1, 2, 3, 4] [1:10:1] . print", "[2, 3, 4]\n"); }
-    #[test] fn test_str_list_slice_42() { run_str("[1, 2, 3, 4] [10:1:-1] . print", "[4, 3]\n"); }
-    #[test] fn test_str_list_slice_43() { run_str("[1, 2, 3, 4] [-10:1] . print", "[1]\n"); }
-    #[test] fn test_str_list_slice_44() { run_str("[1, 2, 3, 4] [1:-10:-1] . print", "[2, 1]\n"); }
-    #[test] fn test_str_list_slice_45() { run_str("[1, 2, 3, 4] [::0]", "ValueError: 'step' argument cannot be zero\n  at: line 1 (<test>)\n\n1 | [1, 2, 3, 4] [::0]\n2 |              ^^^^^\n"); }
-    #[test] fn test_str_list_slice_46() { run_str("[1, 2, 3, 4][:-1] . print", "[1, 2, 3]\n"); }
-    #[test] fn test_str_list_slice_47() { run_str("[1, 2, 3, 4][:0] . print", "[]\n"); }
-    #[test] fn test_str_list_slice_48() { run_str("[1, 2, 3, 4][:1] . print", "[1]\n"); }
-    #[test] fn test_str_list_slice_49() { run_str("[1, 2, 3, 4][5:] . print", "[]\n"); }
-    #[test] fn test_str_sum_list() { run_str("[1, 2, 3, 4] . sum . print", "10\n"); }
-    #[test] fn test_str_sum_values() { run_str("sum(1, 3, 5, 7) . print", "16\n"); }
-    #[test] fn test_str_sum_no_arg() { run_str("sum()", "Function 'sum' requires at least 1 parameter but none were present.\n  at: line 1 (<test>)\n\n1 | sum()\n2 |    ^^\n"); }
-    #[test] fn test_str_sum_empty_list() { run_str("[] . sum . print", "0\n"); }
+    #[test] fn test_empty() { run_str("", ""); }
+    #[test] fn test_compose_1() { run_str("print . print", "print\n"); }
+    #[test] fn test_compose_2() { run_str("'hello world' . print", "hello world\n"); }
+    #[test] fn test_if_01() { run_str("if 1 < 2 { print('yes') } else { print ('no') }", "yes\n"); }
+    #[test] fn test_if_02() { run_str("if 1 < -2 { print('yes') } else { print ('no') }", "no\n"); }
+    #[test] fn test_if_03() { run_str("if true { print('yes') } print('and also')", "yes\nand also\n"); }
+    #[test] fn test_if_04() { run_str("if 1 < -2 { print('yes') } print('and also')", "and also\n"); }
+    #[test] fn test_if_05() { run_str("if 0 { print('yes') }", ""); }
+    #[test] fn test_if_06() { run_str("if 1 { print('yes') }", "yes\n"); }
+    #[test] fn test_if_07() { run_str("if 'string' { print('yes') }", "yes\n"); }
+    #[test] fn test_if_08() { run_str("if 1 < 0 { print('yes') } elif 1 { print('hi') } else { print('hehe') }", "hi\n"); }
+    #[test] fn test_if_09() { run_str("if 1 < 0 { print('yes') } elif 2 < 0 { print('hi') } else { print('hehe') }", "hehe\n"); }
+    #[test] fn test_if_10() { run_str("if 1 { print('yes') } elif true { print('hi') } else { print('hehe') }", "yes\n"); }
+    #[test] fn test_if_short_circuiting_1() { run_str("if true and print('yes') { print('no') }", "yes\n"); }
+    #[test] fn test_if_short_circuiting_2() { run_str("if false and print('also no') { print('no') }", ""); }
+    #[test] fn test_if_short_circuiting_3() { run_str("if true and (print('yes') or true) { print('also yes') }", "yes\nalso yes\n"); }
+    #[test] fn test_if_short_circuiting_4() { run_str("if false or print('yes') { print('no') }", "yes\n"); }
+    #[test] fn test_if_short_circuiting_5() { run_str("if true or print('no') { print('yes') }", "yes\n"); }
+    #[test] fn test_if_then_else_1() { run_str("(if true then 'hello' else 'goodbye') . print", "hello\n"); }
+    #[test] fn test_if_then_else_2() { run_str("(if false then 'hello' else 'goodbye') . print", "goodbye\n"); }
+    #[test] fn test_if_then_else_3() { run_str("(if [] then 'hello' else 'goodbye') . print", "goodbye\n"); }
+    #[test] fn test_if_then_else_4() { run_str("(if 3 then 'hello' else 'goodbye') . print", "hello\n"); }
+    #[test] fn test_if_then_else_5() { run_str("(if false then (fn() -> 'hello' . print)() else 'nope') . print", "nope\n"); }
+    #[test] fn test_if_then_else_top_level() { run_str("if true then print('hello') else print('goodbye')", "hello\n"); }
+    #[test] fn test_if_then_else_top_level_in_loop() { run_str("for x in range(2) { if x then x else x }", ""); }
+    #[test] fn test_while_false_if_false() { run_str("while false { if false { } }", ""); }
+    #[test] fn test_while_else_no_loop() { run_str("while false { break } else { print('hello') }", "hello\n"); }
+    #[test] fn test_while_else_break() { run_str("while true { break } else { print('hello') } print('world')", "world\n"); }
+    #[test] fn test_while_else_no_break() { run_str("let x = true ; while x { x = false } else { print('hello') }", "hello\n"); }
+    #[test] fn test_do_while_1() { run_str("do { 'test' . print } while false", "test\n"); }
+    #[test] fn test_do_while_2() { run_str("let i = 0 ; do { i . print ; i += 1 } while i < 3", "0\n1\n2\n"); }
+    #[test] fn test_do_while_3() { run_str("let i = 0 ; do { i += 1 ; i . print } while i < 3", "1\n2\n3\n"); }
+    #[test] fn test_do_while_4() { run_str("let i = 5 ; do { i . print } while i < 3", "5\n"); }
+    #[test] fn test_do_without_while() { run_str("do { 'test' . print }", "test\n"); }
+    #[test] fn test_do_while_else_1() { run_str("do { 'loop' . print } while false else { 'else' . print }", "loop\nelse\n"); }
+    #[test] fn test_do_while_else_2() { run_str("do { 'loop' . print ; break } while false else { 'else' . print }", "loop\n"); }
+    #[test] fn test_do_while_else_3() { run_str("let i = 0 ; do { i . print ; i += 1 ; if i > 2 { break } } while 1 else { 'end' . print }", "0\n1\n2\n"); }
+    #[test] fn test_do_while_else_4() { run_str("let i = 0 ; do { i . print ; i += 1 ; if i > 2 { break } } while i < 2 else { 'end' . print }", "0\n1\nend\n"); }
+    #[test] fn test_for_loop_no_intrinsic_with_list() { run_str("for x in ['a', 'b', 'c'] { x . print }", "a\nb\nc\n") }
+    #[test] fn test_for_loop_no_intrinsic_with_set() { run_str("for x in 'foobar' . set { x . print }", "f\no\nb\na\nr\n") }
+    #[test] fn test_for_loop_no_intrinsic_with_str() { run_str("for x in 'hello' { x . print }", "h\ne\nl\nl\no\n") }
+    #[test] fn test_for_loop_range_stop() { run_str("for x in range(5) { x . print }", "0\n1\n2\n3\n4\n"); }
+    #[test] fn test_for_loop_range_start_stop() { run_str("for x in range(3, 6) { x . print }", "3\n4\n5\n"); }
+    #[test] fn test_for_loop_range_start_stop_step_positive() { run_str("for x in range(1, 10, 3) { x . print }", "1\n4\n7\n"); }
+    #[test] fn test_for_loop_range_start_stop_step_negative() { run_str("for x in range(11, 0, -4) { x . print }", "11\n7\n3\n"); }
+    #[test] fn test_for_loop_range_start_stop_step_zero() { run_str("for x in range(1, 2, 0) { x . print }", "ValueError: 'step' argument cannot be zero\n  at: line 1 (<test>)\n\n1 | for x in range(1, 2, 0) { x . print }\n2 |               ^^^^^^^^^\n"); }
+    #[test] fn test_for_else_no_loop() { run_str("for _ in [] { print('hello') ; break } else { print('world') }", "world\n"); }
+    #[test] fn test_for_else_break() { run_str("for c in 'abcd' { if c == 'b' { break } } else { print('hello') } print('world')", "world\n"); }
+    #[test] fn test_for_else_no_break() { run_str("for c in 'abcd' { if c == 'B' { break } } else { print('hello') }", "hello\n"); }
+    #[test] fn test_struct_str_of_struct_instance() { run_str("struct Foo(a, b) Foo(1, 2) . print", "Foo(a=1, b=2)\n"); }
+    #[test] fn test_struct_str_of_struct_constructor() { run_str("struct Foo(a, b) Foo . print", "struct Foo(a, b)\n"); }
+    #[test] fn test_struct_get_field_of_struct() { run_str("struct Foo(a, b) Foo(1, 2) -> a . print", "1\n"); }
+    #[test] fn test_struct_get_field_of_struct_wrong_name() { run_str("struct Foo(a, b) struct Bar(c, d) Foo(1, 2) -> c . print", "TypeError: Cannot get field 'c' on struct Foo(a, b)\n  at: line 1 (<test>)\n\n1 | struct Foo(a, b) struct Bar(c, d) Foo(1, 2) -> c . print\n2 |                                             ^^^^\n"); }
+    #[test] fn test_struct_get_field_of_not_struct() { run_str("struct Foo(a, b) (1, 2) -> a . print", "TypeError: Cannot get field 'a' on '(1, 2)' of type 'vector'\n  at: line 1 (<test>)\n\n1 | struct Foo(a, b) (1, 2) -> a . print\n2 |                         ^^^^\n"); }
+    #[test] fn test_struct_get_field_with_overlapping_offsets() { run_str("struct Foo(a, b) struct Bar(b, a) Foo(1, 2) -> b . print", "2\n"); }
+    #[test] fn test_struct_set_field_of_struct() { run_str("struct Foo(a, b) let x = Foo(1, 2) ; x->a = 3 ; x->a . print", "3\n"); }
+    #[test] fn test_struct_set_field_of_struct_wrong_name() { run_str("struct Foo(a, b) struct Bar(c, d) let x = Foo(1, 2) ; x->c = 3", "TypeError: Cannot get field 'c' on struct Foo(a, b)\n  at: line 1 (<test>)\n\n1 | struct Foo(a, b) struct Bar(c, d) let x = Foo(1, 2) ; x->c = 3\n2 |                                                            ^\n"); }
+    #[test] fn test_struct_set_field_of_not_struct() { run_str("struct Foo(a, b) (1, 2)->a = 3", "TypeError: Cannot get field 'a' on '(1, 2)' of type 'vector'\n  at: line 1 (<test>)\n\n1 | struct Foo(a, b) (1, 2)->a = 3\n2 |                            ^\n"); }
+    #[test] fn test_struct_op_set_field_of_struct() { run_str("struct Foo(a, b) let x = Foo(1, 2) ; x->a += 3 ; x->a . print", "4\n"); }
+    #[test] fn test_struct_partial_get_field_in_bare_method() { run_str("struct Foo(a, b) let x = Foo(2, 3), f = (->b) ; x . f . print", "3\n"); }
+    #[test] fn test_struct_partial_get_field_in_function_eval() { run_str("struct Foo(a, b) [Foo(1, 2), Foo(2, 3)] . map(->b) . print", "[2, 3]\n"); }
+    #[test] fn test_struct_more_partial_get_field() { run_str("struct Foo(foo) ; let x = Foo('hello') ; print([x, Foo('')] . filter(->foo) . len)", "1\n"); }
+    #[test] fn test_struct_recursive_repr() { run_str("struct S(x) ; let x = S(nil) ; x->x = x ; x.print", "S(x=S(...))\n"); }
+    #[test] fn test_struct_operator_is() { run_str("struct A() ; struct B() let a = A(), b = B() ; [a is A, A is function, a is B, A is A, a is function] . print", "[true, true, false, false, false]\n"); }
     #[test] fn test_local_vars_01() { run_str("let x=0 do { x.print }", "0\n"); }
     #[test] fn test_local_vars_02() { run_str("let x=0 do { let x=1; x.print }", "1\n"); }
     #[test] fn test_local_vars_03() { run_str("let x=0 do { x.print let x=1 }", "0\n"); }
@@ -1144,6 +1049,85 @@ mod test {
     #[test] fn test_local_vars_11() { run_str("let x=0 do { x=1 do { let x=2 } } x.print", "1\n"); }
     #[test] fn test_local_vars_12() { run_str("let x=0 do { let x=1 do { let x=2 } } x.print", "0\n"); }
     #[test] fn test_local_vars_14() { run_str("let x=3 do { let x=x; x.print }", "3\n"); }
+    #[test] fn test_chained_assignments() { run_str("let a, b, c; a = b = c = 3; [a, b, c] . print", "[3, 3, 3]\n"); }
+    #[test] fn test_array_assignment_1() { run_str("let a = [1, 2, 3]; a[0] = 3; a . print", "[3, 2, 3]\n"); }
+    #[test] fn test_array_assignment_2() { run_str("let a = [1, 2, 3]; a[2] = 1; a . print", "[1, 2, 1]\n"); }
+    #[test] fn test_array_assignment_negative_index_1() { run_str("let a = [1, 2, 3]; a[-1] = 6; a . print", "[1, 2, 6]\n"); }
+    #[test] fn test_array_assignment_negative_index_2() { run_str("let a = [1, 2, 3]; a[-3] = 6; a . print", "[6, 2, 3]\n"); }
+    #[test] fn test_nested_array_assignment_1() { run_str("let a = [[1, 2], [3, 4]]; a[0][1] = 6; a . print", "[[1, 6], [3, 4]]\n"); }
+    #[test] fn test_nested_array_assignment_2() { run_str("let a = [[1, 2], [3, 4]]; a[1][0] = 6; a . print", "[[1, 2], [6, 4]]\n"); }
+    #[test] fn test_nested_array_assignment_negative_index_1() { run_str("let a = [[1, 2], [3, 4]]; a[0][-1] = 6; a . print", "[[1, 6], [3, 4]]\n"); }
+    #[test] fn test_nested_array_assignment_negative_index_2() { run_str("let a = [[1, 2], [3, 4]]; a[-1][-2] = 6; a . print", "[[1, 2], [6, 4]]\n"); }
+    #[test] fn test_chained_operator_assignment() { run_str("let a = 1, b; a += b = 4; [a, b] . print", "[5, 4]\n"); }
+    #[test] fn test_operator_array_assignment() { run_str("let a = [12]; a[0] += 4; a[0] . print", "16\n"); }
+    #[test] fn test_nested_operator_array_assignment() { run_str("let a = [[12]]; a[0][-1] += 4; a . print", "[[16]]\n"); }
+    #[test] fn test_weird_assignment() { run_str("let a = [[12]], b = 3; fn f() -> a; f()[0][-1] += b = 5; [f(), b] . print", "[[[17]], 5]\n"); }
+    #[test] fn test_mutable_array_in_array_1() { run_str("let a = [0], b = [a]; b[0] = 'hi'; b. print", "['hi']\n"); }
+    #[test] fn test_mutable_array_in_array_2() { run_str("let a = [0], b = [a]; b[0][0] = 'hi'; b. print", "[['hi']]\n"); }
+    #[test] fn test_mutable_arrays_in_assignments() { run_str("let a = [0], b = [a, a, a]; b[0][0] = 5; b . print", "[[5], [5], [5]]\n"); }
+    #[test] fn test_pattern_in_let_works() { run_str("let x, y = [1, 2] ; [x, y] . print", "[1, 2]\n"); }
+    #[test] fn test_pattern_in_let_too_long() { run_str("let x, y, z = [1, 2] ; [x, y] . print", "ValueError: Cannot unpack '[1, 2]' of type 'list' with length 2, expected exactly 3 elements\n  at: line 1 (<test>)\n\n1 | let x, y, z = [1, 2] ; [x, y] . print\n2 |                    ^\n"); }
+    #[test] fn test_pattern_in_let_too_short() { run_str("let x, y = [1, 2, 3] ; [x, y] . print", "ValueError: Cannot unpack '[1, 2, 3]' of type 'list' with length 3, expected exactly 2 elements\n  at: line 1 (<test>)\n\n1 | let x, y = [1, 2, 3] ; [x, y] . print\n2 |                    ^\n"); }
+    #[test] fn test_pattern_in_let_with_var_at_end() { run_str("let x, *y = [1, 2, 3, 4] ; [x, y] . print", "[1, [2, 3, 4]]\n"); }
+    #[test] fn test_pattern_in_let_with_var_at_start() { run_str("let *x, y = [1, 2, 3, 4] ; [x, y] . print", "[[1, 2, 3], 4]\n"); }
+    #[test] fn test_pattern_in_let_with_var_at_middle() { run_str("let x, *y, z = [1, 2, 3, 4] ; [x, y, z] . print", "[1, [2, 3], 4]\n"); }
+    #[test] fn test_pattern_in_let_with_var_zero_len_at_end() { run_str("let x, *y = [1] ; [x, y] . print", "[1, []]\n"); }
+    #[test] fn test_pattern_in_let_with_var_zero_len_at_start() { run_str("let *x, y = [1] ; [x, y] . print", "[[], 1]\n"); }
+    #[test] fn test_pattern_in_let_with_var_zero_len_at_middle() { run_str("let x, *y, z = [1, 2] ; [x, y, z] . print", "[1, [], 2]\n"); }
+    #[test] fn test_pattern_in_let_with_var_one_len_at_end() { run_str("let x, *y = [1, 2] ; [x, y] . print", "[1, [2]]\n"); }
+    #[test] fn test_pattern_in_let_with_var_one_len_at_start() { run_str("let *x, y = [1, 2] ; [x, y] . print", "[[1], 2]\n"); }
+    #[test] fn test_pattern_in_let_with_var_one_len_at_middle() { run_str("let x, *y, z = [1, 2, 3] ; [x, y, z] . print", "[1, [2], 3]\n"); }
+    #[test] fn test_pattern_in_let_with_only_empty() { run_str("let _ = 'hello' . print", "hello\n"); }
+    #[test] fn test_pattern_in_let_empty_x3() { run_str("let _, _, _ = [1, 2, 3]", ""); }
+    #[test] fn test_pattern_in_let_empty_x3_too_long() { run_str("let _, _, _ = [1, 2, 3, 4]", "ValueError: Cannot unpack '[1, 2, 3, 4]' of type 'list' with length 4, expected exactly 3 elements\n  at: line 1 (<test>)\n\n1 | let _, _, _ = [1, 2, 3, 4]\n2 |                          ^\n"); }
+    #[test] fn test_pattern_in_let_empty_x3_too_short() { run_str("let _, _, _ = [1, 2]", "ValueError: Cannot unpack '[1, 2]' of type 'list' with length 2, expected exactly 3 elements\n  at: line 1 (<test>)\n\n1 | let _, _, _ = [1, 2]\n2 |                    ^\n"); }
+    #[test] fn test_pattern_in_let_empty_x2_at_end() { run_str("let _, _, x = [1, 2, 3] ; x . print", "3\n"); }
+    #[test] fn test_pattern_in_let_empty_x2_at_middle() { run_str("let _, x, _ = [1, 2, 3] ; x . print", "2\n"); }
+    #[test] fn test_pattern_in_let_empty_x2_at_start() { run_str("let x, _, _ = [1, 2, 3] ; x . print", "1\n"); }
+    #[test] fn test_pattern_in_let_empty_at_middle() { run_str("let x, _, y = [1, 2, 3] ; [x, y] . print", "[1, 3]\n"); }
+    #[test] fn test_pattern_in_let_with_varargs_empty_at_end() { run_str("let x, *_ = [1, 2, 3, 4] ; x . print", "1\n"); }
+    #[test] fn test_pattern_in_let_with_varargs_empty_at_middle() { run_str("let x, *_, y = [1, 2, 3, 4] ; [x, y] . print", "[1, 4]\n"); }
+    #[test] fn test_pattern_in_let_with_varargs_empty_at_start() { run_str("let *_, x = [1, 2, 3, 4] ; x . print", "4\n"); }
+    #[test] fn test_pattern_in_let_with_varargs_var_at_end() { run_str("let _, *x = [1, 2, 3, 4] ; x . print", "[2, 3, 4]\n"); }
+    #[test] fn test_pattern_in_let_with_varargs_var_at_middle() { run_str("let _, *x, _ = [1, 2, 3, 4] ; x . print", "[2, 3]\n"); }
+    #[test] fn test_pattern_in_let_with_varargs_var_at_start() { run_str("let *x, _ = [1, 2, 3, 4] ; x . print", "[1, 2, 3]\n"); }
+    #[test] fn test_pattern_in_let_with_varargs_empty_to_empty() { run_str("let *_ = []", ""); }
+    #[test] fn test_pattern_in_let_with_varargs_empty_to_var_at_end_too_short() { run_str("let *_, x = []", "ValueError: Cannot unpack '[]' of type 'list' with length 0, expected at least 1 elements\n  at: line 1 (<test>)\n\n1 | let *_, x = []\n2 |              ^\n"); }
+    #[test] fn test_pattern_in_let_with_varargs_empty_to_var_at_start_too_short() { run_str("let x, *_ = []", "ValueError: Cannot unpack '[]' of type 'list' with length 0, expected at least 1 elements\n  at: line 1 (<test>)\n\n1 | let x, *_ = []\n2 |              ^\n"); }
+    #[test] fn test_pattern_in_let_with_varargs_empty_to_var_at_end() { run_str("let *_, x = [1] ; x . print", "1\n"); }
+    #[test] fn test_pattern_in_let_with_varargs_empty_to_var_at_start() { run_str("let x, *_ = [1] ; x . print", "1\n"); }
+    #[test] fn test_pattern_in_let_with_varargs_empty_to_var_at_middle() { run_str("let x, *_, y = [1, 2] ; [x, y] . print", "[1, 2]\n"); }
+    #[test] fn test_pattern_in_let_with_nested_pattern() { run_str("let x, (y, _) = [[1, 2], [3, 4]] ; [x, y] . print", "[[1, 2], 3]\n"); }
+    #[test] fn test_pattern_in_let_with_parens_on_one_empty() { run_str("let (_) = [[nil]]", ""); }
+    #[test] fn test_pattern_in_let_with_parens_on_one_empty_one_var() { run_str("let (_, x) = [[1, 2]] ; x . print", "2\n"); }
+    #[test] fn test_pattern_in_let_with_complex_patterns_1() { run_str("let *_, (_, x, _), _ = [[1, 2, 3], [4, 5, 6], [7, 8, 9]] ; x . print", "5\n"); }
+    #[test] fn test_pattern_in_let_with_complex_patterns_2() { run_str("let _, (_, (_, (_, (x, *_)))) = [1, [2, [3, [4, [5, [6, [7, [8, [9, nil]]]]]]]]] ; x . print", "5\n"); }
+    #[test] fn test_pattern_in_let_with_complex_patterns_3() { run_str("let ((*x, _), (_, (*y, _), _), *_) = [[[1, 2, 3], [[1, 2, 3], [2, 3, 4], [3, 4, 5]], [[1], [2], [3]]]] ; [x, y] . print", "[[1, 2], [2, 3]]\n"); }
+    #[test] fn test_pattern_in_function() { run_str("fn f((a, b)) -> [b, a] . print ; f([1, 2])", "[2, 1]\n"); }
+    #[test] fn test_pattern_in_function_multiple() { run_str("fn f((a, b), (c, d)) -> [a, b, c, d] . print ; f([1, 2], [3, 4])", "[1, 2, 3, 4]\n"); }
+    #[test] fn test_pattern_in_function_before_args() { run_str("fn f((a, b, c), d, e) -> [a, b, c, d, e] . print ; f([1, 2, 3], 4, 5)", "[1, 2, 3, 4, 5]\n"); }
+    #[test] fn test_pattern_in_function_between_args() { run_str("fn f(a, (b, c, d), e) -> [a, b, c, d, e] . print ; f(1, [2, 3, 4], 5)", "[1, 2, 3, 4, 5]\n"); }
+    #[test] fn test_pattern_in_function_after_args() { run_str("fn f(a, b, (c, d, e)) -> [a, b, c, d, e] . print ; f(1, 2, [3, 4, 5])", "[1, 2, 3, 4, 5]\n"); }
+    #[test] fn test_pattern_with_empty_in_function_before_args() { run_str("fn f((_, b, _), d, e) -> [1, b, 3, d, e] . print ; f([1, 2, 3], 4, 5)", "[1, 2, 3, 4, 5]\n"); }
+    #[test] fn test_pattern_with_empty_in_function_between_args() { run_str("fn f(a, (_, _, d), e) -> [a, 2, 3, d, e] . print ; f(1, [2, 3, 4], 5)", "[1, 2, 3, 4, 5]\n"); }
+    #[test] fn test_pattern_with_empty_in_function_after_args() { run_str("fn f(a, b, (c, _, _)) -> [a, b, c, 4, 5] . print ; f(1, 2, [3, 4, 5])", "[1, 2, 3, 4, 5]\n"); }
+    #[test] fn test_pattern_with_var_in_function_before_args() { run_str("fn f((a, *_), d, e) -> [a, d, e] . print ; f([1, 2, 3], 4, 5)", "[1, 4, 5]\n"); }
+    #[test] fn test_pattern_with_var_in_function_between_args() { run_str("fn f(a, (*_, d), e) -> [a, d, e] . print ; f(1, [2, 3, 4], 5)", "[1, 4, 5]\n"); }
+    #[test] fn test_pattern_with_var_in_function_after_args() { run_str("fn f(a, b, (*c, _, _)) -> [a, b, c] . print ; f(1, 2, [3, 4, 5])", "[1, 2, [3]]\n"); }
+    #[test] fn test_pattern_in_for_with_enumerate() { run_str("for i, x in 'hello' . enumerate { [i, x] . print }", "[0, 'h']\n[1, 'e']\n[2, 'l']\n[3, 'l']\n[4, 'o']\n")}
+    #[test] fn test_pattern_in_for_with_empty() { run_str("for _ in range(5) { 'hello' . print }", "hello\nhello\nhello\nhello\nhello\n"); }
+    #[test] fn test_pattern_in_for_with_strings() { run_str("for a, *_, b in ['hello', 'world'] { print(a + b) }", "ho\nwd\n"); }
+    #[test] fn test_pattern_in_expression() { run_str("let x, y, z ; x, y, z = 'abc' ; print(x, y, z)", "a b c\n"); }
+    #[test] fn test_pattern_in_expression_nested() { run_str("let x, y, z ; z = x, y = (1, 2) ; print(x, y, z)", "1 2 (1, 2)\n"); }
+    #[test] fn test_pattern_in_expression_locals() { run_str("do { let x, y, z ; z = x, y = (1, 2) ; print(x, y, z) }", "1 2 (1, 2)\n"); }
+    #[test] fn test_pattern_in_expression_return_value() { run_str("let x, y, z ; print(x, y, z = 'abc') ; print(x, y, z)", "abc\na b c\n"); }
+    #[test] fn test_pattern_in_expression_with_variadic() { run_str("let x, y ; *x, y = 'hello' ; print(x, y)", "hell o\n"); }
+    #[test] fn test_pattern_in_expression_with_nested_and_empty() { run_str("let x, y ; (x, *_), (*_, y) = ('hello', 'world') ; print(x, y)", "h d\n"); }
+    #[test] fn test_pattern_in_expression_empty() { run_str("_ = nil ; _, _, _ = (1, 2, 3)", ""); }
+    #[test] fn test_pattern_in_expression_empty_variadic() { run_str("*_ = 'hello world'", ""); }
+    #[test] fn test_function_repr() { run_str("(fn((_, *_), x) -> nil) . repr . print", "fn _((_, *_), x)\n"); }
+    #[test] fn test_function_repr_partial() { run_str("(fn((_, *_), x) -> nil)(1) . repr . print", "fn _((_, *_), x)\n"); }
+    #[test] fn test_function_closure_repr() { run_str("fn box(x) -> fn((_, *_), y) -> x ; box(nil) . repr . print", "fn _((_, *_), y)\n"); }
     #[test] fn test_functions_01() { run_str("fn foo() { 'hello' . print } ; foo();", "hello\n"); }
     #[test] fn test_functions_02() { run_str("fn foo() { 'hello' . print } ; foo() ; foo()", "hello\nhello\n"); }
     #[test] fn test_functions_03() { run_str("fn foo(a) { 'hello' . print } ; foo(1)", "hello\n"); }
@@ -1191,12 +1175,49 @@ mod test {
     #[test] fn test_function_return_4() { run_str("fn foo() { let x = 3; do { let x; } return x } foo() . print", "3\n"); }
     #[test] fn test_function_return_5() { run_str("fn foo() { let x; do { let x = 3; return x } } foo() . print", "3\n"); }
     #[test] fn test_function_return_no_value() { run_str("fn foo() { print('hello') ; return ; print('world') } foo() . print", "hello\nnil\n"); }
+    #[test] fn test_partial_func_1() { run_str("'apples and bananas' . replace ('a', 'o') . print", "opples ond bononos\n"); }
+    #[test] fn test_partial_func_2() { run_str("'apples and bananas' . replace ('a') ('o') . print", "opples ond bononos\n"); }
+    #[test] fn test_partial_func_3() { run_str("print('apples and bananas' . replace ('a') ('o'))", "opples ond bononos\n"); }
+    #[test] fn test_partial_func_4() { run_str("let x = replace ('a', 'o') ; 'apples and bananas' . x . print", "opples ond bononos\n"); }
+    #[test] fn test_partial_func_5() { run_str("let x = replace ('a', 'o') ; print(x('apples and bananas'))", "opples ond bononos\n"); }
+    #[test] fn test_partial_func_6() { run_str("('o' . replace('a')) ('apples and bananas') . print", "opples ond bononos\n"); }
     #[test] fn test_partial_function_composition_1() { run_str("fn foo(a, b, c) { c . print } (3 . (2 . (1 . foo)))", "3\n"); }
     #[test] fn test_partial_function_composition_2() { run_str("fn foo(a, b, c) { c . print } (2 . (1 . foo)) (3)", "3\n"); }
     #[test] fn test_partial_function_composition_3() { run_str("fn foo(a, b, c) { c . print } (1 . foo) (2) (3)", "3\n"); }
     #[test] fn test_partial_function_composition_4() { run_str("fn foo(a, b, c) { c . print } foo (1) (2) (3)", "3\n"); }
     #[test] fn test_partial_function_composition_5() { run_str("fn foo(a, b, c) { c . print } foo (1, 2) (3)", "3\n"); }
     #[test] fn test_partial_function_composition_6() { run_str("fn foo(a, b, c) { c . print } foo (1) (2, 3)", "3\n"); }
+    #[test] fn test_function_with_one_default_arg() { run_str("fn foo(a, b?) { print(a, b) } ; foo('test') ; foo('test', 'bar')", "test nil\ntest bar\n"); }
+    #[test] fn test_function_with_one_default_arg_not_enough() { run_str("fn foo(a, b?) { print(a, b) } ; foo()", "Function 'foo' of type 'function' requires 1 parameters but 0 were present.\n  at: line 1 (<test>)\n\n1 | fn foo(a, b?) { print(a, b) } ; foo()\n2 |                                    ^^\n"); }
+    #[test] fn test_function_with_one_default_arg_too_many() { run_str("fn foo(a, b?) { print(a, b) } ; foo(1, 2, 3)", "Function 'foo' of type 'function' requires 2 parameters but 3 were present.\n  at: line 1 (<test>)\n\n1 | fn foo(a, b?) { print(a, b) } ; foo(1, 2, 3)\n2 |                                    ^^^^^^^^^\n"); }
+    #[test] fn test_function_many_default_args() { run_str("fn foo(a, b = 1, c = 1 + 1, d = 1 * 3) { print(a, b, c, d) } foo('test') ; foo('and', 11) ; foo('other', 11, 22) ; foo('things', 11, 22, 33)", "test 1 2 3\nand 11 2 3\nother 11 22 3\nthings 11 22 33\n"); }
+    #[test] fn test_function_unroll_1() { run_str("fn foo(a, b, c) -> print(a, b, c) ; foo(...['hello', 'the', 'world'])", "hello the world\n"); }
+    #[test] fn test_function_unroll_2() { run_str("fn foo(a, b, c) -> print(a, b, c) ; foo(1, 2, 3, ...[])", "1 2 3\n"); }
+    #[test] fn test_function_unroll_3() { run_str("fn foo(a, b, c) -> print(a, b, c) ; foo(1, ...[], 2, ...[], 3)", "1 2 3\n"); }
+    #[test] fn test_function_unroll_4() { run_str("fn foo(a, b, c) -> print(a, b, c) ; foo(...'ab', 'c')", "a b c\n"); }
+    #[test] fn test_function_unroll_5() { run_str("fn foo(a, b, c, d) -> print(a, b, c, d) ; foo(...'ab', ...'cd')", "a b c d\n"); }
+    #[test] fn test_function_unroll_6() { run_str("fn foo(a, b, c, d) -> print(a, b, c, d) ; foo(...'a', ...'bc', ...'d')", "a b c d\n"); }
+    #[test] fn test_function_unroll_7() { run_str("fn foo(a, b, c, d) -> print(a, b, c, d) ; foo('a', ...'bc', 'd')", "a b c d\n"); }
+    #[test] fn test_function_unroll_8() { run_str("fn foo(a, b, c) -> print(a, b, c) ; foo(1, ...'ab')", "1 a b\n"); }
+    #[test] fn test_function_unroll_9() { run_str("fn foo(a, b, c) -> print(a, b, c) ; foo(...'ab', 3)", "a b 3\n"); }
+    #[test] fn test_function_unroll_10() { run_str("fn foo(a, b, c) -> print(a, b, c) ; foo(1, 2, ...[3, 4])", "Function 'foo' of type 'function' requires 3 parameters but 4 were present.\n  at: line 1 (<test>)\n\n1 | fn foo(a, b, c) -> print(a, b, c) ; foo(1, 2, ...[3, 4])\n2 |                                        ^^^^^^^^^^^^^^^^^\n"); }
+    #[test] fn test_function_unroll_11() { run_str("fn foo(a, b, c) -> print(a, b, c) ; foo(1, 2, ...[]) is function . print", "true\n"); }
+    #[test] fn test_function_unroll_12() { run_str("sum([1, 2, 3, 4, 5]) . print", "15\n"); }
+    #[test] fn test_function_unroll_13() { run_str("sum(...[1, 2, 3, 4, 5]) . print", "15\n"); }
+    #[test] fn test_function_unroll_14() { run_str("print(...[1, 2, 3])", "1 2 3\n"); }
+    #[test] fn test_function_unroll_15() { run_str("print(...[print(...[1, 2, 3])])", "1 2 3\nnil\n"); }
+    #[test] fn test_function_unroll_16() { run_str("print(...[], ...[print(...[], 'second', ...[], ...[print('first', ...[])])], ...[], ...[print('third')])", "first\nsecond nil\nthird\nnil nil\n"); }
+    #[test] fn test_function_unroll_17() { run_str("print(1, ...[2, print('a', ...[1, 2, 3], 'e'), -2], 3)", "a 1 2 3 e\n1 2 nil -2 3\n"); }
+    #[test] fn test_function_var_args_1() { run_str("fn foo(*a) -> print(a) ; foo()", "()\n"); }
+    #[test] fn test_function_var_args_2() { run_str("fn foo(*a) -> print(a) ; foo(1)", "(1)\n"); }
+    #[test] fn test_function_var_args_3() { run_str("fn foo(*a) -> print(a) ; foo(1, 2)", "(1, 2)\n"); }
+    #[test] fn test_function_var_args_4() { run_str("fn foo(*a) -> print(a) ; foo(1, 2, 3)", "(1, 2, 3)\n"); }
+    #[test] fn test_function_var_args_5() { run_str("fn foo(a, b?, *c) -> print(a, b, c) ; foo(1)", "1 nil ()\n"); }
+    #[test] fn test_function_var_args_6() { run_str("fn foo(a, b?, *c) -> print(a, b, c) ; foo(1, 2)", "1 2 ()\n"); }
+    #[test] fn test_function_var_args_7() { run_str("fn foo(a, b?, *c) -> print(a, b, c) ; foo(1, 2, 3)", "1 2 (3)\n"); }
+    #[test] fn test_function_var_args_8() { run_str("fn foo(a, b?, *c) -> print(a, b, c) ; foo(1, 2, 3, 4)", "1 2 (3, 4)\n"); }
+    #[test] fn test_function_var_args_9() { run_str("fn foo(a, b?, *c) -> print(a, b, c) ; foo(1, 2, 3, 4, 5)", "1 2 (3, 4, 5)\n"); }
+    #[test] fn test_function_call_with_over_u8_arguments() { run_str("sum(...range(1 + 1000)) . print", "500500\n"); }
     #[test] fn test_operator_functions_01() { run_str("(+3) . print", "(+)\n"); }
     #[test] fn test_operator_functions_02() { run_str("4 . (+3) . print", "7\n"); }
     #[test] fn test_operator_functions_03() { run_str("4 . (-) . print", "-4\n"); }
@@ -1207,6 +1228,44 @@ mod test {
     #[test] fn test_operator_functions_08() { run_str("let f = (>5) ; 3 . f . print", "false\n"); }
     #[test] fn test_operator_functions_09() { run_str("2 . (**5) . print", "32\n"); }
     #[test] fn test_operator_functions_10() { run_str("7 . (%3) . print", "1\n"); }
+    #[test] fn test_operator_functions_eval() { run_str("(+)(1, 2) . print", "3\n"); }
+    #[test] fn test_operator_functions_partial_eval() { run_str("(+)(1)(2) . print", "3\n"); }
+    #[test] fn test_operator_functions_compose_and_eval() { run_str("2 . (+)(1) . print", "3\n"); }
+    #[test] fn test_operator_functions_compose() { run_str("1 . (2 . (+)) . print", "3\n"); }
+    #[test] fn test_operator_in_expr() { run_str("(1 < 2) . print", "true\n"); }
+    #[test] fn test_operator_partial_right() { run_str("((<2)(1)) . print", "true\n"); }
+    #[test] fn test_operator_partial_left() { run_str("((1<)(2)) . print", "true\n"); }
+    #[test] fn test_operator_partial_twice() { run_str("((<)(1)(2)) . print", "true\n"); }
+    #[test] fn test_operator_as_prefix() { run_str("((<)(1, 2)) . print", "true\n"); }
+    #[test] fn test_operator_partial_right_with_composition() { run_str("(1 . (<2)) . print", "true\n"); }
+    #[test] fn test_operator_partial_left_with_composition() { run_str("(2 . (1<)) . print", "true\n"); }
+    #[test] fn test_operator_binary_max_yes() { run_str("let a = 3 ; a max= 6; a . print", "6\n"); }
+    #[test] fn test_operator_binary_max_no() { run_str("let a = 3 ; a max= 2; a . print", "3\n"); }
+    #[test] fn test_operator_binary_min_yes() { run_str("let a = 3 ; a min= 1; a . print", "1\n"); }
+    #[test] fn test_operator_binary_min_no() { run_str("let a = 3 ; a min= 5; a . print", "3\n"); }
+    #[test] fn test_operator_dot_equals() { run_str("let x = 'hello' ; x .= sort ; x .= reduce(+) ; x . print", "ehllo\n"); }
+    #[test] fn test_operator_dot_equals_operator_function() { run_str("let x = 3 ; x .= (+4) ; x . print", "7\n"); }
+    #[test] fn test_operator_dot_equals_anonymous_function() { run_str("let x = 'hello' ; x .= fn(x) -> x[0] * len(x) ; x . print", "hhhhh\n"); }
+    #[test] fn test_operator_in() { run_str("let f = (in) ; f(1, [1]) . print", "true\n"); }
+    #[test] fn test_operator_in_partial_left() { run_str("let f = (1 in) ; f([1]) . print", "true\n"); }
+    #[test] fn test_operator_in_partial_right() { run_str("let f = (in [1]) ; f(1) . print", "true\n"); }
+    #[test] fn test_operator_not_in() { run_str("let f = (not in) ; f(1, []) . print", "true\n"); }
+    #[test] fn test_operator_not_in_partial_left() { run_str("let f = (1 not in) ; f([]) . print", "true\n"); }
+    #[test] fn test_operator_not_in_partial_right() { run_str("let f = (not in []) ; f(1) . print", "true\n"); }
+    #[test] fn test_operator_is() { run_str("let f = (is) ; f(1, int) . print", "true\n"); }
+    #[test] fn test_operator_is_iterable_yes() { run_str("[[], '123', set(), dict()] . all(is iterable) . print", "true\n"); }
+    #[test] fn test_operator_is_iterable_no() { run_str("[true, false, nil, 123, fn() -> {}] . any(is iterable) . print", "false\n"); }
+    #[test] fn test_operator_is_any_yes() { run_str("[[], '123', set(), dict(), 123, true, false, nil, fn() -> nil] . all(is any) . print", "true\n"); }
+    #[test] fn test_operator_is_function_yes() { run_str("(fn() -> nil) is function . print", "true\n"); }
+    #[test] fn test_operator_is_function_no() { run_str("[nil, true, 123, '123', [], set()] . any(is function) . print", "false\n"); }
+    #[test] fn test_operator_is_partial_left() { run_str("let f = (1 is) ; f(int) . print", "true\n"); }
+    #[test] fn test_operator_is_partial_right() { run_str("let f = (is int) ; f(1) . print", "true\n"); }
+    #[test] fn test_operator_not_is() { run_str("let f = (is not) ; f(1, str) . print", "true\n"); }
+    #[test] fn test_operator_not_is_partial_left() { run_str("let f = (1 is not) ; f(str) . print", "true\n"); }
+    #[test] fn test_operator_not_is_partial_right() { run_str("let f = (is not str) ; f(1) . print", "true\n"); }
+    #[test] fn test_operator_sub_as_unary() { run_str("(-)(3) . print", "-3\n"); }
+    #[test] fn test_operator_sub_as_binary() { run_str("(-)(5, 2) . print", "3\n"); }
+    #[test] fn test_operator_sub_as_partial_not_allowed() { run_str("(-3) . print", "-3\n"); }
     #[test] fn test_arrow_functions_01() { run_str("fn foo() -> 3 ; foo() . print", "3\n"); }
     #[test] fn test_arrow_functions_02() { run_str("fn foo() -> 3 ; foo() . print", "3\n"); }
     #[test] fn test_arrow_functions_03() { run_str("fn foo(a) -> 3 * a ; 5 . foo . print", "15\n"); }
@@ -1227,47 +1286,262 @@ mod test {
     #[test] fn test_arrow_functions_18() { run_str("fn foo() { fn bar() -> 3 ; bar } ; foo() . print", "bar\n"); }
     #[test] fn test_arrow_functions_19() { run_str("fn foo() { fn bar() -> 3 ; bar } ; foo() . repr . print", "fn bar()\n"); }
     #[test] fn test_arrow_functions_20() { run_str("fn foo() { fn bar() -> 3 ; bar } ; foo()() . print", "3\n"); }
-    #[test] fn test_builtin_map() { run_str("[1, 2, 3] . map(str) . repr . print", "['1', '2', '3']\n") }
-    #[test] fn test_builtin_map_lambda() { run_str("[-1, 2, -3] . map(fn(x) -> x . abs) . print", "[1, 2, 3]\n") }
-    #[test] fn test_builtin_filter() { run_str("[2, 3, 4, 5, 6] . filter (>3) . print", "[4, 5, 6]\n") }
-    #[test] fn test_builtin_filter_lambda() { run_str("[2, 3, 4, 5, 6] . filter (fn(x) -> x % 2 == 0) . print", "[2, 4, 6]\n") }
-    #[test] fn test_builtin_reduce() { run_str("[1, 2, 3, 4, 5, 6] . reduce (*) . print", "720\n"); }
-    #[test] fn test_builtin_reduce_lambda() { run_str("[1, 2, 3, 4, 5, 6] . reduce (fn(a, b) -> a * b) . print", "720\n"); }
-    #[test] fn test_builtin_reduce_with_builtin() { run_str("[1, 2, 3, 4, 5, 6] . reduce (sum) . print", "21\n"); }
-    #[test] fn test_builtin_reduce_with_empty() { run_str("[] . reduce(+) . print", "ValueError: Expected value to be a non empty iterable\n  at: line 1 (<test>)\n\n1 | [] . reduce(+) . print\n2 |    ^^^^^^^^^^^\n"); }
-    #[test] fn test_builtin_sorted() { run_str("[6, 2, 3, 7, 2, 1] . sort . print", "[1, 2, 2, 3, 6, 7]\n"); }
-    #[test] fn test_builtin_reversed() { run_str("[8, 1, 2, 6, 3, 2, 3] . reverse . print", "[3, 2, 3, 6, 2, 1, 8]\n"); }
-    #[test] fn test_bare_operator_eval() { run_str("(+)(1, 2) . print", "3\n"); }
-    #[test] fn test_bare_operator_partial_eval() { run_str("(+)(1)(2) . print", "3\n"); }
-    #[test] fn test_bare_operator_compose_and_eval() { run_str("2 . (+)(1) . print", "3\n"); }
-    #[test] fn test_bare_operator_compose() { run_str("1 . (2 . (+)) . print", "3\n"); }
-    #[test] fn test_reduce_list_1() { run_str("[1, 2, 3] . reduce (+) . print", "6\n"); }
-    #[test] fn test_reduce_list_2() { run_str("[1, 2, 3] . reduce (!) . print", "Function '(!)' requires at least 1 parameters but 2 were present.\n  at: line 1 (<test>)\n\n1 | [1, 2, 3] . reduce (!) . print\n2 |           ^^^^^^^^^^^^\n"); }
-    #[test] fn test_str_to_list() { run_str("'funny beans' . list . print", "['f', 'u', 'n', 'n', 'y', ' ', 'b', 'e', 'a', 'n', 's']\n"); }
-    #[test] fn test_str_to_set() { run_str("'funny beans' . set . print", "{'f', 'u', 'n', 'y', ' ', 'b', 'e', 'a', 's'}\n"); }
-    #[test] fn test_str_to_set_to_sorted() { run_str("'funny' . set . sort . print", "['f', 'n', 'u', 'y']\n"); }
-    #[test] fn test_chained_assignments() { run_str("let a, b, c; a = b = c = 3; [a, b, c] . print", "[3, 3, 3]\n"); }
-    #[test] fn test_array_assignment_1() { run_str("let a = [1, 2, 3]; a[0] = 3; a . print", "[3, 2, 3]\n"); }
-    #[test] fn test_array_assignment_2() { run_str("let a = [1, 2, 3]; a[2] = 1; a . print", "[1, 2, 1]\n"); }
-    #[test] fn test_array_assignment_negative_index_1() { run_str("let a = [1, 2, 3]; a[-1] = 6; a . print", "[1, 2, 6]\n"); }
-    #[test] fn test_array_assignment_negative_index_2() { run_str("let a = [1, 2, 3]; a[-3] = 6; a . print", "[6, 2, 3]\n"); }
-    #[test] fn test_nested_array_assignment_1() { run_str("let a = [[1, 2], [3, 4]]; a[0][1] = 6; a . print", "[[1, 6], [3, 4]]\n"); }
-    #[test] fn test_nested_array_assignment_2() { run_str("let a = [[1, 2], [3, 4]]; a[1][0] = 6; a . print", "[[1, 2], [6, 4]]\n"); }
-    #[test] fn test_nested_array_assignment_negative_index_1() { run_str("let a = [[1, 2], [3, 4]]; a[0][-1] = 6; a . print", "[[1, 6], [3, 4]]\n"); }
-    #[test] fn test_nested_array_assignment_negative_index_2() { run_str("let a = [[1, 2], [3, 4]]; a[-1][-2] = 6; a . print", "[[1, 2], [6, 4]]\n"); }
-    #[test] fn test_chained_operator_assignment() { run_str("let a = 1, b; a += b = 4; [a, b] . print", "[5, 4]\n"); }
-    #[test] fn test_operator_array_assignment() { run_str("let a = [12]; a[0] += 4; a[0] . print", "16\n"); }
-    #[test] fn test_nested_operator_array_assignment() { run_str("let a = [[12]]; a[0][-1] += 4; a . print", "[[16]]\n"); }
-    #[test] fn test_weird_assignment() { run_str("let a = [[12]], b = 3; fn f() -> a; f()[0][-1] += b = 5; [f(), b] . print", "[[[17]], 5]\n"); }
-    #[test] fn test_mutable_array_in_array_1() { run_str("let a = [0], b = [a]; b[0] = 'hi'; b. print", "['hi']\n"); }
-    #[test] fn test_mutable_array_in_array_2() { run_str("let a = [0], b = [a]; b[0][0] = 'hi'; b. print", "[['hi']]\n"); }
-    #[test] fn test_list_mul_int() { run_str("[1, 2, 3] * 3 . print", "[1, 2, 3, 1, 2, 3, 1, 2, 3]\n"); }
-    #[test] fn test_int_mul_list() { run_str("3 * [1, 2, 3] . print", "[1, 2, 3, 1, 2, 3, 1, 2, 3]\n"); }
-    #[test] fn test_mutable_arrays_in_assignments() { run_str("let a = [0], b = [a, a, a]; b[0][0] = 5; b . print", "[[5], [5], [5]]\n"); }
-    #[test] fn test_test_nested_array_multiplication() { run_str("let a = [[1]] * 3; a[0][0] = 2; a . print", "[[2], [2], [2]]\n"); }
+    #[test] fn test_annotation_named_func_with_name() { run_str("fn par(f) -> (fn(x) -> f('hello')) ; @par fn foo(x) -> print(x) ; foo('goodbye')", "hello\n"); }
+    #[test] fn test_annotation_expression_func_with_name() { run_str("fn par(f) -> (fn(x) -> f('hello')) ; (@par fn(x) -> print(x))('goodbye')", "hello\n"); }
+    #[test] fn test_annotation_named_func_with_expression() { run_str("fn par(a, f) -> (fn(x) -> f(a)) ; @par('hello') fn foo(x) -> print(x) ; foo('goodbye')", "hello\n"); }
+    #[test] fn test_annotation_expression_func_with_expression() { run_str("fn par(a, f) -> (fn(x) -> f(a)) ; (@par('hello') fn(x) -> print(x))('goodbye')", "hello\n"); }
+    #[test] fn test_annotation_iife() { run_str("fn iife(f) -> f() ; @iife fn foo() -> print('hello')", "hello\n"); }
+    #[test] fn test_function_call_on_list() { run_str("'hello' . [0] . print", "h\n"); }
+    #[test] fn test_function_compose_on_list() { run_str("[-1]('hello') . print", "o\n"); }
+    #[test] fn test_slice_literal_2_no_nil() { run_str("let x = [1:2] ; x . print", "[1:2]\n"); }
+    #[test] fn test_slice_literal_2_all_nil() { run_str("let x = [:] ; x . print", "[:]\n"); }
+    #[test] fn test_slice_literal_3_no_nil() { run_str("let x = [1:2:3] ; x . print", "[1:2:3]\n"); }
+    #[test] fn test_slice_literal_3_all_nil() { run_str("let x = [::] ; x . print", "[:]\n"); }
+    #[test] fn test_slice_literal_3_last_not_nil() { run_str("let x = [::-1] ; x . print", "[::-1]\n"); }
+    #[test] fn test_slice_literal_not_int() { run_str("let x = ['hello':'world'] ; x . print", "TypeError: Expected 'hello' of type 'str' to be a int\n  at: line 1 (<test>)\n\n1 | let x = ['hello':'world'] ; x . print\n2 |         ^^^^^^^^^^^^^^^^^\n"); }
+    #[test] fn test_slice_in_expr_1() { run_str("'1234' . [::-1] . print", "4321\n"); }
+    #[test] fn test_slice_in_expr_2() { run_str("let x = [::-1] ; '1234' . x . print", "4321\n"); }
+    #[test] fn test_slice_in_expr_3() { run_str("'hello the world!' . split(' ') . map([2:]) . print", "['llo', 'e', 'rld!']\n"); }
+    #[test] fn test_int_operators() { run_str("print(5 - 3, 12 + 5, 3 * 9, 16 / 3)", "2 17 27 5\n"); }
+    #[test] fn test_int_div_mod() { run_str("print(3 / 2, 3 / 3, -3 / 2, 10 % 3, 11 % 3, 12 % 3)", "1 1 -2 1 2 0\n"); }
+    #[test] fn test_int_div_by_zero() { run_str("print(15 / 0)", "Compile Error:\n\nValueError: Expected value to be non-zero\n  at: line 1 (<test>)\n\n1 | print(15 / 0)\n2 |          ^\n"); }
+    #[test] fn test_int_mod_by_zero() { run_str("print(15 % 0)", "Compile Error:\n\nValueError: Expected value '0: int' to be positive\n  at: line 1 (<test>)\n\n1 | print(15 % 0)\n2 |          ^\n"); }
+    #[test] fn test_int_left_right_shift() { run_str("print(1 << 10, 16 >> 1, 16 << -1, 1 >> -10)", "1024 8 8 1024\n"); }
+    #[test] fn test_int_comparisons_1() { run_str("print(1 < 3, -5 < -10, 6 > 7, 6 > 4)", "true false false true\n"); }
+    #[test] fn test_int_comparisons_2() { run_str("print(1 <= 3, -5 < -10, 3 <= 3, 2 >= 2, 6 >= 7, 6 >= 4, 6 <= 6, 8 >= 8)", "true false true true false true true true\n"); }
+    #[test] fn test_int_equality() { run_str("print(1 == 3, -5 == -10, 3 != 3, 2 == 2, 6 != 7)", "false false false true true\n"); }
+    #[test] fn test_int_bitwise_operators() { run_str("print(0b111 & 0b100, 0b1100 | 0b1010, 0b1100 ^ 0b1010)", "4 14 6\n"); }
+    #[test] fn test_int_to_hex() { run_str("1234 . hex . print", "4d2\n"); }
+    #[test] fn test_int_to_bin() { run_str("1234 . bin . print", "10011010010\n"); }
+    #[test] fn test_int_default_value_yes() { run_str("int('123', 567) . print", "123\n"); }
+    #[test] fn test_int_default_value_no() { run_str("int('yes', 567) . print", "567\n"); }
+    #[test] fn test_int_min_and_max() { run_str("[int.min, max(int)] . print", "[-9223372036854775808, 9223372036854775807]\n") }
+    #[test] fn test_bool_comparisons_1() { run_str("print(false < false, false < true, true < false, true < true)", "false true false false\n"); }
+    #[test] fn test_bool_comparisons_2() { run_str("print(false <= false, false >= true, true >= false, true <= true)", "true false true true\n"); }
+    #[test] fn test_bool_operator_add() { run_str("true + true + false + false . print", "2\n"); }
+    #[test] fn test_bool_sum() { run_str("range(10) . map(>3) . sum . print", "6\n"); }
+    #[test] fn test_bool_reduce_add() { run_str("range(10) . map(>3) . reduce(+) . print", "6\n"); }
+    #[test] fn test_str_empty() { run_str("'' . print", "\n"); }
+    #[test] fn test_str_empty_constructor() { run_str("str() . print", "\n"); }
+    #[test] fn test_str_add() { run_str("print(('a' + 'b') + (3 + 4) + (' hello' + 3) + (' and' + true + nil))", "ab7 hello3 andtruenil\n"); }
+    #[test] fn test_str_partial_left_add() { run_str("'world ' . (+'hello') . print", "world hello\n"); }
+    #[test] fn test_str_partial_right_add() { run_str("' world' . ('hello'+) . print", "hello world\n"); }
+    #[test] fn test_str_mul() { run_str("print('abc' * 3)", "abcabcabc\n"); }
+    #[test] fn test_str_index() { run_str("'hello'[1] . print", "e\n"); }
+    #[test] fn test_str_slice_start() { run_str("'hello'[1:] . print", "ello\n"); }
+    #[test] fn test_str_slice_stop() { run_str("'hello'[:3] . print", "hel\n"); }
+    #[test] fn test_str_slice_start_stop() { run_str("'hello'[1:3] . print", "el\n"); }
+    #[test] fn test_str_operator_in_yes() { run_str("'hello' in 'hey now, hello world' . print", "true\n"); }
+    #[test] fn test_str_operator_in_no() { run_str("'hello' in 'hey now, \\'ello world' . print", "false\n"); }
+    #[test] fn test_str_format_with_percent_no_args() { run_str("'100 %%' % vector() . print", "100 %\n"); }
+    #[test] fn test_str_format_with_one_int_arg() { run_str("'an int: %d' % (123,) . print", "an int: 123\n"); }
+    #[test] fn test_str_format_with_one_neg_int_arg() { run_str("'an int: %d' % (-123,) . print", "an int: -123\n"); }
+    #[test] fn test_str_format_with_one_zero_pad_int_arg() { run_str("'an int: %05d' % (123,) . print", "an int: 00123\n"); }
+    #[test] fn test_str_format_with_one_zero_pad_neg_int_arg() { run_str("'an int: %05d' % (-123,) . print", "an int: -0123\n"); }
+    #[test] fn test_str_format_with_one_space_pad_int_arg() { run_str("'an int: %5d' % (123,) . print", "an int:   123\n"); }
+    #[test] fn test_str_format_with_one_space_pad_neg_int_arg() { run_str("'an int: %5d' % (-123,) . print", "an int:  -123\n"); }
+    #[test] fn test_str_format_with_one_hex_arg() { run_str("'an int: %x' % (123,) . print", "an int: 7b\n"); }
+    #[test] fn test_str_format_with_one_zero_pad_hex_arg() { run_str("'an int: %04x' % (123,) . print", "an int: 007b\n"); }
+    #[test] fn test_str_format_with_one_space_pad_hex_arg() { run_str("'an int: %4x' % (123,) . print", "an int:   7b\n"); }
+    #[test] fn test_str_format_with_one_bin_arg() { run_str("'an int: %b' % (123,) . print", "an int: 1111011\n"); }
+    #[test] fn test_str_format_with_one_zero_pad_bin_arg() { run_str("'an int: %012b' % (123,) . print", "an int: 000001111011\n"); }
+    #[test] fn test_str_format_with_one_space_pad_bin_arg() { run_str("'an int: %12b' % (123,) . print", "an int:      1111011\n"); }
+    #[test] fn test_str_format_with_many_args() { run_str("'%d %s %x %b ALL THE THINGS %%!' % (10, 'fifteen', 0xff, 0b10101) . print", "10 fifteen ff 10101 ALL THE THINGS %!\n"); }
+    #[test] fn test_str_format_with_solo_arg_nil() { run_str("'hello %s' % nil . print", "hello nil\n"); }
+    #[test] fn test_str_format_with_solo_arg_int() { run_str("'hello %s' % 123 . print", "hello 123\n"); }
+    #[test] fn test_str_format_with_solo_arg_str() { run_str("'hello %s' % 'world' . print", "hello world\n"); }
+    #[test] fn test_str_format_nested_0() { run_str("'%s w%sld %s' % ('hello', 'or', '!') . print", "hello world !\n"); }
+    #[test] fn test_str_format_nested_1() { run_str("'%%%s%%s%s %%s' % ('s w', 'ld') % ('hello', 'or', '!') . print", "hello world !\n"); }
+    #[test] fn test_str_format_nested_2() { run_str("'%ss%%%%s%s%s%ss' % ('%'*3, '%s', ' ', '%'*2) % ('s w', 'ld') % ('hello', 'or', '!') . print", "hello world !\n"); }
+    #[test] fn test_str_format_too_many_args() { run_str("'%d %d %d' % (1, 2)", "ValueError: Not enough arguments for format string\n  at: line 1 (<test>)\n\n1 | '%d %d %d' % (1, 2)\n2 |            ^\n"); }
+    #[test] fn test_str_format_too_few_args() { run_str("'%d %d %d' % (1, 2, 3, 4)", "ValueError: Not all arguments consumed in format string, next: '4' of type 'int'\n  at: line 1 (<test>)\n\n1 | '%d %d %d' % (1, 2, 3, 4)\n2 |            ^\n"); }
+    #[test] fn test_str_format_incorrect_character() { run_str("'%g' % (1,)", "ValueError: Invalid format character 'g' in format string\n  at: line 1 (<test>)\n\n1 | '%g' % (1,)\n2 |      ^\n"); }
+    #[test] fn test_str_format_incorrect_width() { run_str("'%00' % (1,)", "ValueError: Invalid format character '0' in format string\n  at: line 1 (<test>)\n\n1 | '%00' % (1,)\n2 |       ^\n"); }
+    #[test] fn test_list_empty_constructor() { run_str("list() . print", "[]\n"); }
+    #[test] fn test_list_literal_empty() { run_str("[] . print", "[]\n"); }
+    #[test] fn test_list_literal_len_1() { run_str("['hello'] . print", "['hello']\n"); }
+    #[test] fn test_list_literal_len_2() { run_str("['hello', 'world'] . print", "['hello', 'world']\n"); }
+    #[test] fn test_list_literal_unroll_at_start() { run_str("[...[1, 2, 3], 4, 5] . print", "[1, 2, 3, 4, 5]\n"); }
+    #[test] fn test_list_literal_unroll_at_end() { run_str("[0, ...[1, 2, 3]] . print", "[0, 1, 2, 3]\n"); }
+    #[test] fn test_list_literal_unroll_once() { run_str("[...[1, 2, 3]] . print", "[1, 2, 3]\n"); }
+    #[test] fn test_list_literal_unroll_multiple() { run_str("[...[1, 2, 3], ...[4, 5]] . print", "[1, 2, 3, 4, 5]\n"); }
+    #[test] fn test_list_literal_unroll_multiple_and_empty() { run_str("[...[], 0, ...[1, 2, 3], ...[4, 5], ...[], 6] . print", "[0, 1, 2, 3, 4, 5, 6]\n"); }
+    #[test] fn test_list_from_str() { run_str("'funny beans' . list . print", "['f', 'u', 'n', 'n', 'y', ' ', 'b', 'e', 'a', 'n', 's']\n"); }
+    #[test] fn test_list_add() { run_str("[1, 2, 3] + [4, 5, 6] . print", "[1, 2, 3, 4, 5, 6]\n"); }
+    #[test] fn test_list_multiply_left() { run_str("[1, 2, 3] * 3 . print", "[1, 2, 3, 1, 2, 3, 1, 2, 3]\n"); }
+    #[test] fn test_list_multiply_right() { run_str("3 * [1, 2, 3] . print", "[1, 2, 3, 1, 2, 3, 1, 2, 3]\n"); }
+    #[test] fn test_list_multiply_nested() { run_str("let a = [[1]] * 3; a[0][0] = 2; a . print", "[[2], [2], [2]]\n"); }
+    #[test] fn test_list_operator_in_yes() { run_str("13 in [10, 11, 12, 13, 14, 15] . print", "true\n"); }
+    #[test] fn test_list_operator_in_no() { run_str("3 in [10, 11, 12, 13, 14, 15] . print", "false\n"); }
+    #[test] fn test_list_operator_not_in_yes() { run_str("3 not in [1, 2, 3] . print", "false\n"); }
+    #[test] fn test_list_operator_not_in_no() { run_str("3 not in [1, 5, 8] . print", "true\n"); }
+    #[test] fn test_list_index() { run_str("[1, 2, 3] [1] . print", "2\n"); }
+    #[test] fn test_list_index_out_of_bounds() { run_str("[1, 2, 3] [3] . print", "Index '3' is out of bounds for list of length [0, 3)\n  at: line 1 (<test>)\n\n1 | [1, 2, 3] [3] . print\n2 |           ^^^\n"); }
+    #[test] fn test_list_index_negative() { run_str("[1, 2, 3] [-1] . print", "3\n"); }
+    #[test] fn test_list_slice_01() { run_str("[1, 2, 3, 4] [:] . print", "[1, 2, 3, 4]\n"); }
+    #[test] fn test_list_slice_02() { run_str("[1, 2, 3, 4] [::] . print", "[1, 2, 3, 4]\n"); }
+    #[test] fn test_list_slice_03() { run_str("[1, 2, 3, 4] [::1] . print", "[1, 2, 3, 4]\n"); }
+    #[test] fn test_list_slice_04() { run_str("[1, 2, 3, 4] [1:] . print", "[2, 3, 4]\n"); }
+    #[test] fn test_list_slice_05() { run_str("[1, 2, 3, 4] [:2] . print", "[1, 2]\n"); }
+    #[test] fn test_list_slice_06() { run_str("[1, 2, 3, 4] [0:] . print", "[1, 2, 3, 4]\n"); }
+    #[test] fn test_list_slice_07() { run_str("[1, 2, 3, 4] [:4] . print", "[1, 2, 3, 4]\n"); }
+    #[test] fn test_list_slice_08() { run_str("[1, 2, 3, 4] [1:3] . print", "[2, 3]\n"); }
+    #[test] fn test_list_slice_09() { run_str("[1, 2, 3, 4] [2:4] . print", "[3, 4]\n"); }
+    #[test] fn test_list_slice_10() { run_str("[1, 2, 3, 4] [0:2] . print", "[1, 2]\n"); }
+    #[test] fn test_list_slice_11() { run_str("[1, 2, 3, 4] [:-1] . print", "[1, 2, 3]\n"); }
+    #[test] fn test_list_slice_12() { run_str("[1, 2, 3, 4] [:-2] . print", "[1, 2]\n"); }
+    #[test] fn test_list_slice_13() { run_str("[1, 2, 3, 4] [-2:] . print", "[3, 4]\n"); }
+    #[test] fn test_list_slice_14() { run_str("[1, 2, 3, 4] [-3:] . print", "[2, 3, 4]\n"); }
+    #[test] fn test_list_slice_15() { run_str("[1, 2, 3, 4] [::2] . print", "[1, 3]\n"); }
+    #[test] fn test_list_slice_16() { run_str("[1, 2, 3, 4] [::3] . print", "[1, 4]\n"); }
+    #[test] fn test_list_slice_17() { run_str("[1, 2, 3, 4] [::4] . print", "[1]\n"); }
+    #[test] fn test_list_slice_18() { run_str("[1, 2, 3, 4] [1::2] . print", "[2, 4]\n"); }
+    #[test] fn test_list_slice_19() { run_str("[1, 2, 3, 4] [1:3:2] . print", "[2]\n"); }
+    #[test] fn test_list_slice_20() { run_str("[1, 2, 3, 4] [:-1:2] . print", "[1, 3]\n"); }
+    #[test] fn test_list_slice_21() { run_str("[1, 2, 3, 4] [1:-1:3] . print", "[2]\n"); }
+    #[test] fn test_list_slice_22() { run_str("[1, 2, 3, 4] [::-1] . print", "[4, 3, 2, 1]\n"); }
+    #[test] fn test_list_slice_23() { run_str("[1, 2, 3, 4] [1::-1] . print", "[2, 1]\n"); }
+    #[test] fn test_list_slice_24() { run_str("[1, 2, 3, 4] [:2:-1] . print", "[4]\n"); }
+    #[test] fn test_list_slice_25() { run_str("[1, 2, 3, 4] [3:1:-1] . print", "[4, 3]\n"); }
+    #[test] fn test_list_slice_26() { run_str("[1, 2, 3, 4] [-1:-2:-1] . print", "[4]\n"); }
+    #[test] fn test_list_slice_27() { run_str("[1, 2, 3, 4] [-2::-1] . print", "[3, 2, 1]\n"); }
+    #[test] fn test_list_slice_28() { run_str("[1, 2, 3, 4] [:-3:-1] . print", "[4, 3]\n"); }
+    #[test] fn test_list_slice_29() { run_str("[1, 2, 3, 4] [::-2] . print", "[4, 2]\n"); }
+    #[test] fn test_list_slice_30() { run_str("[1, 2, 3, 4] [::-3] . print", "[4, 1]\n"); }
+    #[test] fn test_list_slice_31() { run_str("[1, 2, 3, 4] [::-4] . print", "[4]\n"); }
+    #[test] fn test_list_slice_32() { run_str("[1, 2, 3, 4] [-2::-2] . print", "[3, 1]\n"); }
+    #[test] fn test_list_slice_33() { run_str("[1, 2, 3, 4] [-3::-2] . print", "[2]\n"); }
+    #[test] fn test_list_slice_34() { run_str("[1, 2, 3, 4] [1:1] . print", "[]\n"); }
+    #[test] fn test_list_slice_35() { run_str("[1, 2, 3, 4] [-1:-1] . print", "[]\n"); }
+    #[test] fn test_list_slice_36() { run_str("[1, 2, 3, 4] [-1:1:] . print", "[]\n"); }
+    #[test] fn test_list_slice_37() { run_str("[1, 2, 3, 4] [1:1:-1] . print", "[]\n"); }
+    #[test] fn test_list_slice_38() { run_str("[1, 2, 3, 4] [-2:2:-3] . print", "[]\n"); }
+    #[test] fn test_list_slice_39() { run_str("[1, 2, 3, 4] [-1:1:-1] . print", "[4, 3]\n"); }
+    #[test] fn test_list_slice_40() { run_str("[1, 2, 3, 4] [1:-1:-1] . print", "[]\n"); }
+    #[test] fn test_list_slice_41() { run_str("[1, 2, 3, 4] [1:10:1] . print", "[2, 3, 4]\n"); }
+    #[test] fn test_list_slice_42() { run_str("[1, 2, 3, 4] [10:1:-1] . print", "[4, 3]\n"); }
+    #[test] fn test_list_slice_43() { run_str("[1, 2, 3, 4] [-10:1] . print", "[1]\n"); }
+    #[test] fn test_list_slice_44() { run_str("[1, 2, 3, 4] [1:-10:-1] . print", "[2, 1]\n"); }
+    #[test] fn test_list_slice_45() { run_str("[1, 2, 3, 4] [::0]", "ValueError: 'step' argument cannot be zero\n  at: line 1 (<test>)\n\n1 | [1, 2, 3, 4] [::0]\n2 |              ^^^^^\n"); }
+    #[test] fn test_list_slice_46() { run_str("[1, 2, 3, 4][:-1] . print", "[1, 2, 3]\n"); }
+    #[test] fn test_list_slice_47() { run_str("[1, 2, 3, 4][:0] . print", "[]\n"); }
+    #[test] fn test_list_slice_48() { run_str("[1, 2, 3, 4][:1] . print", "[1]\n"); }
+    #[test] fn test_list_slice_49() { run_str("[1, 2, 3, 4][5:] . print", "[]\n"); }
+    #[test] fn test_list_pop_empty() { run_str("let x = [] , y = x . pop ; (x, y) . print", "ValueError: Expected value to be a non empty iterable\n  at: line 1 (<test>)\n\n1 | let x = [] , y = x . pop ; (x, y) . print\n2 |                    ^^^^^\n"); }
+    #[test] fn test_list_pop() { run_str("let x = [1, 2, 3] , y = x . pop ; (x, y) . print", "([1, 2], 3)\n"); }
+    #[test] fn test_list_pop_front_empty() { run_str("let x = [], y = x . pop_front ; (x, y) . print", "ValueError: Expected value to be a non empty iterable\n  at: line 1 (<test>)\n\n1 | let x = [], y = x . pop_front ; (x, y) . print\n2 |                   ^^^^^^^^^^^\n"); }
+    #[test] fn test_list_pop_front() { run_str("let x = [1, 2, 3], y = x . pop_front ; (x, y) . print", "([2, 3], 1)\n"); }
+    #[test] fn test_list_push() { run_str("let x = [1, 2, 3] ; x . push(4) ; x . print", "[1, 2, 3, 4]\n"); }
+    #[test] fn test_list_push_front() { run_str("let x = [1, 2, 3] ; x . push_front(4) ; x . print", "[4, 1, 2, 3]\n"); }
+    #[test] fn test_list_insert_front() { run_str("let x = [1, 2, 3] ; x . insert(0, 4) ; x . print", "[4, 1, 2, 3]\n"); }
+    #[test] fn test_list_insert_middle() { run_str("let x = [1, 2, 3] ; x . insert(1, 4) ; x . print", "[1, 4, 2, 3]\n"); }
+    #[test] fn test_list_insert_end() { run_str("let x = [1, 2, 3] ; x . insert(2, 4) ; x . print", "[1, 2, 4, 3]\n"); }
+    #[test] fn test_list_insert_out_of_bounds() { run_str("let x = [1, 2, 3] ; x . insert(4, 4) ; x . print", "Index '4' is out of bounds for list of length [0, 3)\n  at: line 1 (<test>)\n\n1 | let x = [1, 2, 3] ; x . insert(4, 4) ; x . print\n2 |                       ^^^^^^^^^^^^^^\n"); }
+    #[test] fn test_list_remove_front() { run_str("let x = [1, 2, 3] , y = x . remove(0) ; (x, y) . print", "([2, 3], 1)\n"); }
+    #[test] fn test_list_remove_middle() { run_str("let x = [1, 2, 3] , y = x . remove(1) ; (x, y) . print", "([1, 3], 2)\n"); }
+    #[test] fn test_list_remove_end() { run_str("let x = [1, 2, 3] , y = x . remove(2) ; (x, y) . print", "([1, 2], 3)\n"); }
+    #[test] fn test_list_clear() { run_str("let x = [1, 2, 3] ; x . clear ; x . print", "[]\n"); }
+    #[test] fn test_list_peek() { run_str("let x = [1, 2, 3], y = x . peek ; (x, y) . print", "([1, 2, 3], 1)\n"); }
+    #[test] fn test_list_str() { run_str("[1, 2, '3'] . print", "[1, 2, '3']\n"); }
+    #[test] fn test_list_repr() { run_str("['1', 2, '3'] . repr . print", "['1', 2, '3']\n"); }
+    #[test] fn test_list_recursive_repr() { run_str("let x = [] ; x.push(x) ; x.print", "[[...]]\n"); }
+    #[test] fn test_list_recursive_knot_repr() { run_str("let x = [] ; let y = [x] ; x.push(y) ; x.print", "[[[...]]]\n"); }
+    #[test] fn test_list_recursive_complex_repr() { run_str("struct S(x) ; let x = [S(nil)] ; x[0]->x = [S(x)] ; x.print", "[S(x=[S(x=[...])])]\n"); }
+    #[test] fn test_vector_empty_constructor() { run_str("vector() . print", "()\n"); }
+    #[test] fn test_vector_literal_single() { run_str("(1,) . print", "(1)\n"); }
+    #[test] fn test_vector_literal_multiple() { run_str("(1,2,3) . print", "(1, 2, 3)\n"); }
+    #[test] fn test_vector_literal_multiple_trailing_comma() { run_str("(1,2,3,) . print", "(1, 2, 3)\n"); }
+    #[test] fn test_vector_literal_unroll_at_start() { run_str("(...(1, 2, 3), 4, 5) . print", "(1, 2, 3, 4, 5)\n"); }
+    #[test] fn test_vector_literal_unroll_at_end() { run_str("(0, ...(1, 2, 3)) . print", "(0, 1, 2, 3)\n"); }
+    #[test] fn test_vector_literal_unroll_once() { run_str("(...(1, 2, 3)) . print", "(1, 2, 3)\n"); }
+    #[test] fn test_vector_literal_unroll_multiple() { run_str("(...(1, 2, 3), ...(4, 5)) . print", "(1, 2, 3, 4, 5)\n"); }
+    #[test] fn test_vector_literal_unroll_multiple_and_empty() { run_str("(...vector(), 0, ...(1, 2, 3), ...(4, 5), ...vector(), 6) . print", "(0, 1, 2, 3, 4, 5, 6)\n"); }
+    #[test] fn test_vector() { run_str("vector(1, 2, 3) . print", "(1, 2, 3)\n"); }
+    #[test] fn test_vector_add() { run_str("vector(1, 2, 3) + vector(6, 3, 2) . print", "(7, 5, 5)\n"); }
+    #[test] fn test_vector_add_constant() { run_str("vector(1, 2, 3) + 3 . print", "(4, 5, 6)\n"); }
+    #[test] fn test_set_empty_constructor() { run_str("set() . print", "{}\n"); }
+    #[test] fn test_vector_array_assign() { run_str("let x = (1, 2, 3) ; x[0] = 3 ; x . print", "(3, 2, 3)\n"); }
+    #[test] fn test_vector_recursive_repr() { run_str("let x = (nil,) ; x[0] = x ; x.print", "((...))\n"); }
+    #[test] fn test_set_literal_empty() { run_str("{} is set . print ; {} . print", "true\n{}\n"); }
+    #[test] fn test_set_literal_single() { run_str("{'hello'} . print", "{'hello'}\n"); }
+    #[test] fn test_set_literal_multiple() { run_str("{1, 2, 3, 4} . print", "{1, 2, 3, 4}\n"); }
+    #[test] fn test_set_literal_unroll_at_start() { run_str("{...{1, 2, 3}, 4, 5} . print", "{1, 2, 3, 4, 5}\n"); }
+    #[test] fn test_set_literal_unroll_at_end() { run_str("{0, ...{1, 2, 3}} . print", "{0, 1, 2, 3}\n"); }
+    #[test] fn test_set_literal_unroll_once() { run_str("{...{1, 2, 3}} . print", "{1, 2, 3}\n"); }
+    #[test] fn test_set_literal_unroll_multiple() { run_str("{...{1, 2, 3}, ...{4, 5}} . print", "{1, 2, 3, 4, 5}\n"); }
+    #[test] fn test_set_literal_unroll_multiple_and_empty() { run_str("{...{}, 0, ...{1, 2, 3}, ...{4, 5}, ...set(), 6} . print", "{0, 1, 2, 3, 4, 5, 6}\n"); }
+    #[test] fn test_set_from_str() { run_str("'funny beans' . set . print", "{'f', 'u', 'n', 'y', ' ', 'b', 'e', 'a', 's'}\n"); }
+    #[test] fn test_set_pop_empty() { run_str("let x = set() , y = x . pop ; (x, y) . print", "ValueError: Expected value to be a non empty iterable\n  at: line 1 (<test>)\n\n1 | let x = set() , y = x . pop ; (x, y) . print\n2 |                       ^^^^^\n"); }
+    #[test] fn test_set_pop() { run_str("let x = {1, 2, 3} , y = x . pop ; (x, y) . print", "({1, 2}, 3)\n"); }
+    #[test] fn test_set_push() { run_str("let x = {1, 2, 3} ; x . push(4) ; x . print", "{1, 2, 3, 4}\n"); }
+    #[test] fn test_set_remove_yes() { run_str("let x = {1, 2, 3}, y = x . remove(2) ; (x, y) . print", "({1, 3}, true)\n"); }
+    #[test] fn test_set_remove_no() { run_str("let x = {1, 2, 3}, y = x . remove(5) ; (x, y) . print", "({1, 2, 3}, false)\n"); }
+    #[test] fn test_set_clear() { run_str("let x = {1, 2, 3} ; x . clear ; x . print", "{}\n"); }
+    #[test] fn test_set_peek() { run_str("let x = {1, 2, 3}, y = x . peek ; (x, y) . print", "({1, 2, 3}, 1)\n"); }
+    #[test] fn test_set_insert_self() { run_str("let x = set() ; x.push(x)", "ValueError: Cannot create recursive hash based collection from '{{...}}' of type 'set'\n  at: line 1 (<test>)\n\n1 | let x = set() ; x.push(x)\n2 |                  ^^^^^^^^\n"); }
+    #[test] fn test_set_indirect_insert_self() { run_str("let x = set() ; x.push([x])", "ValueError: Cannot create recursive hash based collection from '{[{...}]}' of type 'set'\n  at: line 1 (<test>)\n\n1 | let x = set() ; x.push([x])\n2 |                  ^^^^^^^^^^\n"); }
+    #[test] fn test_set_recursive_repr() { run_str("let x = set() ; x.push(x) ; x.print", "ValueError: Cannot create recursive hash based collection from '{{...}}' of type 'set'\n  at: line 1 (<test>)\n\n1 | let x = set() ; x.push(x) ; x.print\n2 |                  ^^^^^^^^\n"); }
+    #[test] fn test_dict_empty_constructor() { run_str("dict() . print", "{}\n"); }
+    #[test] fn test_dict_literal_single() { run_str("{'hello': 'world'} . print", "{'hello': 'world'}\n"); }
+    #[test] fn test_dict_literal_multiple() { run_str("{1: 'a', 2: 'b', 3: 'c'} . print", "{1: 'a', 2: 'b', 3: 'c'}\n"); }
+    #[test] fn test_dict_get_and_set() { run_str("let d = dict() ; d['hi'] = 'yes' ; d['hi'] . print", "yes\n"); }
+    #[test] fn test_dict_get_when_not_present() { run_str("let d = dict() ; d['hello']", "ValueError: Key 'hello' of type 'str' not found in dictionary\n  at: line 1 (<test>)\n\n1 | let d = dict() ; d['hello']\n2 |                   ^^^^^^^^^\n"); }
+    #[test] fn test_dict_get_when_not_present_with_default() { run_str("let d = dict() . default('haha') ; d['hello'] . print", "haha\n"); }
+    #[test] fn test_dict_keys() { run_str("[[1, 'a'], [2, 'b'], [3, 'c']] . dict . keys . print", "{1, 2, 3}\n"); }
+    #[test] fn test_dict_values() { run_str("[[1, 'a'], [2, 'b'], [3, 'c']] . dict . values . print", "['a', 'b', 'c']\n"); }
+    #[test] fn test_dict_pop_empty() { run_str("let x = dict() , y = x . pop ; (x, y) . print", "ValueError: Expected value to be a non empty iterable\n  at: line 1 (<test>)\n\n1 | let x = dict() , y = x . pop ; (x, y) . print\n2 |                        ^^^^^\n"); }
+    #[test] fn test_dict_pop() { run_str("let x = {1: 'a', 2: 'b', 3: 'c'} , y = x . pop ; (x, y) . print", "({1: 'a', 2: 'b'}, (3, 'c'))\n"); }
+    #[test] fn test_dict_insert() { run_str("let x = {1: 'a', 2: 'b', 3: 'c'} ; x . insert(4, 'd') ; x . print", "{1: 'a', 2: 'b', 3: 'c', 4: 'd'}\n"); }
+    #[test] fn test_dict_remove_yes() { run_str("let x = {1: 'a', 2: 'b', 3: 'c'}, y = x . remove(2) ; (x, y) . print", "({1: 'a', 3: 'c'}, true)\n"); }
+    #[test] fn test_dict_remove_no() { run_str("let x = {1: 'a', 2: 'b', 3: 'c'}, y = x . remove(5) ; (x, y) . print", "({1: 'a', 2: 'b', 3: 'c'}, false)\n"); }
+    #[test] fn test_dict_clear() { run_str("let x = {1: 'a', 2: 'b', 3: 'c'} ; x . clear ; x . print", "{}\n"); }
+    #[test] fn test_dict_from_enumerate() { run_str("'hey' . enumerate . dict . print", "{0: 'h', 1: 'e', 2: 'y'}\n"); }
+    #[test] fn test_dict_peek() { run_str("let x = {1: 'a', 2: 'b', 3: 'c'}, y = x . peek ; (x, y) . print", "({1: 'a', 2: 'b', 3: 'c'}, (1, 'a'))\n"); }
+    #[test] fn test_dict_default_with_query() { run_str("let d = dict() . default(3) ; d[0] ; d.print", "{0: 3}\n"); }
+    #[test] fn test_dict_default_with_function() { run_str("let d = dict() . default(list) ; d[0].push(2) ; d[1].push(3) ; d.print", "{0: [2], 1: [3]}\n"); }
+    #[test] fn test_dict_default_with_mutable_default() { run_str("let d = dict() . default([]) ; d[0].push(2) ; d[1].push(3) ; d.print", "{0: [2, 3], 1: [2, 3]}\n"); }
+    #[test] fn test_dict_default_with_self_entry() { run_str("let d ; d = dict() . default(fn() { d['count'] += 1 ; d['hello'] = 'special' ; 'otherwise' }) ; d['count'] = 0 ; d['hello'] ; d['world'] ; d.print", "{'count': 2, 'hello': 'special', 'world': 'otherwise'}\n"); }
+    #[test] fn test_dict_increment() { run_str("let d = dict() . default(fn() -> 3) ; d[0] . print ; d[0] += 1 ; d . print ; d[0] += 1 ; d . print", "3\n{0: 4}\n{0: 5}\n"); }
+    #[test] fn test_dict_insert_self_as_key() { run_str("let x = dict() ; x[x] = 'yes'", "ValueError: Cannot create recursive hash based collection from '{{...}: 'yes'}' of type 'dict'\n  at: line 1 (<test>)\n\n1 | let x = dict() ; x[x] = 'yes'\n2 |                       ^\n"); }
+    #[test] fn test_dict_insert_self_as_value() { run_str("let x = dict() ; x['yes'] = x", ""); }
+    #[test] fn test_dict_recursive_key_index() { run_str("let x = dict() ; x[x] = 'yes' ; x.print", "ValueError: Cannot create recursive hash based collection from '{{...}: 'yes'}' of type 'dict'\n  at: line 1 (<test>)\n\n1 | let x = dict() ; x[x] = 'yes' ; x.print\n2 |                       ^\n"); }
+    #[test] fn test_dict_recursive_key_insert() { run_str("let x = dict() ; x.insert(x, 'yes') ; x.print", "ValueError: Cannot create recursive hash based collection from '{{...}: 'yes'}' of type 'dict'\n  at: line 1 (<test>)\n\n1 | let x = dict() ; x.insert(x, 'yes') ; x.print\n2 |                   ^^^^^^^^^^^^^^^^^\n"); }
+    #[test] fn test_dict_recursive_value_repr() { run_str("let x = dict() ; x['yes'] = x ; x.print", "{'yes': {...}}\n"); }
+    #[test] fn test_heap_empty_constructor() { run_str("heap() . print", "[]\n"); }
     #[test] fn test_heap_from_list() { run_str("let h = [1, 7, 3, 2, 7, 6] . heap; h . print", "[1, 2, 3, 7, 7, 6]\n"); }
     #[test] fn test_heap_pop() { run_str("let h = [1, 7, 3, 2, 7, 6] . heap; [h.pop, h.pop, h.pop] . print", "[1, 2, 3]\n"); }
     #[test] fn test_heap_push() { run_str("let h = [1, 7, 3, 2, 7, 6] . heap; h.push(3); h.push(-1); h.push(16); h . print", "[-1, 1, 3, 2, 7, 6, 3, 7, 16]\n"); }
+    #[test] fn test_heap_recursive_repr() { run_str("let x = heap() ; x.push(x) ; x.print", "[[...]]\n"); }
+    #[test] fn test_print_hello_world() { run_str("print('hello world!')", "hello world!\n"); }
+    #[test] fn test_print_empty() { run_str("print()", "\n"); }
+    #[test] fn test_print_strings() { run_str("print('first', 'second', 'third')", "first second third\n"); }
+    #[test] fn test_print_other_things() { run_str("print(nil, -1, 1, true, false, 'test', print)", "nil -1 1 true false test print\n"); }
+    #[test] fn test_print_unary_operators() { run_str("print(-1, --1, ---1, !3, !!3, !true, !!true)", "-1 1 -1 -4 3 false true\n"); }
+    #[test] fn test_exit_in_expression() { run_str("'this will not print' + exit . print", ""); }
+    #[test] fn test_exit_in_ternary() { run_str("print(if 3 > 2 then exit else 'hello')", ""); }
+    #[test] fn test_assert_pass() { run_str("assert [1, 2] . len . (==2) ; print('yes!')", "yes!\n")}
+    #[test] fn test_assert_pass_with_no_message() { run_str("assert [1, 2] .len . (==2) : print('should not show') ; print('should show')", "should show\n"); }
+    #[test] fn test_assert_fail() { run_str("assert 1 + 2 != 3", "Assertion Failed: nil\n  at: line 1 (<test>)\n\n1 | assert 1 + 2 != 3\n2 |        ^^^^^^^^^^\n"); }
+    #[test] fn test_assert_fail_with_message() { run_str("assert 'here' in 'the goose is gone' : 'goose issues are afoot'", "Assertion Failed: goose issues are afoot\n  at: line 1 (<test>)\n\n1 | assert 'here' in 'the goose is gone' : 'goose issues are afoot'\n2 |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n"); }
+    #[test] fn test_assert_messages_are_lazy() { run_str("assert true : exit ; print('should reach here')", "should reach here\n"); }
+    #[test] fn test_len_list() { run_str("[1, 2, 3] . len . print", "3\n"); }
+    #[test] fn test_len_str() { run_str("'12345' . len . print", "5\n"); }
+    #[test] fn test_sum_list() { run_str("[1, 2, 3, 4] . sum . print", "10\n"); }
+    #[test] fn test_sum_values() { run_str("sum(1, 3, 5, 7) . print", "16\n"); }
+    #[test] fn test_sum_no_arg() { run_str("sum()", "Function 'sum' requires at least 1 parameter but none were present.\n  at: line 1 (<test>)\n\n1 | sum()\n2 |    ^^\n"); }
+    #[test] fn test_sum_empty_list() { run_str("[] . sum . print", "0\n"); }
+    #[test] fn test_map() { run_str("[1, 2, 3] . map(str) . repr . print", "['1', '2', '3']\n") }
+    #[test] fn test_map_lambda() { run_str("[-1, 2, -3] . map(fn(x) -> x . abs) . print", "[1, 2, 3]\n") }
+    #[test] fn test_filter() { run_str("[2, 3, 4, 5, 6] . filter (>3) . print", "[4, 5, 6]\n") }
+    #[test] fn test_filter_lambda() { run_str("[2, 3, 4, 5, 6] . filter (fn(x) -> x % 2 == 0) . print", "[2, 4, 6]\n") }
+    #[test] fn test_reduce_with_operator() { run_str("[1, 2, 3, 4, 5, 6] . reduce (*) . print", "720\n"); }
+    #[test] fn test_reduce_with_function() { run_str("[1, 2, 3, 4, 5, 6] . reduce (fn(a, b) -> a * b) . print", "720\n"); }
+    #[test] fn test_reduce_with_unary_operator() { run_str("[1, 2, 3] . reduce (!) . print", "Function '(!)' requires at least 1 parameters but 2 were present.\n  at: line 1 (<test>)\n\n1 | [1, 2, 3] . reduce (!) . print\n2 |           ^^^^^^^^^^^^\n"); }
+    #[test] fn test_reduce_with_sum() { run_str("[1, 2, 3, 4, 5, 6] . reduce (sum) . print", "21\n"); }
+    #[test] fn test_reduce_with_empty() { run_str("[] . reduce(+) . print", "ValueError: Expected value to be a non empty iterable\n  at: line 1 (<test>)\n\n1 | [] . reduce(+) . print\n2 |    ^^^^^^^^^^^\n"); }
+    #[test] fn test_sorted() { run_str("[6, 2, 3, 7, 2, 1] . sort . print", "[1, 2, 2, 3, 6, 7]\n"); }
+    #[test] fn test_sorted_with_set_of_str() { run_str("'funny' . set . sort . print", "['f', 'n', 'u', 'y']\n"); }
+    #[test] fn test_reverse() { run_str("[8, 1, 2, 6, 3, 2, 3] . reverse . print", "[3, 2, 3, 6, 2, 1, 8]\n"); }
     #[test] fn test_range_1() { run_str("range(3) . list . print", "[0, 1, 2]\n"); }
     #[test] fn test_range_2() { run_str("range(3, 7) . list . print", "[3, 4, 5, 6]\n"); }
     #[test] fn test_range_3() { run_str("range(1, 9, 3) . list . print", "[1, 4, 7]\n"); }
@@ -1277,105 +1551,17 @@ mod test {
     #[test] fn test_range_7() { run_str("range(10, 0, 3) . list . print", "[]\n"); }
     #[test] fn test_range_8() { run_str("range(1, 1, 1) . list . print", "[]\n"); }
     #[test] fn test_range_9() { run_str("range(1, 1, 0) . list . print", "ValueError: 'step' argument cannot be zero\n  at: line 1 (<test>)\n\n1 | range(1, 1, 0) . list . print\n2 |      ^^^^^^^^^\n"); }
+    #[test] fn test_range_operator_in_yes() { run_str("13 in range(10, 15) . print", "true\n"); }
+    #[test] fn test_range_operator_in_no() { run_str("3 in range(10, 15) . print", "false\n"); }
     #[test] fn test_enumerate_1() { run_str("[] . enumerate . list . print", "[]\n"); }
     #[test] fn test_enumerate_2() { run_str("[1, 2, 3] . enumerate . list . print", "[(0, 1), (1, 2), (2, 3)]\n"); }
     #[test] fn test_enumerate_3() { run_str("'foobar' . enumerate . list . print", "[(0, 'f'), (1, 'o'), (2, 'o'), (3, 'b'), (4, 'a'), (5, 'r')]\n"); }
-    #[test] fn test_for_loop_no_intrinsic_with_list() { run_str("for x in ['a', 'b', 'c'] { x . print }", "a\nb\nc\n") }
-    #[test] fn test_for_loop_no_intrinsic_with_set() { run_str("for x in 'foobar' . set { x . print }", "f\no\nb\na\nr\n") }
-    #[test] fn test_for_loop_no_intrinsic_with_str() { run_str("for x in 'hello' { x . print }", "h\ne\nl\nl\no\n") }
-    #[test] fn test_for_loop_range_stop() { run_str("for x in range(5) { x . print }", "0\n1\n2\n3\n4\n"); }
-    #[test] fn test_for_loop_range_start_stop() { run_str("for x in range(3, 6) { x . print }", "3\n4\n5\n"); }
-    #[test] fn test_for_loop_range_start_stop_step_positive() { run_str("for x in range(1, 10, 3) { x . print }", "1\n4\n7\n"); }
-    #[test] fn test_for_loop_range_start_stop_step_negative() { run_str("for x in range(11, 0, -4) { x . print }", "11\n7\n3\n"); }
-    #[test] fn test_for_loop_range_start_stop_step_zero() { run_str("for x in range(1, 2, 0) { x . print }", "ValueError: 'step' argument cannot be zero\n  at: line 1 (<test>)\n\n1 | for x in range(1, 2, 0) { x . print }\n2 |               ^^^^^^^^^\n"); }
-    #[test] fn test_list_literal_empty() { run_str("[] . print", "[]\n"); }
-    #[test] fn test_list_literal_len_1() { run_str("['hello'] . print", "['hello']\n"); }
-    #[test] fn test_list_literal_len_2() { run_str("['hello', 'world'] . print", "['hello', 'world']\n"); }
     #[test] fn test_sqrt() { run_str("[0, 1, 4, 9, 25, 3, 6, 8, 13] . map(sqrt) . print", "[0, 1, 2, 3, 5, 1, 2, 2, 3]\n"); }
-    #[test] fn test_very_large_sqrt() { run_str("[1 << 62, (1 << 62) + 1, (1 << 62) - 1] . map(sqrt) . print", "[2147483648, 2147483648, 2147483647]\n"); }
+    #[test] fn test_sqrt_very_large() { run_str("[1 << 62, (1 << 62) + 1, (1 << 62) - 1] . map(sqrt) . print", "[2147483648, 2147483648, 2147483647]\n"); }
     #[test] fn test_gcd() { run_str("gcd(12, 8) . print", "4\n"); }
     #[test] fn test_gcd_iter() { run_str("[12, 18, 16] . gcd . print", "2\n"); }
     #[test] fn test_lcm() { run_str("lcm(9, 7) . print", "63\n"); }
     #[test] fn test_lcm_iter() { run_str("[12, 10, 18] . lcm . print", "180\n"); }
-    #[test] fn test_if_then_else_1() { run_str("(if true then 'hello' else 'goodbye') . print", "hello\n"); }
-    #[test] fn test_if_then_else_2() { run_str("(if false then 'hello' else 'goodbye') . print", "goodbye\n"); }
-    #[test] fn test_if_then_else_3() { run_str("(if [] then 'hello' else 'goodbye') . print", "goodbye\n"); }
-    #[test] fn test_if_then_else_4() { run_str("(if 3 then 'hello' else 'goodbye') . print", "hello\n"); }
-    #[test] fn test_if_then_else_5() { run_str("(if false then (fn() -> 'hello' . print)() else 'nope') . print", "nope\n"); }
-    #[test] fn test_pattern_in_let_works() { run_str("let x, y = [1, 2] ; [x, y] . print", "[1, 2]\n"); }
-    #[test] fn test_pattern_in_let_too_long() { run_str("let x, y, z = [1, 2] ; [x, y] . print", "ValueError: Cannot unpack '[1, 2]' of type 'list' with length 2, expected exactly 3 elements\n  at: line 1 (<test>)\n\n1 | let x, y, z = [1, 2] ; [x, y] . print\n2 |                    ^\n"); }
-    #[test] fn test_pattern_in_let_too_short() { run_str("let x, y = [1, 2, 3] ; [x, y] . print", "ValueError: Cannot unpack '[1, 2, 3]' of type 'list' with length 3, expected exactly 2 elements\n  at: line 1 (<test>)\n\n1 | let x, y = [1, 2, 3] ; [x, y] . print\n2 |                    ^\n"); }
-    #[test] fn test_pattern_in_let_with_var_at_end() { run_str("let x, *y = [1, 2, 3, 4] ; [x, y] . print", "[1, [2, 3, 4]]\n"); }
-    #[test] fn test_pattern_in_let_with_var_at_start() { run_str("let *x, y = [1, 2, 3, 4] ; [x, y] . print", "[[1, 2, 3], 4]\n"); }
-    #[test] fn test_pattern_in_let_with_var_at_middle() { run_str("let x, *y, z = [1, 2, 3, 4] ; [x, y, z] . print", "[1, [2, 3], 4]\n"); }
-    #[test] fn test_pattern_in_let_with_var_zero_len_at_end() { run_str("let x, *y = [1] ; [x, y] . print", "[1, []]\n"); }
-    #[test] fn test_pattern_in_let_with_var_zero_len_at_start() { run_str("let *x, y = [1] ; [x, y] . print", "[[], 1]\n"); }
-    #[test] fn test_pattern_in_let_with_var_zero_len_at_middle() { run_str("let x, *y, z = [1, 2] ; [x, y, z] . print", "[1, [], 2]\n"); }
-    #[test] fn test_pattern_in_let_with_var_one_len_at_end() { run_str("let x, *y = [1, 2] ; [x, y] . print", "[1, [2]]\n"); }
-    #[test] fn test_pattern_in_let_with_var_one_len_at_start() { run_str("let *x, y = [1, 2] ; [x, y] . print", "[[1], 2]\n"); }
-    #[test] fn test_pattern_in_let_with_var_one_len_at_middle() { run_str("let x, *y, z = [1, 2, 3] ; [x, y, z] . print", "[1, [2], 3]\n"); }
-    #[test] fn test_pattern_in_let_with_only_empty() { run_str("let _ = 'hello' . print", "hello\n"); }
-    #[test] fn test_pattern_in_let_empty_x3() { run_str("let _, _, _ = [1, 2, 3]", ""); }
-    #[test] fn test_pattern_in_let_empty_x3_too_long() { run_str("let _, _, _ = [1, 2, 3, 4]", "ValueError: Cannot unpack '[1, 2, 3, 4]' of type 'list' with length 4, expected exactly 3 elements\n  at: line 1 (<test>)\n\n1 | let _, _, _ = [1, 2, 3, 4]\n2 |                          ^\n"); }
-    #[test] fn test_pattern_in_let_empty_x3_too_short() { run_str("let _, _, _ = [1, 2]", "ValueError: Cannot unpack '[1, 2]' of type 'list' with length 2, expected exactly 3 elements\n  at: line 1 (<test>)\n\n1 | let _, _, _ = [1, 2]\n2 |                    ^\n"); }
-    #[test] fn test_pattern_in_let_empty_x2_at_end() { run_str("let _, _, x = [1, 2, 3] ; x . print", "3\n"); }
-    #[test] fn test_pattern_in_let_empty_x2_at_middle() { run_str("let _, x, _ = [1, 2, 3] ; x . print", "2\n"); }
-    #[test] fn test_pattern_in_let_empty_x2_at_start() { run_str("let x, _, _ = [1, 2, 3] ; x . print", "1\n"); }
-    #[test] fn test_pattern_in_let_empty_at_middle() { run_str("let x, _, y = [1, 2, 3] ; [x, y] . print", "[1, 3]\n"); }
-    #[test] fn test_pattern_in_let_with_varargs_empty_at_end() { run_str("let x, *_ = [1, 2, 3, 4] ; x . print", "1\n"); }
-    #[test] fn test_pattern_in_let_with_varargs_empty_at_middle() { run_str("let x, *_, y = [1, 2, 3, 4] ; [x, y] . print", "[1, 4]\n"); }
-    #[test] fn test_pattern_in_let_with_varargs_empty_at_start() { run_str("let *_, x = [1, 2, 3, 4] ; x . print", "4\n"); }
-    #[test] fn test_pattern_in_let_with_varargs_var_at_end() { run_str("let _, *x = [1, 2, 3, 4] ; x . print", "[2, 3, 4]\n"); }
-    #[test] fn test_pattern_in_let_with_varargs_var_at_middle() { run_str("let _, *x, _ = [1, 2, 3, 4] ; x . print", "[2, 3]\n"); }
-    #[test] fn test_pattern_in_let_with_varargs_var_at_start() { run_str("let *x, _ = [1, 2, 3, 4] ; x . print", "[1, 2, 3]\n"); }
-    #[test] fn test_pattern_in_let_with_varargs_empty_to_empty() { run_str("let *_ = []", ""); }
-    #[test] fn test_pattern_in_let_with_varargs_empty_to_var_at_end_too_short() { run_str("let *_, x = []", "ValueError: Cannot unpack '[]' of type 'list' with length 0, expected at least 1 elements\n  at: line 1 (<test>)\n\n1 | let *_, x = []\n2 |              ^\n"); }
-    #[test] fn test_pattern_in_let_with_varargs_empty_to_var_at_start_too_short() { run_str("let x, *_ = []", "ValueError: Cannot unpack '[]' of type 'list' with length 0, expected at least 1 elements\n  at: line 1 (<test>)\n\n1 | let x, *_ = []\n2 |              ^\n"); }
-    #[test] fn test_pattern_in_let_with_varargs_empty_to_var_at_end() { run_str("let *_, x = [1] ; x . print", "1\n"); }
-    #[test] fn test_pattern_in_let_with_varargs_empty_to_var_at_start() { run_str("let x, *_ = [1] ; x . print", "1\n"); }
-    #[test] fn test_pattern_in_let_with_varargs_empty_to_var_at_middle() { run_str("let x, *_, y = [1, 2] ; [x, y] . print", "[1, 2]\n"); }
-    #[test] fn test_pattern_in_let_with_nested_pattern() { run_str("let x, (y, _) = [[1, 2], [3, 4]] ; [x, y] . print", "[[1, 2], 3]\n"); }
-    #[test] fn test_pattern_in_let_with_parens_on_one_empty() { run_str("let (_) = [[nil]]", ""); }
-    #[test] fn test_pattern_in_let_with_parens_on_one_empty_one_var() { run_str("let (_, x) = [[1, 2]] ; x . print", "2\n"); }
-    #[test] fn test_pattern_in_let_with_complex_patterns_1() { run_str("let *_, (_, x, _), _ = [[1, 2, 3], [4, 5, 6], [7, 8, 9]] ; x . print", "5\n"); }
-    #[test] fn test_pattern_in_let_with_complex_patterns_2() { run_str("let _, (_, (_, (_, (x, *_)))) = [1, [2, [3, [4, [5, [6, [7, [8, [9, nil]]]]]]]]] ; x . print", "5\n"); }
-    #[test] fn test_pattern_in_let_with_complex_patterns_3() { run_str("let ((*x, _), (_, (*y, _), _), *_) = [[[1, 2, 3], [[1, 2, 3], [2, 3, 4], [3, 4, 5]], [[1], [2], [3]]]] ; [x, y] . print", "[[1, 2], [2, 3]]\n"); }
-    #[test] fn test_pattern_in_function() { run_str("fn f((a, b)) -> [b, a] . print ; f([1, 2])", "[2, 1]\n"); }
-    #[test] fn test_multiple_patterns_in_function() { run_str("fn f((a, b), (c, d)) -> [a, b, c, d] . print ; f([1, 2], [3, 4])", "[1, 2, 3, 4]\n"); }
-    #[test] fn test_pattern_in_function_before_args() { run_str("fn f((a, b, c), d, e) -> [a, b, c, d, e] . print ; f([1, 2, 3], 4, 5)", "[1, 2, 3, 4, 5]\n"); }
-    #[test] fn test_pattern_in_function_between_args() { run_str("fn f(a, (b, c, d), e) -> [a, b, c, d, e] . print ; f(1, [2, 3, 4], 5)", "[1, 2, 3, 4, 5]\n"); }
-    #[test] fn test_pattern_in_function_after_args() { run_str("fn f(a, b, (c, d, e)) -> [a, b, c, d, e] . print ; f(1, 2, [3, 4, 5])", "[1, 2, 3, 4, 5]\n"); }
-    #[test] fn test_pattern_with_empty_in_function_before_args() { run_str("fn f((_, b, _), d, e) -> [1, b, 3, d, e] . print ; f([1, 2, 3], 4, 5)", "[1, 2, 3, 4, 5]\n"); }
-    #[test] fn test_pattern_with_empty_in_function_between_args() { run_str("fn f(a, (_, _, d), e) -> [a, 2, 3, d, e] . print ; f(1, [2, 3, 4], 5)", "[1, 2, 3, 4, 5]\n"); }
-    #[test] fn test_pattern_with_empty_in_function_after_args() { run_str("fn f(a, b, (c, _, _)) -> [a, b, c, 4, 5] . print ; f(1, 2, [3, 4, 5])", "[1, 2, 3, 4, 5]\n"); }
-    #[test] fn test_pattern_with_var_in_function_before_args() { run_str("fn f((a, *_), d, e) -> [a, d, e] . print ; f([1, 2, 3], 4, 5)", "[1, 4, 5]\n"); }
-    #[test] fn test_pattern_with_var_in_function_between_args() { run_str("fn f(a, (*_, d), e) -> [a, d, e] . print ; f(1, [2, 3, 4], 5)", "[1, 4, 5]\n"); }
-    #[test] fn test_pattern_with_var_in_function_after_args() { run_str("fn f(a, b, (*c, _, _)) -> [a, b, c] . print ; f(1, 2, [3, 4, 5])", "[1, 2, [3]]\n"); }
-    #[test] fn test_index_in_strings() { run_str("'hello'[1] . print", "e\n"); }
-    #[test] fn test_slice_in_strings_start() { run_str("'hello'[1:] . print", "ello\n"); }
-    #[test] fn test_slice_in_strings_stop() { run_str("'hello'[:3] . print", "hel\n"); }
-    #[test] fn test_slice_in_strings_start_stop() { run_str("'hello'[1:3] . print", "el\n"); }
-    #[test] fn test_pattern_in_for_with_enumerate() { run_str("for i, x in 'hello' . enumerate { [i, x] . print }", "[0, 'h']\n[1, 'e']\n[2, 'l']\n[3, 'l']\n[4, 'o']\n")}
-    #[test] fn test_pattern_in_for_with_empty() { run_str("for _ in range(5) { 'hello' . print }", "hello\nhello\nhello\nhello\nhello\n"); }
-    #[test] fn test_pattern_in_for_with_strings() { run_str("for a, *_, b in ['hello', 'world'] { print(a + b) }", "ho\nwd\n")}
-    #[test] fn test_construct_vector() { run_str("vector(1, 2, 3) . print", "(1, 2, 3)\n"); }
-    #[test] fn test_add_vectors() { run_str("vector(1, 2, 3) + vector(6, 3, 2) . print", "(7, 5, 5)\n"); }
-    #[test] fn test_add_vector_and_constant() { run_str("vector(1, 2, 3) + 3 . print", "(4, 5, 6)\n"); }
-    #[test] fn test_empty_str() { run_str("str() . print", "\n"); }
-    #[test] fn test_empty_list() { run_str("list() . print", "[]\n"); }
-    #[test] fn test_empty_set() { run_str("set() . print", "{}\n"); }
-    #[test] fn test_empty_dict() { run_str("dict() . print", "{}\n"); }
-    #[test] fn test_empty_heap() { run_str("heap() . print", "[]\n"); }
-    #[test] fn test_empty_vector() { run_str("vector() . print", "()\n"); }
-    #[test] fn test_str_in_str_yes() { run_str("'hello' in 'hey now, hello world' . print", "true\n"); }
-    #[test] fn test_str_in_str_no() { run_str("'hello' in 'hey now, \\'ello world' . print", "false\n"); }
-    #[test] fn test_int_in_list_yes() { run_str("13 in [10, 11, 12, 13, 14, 15] . print", "true\n"); }
-    #[test] fn test_int_in_list_no() { run_str("3 in [10, 11, 12, 13, 14, 15] . print", "false\n"); }
-    #[test] fn test_int_in_range_yes() { run_str("13 in range(10, 15) . print", "true\n"); }
-    #[test] fn test_int_in_range_no() { run_str("3 in range(10, 15) . print", "false\n"); }
-    #[test] fn test_dict_get_and_set() { run_str("let d = dict() ; d['hi'] = 'yes' ; d['hi'] . print", "yes\n"); }
-    #[test] fn test_dict_get_when_not_present() { run_str("let d = dict() ; d['hello']", "ValueError: Key 'hello' of type 'str' not found in dictionary\n  at: line 1 (<test>)\n\n1 | let d = dict() ; d['hello']\n2 |                   ^^^^^^^^^\n"); }
-    #[test] fn test_dict_get_when_not_present_with_default() { run_str("let d = dict() . default('haha') ; d['hello'] . print", "haha\n"); }
     #[test] fn test_flat_map_identity() { run_str("['hi', 'bob'] . flat_map(fn(i) -> i) . print", "['h', 'i', 'b', 'o', 'b']\n"); }
     #[test] fn test_flat_map_with_func() { run_str("['hello', 'bob'] . flat_map(fn(i) -> i[2:]) . print", "['l', 'l', 'o', 'b']\n"); }
     #[test] fn test_concat() { run_str("[[], [1], [2, 3], [4, 5, 6], [7, 8, 9, 0]] . concat . print", "[1, 2, 3, 4, 5, 6, 7, 8, 9, 0]\n"); }
@@ -1384,19 +1570,42 @@ mod test {
     #[test] fn test_zip_with_longer_last() { run_str("zip('hi', 'hello', 'hello the world!') . print", "[('h', 'h', 'h'), ('i', 'e', 'e')]\n"); }
     #[test] fn test_zip_with_longer_first() { run_str("zip('hello the world!', 'hello', 'hi') . print", "[('h', 'h', 'h'), ('e', 'e', 'i')]\n"); }
     #[test] fn test_zip_of_list() { run_str("[[1, 2, 3], [4, 5, 6], [7, 8, 9]] . zip . print", "[(1, 4, 7), (2, 5, 8), (3, 6, 9)]\n"); }
-    #[test] fn test_dict_keys() { run_str("[[1, 'a'], [2, 'b'], [3, 'c']] . dict . keys . print", "{1, 2, 3}\n"); }
-    #[test] fn test_dict_values() { run_str("[[1, 'a'], [2, 'b'], [3, 'c']] . dict . values . print", "['a', 'b', 'c']\n"); }
-    #[test] fn test_empty_literal_is_dict() { run_str("let _ = {} is dict . print", "true\n"); }
-    #[test] fn test_dict_literal_singleton() { run_str("let _ = {'hello': 'world'} . print", "{'hello': 'world'}\n"); }
-    #[test] fn test_set_literal_singleton() { run_str("let _ = {'hello'} . print", "{'hello'}\n"); }
-    #[test] fn test_dict_literal_multiple() { run_str("let _ = {1: 'a', 2: 'b', 3: 'c'} . print", "{1: 'a', 2: 'b', 3: 'c'}\n"); }
-    #[test] fn test_set_literal_multiple() { run_str("let _ = {1, 2, 3, 4} . print", "{1, 2, 3, 4}\n"); }
     #[test] fn test_permutations_empty() { run_str("[] . permutations(3) . print", "[]\n"); }
     #[test] fn test_permutations_n_larger_than_size() { run_str("[1, 2, 3] . permutations(5) . print", "[]\n"); }
     #[test] fn test_permutations() { run_str("[1, 2, 3] . permutations(2) . print", "[(1, 2), (1, 3), (2, 1), (2, 3), (3, 1), (3, 2)]\n"); }
     #[test] fn test_combinations_empty() { run_str("[] . combinations(3) . print", "[]\n"); }
     #[test] fn test_combinations_n_larger_than_size() { run_str("[1, 2, 3] . combinations(5) . print", "[]\n"); }
     #[test] fn test_combinations() { run_str("[1, 2, 3] . combinations(2) . print", "[(1, 2), (1, 3), (2, 3)]\n"); }
+    #[test] fn test_replace_regex_1() { run_str("'apples and bananas' . replace('[abe]+', 'o') . print", "opplos ond ononos\n"); }
+    #[test] fn test_replace_regex_2() { run_str("'[a] [b] [c] [d]' . replace('[ac]', '$0$0') . print", "[aa] [b] [cc] [d]\n"); }
+    #[test] fn test_replace_regex_with_function() { run_str("'apples and bananas' . replace('apples', fn((c, *_)) -> c . to_upper) . print", "APPLES and bananas\n"); }
+    #[test] fn test_replace_regex_with_wrong_function() { run_str("'apples and bananas' . replace('apples', min) . print", "TypeError: Expected 'min' of type 'native function' to be a 'fn replace(vector<str>) -> str' function\n  at: line 1 (<test>)\n\n1 | 'apples and bananas' . replace('apples', min) . print\n2 |                      ^^^^^^^^^^^^^^^^^^^^^^^^\n"); }
+    #[test] fn test_replace_regex_with_capture_group() { run_str("'apples and bananas' . replace('([a-z])([a-z]+)', 'yes') . print", "yes yes yes\n"); }
+    #[test] fn test_replace_regex_with_capture_group_function() { run_str("'apples and bananas' . replace('([a-z])([a-z]+)', fn((_, a, b)) -> to_upper(a) + b) . print", "Apples And Bananas\n"); }
+    #[test] fn test_replace_regex_implicit_newline() { run_str("'first\nsecond\nthird\nfourth' . replace('\\n', ', ') . print", "first, second, third, fourth\n"); }
+    #[test] fn test_replace_regex_explicit_newline() { run_str("'first\nsecond\nthird\nfourth' . replace('\n', ', ') . print", "first, second, third, fourth\n"); }
+    #[test] fn test_search_regex_match_all_yes() { run_str("'test' . search('test') . print", "[('test')]\n"); }
+    #[test] fn test_search_regex_match_all_no() { run_str("'test' . search('nope') . print", "[]\n"); }
+    #[test] fn test_search_regex_match_partial_yes() { run_str("'any and nope and nothing' . search('nope') . print", "[('nope')]\n"); }
+    #[test] fn test_search_regex_match_partial_no() { run_str("'any and nope and nothing' . search('some') . print", "[]\n"); }
+    #[test] fn test_search_regex_match_partial_no_start() { run_str("'any and nope and nothing' . search('^some') . print", "[]\n"); }
+    #[test] fn test_search_regex_match_partial_no_end() { run_str("'any and nope and nothing' . search('some$') . print", "[]\n"); }
+    #[test] fn test_search_regex_match_partial_no_start_and_end() { run_str("'any and nope and nothing' . search('^some$') . print", "[]\n"); }
+    #[test] fn test_search_regex_capture_group_match_none() { run_str("'some WORDS with CAPITAL letters' . search('[A-Z]([a-z]+)') . print", "[]\n"); }
+    #[test] fn test_search_regex_capture_group_match_one() { run_str("'some WORDS with Capital letters' . search('[A-Z]([a-z]+)') . print", "[('Capital', 'apital')]\n"); }
+    #[test] fn test_search_regex_capture_group_match_some() { run_str("'some Words With Capital letters' . search('[A-Z]([a-z]+)') . print", "[('Words', 'ords'), ('With', 'ith'), ('Capital', 'apital')]\n"); }
+    #[test] fn test_search_regex_many_capture_groups_match_none() { run_str("'some WORDS with CAPITAL letters' . search('([A-Z])([a-z]+)') . print", "[]\n"); }
+    #[test] fn test_search_regex_many_capture_groups_match_one() { run_str("'some WORDS with Capital letters' . search('([A-Z])[a-z]([a-z]+)') . print", "[('Capital', 'C', 'pital')]\n"); }
+    #[test] fn test_search_regex_many_capture_groups_match_some() { run_str("'some Words With Capital letters' . search('([A-Z])[a-z]([a-z]+)') . print", "[('Words', 'W', 'rds'), ('With', 'W', 'th'), ('Capital', 'C', 'pital')]\n"); }
+    #[test] fn test_search_regex_cannot_compile() { run_str("'test' . search('missing close bracket lol ( this one') . print", "ValueError: Cannot compile regex 'missing close bracket lol ( this one'\n            Parsing error at position 36: Opening parenthesis without closing parenthesis\n  at: line 1 (<test>)\n\n1 | 'test' . search('missing close bracket lol ( this one') . print\n2 |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n"); }
+    #[test] fn test_split_regex_empty_str() { run_str("'abc' . split('') . print", "['a', 'b', 'c']\n"); }
+    #[test] fn test_split_regex_space() { run_str("'a b c' . split(' ') . print", "['a', 'b', 'c']\n"); }
+    #[test] fn test_split_regex_space_duplicates() { run_str("' a  b   c' . split(' ') . print", "['', 'a', '', 'b', '', '', 'c']\n"); }
+    #[test] fn test_split_regex_space_any_whitespace() { run_str("' a  b   c' . split(' +') . print", "['', 'a', 'b', 'c']\n"); }
+    #[test] fn test_split_regex_space_any_with_trim() { run_str("' \nabc  \rabc \\r\\n  abc \\t  \t  \t' . trim . split('\\s+') . print", "['abc', 'abc', 'abc']\n"); }
+    #[test] fn test_split_regex_on_substring() { run_str("'the horse escaped the barn' . split('the') . print", "['', ' horse escaped ', ' barn']\n"); }
+    #[test] fn test_split_regex_on_substring_with_or() { run_str("'the horse escaped the barn' . split('(the| )') . print", "['', '', 'horse', 'escaped', '', '', 'barn']\n"); }
+    #[test] fn test_split_regex_on_substring_with_wildcard() { run_str("'the horse escaped the barn' . split(' *e *') . print", "['th', 'hors', '', 'scap', 'd th', 'barn']\n"); }
     #[test] fn test_find_value_empty() { run_str("[] . find(1) . print", "nil\n"); }
     #[test] fn test_find_func_empty() { run_str("[] . find(==3) . print", "nil\n"); }
     #[test] fn test_find_value_not_found() { run_str("[1, 3, 5, 7] . find(6) . print", "nil\n"); }
@@ -1429,8 +1638,6 @@ mod test {
     #[test] fn test_rindex_of_func_found() { run_str("[1, 3, 5, 7] . rindex_of(>3) . print", "3\n"); }
     #[test] fn test_rindex_of_value_found_multiple() { run_str("[1, 3, 5, 5, 7, 5, 3, 1] . rindex_of(5) . print", "5\n"); }
     #[test] fn test_rindex_of_func_found_multiple() { run_str("[1, 3, 5, 5, 7, 5, 3, 1] . rindex_of(>3) . print", "5\n"); }
-    #[test] fn test_not_in_yes() { run_str("3 not in [1, 2, 3] . print", "false\n"); }
-    #[test] fn test_not_in_no() { run_str("3 not in [1, 5, 8] . print", "true\n"); }
     #[test] fn test_min_by_key() { run_str("[[1, 5], [2, 3], [6, 4]] . min_by(fn(i) -> i[1]) . print", "[2, 3]\n"); }
     #[test] fn test_min_by_cmp() { run_str("[[1, 5], [2, 3], [6, 4]] . min_by(fn(a, b) -> a[1] - b[1]) . print", "[2, 3]\n"); }
     #[test] fn test_min_by_wrong_fn() { run_str("[[1, 5], [2, 3], [6, 4]] . min_by(fn() -> 1) . print", "TypeError: Expected '_' of type 'function' to be a '<A, B> fn key(A) -> B' or '<A> cmp(A, A) -> int' function\n  at: line 1 (<test>)\n\n1 | [[1, 5], [2, 3], [6, 4]] . min_by(fn() -> 1) . print\n2 |                          ^^^^^^^^^^^^^^^^^^^\n"); }
@@ -1448,275 +1655,25 @@ mod test {
     #[test] fn test_eval_zero_equals_zero() { run_str("'0==0' . eval . print", "true\n"); }
     #[test] fn test_eval_create_new_function() { run_str("eval('fn() { print . print }')()", "print\n"); }
     #[test] fn test_eval_overwrite_function() { run_str("fn foo() {} ; foo = eval('fn() { print . print }') ; foo()", "print\n"); }
-    #[test] fn test_operator_in_expr() { run_str("(1 < 2) . print", "true\n"); }
-    #[test] fn test_operator_partial_right() { run_str("((<2)(1)) . print", "true\n"); }
-    #[test] fn test_operator_partial_left() { run_str("((1<)(2)) . print", "true\n"); }
-    #[test] fn test_operator_partial_twice() { run_str("((<)(1)(2)) . print", "true\n"); }
-    #[test] fn test_operator_as_prefix() { run_str("((<)(1, 2)) . print", "true\n"); }
-    #[test] fn test_operator_partial_right_with_composition() { run_str("(1 . (<2)) . print", "true\n"); }
-    #[test] fn test_operator_partial_left_with_composition() { run_str("(2 . (1<)) . print", "true\n"); }
-    #[test] fn test_int_to_hex() { run_str("1234 . hex . print", "4d2\n"); }
-    #[test] fn test_int_to_bin() { run_str("1234 . bin . print", "10011010010\n"); }
-    #[test] fn test_single_element_vector() { run_str("(1,) . print", "(1)\n"); }
-    #[test] fn test_multi_element_vector() { run_str("(1,2,3) . print", "(1, 2, 3)\n"); }
-    #[test] fn test_multi_element_vector_trailing_comma() { run_str("(1,2,3,) . print", "(1, 2, 3)\n"); }
-    #[test] fn test_while_false_if_false() { run_str("while false { if false { } }", ""); }
-    #[test] fn test_binary_max_yes() { run_str("let a = 3 ; a max= 6; a . print", "6\n"); }
-    #[test] fn test_binary_max_no() { run_str("let a = 3 ; a max= 2; a . print", "3\n"); }
-    #[test] fn test_binary_min_yes() { run_str("let a = 3 ; a min= 1; a . print", "1\n"); }
-    #[test] fn test_binary_min_no() { run_str("let a = 3 ; a min= 5; a . print", "3\n"); }
+    #[test] fn test_eval_with_runtime_error_in_different_source() { run_str("eval('%sprint + 1' % (' ' * 100))", "TypeError: Cannot add 'print' of type 'native function' and '1' of type 'int'\n  at: line 1 (<eval>)\n  at: `<script>` (line 1)\n\n1 |                                                                                                     print + 1\n2 |                                                                                                           ^\n"); }
+    #[test] fn test_eval_function_with_runtime_error_in_different_source() { run_str("eval('%sfn() -> print + 1' % (' ' * 100))()", "TypeError: Cannot add 'print' of type 'native function' and '1' of type 'int'\n  at: line 1 (<eval>)\n  at: `fn _()` (line 1)\n\n1 |                                                                                                     fn() -> print + 1\n2 |                                                                                                                   ^\n"); }
     #[test] fn test_all_yes_all() { run_str("[1, 3, 4, 5] . all(>0) . print", "true\n"); }
     #[test] fn test_all_yes_some() { run_str("[1, 3, 4, 5] . all(>3) . print", "false\n"); }
     #[test] fn test_all_yes_none() { run_str("[1, 3, 4, 5] . all(<0) . print", "false\n"); }
     #[test] fn test_any_yes_all() { run_str("[1, 3, 4, 5] . any(>0) . print", "true\n"); }
     #[test] fn test_any_yes_some() { run_str("[1, 3, 4, 5] . any(>3) . print", "true\n"); }
     #[test] fn test_any_yes_none() { run_str("[1, 3, 4, 5] . any(<0) . print", "false\n"); }
-    #[test] fn test_format_with_percent_no_args() { run_str("'100 %%' % vector() . print", "100 %\n"); }
-    #[test] fn test_format_with_one_int_arg() { run_str("'an int: %d' % (123,) . print", "an int: 123\n"); }
-    #[test] fn test_format_with_one_neg_int_arg() { run_str("'an int: %d' % (-123,) . print", "an int: -123\n"); }
-    #[test] fn test_format_with_one_zero_pad_int_arg() { run_str("'an int: %05d' % (123,) . print", "an int: 00123\n"); }
-    #[test] fn test_format_with_one_zero_pad_neg_int_arg() { run_str("'an int: %05d' % (-123,) . print", "an int: -0123\n"); }
-    #[test] fn test_format_with_one_space_pad_int_arg() { run_str("'an int: %5d' % (123,) . print", "an int:   123\n"); }
-    #[test] fn test_format_with_one_space_pad_neg_int_arg() { run_str("'an int: %5d' % (-123,) . print", "an int:  -123\n"); }
-    #[test] fn test_format_with_one_hex_arg() { run_str("'an int: %x' % (123,) . print", "an int: 7b\n"); }
-    #[test] fn test_format_with_one_zero_pad_hex_arg() { run_str("'an int: %04x' % (123,) . print", "an int: 007b\n"); }
-    #[test] fn test_format_with_one_space_pad_hex_arg() { run_str("'an int: %4x' % (123,) . print", "an int:   7b\n"); }
-    #[test] fn test_format_with_one_bin_arg() { run_str("'an int: %b' % (123,) . print", "an int: 1111011\n"); }
-    #[test] fn test_format_with_one_zero_pad_bin_arg() { run_str("'an int: %012b' % (123,) . print", "an int: 000001111011\n"); }
-    #[test] fn test_format_with_one_space_pad_bin_arg() { run_str("'an int: %12b' % (123,) . print", "an int:      1111011\n"); }
-    #[test] fn test_format_with_many_args() { run_str("'%d %s %x %b ALL THE THINGS %%!' % (10, 'fifteen', 0xff, 0b10101) . print", "10 fifteen ff 10101 ALL THE THINGS %!\n"); }
-    #[test] fn test_format_with_solo_arg_nil() { run_str("'hello %s' % nil . print", "hello nil\n"); }
-    #[test] fn test_format_with_solo_arg_int() { run_str("'hello %s' % 123 . print", "hello 123\n"); }
-    #[test] fn test_format_with_solo_arg_str() { run_str("'hello %s' % 'world' . print", "hello world\n"); }
-    #[test] fn test_format_nested_0() { run_str("'%s w%sld %s' % ('hello', 'or', '!') . print", "hello world !\n"); }
-    #[test] fn test_format_nested_1() { run_str("'%%%s%%s%s %%s' % ('s w', 'ld') % ('hello', 'or', '!') . print", "hello world !\n"); }
-    #[test] fn test_format_nested_2() { run_str("'%ss%%%%s%s%s%ss' % ('%'*3, '%s', ' ', '%'*2) % ('s w', 'ld') % ('hello', 'or', '!') . print", "hello world !\n"); }
-    #[test] fn test_format_too_many_args() { run_str("'%d %d %d' % (1, 2)", "ValueError: Not enough arguments for format string\n  at: line 1 (<test>)\n\n1 | '%d %d %d' % (1, 2)\n2 |            ^\n"); }
-    #[test] fn test_format_too_few_args() { run_str("'%d %d %d' % (1, 2, 3, 4)", "ValueError: Not all arguments consumed in format string, next: '4' of type 'int'\n  at: line 1 (<test>)\n\n1 | '%d %d %d' % (1, 2, 3, 4)\n2 |            ^\n"); }
-    #[test] fn test_format_incorrect_character() { run_str("'%g' % (1,)", "ValueError: Invalid format character 'g' in format string\n  at: line 1 (<test>)\n\n1 | '%g' % (1,)\n2 |      ^\n"); }
-    #[test] fn test_format_incorrect_width() { run_str("'%00' % (1,)", "ValueError: Invalid format character '0' in format string\n  at: line 1 (<test>)\n\n1 | '%00' % (1,)\n2 |       ^\n"); }
-    #[test] fn test_list_pop_empty() { run_str("let x = [] , y = x . pop ; (x, y) . print", "ValueError: Expected value to be a non empty iterable\n  at: line 1 (<test>)\n\n1 | let x = [] , y = x . pop ; (x, y) . print\n2 |                    ^^^^^\n"); }
-    #[test] fn test_list_pop() { run_str("let x = [1, 2, 3] , y = x . pop ; (x, y) . print", "([1, 2], 3)\n"); }
-    #[test] fn test_set_pop_empty() { run_str("let x = set() , y = x . pop ; (x, y) . print", "ValueError: Expected value to be a non empty iterable\n  at: line 1 (<test>)\n\n1 | let x = set() , y = x . pop ; (x, y) . print\n2 |                       ^^^^^\n"); }
-    #[test] fn test_set_pop() { run_str("let x = {1, 2, 3} , y = x . pop ; (x, y) . print", "({1, 2}, 3)\n"); }
-    #[test] fn test_dict_pop_empty() { run_str("let x = dict() , y = x . pop ; (x, y) . print", "ValueError: Expected value to be a non empty iterable\n  at: line 1 (<test>)\n\n1 | let x = dict() , y = x . pop ; (x, y) . print\n2 |                        ^^^^^\n"); }
-    #[test] fn test_dict_pop() { run_str("let x = {1: 'a', 2: 'b', 3: 'c'} , y = x . pop ; (x, y) . print", "({1: 'a', 2: 'b'}, (3, 'c'))\n"); }
-    #[test] fn test_list_pop_front_empty() { run_str("let x = [], y = x . pop_front ; (x, y) . print", "ValueError: Expected value to be a non empty iterable\n  at: line 1 (<test>)\n\n1 | let x = [], y = x . pop_front ; (x, y) . print\n2 |                   ^^^^^^^^^^^\n"); }
-    #[test] fn test_list_pop_front() { run_str("let x = [1, 2, 3], y = x . pop_front ; (x, y) . print", "([2, 3], 1)\n"); }
-    #[test] fn test_list_push() { run_str("let x = [1, 2, 3] ; x . push(4) ; x . print", "[1, 2, 3, 4]\n"); }
-    #[test] fn test_set_push() { run_str("let x = {1, 2, 3} ; x . push(4) ; x . print", "{1, 2, 3, 4}\n"); }
-    #[test] fn test_list_push_front() { run_str("let x = [1, 2, 3] ; x . push_front(4) ; x . print", "[4, 1, 2, 3]\n"); }
-    #[test] fn test_list_insert_front() { run_str("let x = [1, 2, 3] ; x . insert(0, 4) ; x . print", "[4, 1, 2, 3]\n"); }
-    #[test] fn test_list_insert_middle() { run_str("let x = [1, 2, 3] ; x . insert(1, 4) ; x . print", "[1, 4, 2, 3]\n"); }
-    #[test] fn test_list_insert_end() { run_str("let x = [1, 2, 3] ; x . insert(2, 4) ; x . print", "[1, 2, 4, 3]\n"); }
-    #[test] fn test_list_insert_out_of_bounds() { run_str("let x = [1, 2, 3] ; x . insert(4, 4) ; x . print", "Index '4' is out of bounds for list of length [0, 3)\n  at: line 1 (<test>)\n\n1 | let x = [1, 2, 3] ; x . insert(4, 4) ; x . print\n2 |                       ^^^^^^^^^^^^^^\n"); }
-    #[test] fn test_dict_insert() { run_str("let x = {1: 'a', 2: 'b', 3: 'c'} ; x . insert(4, 'd') ; x . print", "{1: 'a', 2: 'b', 3: 'c', 4: 'd'}\n"); }
-    #[test] fn test_list_remove_front() { run_str("let x = [1, 2, 3] , y = x . remove(0) ; (x, y) . print", "([2, 3], 1)\n"); }
-    #[test] fn test_list_remove_middle() { run_str("let x = [1, 2, 3] , y = x . remove(1) ; (x, y) . print", "([1, 3], 2)\n"); }
-    #[test] fn test_list_remove_end() { run_str("let x = [1, 2, 3] , y = x . remove(2) ; (x, y) . print", "([1, 2], 3)\n"); }
-    #[test] fn test_set_remove_yes() { run_str("let x = {1, 2, 3}, y = x . remove(2) ; (x, y) . print", "({1, 3}, true)\n"); }
-    #[test] fn test_set_remove_no() { run_str("let x = {1, 2, 3}, y = x . remove(5) ; (x, y) . print", "({1, 2, 3}, false)\n"); }
-    #[test] fn test_dict_remove_yes() { run_str("let x = {1: 'a', 2: 'b', 3: 'c'}, y = x . remove(2) ; (x, y) . print", "({1: 'a', 3: 'c'}, true)\n"); }
-    #[test] fn test_dict_remove_no() { run_str("let x = {1: 'a', 2: 'b', 3: 'c'}, y = x . remove(5) ; (x, y) . print", "({1: 'a', 2: 'b', 3: 'c'}, false)\n"); }
-    #[test] fn test_list_clear() { run_str("let x = [1, 2, 3] ; x . clear ; x . print", "[]\n"); }
-    #[test] fn test_set_clear() { run_str("let x = {1, 2, 3} ; x . clear ; x . print", "{}\n"); }
-    #[test] fn test_dict_clear() { run_str("let x = {1: 'a', 2: 'b', 3: 'c'} ; x . clear ; x . print", "{}\n"); }
-    #[test] fn test_dict_from_enumerate() { run_str("'hey' . enumerate . dict . print", "{0: 'h', 1: 'e', 2: 'y'}\n"); }
-    #[test] fn test_list_peek() { run_str("let x = [1, 2, 3], y = x . peek ; (x, y) . print", "([1, 2, 3], 1)\n"); }
-    #[test] fn test_set_peek() { run_str("let x = {1, 2, 3}, y = x . peek ; (x, y) . print", "({1, 2, 3}, 1)\n"); }
-    #[test] fn test_dict_peek() { run_str("let x = {1: 'a', 2: 'b', 3: 'c'}, y = x . peek ; (x, y) . print", "({1: 'a', 2: 'b', 3: 'c'}, (1, 'a'))\n"); }
-    #[test] fn test_vector_set_index() { run_str("let x = (1, 2, 3) ; x[0] = 3 ; x . print", "(3, 2, 3)\n"); }
-    #[test] fn test_annotation_named_func_with_name() { run_str("fn par(f) -> (fn(x) -> f('hello')) ; @par fn foo(x) -> print(x) ; foo('goodbye')", "hello\n"); }
-    #[test] fn test_annotation_expression_func_with_name() { run_str("fn par(f) -> (fn(x) -> f('hello')) ; (@par fn(x) -> print(x))('goodbye')", "hello\n"); }
-    #[test] fn test_annotation_named_func_with_expression() { run_str("fn par(a, f) -> (fn(x) -> f(a)) ; @par('hello') fn foo(x) -> print(x) ; foo('goodbye')", "hello\n"); }
-    #[test] fn test_annotation_expression_func_with_expression() { run_str("fn par(a, f) -> (fn(x) -> f(a)) ; (@par('hello') fn(x) -> print(x))('goodbye')", "hello\n"); }
-    #[test] fn test_annotation_iife() { run_str("fn iife(f) -> f() ; @iife fn foo() -> print('hello')", "hello\n"); }
-    #[test] fn test_dot_equals() { run_str("let x = 'hello' ; x .= sort ; x .= reduce(+) ; x . print", "ehllo\n"); }
-    #[test] fn test_dot_equals_operator_function() { run_str("let x = 3 ; x .= (+4) ; x . print", "7\n"); }
-    #[test] fn test_dot_equals_anonymous_function() { run_str("let x = 'hello' ; x .= fn(x) -> x[0] * len(x) ; x . print", "hhhhh\n"); }
-    #[test] fn test_exit_in_expression() { run_str("'this will not print' + exit . print", ""); }
-    #[test] fn test_exit_in_ternary() { run_str("print(if 3 > 2 then exit else 'hello')", ""); }
-    #[test] fn test_iterables_is_iterable() { run_str("[[], '123', set(), dict()] . all(is iterable) . print", "true\n"); }
-    #[test] fn test_non_iterables_is_iterable() { run_str("[true, false, nil, 123, fn() -> {}] . any(is iterable) . print", "false\n"); }
-    #[test] fn test_any_is_any() { run_str("[[], '123', set(), dict(), 123, true, false, nil, fn() -> nil] . all(is any) . print", "true\n"); }
-    #[test] fn test_function_is_function() { run_str("(fn() -> nil) is function . print", "true\n"); }
-    #[test] fn test_non_function_is_function() { run_str("[nil, true, 123, '123', [], set()] . any(is function) . print", "false\n"); }
-    #[test] fn test_operator_sub_as_unary() { run_str("(-)(3) . print", "-3\n"); }
-    #[test] fn test_operator_sub_as_binary() { run_str("(-)(5, 2) . print", "3\n"); }
-    #[test] fn test_operator_sub_as_partial_not_allowed() { run_str("(-3) . print", "-3\n"); }
-    #[test] fn test_bare_set_statement() { run_str("{ 1 } . print", "{1}\n"); }
-    #[test] fn test_bare_dict_statement() { run_str("{ 1: 2 } . print", "{1: 2}\n"); }
-    #[test] fn test_pattern_in_expression() { run_str("let x, y, z ; x, y, z = 'abc' ; print(x, y, z)", "a b c\n"); }
-    #[test] fn test_pattern_in_expression_nested() { run_str("let x, y, z ; z = x, y = (1, 2) ; print(x, y, z)", "1 2 (1, 2)\n"); }
-    #[test] fn test_pattern_in_expression_locals() { run_str("do { let x, y, z ; z = x, y = (1, 2) ; print(x, y, z) }", "1 2 (1, 2)\n"); }
-    #[test] fn test_pattern_in_expression_return_value() { run_str("let x, y, z ; print(x, y, z = 'abc') ; print(x, y, z)", "abc\na b c\n"); }
-    #[test] fn test_pattern_in_expression_with_variadic() { run_str("let x, y ; *x, y = 'hello' ; print(x, y)", "hell o\n"); }
-    #[test] fn test_pattern_in_expression_with_nested_and_empty() { run_str("let x, y ; (x, *_), (*_, y) = ('hello', 'world') ; print(x, y)", "h d\n"); }
-    #[test] fn test_pattern_in_expression_empty() { run_str("_ = nil ; _, _, _ = (1, 2, 3)", ""); }
-    #[test] fn test_pattern_in_expression_empty_variadic() { run_str("*_ = 'hello world'", ""); }
-    #[test] fn test_dict_default_with_query() { run_str("let d = dict() . default(3) ; d[0] ; d.print", "{0: 3}\n"); }
-    #[test] fn test_dict_default_with_function() { run_str("let d = dict() . default(list) ; d[0].push(2) ; d[1].push(3) ; d.print", "{0: [2], 1: [3]}\n"); }
-    #[test] fn test_dict_default_with_mutable_default() { run_str("let d = dict() . default([]) ; d[0].push(2) ; d[1].push(3) ; d.print", "{0: [2, 3], 1: [2, 3]}\n"); }
-    #[test] fn test_dict_default_with_self_entry() { run_str("let d ; d = dict() . default(fn() { d['count'] += 1 ; d['hello'] = 'special' ; 'otherwise' }) ; d['count'] = 0 ; d['hello'] ; d['world'] ; d.print", "{'count': 2, 'hello': 'special', 'world': 'otherwise'}\n"); }
-    #[test] fn test_dict_increment() { run_str("let d = dict() . default(fn() -> 3) ; d[0] . print ; d[0] += 1 ; d . print ; d[0] += 1 ; d . print", "3\n{0: 4}\n{0: 5}\n"); }
-    #[test] fn test_while_else_no_loop() { run_str("while false { break } else { print('hello') }", "hello\n"); }
-    #[test] fn test_while_else_break() { run_str("while true { break } else { print('hello') } print('world')", "world\n"); }
-    #[test] fn test_while_else_no_break() { run_str("let x = true ; while x { x = false } else { print('hello') }", "hello\n"); }
-    #[test] fn test_sum_booleans() { run_str("range(10) . map(>3) . sum . print", "6\n"); }
-    #[test] fn test_add_booleans() { run_str("true + true + false + false . print", "2\n"); }
-    #[test] fn test_reduce_plus_booleans() { run_str("range(10) . map(>3) . reduce(+) . print", "6\n"); }
-    #[test] fn test_for_else_no_loop() { run_str("for _ in [] { print('hello') ; break } else { print('world') }", "world\n"); }
-    #[test] fn test_for_else_break() { run_str("for c in 'abcd' { if c == 'b' { break } } else { print('hello') } print('world')", "world\n"); }
-    #[test] fn test_for_else_no_break() { run_str("for c in 'abcd' { if c == 'B' { break } } else { print('hello') }", "hello\n"); }
-    #[test] fn test_top_level_if_then_else() { run_str("if true then print('hello') else print('goodbye')", "hello\n"); }
-    #[test] fn test_repr_of_function() { run_str("(fn((_, *_), x) -> nil) . repr . print", "fn _((_, *_), x)\n"); }
-    #[test] fn test_repr_of_partial_function() { run_str("(fn((_, *_), x) -> nil)(1) . repr . print", "fn _((_, *_), x)\n"); }
-    #[test] fn test_repr_of_closure() { run_str("fn box(x) -> fn((_, *_), y) -> x ; box(nil) . repr . print", "fn _((_, *_), y)\n"); }
     #[test] fn test_typeof_of_basic_types() { run_str("[nil, 0, false, 'test', [], {1}, {1: 2}, heap(), (1, 2), range(30), enumerate([])] . map(typeof) . map(print)", "nil\nint\nbool\nstr\nlist\nset\ndict\nheap\nvector\nrange\nenumerate\n"); }
     #[test] fn test_typeof_functions() { run_str("[range, fn() -> nil, push(3), ((fn(a, b) -> nil)(1))] . map(typeof) . all(==function) . print", "true\n"); }
-    #[test] fn test_compose_with_single_element_list() { run_str("'hello' . [0] . print", "h\n"); }
-    #[test] fn test_eval_single_element_list() { run_str("[-1]('hello') . print", "o\n"); }
-    #[test] fn test_optimized_no_arg_function_call() { run_str("abs()(1)", "Function 'abs' requires at least 1 parameters but 0 were present.\n  at: line 1 (<test>)\n\n1 | abs()(1)\n2 |    ^^\n"); }
-    #[test] fn test_top_level_if_then_else_does_not_stack_smash() { run_str("for x in range(2) { if x then x else x }", ""); }
-    #[test] fn test_assert_pass() { run_str("assert [1, 2] . len . (==2) ; print('yes!')", "yes!\n")}
-    #[test] fn test_assert_pass_with_no_message() { run_str("assert [1, 2] .len . (==2) : print('should not show') ; print('should show')", "should show\n"); }
-    #[test] fn test_assert_fail() { run_str("assert 1 + 2 != 3", "Assertion Failed: nil\n  at: line 1 (<test>)\n\n1 | assert 1 + 2 != 3\n2 |        ^^^^^^^^^^\n"); }
-    #[test] fn test_assert_fail_with_message() { run_str("assert 'here' in 'the goose is gone' : 'goose issues are afoot'", "Assertion Failed: goose issues are afoot\n  at: line 1 (<test>)\n\n1 | assert 'here' in 'the goose is gone' : 'goose issues are afoot'\n2 |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n"); }
-    #[test] fn test_assert_messages_are_lazy() { run_str("assert true : exit ; print('should reach here')", "should reach here\n"); }
-    #[test] fn test_operator_add_left_eval() { run_str("'world' . (+'hello') . print", "worldhello\n"); }
-    #[test] fn test_operator_add_right_eval() { run_str("'world' . ('hello'+) . print", "helloworld\n"); }
     #[test] fn test_typeof_struct_constructor() { run_str("struct Foo(a, b) Foo . typeof . print", "function\n"); }
     #[test] fn test_typeof_struct_instance() { run_str("struct Foo(a, b) Foo(1, 2) . typeof . print", "struct Foo(a, b)\n"); }
-    #[test] fn test_str_of_struct_instance() { run_str("struct Foo(a, b) Foo(1, 2) . print", "Foo(a=1, b=2)\n"); }
-    #[test] fn test_str_of_struct_constructor() { run_str("struct Foo(a, b) Foo . print", "struct Foo(a, b)\n"); }
-    #[test] fn test_get_field_of_struct() { run_str("struct Foo(a, b) Foo(1, 2) -> a . print", "1\n"); }
-    #[test] fn test_get_field_of_struct_wrong_name() { run_str("struct Foo(a, b) struct Bar(c, d) Foo(1, 2) -> c . print", "TypeError: Cannot get field 'c' on struct Foo(a, b)\n  at: line 1 (<test>)\n\n1 | struct Foo(a, b) struct Bar(c, d) Foo(1, 2) -> c . print\n2 |                                             ^^^^\n"); }
-    #[test] fn test_get_field_of_not_struct() { run_str("struct Foo(a, b) (1, 2) -> a . print", "TypeError: Cannot get field 'a' on '(1, 2)' of type 'vector'\n  at: line 1 (<test>)\n\n1 | struct Foo(a, b) (1, 2) -> a . print\n2 |                         ^^^^\n"); }
-    #[test] fn test_get_field_with_overlapping_offsets() { run_str("struct Foo(a, b) struct Bar(b, a) Foo(1, 2) -> b . print", "2\n"); }
-    #[test] fn test_set_field_of_struct() { run_str("struct Foo(a, b) let x = Foo(1, 2) ; x->a = 3 ; x->a . print", "3\n"); }
-    #[test] fn test_set_field_of_struct_wrong_name() { run_str("struct Foo(a, b) struct Bar(c, d) let x = Foo(1, 2) ; x->c = 3", "TypeError: Cannot get field 'c' on struct Foo(a, b)\n  at: line 1 (<test>)\n\n1 | struct Foo(a, b) struct Bar(c, d) let x = Foo(1, 2) ; x->c = 3\n2 |                                                            ^\n"); }
-    #[test] fn test_set_field_of_not_struct() { run_str("struct Foo(a, b) (1, 2)->a = 3", "TypeError: Cannot get field 'a' on '(1, 2)' of type 'vector'\n  at: line 1 (<test>)\n\n1 | struct Foo(a, b) (1, 2)->a = 3\n2 |                            ^\n"); }
-    #[test] fn test_op_set_field_of_struct() { run_str("struct Foo(a, b) let x = Foo(1, 2) ; x->a += 3 ; x->a . print", "4\n"); }
-    #[test] fn test_partial_get_field_in_bare_method() { run_str("struct Foo(a, b) let x = Foo(2, 3), f = (->b) ; x . f . print", "3\n"); }
-    #[test] fn test_partial_get_field_in_function_eval() { run_str("struct Foo(a, b) [Foo(1, 2), Foo(2, 3)] . map(->b) . print", "[2, 3]\n"); }
-    #[test] fn test_more_partial_get_field() { run_str("struct Foo(foo) ; let x = Foo('hello') ; print([x, Foo('')] . filter(->foo) . len)", "1\n"); }
+    #[test] fn test_typeof_slice() { run_str("[:] . typeof . print", "function\n"); }
+    #[test] fn test_abs_requires_one_arg() { run_str("abs()(1)", "Function 'abs' requires at least 1 parameters but 0 were present.\n  at: line 1 (<test>)\n\n1 | abs()(1)\n2 |    ^^\n"); }
     #[test] fn test_count_ones() { run_str("0b11011011 . count_ones . print", "6\n"); }
     #[test] fn test_count_zeros() { run_str("0 . count_zeros . print", "64\n"); }
-    #[test] fn test_do_while_1() { run_str("do { 'test' . print } while false", "test\n"); }
-    #[test] fn test_do_while_2() { run_str("let i = 0 ; do { i . print ; i += 1 } while i < 3", "0\n1\n2\n"); }
-    #[test] fn test_do_while_3() { run_str("let i = 0 ; do { i += 1 ; i . print } while i < 3", "1\n2\n3\n"); }
-    #[test] fn test_do_while_4() { run_str("let i = 5 ; do { i . print } while i < 3", "5\n"); }
-    #[test] fn test_do_without_while() { run_str("do { 'test' . print }", "test\n"); }
-    #[test] fn test_do_while_else_1() { run_str("do { 'loop' . print } while false else { 'else' . print }", "loop\nelse\n"); }
-    #[test] fn test_do_while_else_2() { run_str("do { 'loop' . print ; break } while false else { 'else' . print }", "loop\n"); }
-    #[test] fn test_do_while_else_3() { run_str("let i = 0 ; do { i . print ; i += 1 ; if i > 2 { break } } while 1 else { 'end' . print }", "0\n1\n2\n"); }
-    #[test] fn test_do_while_else_4() { run_str("let i = 0 ; do { i . print ; i += 1 ; if i > 2 { break } } while i < 2 else { 'end' . print }", "0\n1\nend\n"); }
     #[test] fn test_env_exists() { run_str("env . repr . print", "fn env(...)\n"); }
     #[test] fn test_argv_exists() { run_str("argv . repr . print", "fn argv()\n"); }
     #[test] fn test_argv_is_empty() { run_str("argv() . repr . print", "[]\n"); }
-    #[test] fn test_replace_regex_1() { run_str("'apples and bananas' . replace('[abe]+', 'o') . print", "opplos ond ononos\n"); }
-    #[test] fn test_replace_regex_2() { run_str("'[a] [b] [c] [d]' . replace('[ac]', '$0$0') . print", "[aa] [b] [cc] [d]\n"); }
-    #[test] fn test_replace_regex_with_function() { run_str("'apples and bananas' . replace('apples', fn((c, *_)) -> c . to_upper) . print", "APPLES and bananas\n"); }
-    #[test] fn test_replace_regex_with_wrong_function() { run_str("'apples and bananas' . replace('apples', min) . print", "TypeError: Expected 'min' of type 'native function' to be a 'fn replace(vector<str>) -> str' function\n  at: line 1 (<test>)\n\n1 | 'apples and bananas' . replace('apples', min) . print\n2 |                      ^^^^^^^^^^^^^^^^^^^^^^^^\n"); }
-    #[test] fn test_replace_regex_with_capture_group() { run_str("'apples and bananas' . replace('([a-z])([a-z]+)', 'yes') . print", "yes yes yes\n"); }
-    #[test] fn test_replace_regex_with_capture_group_function() { run_str("'apples and bananas' . replace('([a-z])([a-z]+)', fn((_, a, b)) -> to_upper(a) + b) . print", "Apples And Bananas\n"); }
-    #[test] fn test_replace_regex_implicit_newline() { run_str("'first\nsecond\nthird\nfourth' . replace('\\n', ', ') . print", "first, second, third, fourth\n"); }
-    #[test] fn test_replace_regex_explicit_newline() { run_str("'first\nsecond\nthird\nfourth' . replace('\n', ', ') . print", "first, second, third, fourth\n"); }
-    #[test] fn test_search_regex_match_all_yes() { run_str("'test' . search('test') . print", "[('test')]\n"); }
-    #[test] fn test_search_regex_match_all_no() { run_str("'test' . search('nope') . print", "[]\n"); }
-    #[test] fn test_search_regex_match_partial_yes() { run_str("'any and nope and nothing' . search('nope') . print", "[('nope')]\n"); }
-    #[test] fn test_search_regex_match_partial_no() { run_str("'any and nope and nothing' . search('some') . print", "[]\n"); }
-    #[test] fn test_search_regex_match_partial_no_start() { run_str("'any and nope and nothing' . search('^some') . print", "[]\n"); }
-    #[test] fn test_search_regex_match_partial_no_end() { run_str("'any and nope and nothing' . search('some$') . print", "[]\n"); }
-    #[test] fn test_search_regex_match_partial_no_start_and_end() { run_str("'any and nope and nothing' . search('^some$') . print", "[]\n"); }
-    #[test] fn test_search_regex_capture_group_match_none() { run_str("'some WORDS with CAPITAL letters' . search('[A-Z]([a-z]+)') . print", "[]\n"); }
-    #[test] fn test_search_regex_capture_group_match_one() { run_str("'some WORDS with Capital letters' . search('[A-Z]([a-z]+)') . print", "[('Capital', 'apital')]\n"); }
-    #[test] fn test_search_regex_capture_group_match_some() { run_str("'some Words With Capital letters' . search('[A-Z]([a-z]+)') . print", "[('Words', 'ords'), ('With', 'ith'), ('Capital', 'apital')]\n"); }
-    #[test] fn test_search_regex_many_capture_groups_match_none() { run_str("'some WORDS with CAPITAL letters' . search('([A-Z])([a-z]+)') . print", "[]\n"); }
-    #[test] fn test_search_regex_many_capture_groups_match_one() { run_str("'some WORDS with Capital letters' . search('([A-Z])[a-z]([a-z]+)') . print", "[('Capital', 'C', 'pital')]\n"); }
-    #[test] fn test_search_regex_many_capture_groups_match_some() { run_str("'some Words With Capital letters' . search('([A-Z])[a-z]([a-z]+)') . print", "[('Words', 'W', 'rds'), ('With', 'W', 'th'), ('Capital', 'C', 'pital')]\n"); }
-    #[test] fn test_search_regex_cannot_compile() { run_str("'test' . search('missing close bracket lol ( this one') . print", "ValueError: Cannot compile regex 'missing close bracket lol ( this one'\n            Parsing error at position 36: Opening parenthesis without closing parenthesis\n  at: line 1 (<test>)\n\n1 | 'test' . search('missing close bracket lol ( this one') . print\n2 |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n"); }
-    #[test] fn test_split_regex_empty_str() { run_str("'abc' . split('') . print", "['a', 'b', 'c']\n"); }
-    #[test] fn test_split_regex_space() { run_str("'a b c' . split(' ') . print", "['a', 'b', 'c']\n"); }
-    #[test] fn test_split_regex_space_duplicates() { run_str("' a  b   c' . split(' ') . print", "['', 'a', '', 'b', '', '', 'c']\n"); }
-    #[test] fn test_split_regex_space_any_whitespace() { run_str("' a  b   c' . split(' +') . print", "['', 'a', 'b', 'c']\n"); }
-    #[test] fn test_split_regex_space_any_with_trim() { run_str("' \nabc  \rabc \\r\\n  abc \\t  \t  \t' . trim . split('\\s+') . print", "['abc', 'abc', 'abc']\n"); }
-    #[test] fn test_split_regex_on_substring() { run_str("'the horse escaped the barn' . split('the') . print", "['', ' horse escaped ', ' barn']\n"); }
-    #[test] fn test_split_regex_on_substring_with_or() { run_str("'the horse escaped the barn' . split('(the| )') . print", "['', '', 'horse', 'escaped', '', '', 'barn']\n"); }
-    #[test] fn test_split_regex_on_substring_with_wildcard() { run_str("'the horse escaped the barn' . split(' *e *') . print", "['th', 'hors', '', 'scap', 'd th', 'barn']\n"); }
-    #[test] fn test_int_default_value_yes() { run_str("int('123', 567) . print", "123\n"); }
-    #[test] fn test_int_default_value_no() { run_str("int('yes', 567) . print", "567\n"); }
-    #[test] fn test_dict_insert_self_as_key() { run_str("let x = dict() ; x[x] = 'yes'", "ValueError: Cannot create recursive hash based collection from '{{...}: 'yes'}' of type 'dict'\n  at: line 1 (<test>)\n\n1 | let x = dict() ; x[x] = 'yes'\n2 |                       ^\n"); }
-    #[test] fn test_dict_insert_self_as_value() { run_str("let x = dict() ; x['yes'] = x", ""); }
-    #[test] fn test_set_insert_self() { run_str("let x = set() ; x.push(x)", "ValueError: Cannot create recursive hash based collection from '{{...}}' of type 'set'\n  at: line 1 (<test>)\n\n1 | let x = set() ; x.push(x)\n2 |                  ^^^^^^^^\n"); }
-    #[test] fn test_set_indirect_insert_self() { run_str("let x = set() ; x.push([x])", "ValueError: Cannot create recursive hash based collection from '{[{...}]}' of type 'set'\n  at: line 1 (<test>)\n\n1 | let x = set() ; x.push([x])\n2 |                  ^^^^^^^^^^\n"); }
-    #[test] fn test_recursive_list_repr() { run_str("let x = [] ; x.push(x) ; x.print", "[[...]]\n"); }
-    #[test] fn test_recursive_set_repr() { run_str("let x = set() ; x.push(x) ; x.print", "ValueError: Cannot create recursive hash based collection from '{{...}}' of type 'set'\n  at: line 1 (<test>)\n\n1 | let x = set() ; x.push(x) ; x.print\n2 |                  ^^^^^^^^\n"); }
-    #[test] fn test_recursive_dict_key_repr() { run_str("let x = dict() ; x[x] = 'yes' ; x.print", "ValueError: Cannot create recursive hash based collection from '{{...}: 'yes'}' of type 'dict'\n  at: line 1 (<test>)\n\n1 | let x = dict() ; x[x] = 'yes' ; x.print\n2 |                       ^\n"); }
-    #[test] fn test_recursive_dict_key_insert_repr() { run_str("let x = dict() ; x.insert(x, 'yes') ; x.print", "ValueError: Cannot create recursive hash based collection from '{{...}: 'yes'}' of type 'dict'\n  at: line 1 (<test>)\n\n1 | let x = dict() ; x.insert(x, 'yes') ; x.print\n2 |                   ^^^^^^^^^^^^^^^^^\n"); }
-    #[test] fn test_recursive_dict_value_repr() { run_str("let x = dict() ; x['yes'] = x ; x.print", "{'yes': {...}}\n"); }
-    #[test] fn test_recursive_vector_repr() { run_str("let x = (nil,) ; x[0] = x ; x.print", "((...))\n"); }
-    #[test] fn test_recursive_heap_repr() { run_str("let x = heap() ; x.push(x) ; x.print", "[[...]]\n"); }
-    #[test] fn test_recursive_struct_repr() { run_str("struct S(x) ; let x = S(nil) ; x->x = x ; x.print", "S(x=S(...))\n"); }
-    #[test] fn test_recursive_knot_lists() { run_str("let x = [] ; let y = [x] ; x.push(y) ; x.print", "[[[...]]]\n"); }
-    #[test] fn test_recursive_nested_list_struct_repr() { run_str("struct S(x) ; let x = [S(nil)] ; x[0]->x = [S(x)] ; x.print", "[S(x=[S(x=[...])])]\n"); }
-    #[test] fn test_int_min_and_max() { run_str("[int.min, max(int)] . print", "[-9223372036854775808, 9223372036854775807]\n") }
-    #[test] fn test_slice_literal_2_no_nil() { run_str("let x = [1:2] ; x . print", "[1:2]\n"); }
-    #[test] fn test_slice_literal_2_all_nil() { run_str("let x = [:] ; x . print", "[:]\n"); }
-    #[test] fn test_slice_literal_3_no_nil() { run_str("let x = [1:2:3] ; x . print", "[1:2:3]\n"); }
-    #[test] fn test_slice_literal_3_all_nil() { run_str("let x = [::] ; x . print", "[:]\n"); }
-    #[test] fn test_slice_literal_3_last_not_nil() { run_str("let x = [::-1] ; x . print", "[::-1]\n"); }
-    #[test] fn test_slice_literal_not_int() { run_str("let x = ['hello':'world'] ; x . print", "TypeError: Expected 'hello' of type 'str' to be a int\n  at: line 1 (<test>)\n\n1 | let x = ['hello':'world'] ; x . print\n2 |         ^^^^^^^^^^^^^^^^^\n"); }
-    #[test] fn test_use_slice_in_expr_1() { run_str("'1234' . [::-1] . print", "4321\n"); }
-    #[test] fn test_use_slice_in_expr_2() { run_str("let x = [::-1] ; '1234' . x . print", "4321\n"); }
-    #[test] fn test_use_slice_in_expr_3() { run_str("'hello the world!' . split(' ') . map([2:]) . print", "['llo', 'e', 'rld!']\n"); }
-    #[test] fn test_slice_type_of() { run_str("[:] . typeof . print", "function\n"); }
-    #[test] fn test_is_with_struct_instances() { run_str("struct A() ; struct B() let a = A(), b = B() ; [a is A, A is function, a is B, A is A, a is function] . print", "[true, true, false, false, false]\n"); }
-    #[test] fn test_function_with_one_default_arg() { run_str("fn foo(a, b?) { print(a, b) } ; foo('test') ; foo('test', 'bar')", "test nil\ntest bar\n"); }
-    #[test] fn test_function_with_one_default_arg_not_enough() { run_str("fn foo(a, b?) { print(a, b) } ; foo()", "Function 'foo' of type 'function' requires 1 parameters but 0 were present.\n  at: line 1 (<test>)\n\n1 | fn foo(a, b?) { print(a, b) } ; foo()\n2 |                                    ^^\n"); }
-    #[test] fn test_function_with_one_default_arg_too_many() { run_str("fn foo(a, b?) { print(a, b) } ; foo(1, 2, 3)", "Function 'foo' of type 'function' requires 2 parameters but 3 were present.\n  at: line 1 (<test>)\n\n1 | fn foo(a, b?) { print(a, b) } ; foo(1, 2, 3)\n2 |                                    ^^^^^^^^^\n"); }
-    #[test] fn test_function_many_default_args() { run_str("fn foo(a, b = 1, c = 1 + 1, d = 1 * 3) { print(a, b, c, d) } foo('test') ; foo('and', 11) ; foo('other', 11, 22) ; foo('things', 11, 22, 33)", "test 1 2 3\nand 11 2 3\nother 11 22 3\nthings 11 22 33\n"); }
-    #[test] fn test_operator_in() { run_str("let f = (in) ; f(1, [1]) . print", "true\n"); }
-    #[test] fn test_operator_not_in() { run_str("let f = (not in) ; f(1, []) . print", "true\n"); }
-    #[test] fn test_operator_in_partial_left() { run_str("let f = (1 in) ; f([1]) . print", "true\n"); }
-    #[test] fn test_operator_in_partial_right() { run_str("let f = (in [1]) ; f(1) . print", "true\n"); }
-    #[test] fn test_operator_not_in_partial_left() { run_str("let f = (1 not in) ; f([]) . print", "true\n"); }
-    #[test] fn test_operator_not_in_partial_right() { run_str("let f = (not in []) ; f(1) . print", "true\n"); }
-    #[test] fn test_operator_is() { run_str("let f = (is) ; f(1, int) . print", "true\n"); }
-    #[test] fn test_operator_not_is() { run_str("let f = (is not) ; f(1, str) . print", "true\n"); }
-    #[test] fn test_operator_is_partial_left() { run_str("let f = (1 is) ; f(int) . print", "true\n"); }
-    #[test] fn test_operator_is_partial_right() { run_str("let f = (is int) ; f(1) . print", "true\n"); }
-    #[test] fn test_operator_not_is_partial_left() { run_str("let f = (1 is not) ; f(str) . print", "true\n"); }
-    #[test] fn test_operator_not_is_partial_right() { run_str("let f = (is not str) ; f(1) . print", "true\n"); }
-    #[test] fn test_func_unroll_1() { run_str("fn foo(a, b, c) -> print(a, b, c) ; foo(...['hello', 'the', 'world'])", "hello the world\n"); }
-    #[test] fn test_func_unroll_2() { run_str("fn foo(a, b, c) -> print(a, b, c) ; foo(1, 2, 3, ...[])", "1 2 3\n"); }
-    #[test] fn test_func_unroll_3() { run_str("fn foo(a, b, c) -> print(a, b, c) ; foo(1, ...[], 2, ...[], 3)", "1 2 3\n"); }
-    #[test] fn test_func_unroll_4() { run_str("fn foo(a, b, c) -> print(a, b, c) ; foo(...'ab', 'c')", "a b c\n"); }
-    #[test] fn test_func_unroll_5() { run_str("fn foo(a, b, c, d) -> print(a, b, c, d) ; foo(...'ab', ...'cd')", "a b c d\n"); }
-    #[test] fn test_func_unroll_6() { run_str("fn foo(a, b, c, d) -> print(a, b, c, d) ; foo(...'a', ...'bc', ...'d')", "a b c d\n"); }
-    #[test] fn test_func_unroll_7() { run_str("fn foo(a, b, c, d) -> print(a, b, c, d) ; foo('a', ...'bc', 'd')", "a b c d\n"); }
-    #[test] fn test_func_unroll_8() { run_str("fn foo(a, b, c) -> print(a, b, c) ; foo(1, ...'ab')", "1 a b\n"); }
-    #[test] fn test_func_unroll_9() { run_str("fn foo(a, b, c) -> print(a, b, c) ; foo(...'ab', 3)", "a b 3\n"); }
-    #[test] fn test_func_unroll_10() { run_str("fn foo(a, b, c) -> print(a, b, c) ; foo(1, 2, ...[3, 4])", "Function 'foo' of type 'function' requires 3 parameters but 4 were present.\n  at: line 1 (<test>)\n\n1 | fn foo(a, b, c) -> print(a, b, c) ; foo(1, 2, ...[3, 4])\n2 |                                        ^^^^^^^^^^^^^^^^^\n"); }
-    #[test] fn test_func_unroll_11() { run_str("fn foo(a, b, c) -> print(a, b, c) ; foo(1, 2, ...[]) is function . print", "true\n"); }
-    #[test] fn test_func_unroll_12() { run_str("sum([1, 2, 3, 4, 5]) . print", "15\n"); }
-    #[test] fn test_func_unroll_13() { run_str("sum(...[1, 2, 3, 4, 5]) . print", "15\n"); }
-    #[test] fn test_func_unroll_14() { run_str("print(...[1, 2, 3])", "1 2 3\n"); }
-    #[test] fn test_func_unroll_15() { run_str("print(...[print(...[1, 2, 3])])", "1 2 3\nnil\n"); }
-    #[test] fn test_func_unroll_16() { run_str("print(...[], ...[print(...[], 'second', ...[], ...[print('first', ...[])])], ...[], ...[print('third')])", "first\nsecond nil\nthird\nnil nil\n"); }
-    #[test] fn test_func_unroll_17() { run_str("print(1, ...[2, print('a', ...[1, 2, 3], 'e'), -2], 3)", "a 1 2 3 e\n1 2 nil -2 3\n"); }
-    #[test] fn test_eval_many_arguments() { run_str("sum(...range(1 + 1000)) . print", "500500\n"); }
-    #[test] fn test_func_var_args_1() { run_str("fn foo(*a) -> print(a) ; foo()", "()\n"); }
-    #[test] fn test_func_var_args_2() { run_str("fn foo(*a) -> print(a) ; foo(1)", "(1)\n"); }
-    #[test] fn test_func_var_args_3() { run_str("fn foo(*a) -> print(a) ; foo(1, 2)", "(1, 2)\n"); }
-    #[test] fn test_func_var_args_4() { run_str("fn foo(*a) -> print(a) ; foo(1, 2, 3)", "(1, 2, 3)\n"); }
-    #[test] fn test_func_var_args_5() { run_str("fn foo(a, b?, *c) -> print(a, b, c) ; foo(1)", "1 nil ()\n"); }
-    #[test] fn test_func_var_args_6() { run_str("fn foo(a, b?, *c) -> print(a, b, c) ; foo(1, 2)", "1 2 ()\n"); }
-    #[test] fn test_func_var_args_7() { run_str("fn foo(a, b?, *c) -> print(a, b, c) ; foo(1, 2, 3)", "1 2 (3)\n"); }
-    #[test] fn test_func_var_args_8() { run_str("fn foo(a, b?, *c) -> print(a, b, c) ; foo(1, 2, 3, 4)", "1 2 (3, 4)\n"); }
-    #[test] fn test_func_var_args_9() { run_str("fn foo(a, b?, *c) -> print(a, b, c) ; foo(1, 2, 3, 4, 5)", "1 2 (3, 4, 5)\n"); }
-    #[test] fn test_malicious_eval_error_1() { run_str("eval('%sprint + 1' % (' ' * 100))", "TypeError: Cannot add 'print' of type 'native function' and '1' of type 'int'\n  at: line 1 (<eval>)\n  at: `<script>` (line 1)\n\n1 |                                                                                                     print + 1\n2 |                                                                                                           ^\n"); }
-    #[test] fn test_malicious_eval_error_2() { run_str("eval('%sfn() -> print + 1' % (' ' * 100))()", "TypeError: Cannot add 'print' of type 'native function' and '1' of type 'int'\n  at: line 1 (<eval>)\n  at: `fn _()` (line 1)\n\n1 |                                                                                                     fn() -> print + 1\n2 |                                                                                                                   ^\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }
@@ -1787,12 +1744,11 @@ mod test {
             output.push_str(view.format(&error).as_str());
         }
 
-        dbg!(view);
         assert_eq!(output.as_str(), expected);
     }
 
     fn run(path: &'static str) {
-        let resource = misc::test::get_resource("compiler", path);
+        let resource = test_util::get_resource("compiler", path);
         let view: SourceView = resource.view();
         let compile= compiler::compile(true, &view);
 

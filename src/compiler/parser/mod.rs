@@ -949,6 +949,26 @@ impl Parser<'_> {
         self.parse_expr_10()
     }
 
+    #[must_use = "For parsing expressions from non-expressions, use parse_expression()"]
+    fn parse_expr_top_level_or_unrolled(self: &mut Self, any_unroll: &mut bool) -> Expr {
+        let mut unroll = false;
+        let first = !*any_unroll;
+
+        if let Some(Ellipsis) = self.peek() {
+            self.skip();
+            unroll = true;
+            *any_unroll = true;
+        }
+
+        let loc = self.prev_location();
+        let mut expr = self.parse_expr_top_level();
+        if unroll {
+            expr = expr.unroll(loc, first);
+        }
+
+        expr
+    }
+
     /// Returns an `LValue`, or `None`. If this returns `None`, an error will already have been raised.
     fn parse_lvalue(self: &mut Self) -> Option<LValue> {
         trace::trace_parser!("rule <lvalue>");
@@ -1066,13 +1086,20 @@ impl Parser<'_> {
                     Some(expr) => return expr, // Looks ahead, and parses <op> <expr> `)`
                     _ => {},
                 }
+                match self.peek() {
+                    Some(Ellipsis) => { // Must be a vector
+                        let arg1 = self.parse_expr_top_level_or_unrolled(&mut false);
+                        return self.parse_expr_1_vector_literal(loc_start, arg1, true);
+                    },
+                    _ => {}
+                }
                 let expr = self.parse_expr_top_level(); // Parse <expr>
                 let expr = match self.parse_expr_1_partial_operator_right(expr) {
                     Ok(expr) => return expr, // Looks ahead and parses <op> `)`
                     Err(expr) => expr,
                 };
                 match self.peek() {
-                    Some(Comma) => self.parse_expr_1_vector_literal(loc_start, expr),
+                    Some(Comma) => self.parse_expr_1_vector_literal(loc_start, expr, false),
                     _ => {
                         // Simple expression
                         self.expect(CloseParen);
@@ -1247,25 +1274,17 @@ impl Parser<'_> {
         }
     }
 
-    fn parse_expr_1_vector_literal(self: &mut Self, mut loc: Location, arg1: Expr) -> Expr {
+    fn parse_expr_1_vector_literal(self: &mut Self, loc: Location, arg1: Expr, arg_is_unroll: bool) -> Expr {
         trace::trace_parser!("rule <expr-1-vector-literal>");
 
         let mut args: Vec<Expr> = vec![arg1];
+        let mut any_unroll = arg_is_unroll;
 
-        // Vector literal `(` <expr> `,` [ <expr> [ `,` <expr> ] * ] ? `)`
-        // Note that this might be a single element vector literal, which includes a trailing comma
-        self.advance(); // Consume `,`
-        if let Some(CloseParen) = self.peek() {
-            loc |= self.advance_with(); // Consume `)`
-            return Expr::vector(loc, args)
-        }
-
-        // Otherwise, it must be > 1
         loop {
-            args.push(self.parse_expr_top_level());
             if self.parse_optional_trailing_comma(CloseParen, ExpectedCommaOrEndOfVector) {
                 break
             }
+            args.push(self.parse_expr_top_level_or_unrolled(&mut any_unroll));
         }
         self.expect_resync(CloseParen);
 
@@ -1274,7 +1293,9 @@ impl Parser<'_> {
 
     fn parse_expr_1_list_or_slice_literal(self: &mut Self) -> Expr {
         trace::trace_parser!("rule <expr-1-list-or-slice-literal>");
+
         let loc_start = self.advance_with(); // Consume `[`
+        let mut any_unroll = false;
 
         match self.peek() {
             Some(CloseSquareBracket) => { // Empty list
@@ -1288,13 +1309,16 @@ impl Parser<'_> {
         }
 
         // Unsure if a slice or a list so far, so we parse the first expression and check for a colon, square bracket, or comma
-        let arg = self.parse_expr_top_level();
+        let arg = self.parse_expr_top_level_or_unrolled(&mut any_unroll);
         match self.peek() {
             Some(CloseSquareBracket) => { // Single element list
                 let loc_end = self.advance_with(); // Consume `]`
                 return Expr::list(loc_start | loc_end, vec![arg]);
             },
             Some(Colon) => { // Slice with a first argument
+                if any_unroll {
+                    self.semantic_error(UnrollNotAllowedInSlice);
+                }
                 return self.parse_expr_1_slice_literal(loc_start, arg);
             },
             Some(Comma) => {}, // Don't consume the comma just yet
@@ -1307,7 +1331,7 @@ impl Parser<'_> {
             if self.parse_optional_trailing_comma(CloseSquareBracket, ExpectedCommaOrEndOfList) {
                 break;
             }
-            args.push(self.parse_expr_top_level());
+            args.push(self.parse_expr_top_level_or_unrolled(&mut any_unroll));
         }
         self.expect(CloseSquareBracket);
 
@@ -1321,7 +1345,7 @@ impl Parser<'_> {
             Some(Colon) => Expr::nil(), // No second argument, but we have a third argument. Don't consume the colon as it's the seperator
             Some(CloseSquareBracket) => { // No second argument, so a unbounded slice
                 let loc_end = self.advance_with();
-                return Expr::slice_literal(loc_start | loc_end, arg1, Expr::nil(), None);
+                return Expr::raw_slice(loc_start | loc_end, arg1, Expr::nil(), None);
             }
             _ => self.parse_expr_top_level(), // As we consumed `:`, we require a second expression
         };
@@ -1330,7 +1354,7 @@ impl Parser<'_> {
         match self.peek() {
             Some(CloseSquareBracket) => { // Two argument slice
                 let loc_end = self.advance_with();
-                return Expr::slice_literal(loc_start | loc_end, arg1, arg2, None);
+                return Expr::raw_slice(loc_start | loc_end, arg1, arg2, None);
             },
             Some(Colon) => {
                 // Three arguments, so continue parsing
@@ -1349,50 +1373,57 @@ impl Parser<'_> {
         };
 
         self.expect(CloseSquareBracket);
-        Expr::slice_literal(loc_start | self.prev_location(), arg1, arg2, Some(arg3))
+        Expr::raw_slice(loc_start | self.prev_location(), arg1, arg2, Some(arg3))
     }
 
+    /// Parses either a `dict` or `set` literal.
+    /// Literals default to being sets, unless a `:` is present in any entry. This means empty literals, and literals with only unrolled terms default to sets.
     fn parse_expr_1_dict_or_set_literal(self: &mut Self) -> Expr {
         trace::trace_parser!("rule <expr-1-dict-or-set-literal>");
+
         let mut loc = self.advance_with(); // Consume `{`
 
-        // As dict and set literals both start the same, we initially parse empty `{}` as a empty dict, and use the first argument to determine if it is a dict or set
-        match self.peek() {
-            Some(CloseBrace) => {
-                // Just `{}` is a empty dict, not a set
-                loc |= self.advance_with();
-                return Expr::dict(loc, vec![])
-            },
-            _ => {}, // Otherwise, continue parsing to determine if it is a dict or set
+        if let Some(CloseBrace) = self.peek() {
+            return Expr::set(loc | self.advance_with(), Vec::new())
         }
 
+        let mut any_unroll = false;
+        let mut is_dict: Option<bool> = None; // None = could be both, vs. Some(is_dict)
         let mut args: Vec<Expr> = Vec::new();
 
-        args.push(self.parse_expr_top_level());
-        let is_dict: bool = match self.peek() {
-            Some(Colon) => {
-                // Found `{ <expr> `:`, so it must be a dict. Parse the first value, then continue as such
-                self.advance();
-                args.push(self.parse_expr_top_level());
-                true
-            },
-            _ => false,
-        };
-
         loop {
-            if self.parse_optional_trailing_comma(CloseBrace, if is_dict { ExpectedCommaOrEndOfDict } else { ExpectedCommaOrEndOfSet }) {
+            let arg = self.parse_expr_top_level_or_unrolled(&mut any_unroll);
+            let is_unroll = arg.is_unroll();
+            args.push(arg);
+
+            if !is_unroll { // Unroll arguments are always singular
+                match is_dict {
+                    Some(true) => {
+                        self.expect(Colon);
+                        args.push(self.parse_expr_top_level());
+                    },
+                    Some(false) => {}, // Set does not have any `:` arguments
+                    None => { // Still undetermined if it is a dict, or set -> based on this argument we can know definitively
+                        is_dict = Some(match self.peek() { // Found a `:`, so we know this is now a dict
+                            Some(Colon) => {
+                                self.skip();
+                                args.push(self.parse_expr_top_level());
+                                true
+                            },
+                            _ => false,
+                        })
+                    }
+                }
+            }
+
+            if self.parse_optional_trailing_comma(CloseBrace, if is_dict.unwrap_or(false) { ExpectedCommaOrEndOfDict } else { ExpectedCommaOrEndOfSet }) {
                 break;
             }
-            args.push(self.parse_expr_top_level());
-            if is_dict {
-                self.expect(Colon);
-                args.push(self.parse_expr_top_level());
-            }
         }
-        self.expect_resync(CloseBrace);
 
+        self.expect_resync(CloseBrace);
         loc |= self.prev_location();
-        if is_dict { Expr::dict(loc, args) } else { Expr::set(loc, args) }
+        if is_dict.unwrap_or(false) { Expr::dict(loc, args) } else { Expr::set(loc, args) }
     }
 
     fn parse_expr_1_inline_if_then_else(self: &mut Self) -> Expr {
@@ -1542,20 +1573,7 @@ impl Parser<'_> {
         let mut args: Vec<Expr> = Vec::new();
 
         loop {
-            let mut unroll = false;
-            let first = !any_unroll;
-            if let Some(Ellipsis) = self.peek() {
-                self.skip(); // Consume `...`
-                unroll = true;
-                any_unroll = true;
-            }
-            let loc = self.prev_location();
-            let mut arg = self.parse_expr_top_level();
-            if unroll {
-                arg = arg.unroll(loc, first);
-            }
-            args.push(arg);
-
+            args.push(self.parse_expr_top_level_or_unrolled(&mut any_unroll));
             if self.parse_optional_trailing_comma(CloseParen, ExpectedCommaOrEndOfArguments) {
                 break;
             }
@@ -1907,7 +1925,7 @@ mod tests {
     use crate::compiler::scanner::ScanResult;
     use crate::reporting::SourceView;
     use crate::stdlib::NativeFunction;
-    use crate::misc;
+    use crate::test_util;
     use crate::vm::Opcode;
     use crate::vm::operator::{BinaryOp, UnaryOp};
 
@@ -2068,7 +2086,7 @@ mod tests {
     }
 
     fn run(path: &'static str) {
-        let resource = misc::test::get_resource("parser", path);
+        let resource = test_util::get_resource("parser", path);
         let view: SourceView = resource.view();
         let scan_result: ScanResult = scanner::scan(&view);
         assert!(scan_result.errors.is_empty());

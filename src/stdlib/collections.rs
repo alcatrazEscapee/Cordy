@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 
 use itertools::Itertools;
 
-use crate::{misc, vm};
+use crate::{util, vm};
 use crate::vm::{IntoDictValue, IntoIterableValue, IntoValue, Iterable, RuntimeError, Value, VirtualInterface};
 
 use RuntimeError::{*};
@@ -94,19 +94,19 @@ pub fn min_by<VM>(vm: &mut VM, by: Value, args: Value) -> ValueResult where VM :
         Some(Some(2)) => {
             let mut err: Option<Box<RuntimeError>> = None;
             let ret = iter
-                .min_by(|a, b| misc::yield_result(&mut err, || {
+                .min_by(|a, b| util::yield_result(&mut err, || {
                     let cmp = vm.invoke_func2(by.clone(), (*a).clone(), (*b).clone())?.as_int()?;
                     cmp_to_ord(cmp)
                 }, Ordering::Equal));
 
-            non_empty(misc::join_result(ret, err)?)
+            non_empty(util::join_result(ret, err)?)
         },
         Some(Some(1)) => {
             let mut err = None;
             let ret = iter
-                .min_by_key(|u| misc::yield_result(&mut err, || vm.invoke_func1(by.clone(), (*u).clone()), Nil));
+                .min_by_key(|u| util::yield_result(&mut err, || vm.invoke_func1(by.clone(), (*u).clone()), Nil));
 
-            non_empty(misc::join_result(ret, err)?)
+            non_empty(util::join_result(ret, err)?)
         },
         Some(_) => TypeErrorArgMustBeCmpOrKeyFunction(by).err(),
         None => TypeErrorArgMustBeFunction(by).err(),
@@ -123,19 +123,19 @@ pub fn max_by<VM>(vm: &mut VM, by: Value, args: Value) -> ValueResult where VM :
         Some(Some(2)) => {
             let mut err: Option<Box<RuntimeError>> = None;
             let ret = iter
-                .max_by(|a, b| misc::yield_result(&mut err, || {
+                .max_by(|a, b| util::yield_result(&mut err, || {
                     let cmp = vm.invoke_func2(by.clone(), (*a).clone(), (*b).clone())?.as_int()?;
                     cmp_to_ord(cmp)
                 }, Ordering::Equal));
 
-            non_empty(misc::join_result(ret, err)?)
+            non_empty(util::join_result(ret, err)?)
         },
         Some(Some(1)) => {
             let mut err = None;
             let ret = iter
-                .max_by_key(|u| misc::yield_result(&mut err, || vm.invoke_func1(by.clone(), (*u).clone()), Nil));
+                .max_by_key(|u| util::yield_result(&mut err, || vm.invoke_func1(by.clone(), (*u).clone()), Nil));
 
-            non_empty(misc::join_result(ret, err)?)
+            non_empty(util::join_result(ret, err)?)
         },
         Some(_) => TypeErrorArgMustBeCmpOrKeyFunction(by).err(),
         None => TypeErrorArgMustBeFunction(by).err(),
@@ -173,16 +173,16 @@ pub fn sort_by<VM>(vm: &mut VM, by: Value, args: Value) -> ValueResult where VM 
     match by.unbox_func_args() {
         Some(Some(2)) => {
             let mut err: Option<Box<RuntimeError>> = None;
-            sorted.sort_unstable_by(|a, b| misc::yield_result(&mut err, || {
+            sorted.sort_unstable_by(|a, b| util::yield_result(&mut err, || {
                 let cmp = vm.invoke_func2(by.clone(), a.clone(), b.clone())?.as_int()?;
                 cmp_to_ord(cmp)
             }, Ordering::Equal));
-            misc::join_result((), err)?
+            util::join_result((), err)?
         },
         Some(Some(1)) => {
             let mut err: Option<Box<RuntimeError>> = None;
-            sorted.sort_unstable_by_key(|a| misc::yield_result(&mut err, || vm.invoke_func1(by.clone(), a.clone()), Nil));
-            misc::join_result((), err)?
+            sorted.sort_unstable_by_key(|a| util::yield_result(&mut err, || vm.invoke_func1(by.clone(), a.clone()), Nil));
+            util::join_result((), err)?
         },
         Some(_) => return TypeErrorArgMustBeCmpOrKeyFunction(by).err(),
         None => return TypeErrorArgMustBeFunction(by).err(),
@@ -405,14 +405,7 @@ pub fn clear(target: Value) -> ValueResult {
 
 
 pub fn collect_into_dict(iter: impl Iterator<Item=Value>) -> ValueResult {
-    Ok(iter.map(|t| {
-        let index = t.as_index()?;
-        if index.len() == 2 {
-            Ok((index.get_index(0), index.get_index(1)))
-        } else {
-            ValueErrorCannotCollectIntoDict(t.clone()).err()
-        }
-    })
+    Ok(iter.map(|t| t.as_pair())
         .collect::<Result<Vec<(Value, Value)>, Box<RuntimeError>>>()?
         .into_iter()
         .to_dict())

@@ -73,9 +73,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    // ===== Common Parse Functions ===== //
-    // These abstract parsing functionality that is found in multiple places, and reduce some of the clutter in `parser/mod.rs`
-
     /// In the parsing of `<term>` defined by the following grammar:
     /// ```grammar
     /// <term> := <open-token> <term-arguments> ? <close-token>
@@ -89,16 +86,7 @@ impl<'a> Parser<'a> {
     ///
     /// Returns `true` if the close token was encountered, or an error (either case causing the loop to break).
     /// Does not consume the closing token.
-    pub fn parse_optional_trailing_comma<F : FnOnce(Option<ScanToken>) -> ParserErrorType>(self: &mut Self, close_token: ScanToken, error: F) -> bool {
-        let mut err: bool = false;
-        let ret = self.parse_optional_trailing_comma_or_empty(close_token, &mut err);
-        if err {
-            self.error_with(error);
-        }
-        ret
-    }
-
-    pub fn parse_optional_trailing_comma_or_empty(self: &mut Self, close_token: ScanToken, error: &mut bool) -> bool {
+    pub(super) fn parse_optional_trailing_comma<F : FnOnce(Option<ScanToken>) -> ParserErrorType>(self: &mut Self, close_token: ScanToken, error: F) -> bool {
         trace::trace_parser!("rule <csv-term-suffix>");
         match self.peek() {
             Some(Comma) => {
@@ -111,7 +99,7 @@ impl<'a> Parser<'a> {
                 return true; // Don't consume the close token, as it's used as a resync point
             },
             _ => {
-                *error = true;
+                self.error_with(error);
                 return true; // Since in this situation, we still want to break
             },
         }

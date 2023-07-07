@@ -1,6 +1,7 @@
 use crate::stdlib::NativeFunction;
 use crate::vm::operator::{BinaryOp, UnaryOp};
-use crate::misc::OffsetAdd;
+use crate::vm::value::LiteralType;
+use crate::util::OffsetAdd;
 
 use Opcode::{*};
 
@@ -73,13 +74,21 @@ pub enum Opcode {
     Str(u32),
     Function(u32),
     NativeFunction(NativeFunction),
-    // Note that `List`, `Vector`, `Set`, `Dict`, are different from invoking native functions
-    // 1. They don't require a function evaluation and resolution (efficient)
-    // 2. They allow zero and one element cases to be handled exactly as usual (i.e. `list('no')` is `['no'], not ['n', 'o'])
-    List(u32),
-    Vector(u32),
-    Set(u32),
-    Dict(u32),
+
+    /// Pushes a new, empty `Literal` onto the literal stack, of a given literal sequence type (`list`, `set`, `dict`, or `vector`), and size hint `u32`.
+    /// Initialization of a literal will always start with a `LiteralBegin`, followed by one more more `LiteralAcc` and `LiteralUnroll` opcodes, then `LiteralEnd`
+    LiteralBegin(LiteralType, u32),
+
+    /// Pops `u32` entries from the stack and inserts them, in order, to the top of the literal stack.
+    LiteralAcc(u32),
+
+    /// Pops the top of the stack, and unrolls it and inserts each element, in order, to the top of the literal stack.
+    /// This is different from doing a `OpUnroll` as we have special handling for accumulating and unrolling `dict`s
+    LiteralUnroll,
+
+    // Pops the top of the literal stack, and pushes it as a value onto the stack.
+    LiteralEnd,
+
     /// The parameter corresponds to the `type index` of the struct.
     Struct(u32),
 
@@ -100,7 +109,7 @@ pub enum Opcode {
     OpFuncEval(u32),
     OpFuncEvalUnrolled(u32),
 
-    /// Unrolls an iterable on the stack. Used in combination with `OpFuncEvalUnrolled` to call functions with `...`
+    /// Unrolls an iterable on the stack. Used in combination with `OpFuncEvalUnrolled` to call functions with `...`. Also can be used with list, vector, and dict initializations.
     /// The argument is if this unroll is the first one we've seen in the *current function invocation*. If so, it pushes a new counter onto the stack.
     OpUnroll(bool),
 

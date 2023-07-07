@@ -517,7 +517,7 @@ pub fn invoke<VM>(native: NativeFunction, nargs: u32, vm: &mut VM) -> ValueResul
             match nargs {
                 0 => panic!("Illegal invoke of synthetic method with no primary argument"),
                 _ => {
-                    let $an = vm.popn(nargs as usize - 1);
+                    let $an = vm.popn(nargs - 1);
                     let $a1 = vm.pop();
                     $ret
                 }
@@ -535,7 +535,7 @@ pub fn invoke<VM>(native: NativeFunction, nargs: u32, vm: &mut VM) -> ValueResul
                     ret
                 },
                 _ => {
-                    let varargs = vm.popn(nargs as usize);
+                    let varargs = vm.popn(nargs);
                     let mut $an = varargs.iter().cloned();
                     let ret = $ret_n;
                     ret
@@ -550,7 +550,7 @@ pub fn invoke<VM>(native: NativeFunction, nargs: u32, vm: &mut VM) -> ValueResul
                     Err(e) => Err(e),
                 },
                 _ => {
-                    let varargs = vm.popn(nargs as usize);
+                    let varargs = vm.popn(nargs);
                     let mut $an = varargs.iter().cloned();
                     $ret_n
                 },
@@ -564,7 +564,7 @@ pub fn invoke<VM>(native: NativeFunction, nargs: u32, vm: &mut VM) -> ValueResul
                     Err(e) => Err(e),
                 },
                 _ => {
-                    let varargs = vm.popn(nargs as usize);
+                    let varargs = vm.popn(nargs);
                     let mut $an = varargs.iter().cloned();
                     $ret_n
                 },
@@ -678,7 +678,7 @@ pub fn invoke<VM>(native: NativeFunction, nargs: u32, vm: &mut VM) -> ValueResul
                 Value::NativeFunction(Int) => Ok(Value::Int(i64::MIN)),
                 an => collections::min(an.as_iter()?),
             },
-            _ => collections::min(vm.popn(nargs as usize).iter().cloned()),
+            _ => collections::min(vm.popn(nargs).iter().cloned()),
         },
         MinBy => dispatch!(a1, a2, collections::min_by(vm, a1, a2)),
         Max => match nargs {
@@ -687,7 +687,7 @@ pub fn invoke<VM>(native: NativeFunction, nargs: u32, vm: &mut VM) -> ValueResul
                 Value::NativeFunction(Int) => Ok(Value::Int(i64::MAX)),
                 an => collections::max(an.as_iter()?),
             },
-            _ => collections::max(vm.popn(nargs as usize).iter().cloned()),
+            _ => collections::max(vm.popn(nargs).iter().cloned()),
         },
         MaxBy => dispatch!(a1, a2, collections::max_by(vm, a1, a2)),
         Map => dispatch!(a1, a2, collections::map(vm, a1, a2)),

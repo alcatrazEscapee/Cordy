@@ -4,23 +4,25 @@ L1: 0000 IncGlobalCount
     0003 Nil
     0004 Nil
     0005 Nil
-L2: 0006 Int(1) -> 1
-    0007 Int(2) -> 2
-    0008 Int(3) -> 3
-    0009 List(3)
-    0010 CheckLengthEqualTo(3) -> 3
-    0011 Int(0) -> 0
-    0012 OpIndexPeek
-    0013 StoreGlobal(0) -> x
-    0014 PopN(2)
-    0015 Int(1) -> 1
-    0016 OpIndexPeek
-    0017 StoreGlobal(1) -> y
-    0018 PopN(2)
-    0019 Int(2) -> 2
-    0020 OpIndexPeek
-    0021 StoreGlobal(2) -> z
-    0022 PopN(2)
-    0023 Pop
-    0024 PopN(3)
-    0025 Exit
+L2: 0006 LiteralBegin(List, 3)
+    0007 Int(1) -> 1
+    0008 Int(2) -> 2
+    0009 Int(3) -> 3
+    0010 LiteralAcc(3)
+    0011 LiteralEnd
+    0012 CheckLengthEqualTo(3) -> 3
+    0013 Int(0) -> 0
+    0014 OpIndexPeek
+    0015 StoreGlobal(0) -> x
+    0016 PopN(2)
+    0017 Int(1) -> 1
+    0018 OpIndexPeek
+    0019 StoreGlobal(1) -> y
+    0020 PopN(2)
+    0021 Int(2) -> 2
+    0022 OpIndexPeek
+    0023 StoreGlobal(2) -> z
+    0024 PopN(2)
+    0025 Pop
+    0026 PopN(3)
+    0027 Exit

@@ -524,7 +524,7 @@ mod tests {
     use crate::compiler::scanner;
     use crate::compiler::scanner::{ScanResult, ScanToken};
     use crate::reporting::SourceView;
-    use crate::misc;
+    use crate::test_util;
 
     use ScanToken::{*};
 
@@ -568,7 +568,7 @@ mod tests {
     }
 
     fn run(path: &'static str) {
-        let resource = misc::test::get_resource("scanner", path);
+        let resource = test_util::get_resource("scanner", path);
         let view = resource.view();
         let result: ScanResult = scanner::scan(&view);
 

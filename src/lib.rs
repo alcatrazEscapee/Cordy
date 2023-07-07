@@ -5,6 +5,9 @@ pub mod repl;
 pub mod vm;
 
 mod stdlib;
-mod misc;
 mod reporting;
 mod trace;
+mod util;
+
+#[cfg(test)]
+mod test_util;
