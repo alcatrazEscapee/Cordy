@@ -212,16 +212,16 @@ impl Parser<'_> {
         // Emit functions
         for mut func in self.functions.drain(..) {
             let head: usize = self.raw_output.len();
-            for (loc, op) in func.code.drain(..) {
+            for (loc, op) in func.emit_code() {
                 self.raw_output.push(op);
                 self.locations.push(loc);
             }
-            for local in func.locals_reference.drain(..) {
+            for local in func.emit_locals() {
                 self.locals_reference.push(local);
             }
 
             let tail: usize = self.raw_output.len() - 1;
-            let baked: Rc<FunctionImpl> = Rc::new(FunctionImpl::new(head, tail, func.name, func.args, func.default_args, func.var_arg));
+            let baked: Rc<FunctionImpl> = func.bake(head, tail);
 
             self.baked_functions.push(baked);
         }
@@ -231,7 +231,7 @@ impl Parser<'_> {
             self.error(UnexpectedTokenAfterEoF(token));
         }
         for global in self.late_bound_globals.drain(..) {
-            if let Some(error) = global.into().error {
+            if let Some(error) = global.into().error() {
                 self.errors.push(error);
             }
         }
@@ -586,10 +586,7 @@ impl Parser<'_> {
 
         // If this function has captured any upvalues, we need to emit the correct tokens for them now, including wrapping the function in a closure
         // We just collect and return the opcodes for it, as if this is part of an expression function, we need to hold them to be emitted later
-        let closed_locals: Vec<Opcode> = self.current_locals().upvalues
-            .iter()
-            .map(|upvalue| if upvalue.is_local { CloseLocal(upvalue.index) } else { CloseUpValue(upvalue.index) })
-            .collect::<Vec<Opcode>>();
+        let closed_locals: Vec<Opcode> = self.current_locals().closed_locals();
 
         self.delay_pop_from_expression_statement = prev_pop_status; // Exit the stack
 
@@ -831,11 +828,12 @@ impl Parser<'_> {
         trace::trace_parser!("rule <break-statement>");
         self.push_delayed_pop();
         self.advance();
-        match self.current_locals().loops.last() {
+        match self.current_locals_mut().top_loop() {
             Some(loop_stmt) => {
-                self.pop_locals(Some(loop_stmt.scope_depth + 1), false, true, true);
+                let depth: u32 = loop_stmt.scope_depth + 1;
+                self.pop_locals(Some(depth), false, true, true);
                 let jump = self.reserve();
-                self.current_locals_mut().loops.last_mut().unwrap().break_statements.push(jump);
+                self.current_locals_mut().top_loop().unwrap().break_statements.push(jump);
             },
             None => self.semantic_error(BreakOutsideOfLoop),
         }
@@ -845,10 +843,11 @@ impl Parser<'_> {
         trace::trace_parser!("rule <continue-statement>");
         self.push_delayed_pop();
         self.advance();
-        match self.current_locals().loops.last() {
+        match self.current_locals_mut().top_loop() {
             Some(loop_stmt) => {
                 let jump_to: usize = loop_stmt.start_index;
-                self.pop_locals(Some(loop_stmt.scope_depth + 1), false, true, true);
+                let depth: u32 = loop_stmt.scope_depth + 1;
+                self.pop_locals(Some(depth), false, true, true);
                 self.push_jump(jump_to, Jump);
             },
             None => self.semantic_error(ContinueOutsideOfLoop),

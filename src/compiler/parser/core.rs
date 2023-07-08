@@ -344,7 +344,7 @@ impl<'a> Parser<'a> {
             _ => None,
         } {
             Some((depth, id)) => {
-                let local = self.locals[depth].locals[*id as usize].name.clone();
+                let local = self.locals[depth].get_name(*id as usize);
                 self.current_locals_reference_mut().push(local);
             },
             _ => {}
