@@ -250,7 +250,7 @@ fn load_native_functions() -> Vec<NativeFunctionInfo> {
         };
         ($native:expr, $name:expr, $args:expr, $nargs:expr, $hidden:expr) => {
             let info = NativeFunctionInfo::new($native, $name, $args, $nargs, $hidden);
-            assert_eq!(natives.len(), $native as usize, "Native Function {:?} (index = {}) declared in order {}", $native, $native as usize, natives.len());
+            debug_assert_eq!(natives.len(), $native as usize, "Native Function {:?} (index = {}) declared in order {}", $native, $native as usize, natives.len());
             natives.push(info);
         };
     }

@@ -5,12 +5,13 @@
 
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::rc::Rc;
 
 use itertools::Itertools;
 
 use crate::compiler::parser::{Parser, ParserError, ParserErrorType};
 use crate::core;
-use crate::vm::Opcode;
+use crate::vm::{FunctionImpl, Opcode};
 use crate::reporting::Location;
 
 use ParserErrorType::{*};
@@ -36,32 +37,53 @@ impl Loop {
 pub struct Locals {
     /// The local variables in the current function.
     /// Top level local variables are considered global, even though they still might be block scoped ('true global' are top level function in no block scope, as they can never go out of scope).
-    pub(super) locals: Vec<Local>,
+    locals: Vec<Local>,
     /// An array of captured upvalues for this function, either due to an inner function requiring them, or this function needing to capture locals from it's enclosing function
-    pub(super) upvalues: Vec<UpValue>,
+    upvalues: Vec<UpValue>,
     /// Loop stack
     /// Each frame represents a single loop, which `break` and `continue` statements refer to
     /// `continue` jumps back to the beginning of the loop, aka the first `usize` (loop start)
     /// `break` statements jump back to the end of the loop, which needs to be patched later. The values to be patched record themselves in the stack at the current loop level
-    pub(super) loops: Vec<Loop>,
+    loops: Vec<Loop>,
 
     /// Ordinal into `self.functions` to access `self.functions[func].code`
     /// If not present, it is assumed to be global code.
     /// Note this is not quite the same as the function ID, as if there are baked functions present, this will differ by the amount of baked functions
-    pub func: Option<usize>,
+    func: Option<usize>,
 }
 
 impl Locals {
+    /// Returns a new empty `Locals` stack.
     pub fn empty() -> Vec<Locals> {
         vec![Locals::new(None)]
     }
 
+    /// Returns a new empty `Locals` instance, corresponding to the given function, if present.
+    pub(super) fn new(func: Option<usize>) -> Locals {
+        Locals { locals: Vec::new(), upvalues: Vec::new(), loops: Vec::new(), func }
+    }
+
+    /// Returns the length of the locals, effectively the number of variables declared in this frame.
+    /// `locals[0].len()` will be the number of global variables, for a given `Locals` stack.
     pub fn len(self: &Self) -> usize {
         self.locals.len()
     }
 
-    pub fn new(func: Option<usize>) -> Locals {
-        Locals { locals: Vec::new(), upvalues: Vec::new(), loops: Vec::new(), func }
+    /// Returns the name of a local with the given `index`.
+    pub(super) fn get_name(self: &Self, index: usize) -> String {
+        self.locals[index].name.clone()
+    }
+
+    /// Returns the topmost `Loop` statement on the stack, or `None` if the stack is empty.
+    pub(super) fn top_loop(self: &mut Self) -> Option<&mut Loop> {
+        self.loops.last_mut()
+    }
+
+    /// Enumerates the current locals' `upvalues`, and emits the correct `CloseLocal` or `CloseUpValue` tokens for each.
+    pub(super) fn closed_locals(self: &Self) -> Vec<Opcode> {
+        self.upvalues.iter()
+            .map(|upvalue| if upvalue.is_local { CloseLocal(upvalue.index) } else { CloseUpValue(upvalue.index) })
+            .collect::<Vec<Opcode>>()
     }
 }
 
@@ -69,13 +91,13 @@ impl Locals {
 pub struct Fields {
     /// A mapping of `field name` to `field index`. This is used to record unique fields.
     /// For example, `struct Foo(a, b, c)` would generate the fields `"a"`, `"b"`, and `"c"` at index `0`, `1`, and `2`, respectively.
-    pub fields: HashMap<String, u32>,
+    fields: HashMap<String, u32>,
 
     /// A table which maps pairs of `(type index, field index)` to a `field offset`
     /// The `type index` is known at runtime, based on the runtime type of the struct in use.
     /// The `field index` is known at compile time, based on the identifier that it resolves to.
     /// The resultant `field offset` is a index into a specific struct object's `Vec<Value>` of fields.
-    pub lookup: HashMap<(u32, u32), usize>,
+    lookup: HashMap<(u32, u32), usize>,
 }
 
 impl Fields {
@@ -101,17 +123,17 @@ impl Fields {
 }
 
 #[derive(Debug, Clone)]
-pub struct UpValue {
+struct UpValue {
     /// `true` = local variable in enclosing function, `false` = upvalue in enclosing function
-    pub(super) is_local: bool,
+    is_local: bool,
 
     /// Either a reference to an index in the enclosing function's `locals` (which are stack offset),
     /// or a reference to the enclosing function's `upvalues` (which can be accessed via stack offset 0 -> upvalues, if it is a closure
-    pub(super) index: u32,
+    index: u32,
 }
 
 impl UpValue {
-    pub fn new(is_local: bool, index: u32) -> UpValue {
+    fn new(is_local: bool, index: u32) -> UpValue {
         UpValue { is_local, index }
     }
 }
@@ -119,9 +141,9 @@ impl UpValue {
 
 
 #[derive(Eq, PartialEq, Debug, Clone)]
-pub struct Local {
+struct Local {
     /// The local variable name
-    pub(super) name: String,
+    name: String,
     /// The index of the local variable within it's `Locals` array.
     /// - At runtime, this matches the stack offset of this variable.
     /// - At compile time, this is used to index into `Parser.locals`
@@ -147,21 +169,28 @@ impl Local {
 #[derive(Debug, Clone)]
 pub struct LateBoundGlobal {
     name: String,
-    opcode: OpcodeReference,
-    pub(super) error: Option<ParserError>, // An error that would be thrown from here, if the variable does not end up bound
+    /// This is a pair of (function ordinal, code ordinal)
+    /// Note that the function ordinal is an index into `self.functions`, not an absolute function ID (and is thus a `usize` not a `u32`)
+    opcode: (usize, usize),
+
+    error: Option<ParserError>, // An error that would be thrown from here, if the variable does not end up bound
 }
 
 impl LateBoundGlobal {
     pub fn new(name: String, ordinal: usize, opcode: usize, error: Option<ParserError>) -> LateBoundGlobal {
         LateBoundGlobal {
             name,
-            opcode: OpcodeReference(ordinal, opcode),
+            opcode: (ordinal, opcode),
             error
         }
     }
 
     pub fn update_opcode(self: Self, ordinal: usize, opcode: usize) -> Self {
         LateBoundGlobal::new(self.name, ordinal, opcode, self.error)
+    }
+
+    pub fn error(self: Self) -> Option<ParserError> {
+        self.error
     }
 }
 
@@ -451,35 +480,45 @@ impl<T : Debug> Reference<T> {
     pub fn is_load(&self) -> bool { match self { Reference::Load(_) => true, _ => false } }
 }
 
-/// A reference to a particular opcode, while the parser is parsing, that is capable of crossing functions.
-/// This is a pair of (function ordinal, code ordinal)
-/// Note that the function ordinal is an index into `self.functions`, not an absolute function ID (and is thus a `usize` not a `u32`)
-#[derive(Debug, Clone, Copy)]
-pub struct OpcodeReference(pub usize, pub usize);
-
 
 #[derive(Debug)]
 pub struct ParserFunctionImpl {
     /// Function name and argument names
-    pub(super) name: String,
-    pub(super) args: Vec<String>,
+    name: String,
+    args: Vec<String>,
 
     /// These are indexes into the function code, where the function call position should jump to.
     /// They are indexed from the first function call (zero default arguments), increasing.
     /// So `[Nil, Int(1), Int(2), Plus, ...]` would have entries `[1, 4]` as it's argument set, and length is the number of default arguments.
-    pub(super) default_args: Vec<usize>,
+    default_args: Vec<usize>,
 
-    /// If the last argument in this function is a varadic argument, meaning it needs special behavior when invoked with >= `max_args()`
-    pub(super) var_arg: bool,
+    /// If the last argument in this function is a variadic argument, meaning it needs special behavior when invoked with >= `max_args()`
+    var_arg: bool,
 
     /// Bytecode for the function body itself
-    pub(super) code: Vec<(Location, Opcode)>,
+    code: Vec<(Location, Opcode)>,
 
     /// Entries for `locals_reference`, that need to be held until the function code is emitted
-    pub(super) locals_reference: Vec<String>,
+    locals_reference: Vec<String>,
 }
 
 impl ParserFunctionImpl {
+    /// Empties and returns the source code for this parser function.
+    pub(super) fn emit_code(self: &mut Self) -> std::vec::Drain<'_, (Location, Opcode)> {
+        self.code.drain(..)
+    }
+
+    /// Empties and returns the local references for this parser function.
+    pub(super) fn emit_locals(self: &mut Self) -> std::vec::Drain<'_, String> {
+        self.locals_reference.drain(..)
+    }
+
+    /// Bakes this parser function into an immutable `FunctionImpl`.
+    /// The `head` and `tail` pointers are computed based on the surrounding code.
+    pub(super) fn bake(self, head: usize, tail: usize) -> Rc<FunctionImpl> {
+        Rc::new(FunctionImpl::new(head, tail, self.name, self.args, self.default_args, self.var_arg))
+    }
+
     /// Marks a default argument as finished.
     pub(super) fn mark_default_arg(self: &mut Self) {
         self.default_args.push(self.code.len());

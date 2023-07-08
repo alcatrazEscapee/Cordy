@@ -183,6 +183,7 @@ impl<R, W> VirtualMachine<R, W> where
     pub fn run_recovery(self: &mut Self, locals: usize) {
         self.call_stack.truncate(1);
         self.stack.truncate(locals);
+        self.literal_stack.clear();
         self.ip = self.code.len();
     }
 
