@@ -1,0 +1,48 @@
+L03: 0000 IncGlobalCount
+     0001 IncGlobalCount
+     0002 IncGlobalCount
+     0003 Nil
+     0004 Nil
+     0005 Nil
+L05: 0006 Nil
+     0007 Nil
+     0008 OpFuncEval(1)
+     0009 Pop
+L06: 0010 True
+     0011 False
+     0012 OpFuncEval(1)
+     0013 Pop
+L07: 0014 Int(1) -> 1
+     0015 Int(2) -> 2
+     0016 OpFuncEval(1)
+     0017 Int(3) -> 3
+     0018 OpFuncEval(1)
+     0019 Pop
+L08: 0020 PushGlobal(0) -> a
+     0021 PushGlobal(1) -> b
+     0022 OpFuncEval(1)
+     0023 PushGlobal(2) -> c
+     0024 OpFuncEval(1)
+     0025 Pop
+L09: 0026 NativeFunction(OperatorAddSwap)
+     0027 Int(1) -> 1
+     0028 OpFuncEval(1)
+     0029 NativeFunction(OperatorAddSwap)
+     0030 Int(2) -> 2
+     0031 OpFuncEval(1)
+     0032 OpFuncEval(1)
+     0033 NativeFunction(OperatorAddSwap)
+     0034 Int(3) -> 3
+     0035 OpFuncEval(1)
+     0036 OpFuncEval(1)
+     0037 Pop
+L10: 0038 PushGlobal(0) -> a
+     0039 Nil
+     0040 OpFuncEval(1)
+     0041 False
+     0042 OpFuncEval(1)
+     0043 Int(0) -> 0
+     0044 OpFuncEval(1)
+     0045 Pop
+     0046 PopN(3)
+     0047 Exit

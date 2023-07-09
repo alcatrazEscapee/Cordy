@@ -163,7 +163,7 @@ impl<'a> Parser<'a> {
     /// **Important**: Must only be called once `peek()` has identified an `Int` token is present, as this will panic otherwise.
     pub fn take_int(self: &mut Self) -> i64 {
         match self.advance() {
-            Some(ScanToken::Int(i)) => i,
+            Some(ScanToken::IntLiteral(i)) => i,
             t => panic!("Token mismatch in advance_int() -> expected an Some(Int(i64)), got a {:?} instead", t)
         }
     }
@@ -178,7 +178,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Specialization of `peek()`, does not consume newlines, for checking if a specific syntax token is on the same line as the preceding one.
-    pub fn peek_no_newline(self: &mut Self) -> Option<&ScanToken> {
+    pub fn peek_no_newline(self: &Self) -> Option<&ScanToken> {
         if self.error_recovery {
             return None
         }
@@ -192,11 +192,11 @@ impl<'a> Parser<'a> {
     /// Note that this function only returns a read-only reference to the underlying token, suitable for matching
     /// If the token data needs to be unboxed, i.e. as with `Identifier` tokens, it must be extracted only via `advance()`
     /// This also does not consume newline tokens in the input, rather peeks _past_ them in order to find the next matching token.
-    pub fn peek(self: &mut Self) -> Option<&ScanToken> { self.peek_lookahead(0) }
-    pub fn peek2(self: &mut Self) -> Option<&ScanToken> { self.peek_lookahead(1) }
-    pub fn peek3(self: &mut Self) -> Option<&ScanToken> { self.peek_lookahead(2) }
+    pub fn peek(self: &Self) -> Option<&ScanToken> { self.peek_lookahead(0) }
+    pub fn peek2(self: &Self) -> Option<&ScanToken> { self.peek_lookahead(1) }
+    pub fn peek3(self: &Self) -> Option<&ScanToken> { self.peek_lookahead(2) }
 
-    fn peek_lookahead(self: &mut Self, mut lookahead: u8) -> Option<&ScanToken> {
+    fn peek_lookahead(self: &Self, mut lookahead: u8) -> Option<&ScanToken> {
         if !self.error_recovery {
             for (_, token) in &self.input {
                 if token != &NewLine {
@@ -205,7 +205,7 @@ impl<'a> Parser<'a> {
                     }
                     lookahead -= 1;
                 } else {
-                    self.prevent_expression_statement = false;
+                    //self.prevent_expression_statement = false;
                 }
             }
         }
