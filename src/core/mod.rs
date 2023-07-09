@@ -120,6 +120,7 @@ pub enum NativeFunction {
     Reduce,
     Sort,
     SortBy,
+    GroupBy,
     Reverse,
     Permutations,
     Combinations,
@@ -345,6 +346,7 @@ fn load_native_functions() -> Vec<NativeFunctionInfo> {
     declare!(Reduce, "reduce", "f, iter", 2);
     declare!(Sort, "sort", "...");
     declare!(SortBy, "sort_by", "f, iter", 2);
+    declare!(GroupBy, "group_by", "f, iter", 2);
     declare!(Reverse, "reverse", "iter", 1);
     declare!(Permutations, "permutations", "n, iter", 2);
     declare!(Combinations, "combinations", "n, iter", 2);
@@ -692,6 +694,7 @@ pub fn invoke<VM>(native: NativeFunction, nargs: u32, vm: &mut VM) -> ValueResul
         Reduce => dispatch!(a1, a2, collections::reduce(vm, a1, a2)),
         Sort => dispatch_varargs!(an, collections::sort(an)),
         SortBy => dispatch!(a1, a2, collections::sort_by(vm, a1, a2)),
+        GroupBy => dispatch!(a1, a2, collections::group_by(vm, a1, a2)),
         Reverse => dispatch_varargs!(an, collections::reverse(an)),
         Permutations => dispatch!(a1, a2, collections::permutations(a1, a2)),
         Combinations => dispatch!(a1, a2, collections::combinations(a1, a2)),

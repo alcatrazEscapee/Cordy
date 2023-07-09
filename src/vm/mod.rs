@@ -1550,6 +1550,18 @@ mod test {
     #[test] fn test_reduce_with_empty() { run_str("[] . reduce(+) . print", "ValueError: Expected value to be a non empty iterable\n  at: line 1 (<test>)\n\n1 | [] . reduce(+) . print\n2 |    ^^^^^^^^^^^\n"); }
     #[test] fn test_sorted() { run_str("[6, 2, 3, 7, 2, 1] . sort . print", "[1, 2, 2, 3, 6, 7]\n"); }
     #[test] fn test_sorted_with_set_of_str() { run_str("'funny' . set . sort . print", "['f', 'n', 'u', 'y']\n"); }
+    #[test] fn test_group_by_int_negative() { run_str("group_by(-1, [1, 2, 3, 4]) . print", "ValueError: Expected value '-1: int' to be positive\n  at: line 1 (<test>)\n\n1 | group_by(-1, [1, 2, 3, 4]) . print\n2 |         ^^^^^^^^^^^^^^^^^^\n"); }
+    #[test] fn test_group_by_int_zero() { run_str("group_by(0, [1, 2, 3, 4]) . print", "ValueError: Expected value '0: int' to be positive\n  at: line 1 (<test>)\n\n1 | group_by(0, [1, 2, 3, 4]) . print\n2 |         ^^^^^^^^^^^^^^^^^\n"); }
+    #[test] fn test_group_by_int_by_one() { run_str("group_by(1, [1, 2, 3, 4]) . print", "[(1), (2), (3), (4)]\n"); }
+    #[test] fn test_group_by_int_by_three() { run_str("[1, 2, 3, 4, 5, 6] . group_by(3) . print", "[(1, 2, 3), (4, 5, 6)]\n"); }
+    #[test] fn test_group_by_int_by_one_empty_iterable() { run_str("[] . group_by(1) . print", "[]\n"); }
+    #[test] fn test_group_by_int_by_three_empty_iterable() { run_str("[] . group_by(3) . print", "[]\n"); }
+    #[test] fn test_group_by_int_by_three_with_remainder() { run_str("[1, 2, 3, 4] . group_by(3) . print", "[(1, 2, 3), (4)]\n"); }
+    #[test] fn test_group_by_int_by_three_not_enough() { run_str("[1, 2] . group_by(3) . print", "[(1, 2)]\n"); }
+    #[test] fn test_group_by_function_empty_iterable() { run_str("[] . group_by(fn(x) -> nil) . print", "{}\n"); }
+    #[test] fn test_group_by_function_all_same_keys() { run_str("[1, 2, 3, 4] . group_by(fn(x) -> nil) . print", "{nil: (1, 2, 3, 4)}\n"); }
+    #[test] fn test_group_by_function_all_different_keys() { run_str("[1, 2, 3, 4] . group_by(fn(x) -> x) . print", "{1: (1), 2: (2), 3: (3), 4: (4)}\n"); }
+    #[test] fn test_group_by_function_remainder_by_three() { run_str("[1, 2, 3, 4, 5] . group_by(%3) . print", "{1: (1, 4), 2: (2, 5), 0: (3)}\n"); }
     #[test] fn test_reverse() { run_str("[8, 1, 2, 6, 3, 2, 3] . reverse . print", "[3, 2, 3, 6, 2, 1, 8]\n"); }
     #[test] fn test_range_1() { run_str("range(3) . list . print", "[0, 1, 2]\n"); }
     #[test] fn test_range_2() { run_str("range(3, 7) . list . print", "[3, 4, 5, 6]\n"); }
