@@ -924,14 +924,14 @@ impl Parser<'_> {
 
     fn parse_expression_statement(self: &mut Self) {
         trace::trace_parser!("rule <expression-statement>");
-        if !self.prevent_expression_statement {
+        //if !self.prevent_expression_statement {
             self.prevent_expression_statement = true;
             self.push_delayed_pop();
             self.parse_expression();
             self.delay_pop_from_expression_statement = true;
-        } else {
-            self.error_with(ExpectedStatement)
-        }
+        //} else {
+        //    self.error_with(ExpectedStatement)
+        //}
     }
 
     fn parse_expression(self: &mut Self) {
@@ -1071,7 +1071,7 @@ impl Parser<'_> {
                 self.advance();
                 Expr::exit()
             },
-            Some(ScanToken::Int(_)) => Expr::int(self.take_int()),
+            Some(IntLiteral(_)) => Expr::int(self.take_int()),
             Some(StringLiteral(_)) => Expr::str(self.take_str()),
             Some(Identifier(_)) => {
                 let name: String = self.take_identifier();
@@ -1441,7 +1441,20 @@ impl Parser<'_> {
     fn parse_expr_2_unary(self: &mut Self) -> Expr {
         trace::trace_parser!("rule <expr-2>");
 
-        // Prefix operators
+        let stack: Vec<(Location, UnaryOp)> = self.parse_expr_2_prefix_operators();
+        let mut expr: Expr = self.parse_expr_1_terminal();
+
+        expr = self.parse_expr_2_suffix_operators(expr);
+
+        // Prefix operators are lower precedence than suffix operators
+        for (loc, op) in stack.into_iter().rev() {
+            expr = expr.unary(loc, op)
+        }
+
+        expr
+    }
+
+    fn parse_expr_2_prefix_operators(self: &mut Self) -> Vec<(Location, UnaryOp)> {
         let mut stack: Vec<(Location, UnaryOp)> = Vec::new();
         loop {
             match self.peek() {
@@ -1453,13 +1466,12 @@ impl Parser<'_> {
                     let loc = self.advance_with();
                     stack.push((loc, UnaryOp::Not));
                 },
-                _ => break
+                _ => return stack
             }
         }
+    }
 
-        let mut expr: Expr = self.parse_expr_1_terminal();
-
-        // Suffix operators
+    fn parse_expr_2_suffix_operators(self: &mut Self, mut expr: Expr) -> Expr {
         loop {
             // The opening token of a suffix operator must be on the same line
             match self.peek_no_newline() {
@@ -1547,6 +1559,27 @@ impl Parser<'_> {
                     self.expect(CloseSquareBracket);
                     expr = expr.slice_step(loc_start | self.prev_location(), arg1, arg2, arg3);
                 },
+
+                // This is a collection of syntax elements that would be otherwise invalid in an expression at this point, but form a legal `expr-1-terminal`
+                // As a result, we have an expression, followed by a space (no line break), followed by another terminal expression
+                // So, we interpret it `a b` as `a (b)`
+                // This is consistent with how we handle partial operators in function evaluation, for example, `map (>0)` is a shorthand for `map((>0))`
+                //
+                // Note 1: We have to avoid parsing into a `max =` or `min =` here
+                // We would see `a max =` and interpret it as `a ( max )` and then fail on the `=`
+                // In general, if we see a identifier, followed by equals, this can never be legal, as the left hand side would be a function evaluation
+                //
+                // Note 2: We have to be careful about accepting `fn` tokens here:
+                // If we have a decorator, like `@ a fn`, we need to be aware of the fact the decorator will try and parse the function.
+                // In some situations, this might be fine, but the rest of the parser is not designed to handle it - it will expect a function, not a expression which `a fn() { ... }` translates to `a ( fn() { ... } )` - which is exactly what the decorator would do anyway.
+                // todo: add `KeywordFn` and handle the above complications. For now we don't allow `fn` as a bare eval argument to avoid this problem
+                Some(Identifier(_)) if self.peek2() != Some(&Equals) => {
+                    expr = self.parse_expr_2_bare_suffix(expr);
+                },
+                Some(KeywordNil | KeywordTrue | KeywordFalse | KeywordExit | IntLiteral(_) | StringLiteral(_) | At | KeywordIf) => {
+                    expr = self.parse_expr_2_bare_suffix(expr);
+                },
+
                 _ => match self.peek() { // Re-match, since this is allowed to break over newlines
                     Some(Arrow) => {
                         if let Some((loc, field_index)) = self.parse_expr_2_field_access() {
@@ -1557,13 +1590,13 @@ impl Parser<'_> {
                 }
             }
         }
-
-        // Prefix operators are lower precedence than suffix operators
-        for (loc, op) in stack.into_iter().rev() {
-            expr = expr.unary(loc, op)
-        }
-
         expr
+    }
+
+    fn parse_expr_2_bare_suffix(self: &mut Self, expr: Expr) -> Expr {
+        let loc_start = self.next_location();
+        let arg = self.parse_expr_1_terminal();
+        expr.eval(loc_start | self.prev_location(), vec![arg], false)
     }
 
     fn parse_expr_2_unary_function_call(self: &mut Self, loc_start: Location, expr: Expr) -> Expr {
@@ -1990,6 +2023,7 @@ mod tests {
 
     #[test] fn test_array_access_after_newline() { run("array_access_after_newline"); }
     #[test] fn test_array_access_no_newline() { run("array_access_no_newline"); }
+    #[test] fn test_bare_eval() { run("bare_eval"); }
     #[test] fn test_break_past_locals() { run("break_past_locals"); }
     #[test] fn test_constants() { run("constants"); }
     #[test] fn test_continue_past_locals() { run("continue_past_locals"); }

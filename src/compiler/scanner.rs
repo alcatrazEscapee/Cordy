@@ -69,7 +69,7 @@ pub enum ScanToken {
     // Special
     Identifier(String),
     StringLiteral(String),
-    Int(i64),
+    IntLiteral(i64),
 
     // Keywords
     KeywordLet,
@@ -213,12 +213,12 @@ impl<'a> Scanner<'a> {
                                 Some(e @ ('a'..='z' | 'A'..='Z' | '0'..='9' | '_')) => self.push_err(1, InvalidNumericPrefix(e)),
                                 Some(_) => {
                                     // Don't consume, as this isn't part of the number, just a '0' literal followed by some other syntax
-                                    self.push(1, Int(0));
+                                    self.push(1, IntLiteral(0));
                                 },
                                 None => {
                                     // The last element in the input is `0`, so still emit `Int(0)`
                                     self.advance();
-                                    self.push(1, Int(0));
+                                    self.push(1, IntLiteral(0));
                                 },
                             }
                        }
@@ -453,7 +453,7 @@ impl<'a> Scanner<'a> {
         let string: String = buffer.iter().collect();
         let len: usize = string.len();
         match i64::from_str_radix(string.as_str(), radix) {
-            Ok(value) => self.push(len, Int(value)),
+            Ok(value) => self.push(len, IntLiteral(value)),
             Err(e) => self.push_err(len, InvalidNumericValue(e))
         }
     }
@@ -534,9 +534,9 @@ mod tests {
     #[test] fn test_identifiers() { run_str("foobar big_bad_wolf ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz", vec![Identifier(String::from("foobar")), Identifier(String::from("big_bad_wolf")), Identifier(String::from("ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz"))]); }
     #[test] fn test_str_literals() { run_str("'abc' 'a \n 3' '\\''", vec![StringLiteral(String::from("abc")), NewLine, StringLiteral(String::from("a \n 3")), StringLiteral(String::from("'"))]); }
     #[test] fn test_str_escaping() { run_str("'\\.' '\\\\.' '\\n' '\\\\n'", vec![StringLiteral(String::from("\\.")), StringLiteral(String::from("\\.")), StringLiteral(String::from("\n")), StringLiteral(String::from("\\n"))]); }
-    #[test] fn test_ints() { run_str("1234 654 10_00_00 0 1", vec![Int(1234), Int(654), Int(100000), Int(0), Int(1)]); }
-    #[test] fn test_binary_ints() { run_str("0b11011011 0b0 0b1 0b1_01", vec![Int(0b11011011), Int(0b0), Int(0b1), Int(0b101)]); }
-    #[test] fn test_hex_ints() { run_str("0x12345678 0xabcdef90 0xABCDEF 0xF_f", vec![Int(0x12345678), Int(0xabcdef90), Int(0xABCDEF), Int(0xFF)])}
+    #[test] fn test_ints() { run_str("1234 654 10_00_00 0 1", vec![IntLiteral(1234), IntLiteral(654), IntLiteral(100000), IntLiteral(0), IntLiteral(1)]); }
+    #[test] fn test_binary_ints() { run_str("0b11011011 0b0 0b1 0b1_01", vec![IntLiteral(0b11011011), IntLiteral(0b0), IntLiteral(0b1), IntLiteral(0b101)]); }
+    #[test] fn test_hex_ints() { run_str("0x12345678 0xabcdef90 0xABCDEF 0xF_f", vec![IntLiteral(0x12345678), IntLiteral(0xabcdef90), IntLiteral(0xABCDEF), IntLiteral(0xFF)])}
     #[test] fn test_unary_operators() { run_str("- !", vec![Minus, Not]); }
     #[test] fn test_comparison_operators() { run_str("> < >= > = <= < =", vec![GreaterThan, LessThan, GreaterThanEquals, GreaterThan, Equals, LessThanEquals, LessThan, Equals]); }
     #[test] fn test_equality_operators() { run_str("!= ! = == =", vec![NotEquals, Not, Equals, DoubleEquals, Equals]); }

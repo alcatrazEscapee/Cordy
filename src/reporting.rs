@@ -459,7 +459,7 @@ impl AsError for ScanToken {
         match &self {
             ScanToken::Identifier(s) => format!("identifier \'{}\'", s),
             ScanToken::StringLiteral(s) => format!("string '{}'", s),
-            ScanToken::Int(i) => format!("integer '{}'", i),
+            ScanToken::IntLiteral(i) => format!("integer '{}'", i),
 
             ScanToken::KeywordLet => String::from("'let' keyword"),
             ScanToken::KeywordFn => String::from("'fn' keyword"),
