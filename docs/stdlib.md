@@ -445,6 +445,35 @@ Possible signatures:
 
 Returns the elements from `it` in a sorted ascending order, either by the key function `key`, or by the comparator function `cmp`, depending on the number of arguments required by `key` / `cmp`.
 
+### Group By <T, K> group_by(by: int | fn(T) -> K, it: iterable<T>) -> list<vector<T>> | dict<K, vector<T>>
+
+Possible signatures:
+
+- `<T> group_by(by: int, it: iterable<T>) -> list<vector<T>>`
+- `<T, K> group_by(by: fn(T) -> K, it: iterable<T>) -> dict<K, vector<T>>`
+
+When invoked with an int as the argument to `by`, this will return a list of groups (vectors) of length `by` from `it`, until it is exhausted. If the length of `it` does not perfectly divide `by`, the last group will contain the remainder.
+
+**Example**
+
+```
+>>> [1, 2, 3, 4, 5, 6] . group_by(2)
+[(1, 2), (3, 4), (5, 6)]
+>>> [1, 2, 3, 4, 5] . group_by(3)
+[(1, 2, 3), (4, 5)]
+```
+
+When invoked with a function as the argument to `by`, this will instead use the function on each element of the iterable as a key extractor. It will then create a dictionary mapping each key to its value.
+
+**Example**
+
+```
+>>> [1, 2, 3, 4, 5] . group_by(%3)
+{1: (1, 4), 2: (2, 5), 0: (3)}
+>> [1, 2, 3, 4, 5] . group_by(fn(x) -> if x % 2 == 0 then 'even' else 'odd')
+{'odd': (1, 3, 5), 'even': (2, 4)}
+```
+
 ### Reverse `<A> reverse(it: iterable<A>) -> list<A>`
 
 Returns a list of the elements in `it`, in reverse order.

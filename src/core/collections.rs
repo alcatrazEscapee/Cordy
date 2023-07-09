@@ -1,5 +1,6 @@
 use std::cmp::{Ordering, Reverse};
 use std::collections::VecDeque;
+use indexmap::IndexMap;
 
 use itertools::Itertools;
 
@@ -168,7 +169,7 @@ pub fn sort(args: impl Iterator<Item=Value>) -> ValueResult {
     Ok(sorted.into_iter().to_list())
 }
 
-pub fn sort_by<VM>(vm: &mut VM, by: Value, args: Value) -> ValueResult where VM : VirtualInterface {
+pub fn sort_by<VM : VirtualInterface>(vm: &mut VM, by: Value, args: Value) -> ValueResult {
     let mut sorted: Vec<Value> = args.as_iter()?.collect::<Vec<Value>>();
     match by.unbox_func_args() {
         Some(Some(2)) => {
@@ -188,6 +189,46 @@ pub fn sort_by<VM>(vm: &mut VM, by: Value, args: Value) -> ValueResult where VM 
         None => return TypeErrorArgMustBeFunction(by).err(),
     }
     Ok(sorted.into_iter().to_list())
+}
+
+pub fn group_by<VM : VirtualInterface>(vm: &mut VM, by: Value, args: Value) -> ValueResult {
+    let iter = args.as_iter()?;
+    Ok(match by {
+        Int(i) => {
+            // `group_by(n, iter) will return a list of vectors of `n` values each. Last value will have whatever, instead of raising an error
+            if i <= 0 {
+                return ValueErrorValueMustBePositive(i).err()
+            }
+            let size: usize = i as usize;
+            let mut groups: VecDeque<Value> = VecDeque::with_capacity(1 + iter.len() / size); // Accurate guess
+            let mut group: Vec<Value> = Vec::with_capacity(size);
+            for value in iter {
+                group.push(value);
+                if group.len() == size {
+                    groups.push_back(group.to_value());
+                    group = Vec::with_capacity(size);
+                }
+            }
+            if !group.is_empty() {
+                groups.push_back(group.to_value());
+            }
+            groups.to_value()
+        },
+        _ => {
+            // Otherwise, we assume this is a group_by(f), in which case we assume the function to be a item -> key, and create a dictionary of keys -> vector of values
+            // For capacity, we guess that we're halving. That seems to be a reasonable compromise between overestimating, and optimal values.
+            let mut groups: IndexMap<Value, Value> = IndexMap::with_capacity(iter.len() / 2);
+            for value in iter {
+                let key = vm.invoke_func1(by.clone(), value.clone())?;
+                match groups.entry(key)
+                    .or_insert_with(|| Vec::new().to_value()) {
+                    Vector(it) => it.unbox_mut().push(value),
+                    _ => panic!("Expected only vectors"),
+                }
+            }
+            groups.to_value()
+        }
+    })
 }
 
 pub fn reverse(args: impl Iterator<Item=Value>) -> ValueResult {
