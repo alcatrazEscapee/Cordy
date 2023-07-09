@@ -41,7 +41,6 @@ impl ParserError {
             ExpectedUnderscoreOrVariableNameAfterVariadicInPattern(it) |
             ExpectedUnderscoreOrVariableNameOrPattern(it) |
             ExpectedAnnotationOrNamedFunction(it) |
-            ExpectedAnnotationOrAnonymousFunction(it) |
             ExpectedStructNameAfterStruct(it) |
             ExpectedFieldNameAfterArrow(it) => it.is_none(),
 
@@ -97,7 +96,6 @@ pub enum ParserErrorType {
     ExpectedUnderscoreOrVariableNameAfterVariadicInPattern(Option<ScanToken>),
     ExpectedUnderscoreOrVariableNameOrPattern(Option<ScanToken>),
     ExpectedAnnotationOrNamedFunction(Option<ScanToken>),
-    ExpectedAnnotationOrAnonymousFunction(Option<ScanToken>),
     ExpectedStructNameAfterStruct(Option<ScanToken>),
     ExpectedFieldNameAfterArrow(Option<ScanToken>),
 
