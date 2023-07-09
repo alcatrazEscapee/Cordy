@@ -160,6 +160,20 @@ Alternatively, single-argument functions can be invoked with the `.` operator, w
 'hello' . foo
 ```
 
+Finally, functions can also be evaluated, one argument at a time, left associatively, simply by adjacent whitespace (but not newline!) seperated arguments after the function:
+
+```rust
+// same as writing `foo(1)(2)(3)`, which is the same as `foo(1, 2, 3)` if `foo` returns partial functions for the first two arguments
+foo 1 2 3
+```
+
+Note that this is not always possible, and if it would be ambiguous with some other syntax, that is universally preferred. For example:
+
+```rust
+foo [1] // Evaluates to `foo[1]`, not `foo([1])`
+foo [1, 2] // Syntax error - not a valid index or slice.
+```
+
 #### Partial Functions
 
 Functions can be *partially evaluated*, that is, if a function is evaluated with less than the required number of arguments, it returns a new function which can be evaluated with the remaining arguments:
@@ -455,7 +469,7 @@ a = b, c = (1, 2) // assigns a = (1, 2), b = 1, c = 2
 
 ### Decorators
 
-Functions can optionally be *decorated*, which is a way to modify the function in-place, without having to reassign to it. A decorator consists of a `@` followed by an expression, before the function is declared:
+Named functions can optionally be *decorated*, which is a way to modify the function in-place, without having to reassign to it. A decorator consists of a `@` followed by an expression, before the function is declared:
 
 ```rust
 @memoize

@@ -1288,9 +1288,9 @@ mod test {
     #[test] fn test_arrow_functions_19() { run_str("fn foo() { fn bar() -> 3 ; bar } ; foo() . repr . print", "fn bar()\n"); }
     #[test] fn test_arrow_functions_20() { run_str("fn foo() { fn bar() -> 3 ; bar } ; foo()() . print", "3\n"); }
     #[test] fn test_annotation_named_func_with_name() { run_str("fn par(f) -> (fn(x) -> f('hello')) ; @par fn foo(x) -> print(x) ; foo('goodbye')", "hello\n"); }
-    #[test] fn test_annotation_expression_func_with_name() { run_str("fn par(f) -> (fn(x) -> f('hello')) ; (@par fn(x) -> print(x))('goodbye')", "hello\n"); }
     #[test] fn test_annotation_named_func_with_expression() { run_str("fn par(a, f) -> (fn(x) -> f(a)) ; @par('hello') fn foo(x) -> print(x) ; foo('goodbye')", "hello\n"); }
-    #[test] fn test_annotation_expression_func_with_expression() { run_str("fn par(a, f) -> (fn(x) -> f(a)) ; (@par('hello') fn(x) -> print(x))('goodbye')", "hello\n"); }
+    #[test] fn test_annotation_expression_func_with_name() { run_str("fn par(f) -> (fn(x) -> f('hello')) ; par(fn(x) -> print(x))('goodbye')", "hello\n"); }
+    #[test] fn test_annotation_expression_func_with_expression() { run_str("fn par(a, f) -> (fn(x) -> f(a)) ; par('hello', fn(x) -> print(x))('goodbye')", "hello\n"); }
     #[test] fn test_annotation_iife() { run_str("fn iife(f) -> f() ; @iife fn foo() -> print('hello')", "hello\n"); }
     #[test] fn test_function_call_on_list() { run_str("'hello' . [0] . print", "h\n"); }
     #[test] fn test_function_compose_on_list() { run_str("[-1]('hello') . print", "o\n"); }

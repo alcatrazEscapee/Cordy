@@ -408,7 +408,6 @@ impl AsError for ParserError {
             ParserErrorType::ExpectedUnderscoreOrVariableNameAfterVariadicInPattern(e) => format!("Expected a name or '_' after '*' in a pattern variable, got {} instead", e.as_error()),
             ParserErrorType::ExpectedUnderscoreOrVariableNameOrPattern(e) => format!("Expected a variable binding, either a name, or '_', or pattern (i.e. 'x, (_, y), *z'), got {} instead", e.as_error()),
             ParserErrorType::ExpectedAnnotationOrNamedFunction(e) => format!("Expected another decorator, or a named function after decorator, got {} instead", e.as_error()),
-            ParserErrorType::ExpectedAnnotationOrAnonymousFunction(e) => format!("Expected another decorator, or an expression function after decorator, got {} instead", e.as_error()),
             ParserErrorType::ExpectedStructNameAfterStruct(e) => format!("Expected a struct name after 'struct' keyword, got {} instead", e.as_error()),
             ParserErrorType::ExpectedFieldNameAfterArrow(e) => format!("Expected a field name after '->', got {} instead", e.as_error()),
 

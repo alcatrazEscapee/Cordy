@@ -163,7 +163,7 @@ impl<'a> Parser<'a> {
     /// **Important**: Must only be called once `peek()` has identified an `Int` token is present, as this will panic otherwise.
     pub fn take_int(self: &mut Self) -> i64 {
         match self.advance() {
-            Some(ScanToken::IntLiteral(i)) => i,
+            Some(IntLiteral(i)) => i,
             t => panic!("Token mismatch in advance_int() -> expected an Some(Int(i64)), got a {:?} instead", t)
         }
     }

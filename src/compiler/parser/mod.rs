@@ -393,24 +393,6 @@ impl Parser<'_> {
         self.emit_closure_and_closed_locals(closed_locals);
     }
 
-    fn parse_annotated_expression_function(self: &mut Self) -> Expr {
-        trace::trace_parser!("rule <annotated-expression-function");
-
-        self.push_delayed_pop();
-        let loc_start = self.advance_with(); // Consume `@`
-        let func = self.parse_expr_top_level(); // The annotation body
-        let loc_end = self.prev_location();
-        let arg = match self.peek() {
-            Some(At) => self.parse_annotated_expression_function(),
-            Some(KeywordFn) => self.parse_expression_function(),
-            _ => {
-                self.error_with(ExpectedAnnotationOrAnonymousFunction);
-                Expr::nil()
-            },
-        };
-        func.eval(loc_start | loc_end, vec![arg], false) // Evaluate the annotation
-    }
-
     fn parse_expression_function(self: &mut Self) -> Expr {
         trace::trace_parser!("rule <expression-function>");
 
@@ -1108,7 +1090,6 @@ impl Parser<'_> {
             },
             Some(OpenSquareBracket) => self.parse_expr_1_list_or_slice_literal(),
             Some(OpenBrace) => self.parse_expr_1_dict_or_set_literal(),
-            Some(At) => self.parse_annotated_expression_function(),
             Some(KeywordFn) => self.parse_expression_function(),
             Some(KeywordIf) => self.parse_expr_1_inline_if_then_else(),
             _ => {
