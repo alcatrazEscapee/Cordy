@@ -5,11 +5,11 @@ L1: 0000 Nil
     0004 JumpIfFalsePop(11)
     0005 StoreLocal(0) -> x
     0006 Pop
-L2: 0007 Str(1) -> "hello"
+L2: 0007 Str('hello')
     0008 Pop
 L3: 0009 Jump(14)
 L4: 0010 Jump(3)
     0011 PopN(2)
-L5: 0012 Str(2) -> "world"
+L5: 0012 Str('world')
 L6: 0013 Pop
     0014 Exit

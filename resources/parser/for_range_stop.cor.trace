@@ -1,16 +1,16 @@
 L1: 0000 Nil
-    0001 NativeFunction(Range)
-    0002 Int(2) -> 10
-    0003 OpFuncEval(1)
+    0001 Range
+    0002 Int(10)
+    0003 Call(1)
     0004 InitIterable
     0005 TestIterable
     0006 JumpIfFalsePop(15)
     0007 StoreLocal(0) -> i
     0008 Pop
 L2: 0009 PushLocal(0) -> i
-    0010 NativeFunction(Print)
+    0010 Print
     0011 Swap
-    0012 OpFuncEval(1)
+    0012 Call(1)
 L3: 0013 Pop
     0014 Jump(5)
     0015 PopN(2)

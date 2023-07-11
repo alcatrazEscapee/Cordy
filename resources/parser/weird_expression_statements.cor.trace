@@ -1,11 +1,11 @@
-L1: 0000 Str(1) -> "hello"
-    0001 NativeFunction(Print)
+L1: 0000 Str('hello')
+    0001 Print
     0002 Swap
-    0003 OpFuncEval(1)
+    0003 Call(1)
     0004 Pop
-L2: 0005 Str(2) -> "world"
-    0006 NativeFunction(Print)
+L2: 0005 Str('world')
+    0006 Print
     0007 Swap
-    0008 OpFuncEval(1)
+    0008 Call(1)
     0009 Pop
     0010 Exit

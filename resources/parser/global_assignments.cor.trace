@@ -4,22 +4,22 @@ L1: 0000 IncGlobalCount
     0003 Nil
     0004 Nil
     0005 Nil
-L2: 0006 Int(1) -> 1
+L2: 0006 Int(1)
     0007 StoreGlobal(0) -> x
     0008 Pop
 L3: 0009 PushGlobal(0) -> x
-    0010 Int(2) -> 5
-    0011 Binary(Add)
+    0010 Int(5)
+    0011 Add
     0012 StoreGlobal(1) -> y
     0013 Pop
 L4: 0014 PushGlobal(2) -> z
     0015 PushGlobal(0) -> x
-    0016 Binary(Mul)
+    0016 Mul
     0017 StoreGlobal(2) -> z
     0018 Pop
 L5: 0019 PushGlobal(0) -> x
     0020 PushGlobal(2) -> z
-    0021 Binary(Sub)
+    0021 Sub
     0022 StoreGlobal(0) -> x
     0023 Pop
     0024 PopN(3)

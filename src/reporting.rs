@@ -6,8 +6,6 @@ use crate::core::NativeFunction;
 use crate::vm::{FunctionImpl, RuntimeError, StructTypeImpl, Value};
 use crate::vm::operator::{BinaryOp, UnaryOp};
 
-pub type Locations = Vec<Location>;
-
 
 /// `Location` represents a position in the source code.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -342,7 +340,7 @@ impl AsError for StructTypeImpl {
 impl AsError for UnaryOp {
     fn as_error(self: &Self) -> String {
         String::from(match self {
-            UnaryOp::Minus => "-",
+            UnaryOp::Neg => "-",
             UnaryOp::Not => "!",
         })
     }
@@ -459,6 +457,7 @@ impl AsError for ScanToken {
             ScanToken::Identifier(s) => format!("identifier \'{}\'", s),
             ScanToken::StringLiteral(s) => format!("string '{}'", s),
             ScanToken::IntLiteral(i) => format!("integer '{}'", i),
+            ScanToken::ComplexLiteral(i) => format!("complex integer '{}'", i),
 
             ScanToken::KeywordLet => String::from("'let' keyword"),
             ScanToken::KeywordFn => String::from("'fn' keyword"),
@@ -664,4 +663,6 @@ mod tests {
 
         assert_eq!(error.as_str(), expected);
     }
+
+    #[test] fn test_layout() { assert_eq!(16, std::mem::size_of::<Location>()); }
 }

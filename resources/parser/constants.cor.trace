@@ -1,18 +1,18 @@
-L1: 0000 Str(1) -> "hello"
-    0001 Int(1) -> 1
+L1: 0000 Str('hello')
+    0001 Int(1)
     0002 Swap
-    0003 OpFuncEval(1)
-    0004 Str(1) -> "hello"
+    0003 Call(1)
+    0004 Str('hello')
     0005 Swap
-    0006 OpFuncEval(1)
-    0007 Int(1) -> 1
+    0006 Call(1)
+    0007 Int(1)
     0008 Swap
-    0009 OpFuncEval(1)
-    0010 Str(1) -> "hello"
+    0009 Call(1)
+    0010 Str('hello')
     0011 Swap
-    0012 OpFuncEval(1)
-    0013 Int(1) -> 1
+    0012 Call(1)
+    0013 Int(1)
     0014 Swap
-    0015 OpFuncEval(1)
+    0015 Call(1)
     0016 Pop
     0017 Exit

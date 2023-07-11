@@ -12,6 +12,7 @@ The primitive types in Cordy are:
 - `nil` (The absence of a value)
 - A boolean (`bool`), which can take the values `true` and `false`.
 - `int`, which is a 64-bit integer. It can be expressed as decimal numbers (`5`), binary (`0b101`), or hexadecimal (`0x5`).
+- `complex`, which is a pair of 64-bit integers, with a real and imaginary part. Imaginary int literals can be expressed as any integer literal followed by an `i` or `j`.
 - `str`, which is a UTF-8 string. Like Python, there is no separate `char` data type, instead a string is a sequence of single element strings.
 
 All primitive types are **immutable**. In addition to these, Cordy has a number of [Collection Types](#collection-types), and allows the creation of basic user defined types in the form of [Structs](#structs).
@@ -23,9 +24,10 @@ Expressions in Cordy are similar to C style languages. Cordy has a number of mat
 - `+`, `-`, `*`, `/`: Addition, Subtraction, Multiplication, and Division.
   - Note: multiplying a `str` and an `int` repeats the string by the int number of times, as in Python.
   - Note: addition with `str` will convert other arguments to a string and concatenate them.
-  - Division for integers with a remainder rounds to negative infinity, and obeys the relation `-(a / b) == -a / b == a / -b` when it comes to negative operands.
+  - `/` for integers and complex numbers is floor division, rounding to negative infinity.
 - `a ** b` computes a raised to the power of b.
 - `a % b` computes the mathematical modulo `a mod b`, and will always return a value in `[0, b)`.
+  - When `a` is a string, this behaves like Python's string formatting `%` operator.
 - `&`, `|`, and `^` are bitwise AND, OR, and XOR, respectively. `<<` and `>>` are left and right shifts.
   - Shifts be negative values shift in reverse, so `1 >> -3` is `8`.
 - `!` computes a logical not of boolean inputs, or a bitwise not of integer inputs.
@@ -34,7 +36,7 @@ Expressions in Cordy are similar to C style languages. Cordy has a number of mat
   - Note: different types will always compare as equal ordering.
 - `if condition then value_if_true else value_if_false` is a short-circuiting ternary operator.
   - Note that all boolean comparisons will take the truthy value of it's argument. `nil`, `0`, `false`, `''`, empty collections, and empty `range` and `enumerate` types are the only falsy values, everything else is truthy.
-- `is` is an operator used to check the type of a value.
+- `is` (along with `is not`) is an operator used to check the type of a value.
 - `in` (along with `not in`) is a special operator used for checking membership in collections, or substrings.
 - `max=` and `min=` are special cases of the builtin functions `max` and `min`, expressed as an assignment operator. `a max= b` is semantically equivalent to `a = if b > a then b else a`, similar for `min=`.
 
@@ -47,7 +49,7 @@ All operators are left associative (except `=` for assigning variables). Their p
 |------------|------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------|
 | 1          | `[]`, `()`, `if then else`                                                                     | Array Access, Function Evaluation, Ternary `if`                                        |
 | 2          | `-`, `!`, `~`, `->`                                                                            | Unary Negation, Logical Not, Bitwise Not, Struct Access                                |
-| 3          | `*`, `/`, `%`, `**`, `is`, `is not`, in`, `not in`                                             | Multiplication, Division, Modulo, Power, Is, Is Not, In, Not In                        |
+| 3          | `*`, `/`, `%`, `**`, `is`, `is not`, `in`, `not in`                                            | Multiplication, Division, Modulo, Power, Is, Is Not, In, Not In                        |
 | 4          | `+`, `-`                                                                                       | Addition, Subtraction                                                                  |
 | 5          | `<<`, `>>`                                                                                     | Left Shift, Right Shift                                                                |
 | 6          | `&`, `∣`, `^`                                                                                  | Bitwise AND, Bitwise OR, Bitwise XOR                                                   |

@@ -1,5 +1,4 @@
 use std::collections::VecDeque;
-use std::rc::Rc;
 
 use crate::compiler::{CompileParameters, CompileResult};
 use crate::compiler::parser::core::ParserState;
@@ -8,10 +7,10 @@ use crate::compiler::parser::semantic::{LateBoundGlobal, LValue, LValueReference
 use crate::compiler::parser::optimizer::Optimize;
 use crate::compiler::scanner::{ScanResult, ScanToken};
 use crate::core::NativeFunction;
-use crate::vm::{FunctionImpl, Opcode, StructTypeImpl};
+use crate::vm::{Opcode, StructTypeImpl, Value};
 use crate::vm::operator::{BinaryOp, UnaryOp};
 use crate::trace;
-use crate::reporting::{Location, Locations};
+use crate::reporting::Location;
 
 pub use crate::compiler::parser::errors::{ParserError, ParserErrorType};
 pub use crate::compiler::parser::semantic::{Fields, Locals};
@@ -20,10 +19,6 @@ use NativeFunction::{*};
 use Opcode::{*};
 use ParserErrorType::{*};
 use ScanToken::{*};
-
-
-pub(super) const RULE_REPL: ParseRule = |parser| parser.parse_incremental_repl();
-pub(super) const RULE_EVAL: ParseRule = |parser| parser.parse_incremental_eval();
 
 pub(super) type ParseRule = fn(&mut Parser) -> ();
 
@@ -51,29 +46,26 @@ pub(super) fn parse(enable_optimization: bool, scan_result: ScanResult) -> Compi
 pub(super) fn parse_incremental(scan_result: ScanResult, params: &mut CompileParameters, rule: ParseRule) -> Vec<ParserError> {
     let mut errors: Vec<ParserError> = Vec::new();
 
-    rule(&mut Parser::new(params.enable_optimization, scan_result.tokens, params.code, params.locals, params.fields, &mut errors, params.strings, params.constants, params.functions, params.structs, params.locations, &mut Vec::new(), params.globals));
+    rule(&mut Parser::new(params.enable_optimization, scan_result.tokens, params.code, &mut errors, params.constants, params.globals, params.locations, params.fields, params.locals, &mut Vec::new()));
 
     errors
 }
 
 
-fn parse_rule(enable_optimization: bool, tokens: Vec<(Location, ScanToken)>, rule: ParseRule) -> CompileResult {
+fn parse_rule(enable_optimization: bool, tokens: Vec<(Location, ScanToken)>, rule: fn(&mut Parser) -> ()) -> CompileResult {
     let mut result = CompileResult {
         code: Vec::new(),
         errors: Vec::new(),
 
-        strings: vec![String::new()],
-        constants: vec![0, 1],
-        functions: Vec::new(),
-        structs: Vec::new(),
-
-        locations: Vec::new(),
+        constants: vec![],
         globals: Vec::new(),
-        locals: Vec::new(),
+        locations: Vec::new(),
         fields: Fields::new(),
+
+        locals: Vec::new(),
     };
 
-    rule(&mut Parser::new(enable_optimization, tokens, &mut result.code, &mut Locals::empty(), &mut result.fields, &mut result.errors, &mut result.strings, &mut result.constants, &mut result.functions, &mut result.structs, &mut result.locations, &mut result.locals, &mut result.globals));
+    rule(&mut Parser::new(enable_optimization, tokens, &mut result.code, &mut result.errors, &mut result.constants, &mut result.globals, &mut result.locations, &mut result.fields, &mut Locals::empty(), &mut result.locals));
 
     result
 }
@@ -92,7 +84,7 @@ pub(super) struct Parser<'a> {
     errors: &'a mut Vec<ParserError>,
 
     /// A 1-1 mapping of the output tokens to their location
-    locations: &'a mut Locations,
+    locations: &'a mut Vec<Location>,
     last_location: Option<Location>,
 
     locals_reference: &'a mut Vec<String>, // A reference for local names on a per-instruction basis, used for disassembly
@@ -117,27 +109,37 @@ pub(super) struct Parser<'a> {
 
     /// A table of all struct fields and types. This is used to resolve `-> <name>` references at compile time, to a `field index`. At runtime it is used as a lookup to resolve a `(type index, field index)` into a `field offset`, which is used to access the underlying field.
     fields: &'a mut Fields,
-    /// A vector of all baked structs, known to the runtime. These are appended as a new struct is encountered.
-    structs: &'a mut Vec<Rc<StructTypeImpl>>,
 
     late_bound_globals: Vec<Reference<LateBoundGlobal>>, // Table of all late bound globals, as they occur.
     synthetic_local_index: usize, // A counter for unique synthetic local variables (`$1`, `$2`, etc.)
     scope_depth: u32, // Current scope depth
     function_depth: u32,
 
-    strings: &'a mut Vec<String>,
-    constants: &'a mut Vec<i64>,
+    constants: &'a mut Vec<Value>,
 
     /// List of all functions known to the parser, in their unbaked form.
     /// Note that this list is considered starting at the length of `baked_functions`
     functions: Vec<ParserFunctionImpl>,
-    baked_functions: &'a mut Vec<Rc<FunctionImpl>>,
 }
 
 
 impl Parser<'_> {
 
-    fn new<'a, 'b : 'a>(enable_optimization: bool, tokens: Vec<(Location, ScanToken)>, output: &'b mut Vec<Opcode>, locals: &'b mut Vec<Locals>, fields: &'b mut Fields, errors: &'b mut Vec<ParserError>, strings: &'b mut Vec<String>, constants: &'b mut Vec<i64>, baked_functions: &'b mut Vec<Rc<FunctionImpl>>, structs: &'b mut Vec<Rc<StructTypeImpl>>, locations: &'b mut Locations, locals_reference: &'b mut Vec<String>, globals_reference: &'b mut Vec<String>) -> Parser<'a> {
+    fn new<'a, 'b : 'a>(
+        enable_optimization: bool,
+
+        tokens: Vec<(Location, ScanToken)>,
+        output: &'b mut Vec<Opcode>,
+        errors: &'b mut Vec<ParserError>,
+
+        constants: &'b mut Vec<Value>,
+        globals_reference: &'b mut Vec<String>,
+        locations: &'b mut Vec<Location>,
+        fields: &'b mut Fields,
+
+        locals: &'b mut Vec<Locals>,
+        locals_reference: &'b mut Vec<String>,
+    ) -> Parser<'a> {
         Parser {
             enable_optimization,
 
@@ -159,17 +161,14 @@ impl Parser<'_> {
 
             locals,
             fields,
-            structs,
             late_bound_globals: Vec::new(),
 
             synthetic_local_index: 0,
             scope_depth: 0,
             function_depth: 0,
 
-            strings,
             constants,
             functions: Vec::new(),
-            baked_functions,
         }
     }
 
@@ -182,7 +181,7 @@ impl Parser<'_> {
         self.teardown();
     }
 
-    fn parse_incremental_repl(self: &mut Self) {
+    pub(super) fn parse_incremental_repl(self: &mut Self) {
         trace::trace_parser!("rule <root-incremental>");
         self.parse_statements();
         if self.delay_pop_from_expression_statement {
@@ -196,7 +195,7 @@ impl Parser<'_> {
         self.teardown();
     }
 
-    fn parse_incremental_eval(self: &mut Self) {
+    pub(super) fn parse_incremental_eval(self: &mut Self) {
         self.parse_expression();
         self.push(Return); // Insert a `Return` at the end, to return out of `eval`'s frame
         self.teardown();
@@ -221,9 +220,8 @@ impl Parser<'_> {
             }
 
             let tail: usize = self.raw_output.len() - 1;
-            let baked: Rc<FunctionImpl> = func.bake(head, tail);
 
-            self.baked_functions.push(baked);
+            func.bake(&mut self.constants, head, tail);
         }
 
         if let Some(t) = self.peek() {
@@ -298,7 +296,7 @@ impl Parser<'_> {
         }
 
         let type_name: String = match self.peek() {
-            Some(Identifier(_)) => self.take_identifier(),
+            Some(Identifier(_)) => self.advance_identifier(),
             _ => return,
         };
 
@@ -309,7 +307,7 @@ impl Parser<'_> {
         }
 
         // Declare a type index, as at this point we know we're in totally global scope, and the type name must be unique
-        let type_index: u32 = self.structs.len() as u32;
+        let type_index: u32 = self.declare_type();
         let mut unique_fields: Vec<String> = Vec::new();
 
         self.expect(OpenParen);
@@ -317,7 +315,7 @@ impl Parser<'_> {
         loop {
             match self.peek() {
                 Some(Identifier(_)) => {
-                    let name: String = self.take_identifier();
+                    let name: String = self.advance_identifier();
 
                     if unique_fields.contains(&name) {
                         self.semantic_error(DuplicateFieldName(name))
@@ -336,8 +334,8 @@ impl Parser<'_> {
             }
         }
 
-        self.push(Struct(type_index));
-        self.structs.push(Rc::new(StructTypeImpl::new(type_name, unique_fields, type_index)));
+        let id: u32 = self.declare_const(StructTypeImpl::new(type_name, unique_fields, type_index));
+        self.push(Constant(id));
 
         self.expect_resync(CloseParen);
     }
@@ -386,7 +384,7 @@ impl Parser<'_> {
             .unwrap_or_else(|| String::from("<invalid>"));
 
         let func: u32 = self.declare_function(name, &args, var_arg);
-        self.push(Opcode::Function(func));
+        self.push(Constant(func));
 
         // Emit the closed locals from the function body right away, because we are not in an expression context
         let closed_locals = self.parse_function_body(args, default_args);
@@ -412,7 +410,7 @@ impl Parser<'_> {
     fn parse_function_name(self: &mut Self) -> Option<String> {
         trace::trace_parser!("rule <function-name>");
         match self.peek() {
-            Some(Identifier(_)) => Some(self.take_identifier()),
+            Some(Identifier(_)) => Some(self.advance_identifier()),
             _ => {
                 self.error_with(ExpectedFunctionNameAfterFn);
                 None
@@ -956,7 +954,7 @@ impl Parser<'_> {
 
         match self.peek() {
             Some(Identifier(_)) => {
-                let name = self.take_identifier();
+                let name = self.advance_identifier();
                 Some(LValue::Named(LValueReference::Named(name)))
             },
             Some(Underscore) => {
@@ -967,7 +965,7 @@ impl Parser<'_> {
                 self.advance();
                 match self.peek() {
                     Some(Identifier(_)) => {
-                        let name = self.take_identifier();
+                        let name = self.advance_identifier();
                         Some(LValue::VarNamed(LValueReference::Named(name)))
                     },
                     Some(Underscore) => {
@@ -1037,26 +1035,15 @@ impl Parser<'_> {
     fn parse_expr_1_terminal(self: &mut Self) -> Expr {
         trace::trace_parser!("rule <expr-1>");
         match self.peek() {
-            Some(KeywordNil) => {
-                self.advance();
-                Expr::nil()
-            },
-            Some(KeywordTrue) => {
-                self.advance();
-                Expr::bool(true)
-            },
-            Some(KeywordFalse) => {
-                self.advance();
-                Expr::bool(false)
-            },
-            Some(KeywordExit) => {
-                self.advance();
-                Expr::exit()
-            },
-            Some(IntLiteral(_)) => Expr::int(self.take_int()),
-            Some(StringLiteral(_)) => Expr::str(self.take_str()),
+            Some(KeywordNil) => { self.advance(); Expr::nil() },
+            Some(KeywordTrue) => { self.advance(); Expr::bool(true) },
+            Some(KeywordFalse) => { self.advance(); Expr::bool(false) },
+            Some(KeywordExit) => { self.advance(); Expr::exit() },
+            Some(IntLiteral(i)) => { let i = *i; self.advance(); Expr::int(i) },
+            Some(ComplexLiteral(i)) => { let i = *i; self.advance(); Expr::complex(i) },
+            Some(StringLiteral(_)) => Expr::str(self.advance_str()),
             Some(Identifier(_)) => {
-                let name: String = self.take_identifier();
+                let name: String = self.advance_identifier();
                 let loc: Location = self.prev_location();
                 let lvalue: LValueReference = self.resolve_identifier(name);
                 Expr::lvalue(loc, lvalue)
@@ -1441,7 +1428,7 @@ impl Parser<'_> {
             match self.peek() {
                 Some(Minus) => {
                     let loc = self.advance_with();
-                    stack.push((loc, UnaryOp::Minus));
+                    stack.push((loc, UnaryOp::Neg));
                 },
                 Some(Not) => {
                     let loc = self.advance_with();
@@ -1602,7 +1589,7 @@ impl Parser<'_> {
         let loc_start = self.advance_with(); // Consume `->`
         match self.peek() {
             Some(Identifier(_)) => {
-                let field: String = self.take_identifier();
+                let field: String = self.advance_identifier();
                 match self.resolve_field(&field) {
                     Some(field_index) => return Some((loc_start | self.prev_location(), field_index)),
                     None => self.semantic_error(InvalidFieldName(field))
@@ -1934,66 +1921,81 @@ impl Parser<'_> {
 
 #[cfg(test)]
 mod tests {
+    use itertools::Itertools;
     use crate::compiler::{CompileResult, parser, scanner};
     use crate::compiler::scanner::ScanResult;
     use crate::reporting::SourceView;
-    use crate::core::NativeFunction;
     use crate::test_util;
-    use crate::vm::Opcode;
-    use crate::vm::operator::{BinaryOp, UnaryOp};
 
-    use NativeFunction::{OperatorAdd, OperatorDiv, OperatorMul, Print, ReadText};
-    use Opcode::{*};
 
-    #[test] fn test_int() { run_expr("123", vec![Int(123)]); }
-    #[test] fn test_str() { run_expr("'abc'", vec![Str(1)]); }
-    #[test] fn test_unary_minus() { run_expr("-3", vec![Int(3), Unary(UnaryOp::Minus)]); }
-    #[test] fn test_binary_mul() { run_expr("3 * 6", vec![Int(3), Int(6), Binary(BinaryOp::Mul)]); }
-    #[test] fn test_binary_div() { run_expr("20 / 4 / 5", vec![Int(20), Int(4), Binary(BinaryOp::Div), Int(5), Binary(BinaryOp::Div)]); }
-    #[test] fn test_binary_pow() { run_expr("2 ** 10", vec![Int(2), Int(10), Binary(BinaryOp::Pow)]); }
-    #[test] fn test_binary_minus() { run_expr("6 - 7", vec![Int(6), Int(7), Binary(BinaryOp::Sub)]); }
-    #[test] fn test_binary_and_unary_minus() { run_expr("15 -- 7", vec![Int(15), Int(7), Unary(UnaryOp::Minus), Binary(BinaryOp::Sub)]); }
-    #[test] fn test_binary_add_and_mod() { run_expr("1 + 2 % 3", vec![Int(1), Int(2), Int(3), Binary(BinaryOp::Mod), Binary(BinaryOp::Add)]); }
-    #[test] fn test_binary_add_and_mod_rev() { run_expr("1 % 2 + 3", vec![Int(1), Int(2), Binary(BinaryOp::Mod), Int(3), Binary(BinaryOp::Add)]); }
-    #[test] fn test_binary_shifts() { run_expr("1 << 2 >> 3", vec![Int(1), Int(2), Binary(BinaryOp::LeftShift), Int(3), Binary(BinaryOp::RightShift)]); }
-    #[test] fn test_binary_shifts_and_operators() { run_expr("1 & 2 << 3 | 5", vec![Int(1), Int(2), Int(3), Binary(BinaryOp::LeftShift), Binary(BinaryOp::And), Int(5), Binary(BinaryOp::Or)]); }
-    #[test] fn test_function_composition() { run_expr("print . read_text", vec![NativeFunction(Print), NativeFunction(ReadText), Swap, OpFuncEval(1)]); }
-    #[test] fn test_precedence_with_parens() { run_expr("(1 + 2) * 3", vec![Int(1), Int(2), Binary(BinaryOp::Add), Int(3), Binary(BinaryOp::Mul)]); }
-    #[test] fn test_precedence_with_parens_2() { run_expr("6 / (5 - 3)", vec![Int(6), Int(5), Int(3), Binary(BinaryOp::Sub), Binary(BinaryOp::Div)]); }
-    #[test] fn test_precedence_with_parens_3() { run_expr("-(1 - 3)", vec![Int(1), Int(3), Binary(BinaryOp::Sub), Unary(UnaryOp::Minus)]); }
-    #[test] fn test_function_no_args() { run_expr("print", vec![NativeFunction(Print)]); }
-    #[test] fn test_function_one_arg() { run_expr("print(1)", vec![NativeFunction(Print), Int(1), OpFuncEval(1)]); }
-    #[test] fn test_function_many_args() { run_expr("print(1,2,3)", vec![NativeFunction(Print), Int(1), Int(2), Int(3), OpFuncEval(3)]); }
-    #[test] fn test_multiple_unary_ops() { run_expr("- ! 1", vec![Int(1), Unary(UnaryOp::Not), Unary(UnaryOp::Minus)]); }
-    #[test] fn test_multiple_function_calls() { run_expr("print (1) (2) (3)", vec![NativeFunction(Print), Int(1), OpFuncEval(1), Int(2), OpFuncEval(1), Int(3), OpFuncEval(1)]); }
-    #[test] fn test_multiple_function_calls_some_args() { run_expr("print () (1) (2, 3)", vec![NativeFunction(Print), OpFuncEval(0), Int(1), OpFuncEval(1), Int(2), Int(3), OpFuncEval(2)]); }
-    #[test] fn test_multiple_function_calls_no_args() { run_expr("print () () ()", vec![NativeFunction(Print), OpFuncEval(0), OpFuncEval(0), OpFuncEval(0)]); }
-    #[test] fn test_function_call_unary_op_precedence() { run_expr("- print ()", vec![NativeFunction(Print), OpFuncEval(0), Unary(UnaryOp::Minus)]); }
-    #[test] fn test_function_call_unary_op_precedence_with_parens() { run_expr("(- print) ()", vec![NativeFunction(Print), Unary(UnaryOp::Minus), OpFuncEval(0)]); }
-    #[test] fn test_function_call_unary_op_precedence_with_parens_2() { run_expr("- (print () )", vec![NativeFunction(Print), OpFuncEval(0), Unary(UnaryOp::Minus)]); }
-    #[test] fn test_function_call_binary_op_precedence() { run_expr("print ( 1 ) + ( 2 ( 3 ) )", vec![NativeFunction(Print), Int(1), OpFuncEval(1), Int(2), Int(3), OpFuncEval(1), Binary(BinaryOp::Add)]); }
-    #[test] fn test_function_call_parens_1() { run_expr("print . read_text (1 + 3) (5)", vec![NativeFunction(Print), NativeFunction(ReadText), Int(1), Int(3), Binary(BinaryOp::Add), OpFuncEval(1), Int(5), OpFuncEval(1), Swap, OpFuncEval(1)]); }
-    #[test] fn test_function_call_parens_2() { run_expr("( print . read_text (1 + 3) ) (5)", vec![NativeFunction(Print), NativeFunction(ReadText), Int(1), Int(3), Binary(BinaryOp::Add), OpFuncEval(1), Swap, OpFuncEval(1), Int(5), OpFuncEval(1)]); }
-    #[test] fn test_function_composition_with_is() { run_expr("'123' . int is int . print", vec![Str(1), NativeFunction(NativeFunction::Int), NativeFunction(NativeFunction::Int), Binary(BinaryOp::Is), Swap, OpFuncEval(1), NativeFunction(Print), Swap, OpFuncEval(1)]); }
-    #[test] fn test_and() { run_expr("1 < 2 and 3 < 4", vec![Int(1), Int(2), Binary(BinaryOp::LessThan), JumpIfFalse(8), Pop, Int(3), Int(4), Binary(BinaryOp::LessThan)]); }
-    #[test] fn test_or() { run_expr("1 < 2 or 3 < 4", vec![Int(1), Int(2), Binary(BinaryOp::LessThan), JumpIfTrue(8), Pop, Int(3), Int(4), Binary(BinaryOp::LessThan)]); }
-    #[test] fn test_precedence_1() { run_expr("1 . 2 & 3 > 4", vec![Int(1), Int(2), Int(3), Binary(BinaryOp::And), Swap, OpFuncEval(1), Int(4), Binary(BinaryOp::GreaterThan)]); }
-    #[test] fn test_slice_01() { run_expr("1 [::]", vec![Int(1), Nil, Nil, Nil, OpSliceWithStep]); }
-    #[test] fn test_slice_02() { run_expr("1 [2::]", vec![Int(1), Int(2), Nil, Nil, OpSliceWithStep]); }
-    #[test] fn test_slice_03() { run_expr("1 [:3:]", vec![Int(1), Nil, Int(3), Nil, OpSliceWithStep]); }
-    #[test] fn test_slice_04() { run_expr("1 [::4]", vec![Int(1), Nil, Nil, Int(4), OpSliceWithStep]); }
-    #[test] fn test_slice_05() { run_expr("1 [2:3:]", vec![Int(1), Int(2), Int(3), Nil, OpSliceWithStep]); }
-    #[test] fn test_slice_06() { run_expr("1 [2::3]", vec![Int(1), Int(2), Nil, Int(3), OpSliceWithStep]); }
-    #[test] fn test_slice_07() { run_expr("1 [:3:4]", vec![Int(1), Nil, Int(3), Int(4), OpSliceWithStep]); }
-    #[test] fn test_slice_08() { run_expr("1 [2:3:4]", vec![Int(1), Int(2), Int(3), Int(4), OpSliceWithStep]); }
-    #[test] fn test_slice_09() { run_expr("1 [:]", vec![Int(1), Nil, Nil, OpSlice]); }
-    #[test] fn test_slice_10() { run_expr("1 [2:]", vec![Int(1), Int(2), Nil, OpSlice]); }
-    #[test] fn test_slice_11() { run_expr("1 [:3]", vec![Int(1), Nil, Int(3), OpSlice]); }
-    #[test] fn test_slice_12() { run_expr("1 [2:3]", vec![Int(1), Int(2), Int(3), OpSlice]); }
-    #[test] fn test_binary_ops() { run_expr("(*) * (+) + (/)", vec![NativeFunction(OperatorMul), NativeFunction(OperatorAdd), Binary(BinaryOp::Mul), NativeFunction(OperatorDiv), Binary(BinaryOp::Add)]); }
-    #[test] fn test_if_then_else() { run_expr("(if true then 1 else 2)", vec![True, JumpIfFalsePop(4), Int(1), Jump(5), Int(2)]); }
-    #[test] fn test_zero_equals_zero() { run_expr("0 == 0", vec![Int(0), Int(0), Binary(BinaryOp::Equal)]); }
-    #[test] fn test_zero_equals_zero_no_spaces() { run_expr("0==0", vec![Int(0), Int(0), Binary(BinaryOp::Equal)]); }
+    #[test] fn test_nil() { run_expr("nil", "Nil") }
+    #[test] fn test_true() { run_expr("true", "True") }
+    #[test] fn test_false() { run_expr("false", "False") }
+    #[test] fn test_int() { run_expr("123", "Int(123)") }
+    #[test] fn test_imaginary() { run_expr("123i", "Complex(123i)") }
+    #[test] fn test_complex() { run_expr("123 + 456i", "Int(123) Complex(456i) Add") }
+    #[test] fn test_str() { run_expr("'abc'", "Str('abc')") }
+    #[test] fn test_print() { run_expr("print", "Print") }
+    #[test] fn test_unary_neg() { run_expr("-3", "Int(3) Neg") }
+    #[test] fn test_unary_not() { run_expr("!!3", "Int(3) Not Not") }
+    #[test] fn test_binary_mul() { run_expr("1 * 2", "Int(1) Int(2) Mul") }
+    #[test] fn test_binary_div() { run_expr("1 / 2 / 3", "Int(1) Int(2) Div Int(3) Div") }
+    #[test] fn test_binary_mul_div() { run_expr("1 * 2 / 3", "Int(1) Int(2) Mul Int(3) Div") }
+    #[test] fn test_binary_mul_add() { run_expr("1 * 2 + 3", "Int(1) Int(2) Mul Int(3) Add") }
+    #[test] fn test_binary_mul_add_left_parens() { run_expr("(1 * 2) + 3", "Int(1) Int(2) Mul Int(3) Add") }
+    #[test] fn test_binary_mul_add_right_parens() { run_expr("1 * (2 + 3)", "Int(1) Int(2) Int(3) Add Mul") }
+    #[test] fn test_binary_add_mul() { run_expr("1 + 2 * 3", "Int(1) Int(2) Int(3) Mul Add") }
+    #[test] fn test_binary_add_mul_left_parens() { run_expr("(1 + 2) * 3", "Int(1) Int(2) Add Int(3) Mul") }
+    #[test] fn test_binary_add_mul_right_parens() { run_expr("1 + (2 * 3)", "Int(1) Int(2) Int(3) Mul Add") }
+    #[test] fn test_binary_add_mod() { run_expr("1 + 2 % 3", "Int(1) Int(2) Int(3) Mod Add") }
+    #[test] fn test_binary_mod_add() { run_expr("1 % 2 + 3", "Int(1) Int(2) Mod Int(3) Add") }
+    #[test] fn test_binary_lsh_rhs_or() { run_expr("1 << 2 >> 3 | 4", "Int(1) Int(2) LeftShift Int(3) RightShift Int(4) Or") }
+    #[test] fn test_binary_rhs_lhs_and() { run_expr("1 >> 2 << 3 & 4", "Int(1) Int(2) RightShift Int(3) LeftShift Int(4) And") }
+    #[test] fn test_binary_is() { run_expr("1 is 2", "Int(1) Int(2) Is") }
+    #[test] fn test_binary_is_not() { run_expr("1 is not 2", "Int(1) Int(2) IsNot") }
+    #[test] fn test_binary_in() { run_expr("1 in 2", "Int(1) Int(2) In") }
+    #[test] fn test_binary_not_in() { run_expr("1 not in 2", "Int(1) Int(2) NotIn") }
+    #[test] fn test_binary_and() { run_expr("1 and 2", "Int(1) JumpIfFalse(4) Pop Int(2)"); }
+    #[test] fn test_binary_and_or() { run_expr("1 and (2 or 3)", "Int(1) JumpIfFalse(7) Pop Int(2) JumpIfTrue(7) Pop Int(3)"); }
+    #[test] fn test_binary_or() { run_expr("1 or 2", "Int(1) JumpIfTrue(4) Pop Int(2)"); }
+    #[test] fn test_binary_or_and() { run_expr("1 or (2 and 3)", "Int(1) JumpIfTrue(7) Pop Int(2) JumpIfFalse(7) Pop Int(3)"); }
+    #[test] fn test_binary_equal() { run_expr("1 == 2", "Int(1) Int(2) Equal") }
+    #[test] fn test_binary_equal_add() { run_expr("1 == 2 + 3", "Int(1) Int(2) Int(3) Add Equal") }
+    #[test] fn test_function_call_no_args() { run_expr("print()", "Print Call(0)") }
+    #[test] fn test_function_call_one_arg() { run_expr("print(1)", "Print Int(1) Call(1)") }
+    #[test] fn test_function_call_many_args() { run_expr("print(1, 2, 3)", "Print Int(1) Int(2) Int(3) Call(3)") }
+    #[test] fn test_function_call_unroll() { run_expr("print(...1)", "Print Int(1) Unroll Call...(1)") }
+    #[test] fn test_function_call_many_unroll() { run_expr("print(...1, 2, ...3)", "Print Int(1) Unroll Int(2) Int(3) Unroll Call...(3)") }
+    #[test] fn test_function_call_bare() { run_expr("print 1", "Print Int(1) Call(1)") }
+    #[test] fn test_function_call_chained() { run_expr("print () ()", "Print Call(0) Call(0)") }
+    #[test] fn test_function_call_unary_op() { run_expr("! print ()", "Print Call(0) Not") }
+    #[test] fn test_function_call_unary_op_left_parens() { run_expr("(! print) ()", "Print Not Call(0)") }
+    #[test] fn test_function_call_unary_op_right_parens() { run_expr("! (print ())", "Print Call(0) Not") }
+    #[test] fn test_function_composition() { run_expr("1 . print", "Int(1) Print Swap Call(1)") }
+    #[test] fn test_function_composition_left_unary_op() { run_expr("! 1 . print", "Int(1) Not Print Swap Call(1)") }
+    #[test] fn test_function_composition_left_unary_op_left_parens() { run_expr("(! 1) . print", "Int(1) Not Print Swap Call(1)") }
+    #[test] fn test_function_composition_left_unary_op_right_parens() { run_expr("! (1 . print)", "Int(1) Print Swap Call(1) Not") }
+    #[test] fn test_function_composition_right_unary_op() { run_expr("1 . - print", "Int(1) Print Neg Swap Call(1)") }
+    #[test] fn test_function_composition_call() { run_expr("1 . 2 (3)", "Int(1) Int(2) Int(3) Call(1) Swap Call(1)") }
+    #[test] fn test_function_composition_call_left_parens() { run_expr("(1 . 2) (3)", "Int(1) Int(2) Swap Call(1) Int(3) Call(1)") }
+    #[test] fn test_function_composition_call_right_parens() { run_expr("1 . (2 (3))", "Int(1) Int(2) Int(3) Call(1) Swap Call(1)") }
+    #[test] fn test_slice_01() { run_expr("1 [::]", "Int(1) Nil Nil Nil OpSliceWithStep") }
+    #[test] fn test_slice_02() { run_expr("1 [2::]", "Int(1) Int(2) Nil Nil OpSliceWithStep") }
+    #[test] fn test_slice_03() { run_expr("1 [:3:]", "Int(1) Nil Int(3) Nil OpSliceWithStep") }
+    #[test] fn test_slice_04() { run_expr("1 [::4]", "Int(1) Nil Nil Int(4) OpSliceWithStep") }
+    #[test] fn test_slice_05() { run_expr("1 [2:3:]", "Int(1) Int(2) Int(3) Nil OpSliceWithStep") }
+    #[test] fn test_slice_06() { run_expr("1 [2::3]", "Int(1) Int(2) Nil Int(3) OpSliceWithStep") }
+    #[test] fn test_slice_07() { run_expr("1 [:3:4]", "Int(1) Nil Int(3) Int(4) OpSliceWithStep") }
+    #[test] fn test_slice_08() { run_expr("1 [2:3:4]", "Int(1) Int(2) Int(3) Int(4) OpSliceWithStep") }
+    #[test] fn test_slice_09() { run_expr("1 [:]", "Int(1) Nil Nil OpSlice") }
+    #[test] fn test_slice_10() { run_expr("1 [2:]", "Int(1) Int(2) Nil OpSlice") }
+    #[test] fn test_slice_11() { run_expr("1 [:3]", "Int(1) Nil Int(3) OpSlice") }
+    #[test] fn test_slice_12() { run_expr("1 [2:3]", "Int(1) Int(2) Int(3) OpSlice") }
+    #[test] fn test_partial_unary_ops() { run_expr("(-) (!)", "OperatorUnarySub OperatorUnaryNot Call(1)") }
+    #[test] fn test_partial_binary_ops() { run_expr("(+) ((*)) (/)", "OperatorAdd OperatorMul Call(1) OperatorDiv Call(1)") }
+    #[test] fn test_partial_binary_op_left_eval() { run_expr("(+1)", "OperatorAddSwap Int(1) Call(1)"); }
+    #[test] fn test_partial_binary_op_right_eval() { run_expr("(1+)", "OperatorAdd Int(1) Call(1)"); }
+    #[test] fn test_if_then_else() { run_expr("if true then 1 else 2", "True JumpIfFalsePop(4) Int(1) Jump(5) Int(2)")}
 
     #[test] fn test_let_eof() { run_err("let", "Expected a variable binding, either a name, or '_', or pattern (i.e. 'x, (_, y), *z'), got end of input instead\n  at: line 1 (<test>)\n\n1 | let\n2 |     ^^^\n"); }
     #[test] fn test_let_no_identifier() { run_err("let =", "Expected a variable binding, either a name, or '_', or pattern (i.e. 'x, (_, y), *z'), got '=' token instead\n  at: line 1 (<test>)\n\n1 | let =\n2 |     ^\n"); }
@@ -2058,28 +2060,21 @@ mod tests {
     #[test] fn test_while_false_if_false() { run("while_false_if_false"); }
 
 
-    fn run_expr(text: &'static str, expected: Vec<Opcode>) {
-        let result: ScanResult = scanner::scan(&SourceView::new(String::new(), String::from(text)));
-        assert!(result.errors.is_empty());
+    fn run_expr(text: &'static str, expected: &'static str) {
+        let scan: ScanResult = scanner::scan(&SourceView::new(String::new(), String::from(text)));
+        assert!(scan.errors.is_empty());
 
-        let compile = parser::parse(false, result);
-        assert!(compile.errors.is_empty(), "Found parser errors: {:?}", compile.errors);
+        let result: CompileResult = parser::parse(false, scan);
+        assert!(result.errors.is_empty(), "Found parser errors: {:?}", result.errors);
 
-        // For the purposes of the test, we perform some transformations on the 'expected' opcodes
-        // - Int tokens use the actual value, as opposed to a constant ID
-        // - Jump opcodes replace relative jumps with absolute jumps
-        // - The trailing `Pop`, `Exit` tokens are removed.
-        let constants: Vec<i64> = compile.constants;
-        let mut actual: Vec<Opcode> = compile.code.into_iter()
+        let mut locals = result.locals.iter().cloned();
+        let actual: String = result.code
+            .iter()
             .enumerate()
-            .map(|(ip, t)| match t {
-                Int(i) => Int(constants[i as usize] as u32),
-                _ => t.to_absolute_jump(ip),
-            })
-            .collect::<Vec<Opcode>>();
+            .map(|(ip, op)| op.disassembly(ip, &mut locals, &result.fields, &result.constants))
+            .join("\n");
 
-        assert_eq!(actual.pop(), Some(Exit));
-        assert_eq!(actual.pop(), Some(Pop));
+        let expected: String = format!("{}\nPop\nExit", expected.replace(" ", "\n"));
         assert_eq!(actual, expected);
     }
 

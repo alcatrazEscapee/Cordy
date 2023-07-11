@@ -70,6 +70,7 @@ pub enum ScanToken {
     Identifier(String),
     StringLiteral(String),
     IntLiteral(i64),
+    ComplexLiteral(i64),
 
     // Keywords
     KeywordLet,
@@ -210,7 +211,11 @@ impl<'a> Scanner<'a> {
                                     }
                                     self.screen_int(buffer, 2);
                                 },
-                                Some(e @ ('a'..='z' | 'A'..='Z' | '0'..='9' | '_')) => self.push_err(1, InvalidNumericPrefix(e)),
+                                Some('i' | 'j') => { // Complex literal `0i` which is equal to `0`
+                                    self.advance();
+                                    self.push(2, IntLiteral(0));
+                                }
+                                Some(e @ ('a'..='z' | 'A'..='Z' | '0'..='9' | '_')) => self.push_err(1, 2, InvalidNumericPrefix(e)),
                                 Some(_) => {
                                     // Don't consume, as this isn't part of the number, just a '0' literal followed by some other syntax
                                     self.push(1, IntLiteral(0));
@@ -408,7 +413,7 @@ impl<'a> Scanner<'a> {
                        '?' => self.push(1, QuestionMark),
                        '\\' => {}, // Discard backslashes... like a ninja
 
-                       e => self.push_err(1, InvalidCharacter(e))
+                       e => self.push_err(0, 1, InvalidCharacter(e))
                    }
                }
                None => break // eof
@@ -451,16 +456,28 @@ impl<'a> Scanner<'a> {
 
     fn screen_int(self: &mut Self, buffer: Vec<char>, radix: u32) {
         let string: String = buffer.iter().collect();
-        let len: usize = string.len();
+        let mut len: usize = string.len();
+        let is_complex: bool = match self.peek() {
+            Some('i' | 'j') => {
+                self.advance();
+                len += 1;
+                true
+            },
+            _ => false,
+        };
+        if radix != 10 {
+            len += 2; // To account for the numeric prefix
+        }
+
         match i64::from_str_radix(string.as_str(), radix) {
-            Ok(value) => self.push(len, IntLiteral(value)),
-            Err(e) => self.push_err(len, InvalidNumericValue(e))
+            Ok(value) => self.push(len, if is_complex { ComplexLiteral(value) } else { IntLiteral(value) }),
+            Err(e) => self.push_err(0, len, InvalidNumericValue(e))
         }
     }
 
 
     fn push(self: &mut Self, width: usize, token: ScanToken) {
-        self.tokens.push((self.location(width), token));
+        self.tokens.push((Location::new(self.cursor - width, width as u32, self.index), token));
     }
 
     fn push_skip(self: &mut Self, width: usize, token: ScanToken) {
@@ -468,10 +485,10 @@ impl<'a> Scanner<'a> {
         self.push(width, token);
     }
 
-    fn push_err(self: &mut Self, width: usize, error: ScanErrorType) {
+    fn push_err(self: &mut Self, offset: usize, width: usize, error: ScanErrorType) {
         self.errors.push(ScanError {
             error,
-            loc: self.location(width)
+            loc: Location::new(self.cursor - width + offset, width as u32, self.index)
         });
     }
 
@@ -510,11 +527,7 @@ impl<'a> Scanner<'a> {
 
     /// Inspects the next character and returns it, without consuming it
     fn peek(self: &mut Self) -> Option<char> {
-        self.chars.peek().map(|c| *c)
-    }
-
-    fn location(self: &Self, width: usize) -> Location {
-        Location::new(self.cursor - width, width as u32, self.index)
+        self.chars.peek().copied()
     }
 }
 
@@ -537,6 +550,7 @@ mod tests {
     #[test] fn test_ints() { run_str("1234 654 10_00_00 0 1", vec![IntLiteral(1234), IntLiteral(654), IntLiteral(100000), IntLiteral(0), IntLiteral(1)]); }
     #[test] fn test_binary_ints() { run_str("0b11011011 0b0 0b1 0b1_01", vec![IntLiteral(0b11011011), IntLiteral(0b0), IntLiteral(0b1), IntLiteral(0b101)]); }
     #[test] fn test_hex_ints() { run_str("0x12345678 0xabcdef90 0xABCDEF 0xF_f", vec![IntLiteral(0x12345678), IntLiteral(0xabcdef90), IntLiteral(0xABCDEF), IntLiteral(0xFF)])}
+    #[test] fn test_complex_ints() { run_str("0i 0j 1i 1j 0b101i 0xfi 123i", vec![IntLiteral(0), IntLiteral(0), ComplexLiteral(1), ComplexLiteral(1), ComplexLiteral(5), ComplexLiteral(0xf), ComplexLiteral(123)]); }
     #[test] fn test_unary_operators() { run_str("- !", vec![Minus, Not]); }
     #[test] fn test_comparison_operators() { run_str("> < >= > = <= < =", vec![GreaterThan, LessThan, GreaterThanEquals, GreaterThan, Equals, LessThanEquals, LessThan, Equals]); }
     #[test] fn test_equality_operators() { run_str("!= ! = == =", vec![NotEquals, Not, Equals, DoubleEquals, Equals]); }
@@ -550,6 +564,7 @@ mod tests {
 
     #[test] fn test_hello_world() { run("hello_world"); }
     #[test] fn test_invalid_character() { run("invalid_character"); }
+    #[test] fn test_invalid_numeric_prefix() { run("invalid_numeric_prefix"); }
     #[test] fn test_invalid_numeric_value() { run("invalid_numeric_value"); }
     #[test] fn test_string_with_newlines() { run("string_with_newlines"); }
     #[test] fn test_unterminated_string_literal() { run("unterminated_string_literal"); }

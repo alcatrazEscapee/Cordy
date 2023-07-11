@@ -14,7 +14,7 @@ use crate::reporting::{Location, SourceView};
 
 pub use crate::vm::error::{DetailRuntimeError, RuntimeError};
 pub use crate::vm::opcode::Opcode;
-pub use crate::vm::value::{FunctionImpl, guard_recursive_hash, IntoDictValue, IntoIterableValue, IntoValue, IntoValueResult, Iterable, LiteralType, StructTypeImpl, Value};
+pub use crate::vm::value::{FunctionImpl, guard_recursive_hash, IntoDictValue, IntoIterableValue, IntoValue, IntoValueResult, Iterable, LiteralType, StructTypeImpl, Value, C64};
 
 use Opcode::{*};
 use RuntimeError::{*};
@@ -39,11 +39,8 @@ pub struct VirtualMachine<R, W> {
     open_upvalues: HashMap<usize, Rc<Cell<UpValue>>>,
     unroll_stack: Vec<i32>,
 
-    strings: Vec<String>,
+    constants: Vec<Value>,
     globals: Vec<String>,
-    constants: Vec<i64>,
-    functions: Vec<Rc<FunctionImpl>>,
-    structs: Vec<Rc<StructTypeImpl>>,
     locations: Vec<Location>,
     fields: Fields,
 
@@ -68,6 +65,15 @@ impl ExitType {
         match self {
             ExitType::Exit | ExitType::Error(_) => true,
             _ => false,
+        }
+    }
+
+    fn of<R: BufRead, W: Write>(vm: &mut VirtualMachine<R, W>, result: AnyResult) -> ExitType {
+        match result.map_err(|e| *e) {
+            Ok(_) => ExitType::Return,
+            Err(RuntimeExit) => ExitType::Exit,
+            Err(RuntimeYield) => ExitType::Yield,
+            Err(error) => ExitType::Error(error.with_stacktrace(vm.ip - 1, &vm.call_stack, &vm.constants, &vm.locations)),
         }
     }
 }
@@ -132,11 +138,8 @@ impl<R, W> VirtualMachine<R, W> where
             open_upvalues: HashMap::new(),
             unroll_stack: Vec::new(),
 
-            strings: result.strings,
-            globals: result.globals,
             constants: result.constants,
-            functions: result.functions,
-            structs: result.structs,
+            globals: result.globals,
             locations: result.locations,
             fields: result.fields,
 
@@ -167,16 +170,18 @@ impl<R, W> VirtualMachine<R, W> where
     }
 
     fn as_compile_parameters<'a, 'b: 'a, 'c: 'a>(self: &'b mut Self, enable_optimization: bool, locals: &'c mut Vec<Locals>) -> CompileParameters<'a> {
-        CompileParameters::new(enable_optimization, &mut self.code, locals, &mut self.fields, &mut self.strings, &mut self.constants, &mut self.functions, &mut self.structs, &mut self.locations, &mut self.globals, &mut self.view)
+        CompileParameters::new(enable_optimization, &mut self.code, &mut self.constants, &mut self.globals, &mut self.locations, &mut self.fields, locals, &mut self.view)
     }
 
     pub fn run_until_completion(self: &mut Self) -> ExitType {
-        match self.run().map_err(|u| *u) {
-            Ok(_) => ExitType::Return,
-            Err(RuntimeExit) => ExitType::Exit,
-            Err(RuntimeYield) => ExitType::Yield,
-            Err(error) => ExitType::Error(error.with_stacktrace(self.ip - 1, &self.call_stack, &self.functions, &self.locations)),
-        }
+        let result = self.run();
+        ExitType::of(self, result)
+    }
+
+    #[cfg(test)]
+    pub fn run_until_completion_with_limit(self: &mut Self, limit: usize) -> ExitType {
+        let result = self.run_limit(limit);
+        ExitType::of(self, result)
     }
 
     /// Recovers the VM into an operational state, in case previous instructions terminated in an error or in the middle of a function
@@ -201,6 +206,18 @@ impl<R, W> VirtualMachine<R, W> where
 
     fn run(self: &mut Self) -> AnyResult {
         loop {
+            let op: Opcode = self.next_op();
+            self.run_instruction(op)?;
+        }
+    }
+
+    #[cfg(test)]
+    fn run_limit(self: &mut Self, mut limit: usize) -> AnyResult {
+        loop {
+            if limit == 0 {
+                panic!("Execution limit reached!");
+            }
+            limit -= 1;
             let op: Opcode = self.next_op();
             self.run_instruction(op)?;
         }
@@ -434,32 +451,12 @@ impl<R, W> VirtualMachine<R, W> where
             },
 
             // Push Operations
-            Nil => {
-                self.push(Value::Nil);
-            },
-            True => {
-                self.push(true.to_value());
-            },
-            False => {
-                self.push(false.to_value());
-            },
-            Int(cid) => {
-                let cid: usize = cid as usize;
-                let value: i64 = self.constants[cid];
-                self.push(value.to_value());
-            }
-            Str(sid) => {
-                let sid: usize = sid as usize;
-                let str: String = self.strings[sid].clone();
-                self.push(str.to_value());
-            },
-            Function(fid) => {
-                let fid: usize = fid as usize;
-                let func = Value::Function(Rc::clone(&self.functions[fid]));
-                self.push(func);
-            },
-            NativeFunction(b) => {
-                self.push(Value::NativeFunction(b));
+            Nil => self.push(Value::Nil),
+            True => self.push(true.to_value()),
+            False => self.push(false.to_value()),
+            NativeFunction(native) => self.push(native.to_value()),
+            Constant(id) => {
+                self.push(self.constants[id as usize].clone());
             },
 
             LiteralBegin(op, length) => {
@@ -477,10 +474,6 @@ impl<R, W> VirtualMachine<R, W> where
             LiteralEnd => {
                 let top = self.literal_stack.pop().unwrap();
                 self.push(top.to_value());
-            },
-
-            Struct(type_index) => {
-                self.push(Value::StructType(self.structs[type_index as usize].clone()));
             },
 
             OpUnroll(first) => {
@@ -505,24 +498,22 @@ impl<R, W> VirtualMachine<R, W> where
             }
 
             CheckLengthGreaterThan(len) => {
-                let len = self.constants[len as usize] as usize;
                 let a1: &Value = self.peek(0);
                 let actual = match a1.len() {
                     Ok(len) => len,
                     Err(e) => return Err(e),
                 };
-                if len > actual {
+                if len as usize > actual {
                     return ValueErrorCannotUnpackLengthMustBeGreaterThan(len, actual, a1.clone()).err()
                 }
             },
             CheckLengthEqualTo(len) => {
-                let len = self.constants[len as usize] as usize;
                 let a1: &Value = self.peek(0);
                 let actual = match a1.len() {
                     Ok(len) => len,
                     Err(e) => return Err(e),
                 };
-                if len != actual {
+                if len as usize != actual {
                     return ValueErrorCannotUnpackLengthMustBeEqual(len, actual, a1.clone()).err()
                 }
             },
@@ -608,7 +599,7 @@ impl<R, W> VirtualMachine<R, W> where
             AssertFailed => {
                 let ret: Value = self.pop();
                 return RuntimeAssertFailed(ret.to_str()).err()
-            }
+            },
         }
         Ok(())
     }
@@ -1306,7 +1297,6 @@ mod test {
     #[test] fn test_int_operators() { run_str("print(5 - 3, 12 + 5, 3 * 9, 16 / 3)", "2 17 27 5\n"); }
     #[test] fn test_int_div_mod() { run_str("print(3 / 2, 3 / 3, -3 / 2, 10 % 3, 11 % 3, 12 % 3)", "1 1 -2 1 2 0\n"); }
     #[test] fn test_int_div_by_zero() { run_str("print(15 / 0)", "Compile Error:\n\nValueError: Expected value to be non-zero\n  at: line 1 (<test>)\n\n1 | print(15 / 0)\n2 |          ^\n"); }
-    #[test] fn test_int_mod_by_zero() { run_str("print(15 % 0)", "Compile Error:\n\nValueError: Expected value '0: int' to be positive\n  at: line 1 (<test>)\n\n1 | print(15 % 0)\n2 |          ^\n"); }
     #[test] fn test_int_left_right_shift() { run_str("print(1 << 10, 16 >> 1, 16 << -1, 1 >> -10)", "1024 8 8 1024\n"); }
     #[test] fn test_int_comparisons_1() { run_str("print(1 < 3, -5 < -10, 6 > 7, 6 > 4)", "true false false true\n"); }
     #[test] fn test_int_comparisons_2() { run_str("print(1 <= 3, -5 < -10, 3 <= 3, 2 >= 2, 6 >= 7, 6 >= 4, 6 <= 6, 8 >= 8)", "true false true true false true true true\n"); }
@@ -1317,6 +1307,13 @@ mod test {
     #[test] fn test_int_default_value_yes() { run_str("int('123', 567) . print", "123\n"); }
     #[test] fn test_int_default_value_no() { run_str("int('yes', 567) . print", "567\n"); }
     #[test] fn test_int_min_and_max() { run_str("[int.min, max(int)] . print", "[-9223372036854775808, 9223372036854775807]\n") }
+    #[test] fn test_complex_add() { run_str("(1 + 2i) + (3 + 4j) . print", "4 + 6i\n"); }
+    #[test] fn test_complex_mul() { run_str("(1 + 2i) * (3 + 4j) . print", "-5 + 10i\n"); }
+    #[test] fn test_complex_str() { run_str("1 + 1i . print", "1 + 1i\n"); }
+    #[test] fn test_complex_str_no_real_part() { run_str("123i . print", "123i\n"); }
+    #[test] fn test_complex_typeof() { run_str("123i . typeof . print", "complex\n"); }
+    #[test] fn test_complex_no_real_part_is_int() { run_str("1i * 1i . typeof . print", "int\n"); }
+    #[test] fn test_complex_to_vector() { run_str("1 + 3i . vector . print", "(1, 3)\n"); }
     #[test] fn test_bool_comparisons_1() { run_str("print(false < false, false < true, true < false, true < true)", "false true false false\n"); }
     #[test] fn test_bool_comparisons_2() { run_str("print(false <= false, false >= true, true >= false, true <= true)", "true false true true\n"); }
     #[test] fn test_bool_operator_add() { run_str("true + true + false + false . print", "2\n"); }
@@ -1735,6 +1732,10 @@ mod test {
     #[test] fn test_runtime_error_with_trace() { run("runtime_error_with_trace"); }
     #[test] fn test_upvalue_never_captured() { run("upvalue_never_captured"); }
 
+    /// Per-test, how many instructions should be allowed to execute.
+    /// This primarily prevents infinite-loop tests from causing tests to hang, allowing easier debugging.
+    const EXECUTION_LIMIT: usize = 1000;
+
 
     fn run_str(text: &'static str, expected: &'static str) {
         let view: SourceView = SourceView::new(String::from("<test>"), String::from(text));
@@ -1754,7 +1755,7 @@ mod test {
         let mut buf: Vec<u8> = Vec::new();
         let mut vm = VirtualMachine::new(compile, view, &b""[..], &mut buf, vec![]);
 
-        let result: ExitType = vm.run_until_completion();
+        let result: ExitType = vm.run_until_completion_with_limit(EXECUTION_LIMIT);
         assert!(vm.stack.is_empty() || result.is_early_exit());
 
         let view: SourceView = vm.view;
@@ -1786,7 +1787,7 @@ mod test {
         let mut buf: Vec<u8> = Vec::new();
         let mut vm = VirtualMachine::new(compile, view, &b""[..], &mut buf, vec![]);
 
-        let result: ExitType = vm.run_until_completion();
+        let result: ExitType = vm.run_until_completion_with_limit(EXECUTION_LIMIT);
         assert!(vm.stack.is_empty() || result.is_early_exit());
 
         let view: SourceView = vm.view;

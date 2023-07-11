@@ -1,5 +1,4 @@
-use std::rc::Rc;
-use crate::reporting::{AsError, AsErrorWithContext, Location, Locations, SourceView};
+use crate::reporting::{AsError, AsErrorWithContext, Location, SourceView};
 
 use crate::core::NativeFunction;
 use crate::vm::{CallFrame, StructTypeImpl};
@@ -7,7 +6,7 @@ use crate::vm::operator::{BinaryOp, UnaryOp};
 use crate::vm::value::{FunctionImpl, Value};
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RuntimeError {
     RuntimeExit,
     RuntimeYield,
@@ -28,8 +27,8 @@ pub enum RuntimeError {
     ValueErrorValueMustBePositive(i64),
     ValueErrorValueMustBeNonZero,
     ValueErrorValueMustBeNonEmpty,
-    ValueErrorCannotUnpackLengthMustBeGreaterThan(usize, usize, Value), // expected, actual
-    ValueErrorCannotUnpackLengthMustBeEqual(usize, usize, Value), // expected, actual
+    ValueErrorCannotUnpackLengthMustBeGreaterThan(u32, usize, Value), // expected, actual
+    ValueErrorCannotUnpackLengthMustBeEqual(u32, usize, Value), // expected, actual
     ValueErrorCannotCollectIntoDict(Value),
     ValueErrorKeyNotPresent(Value),
     ValueErrorInvalidCharacterOrdinal(i64),
@@ -64,7 +63,7 @@ impl RuntimeError {
         Err(Box::new(self))
     }
 
-    pub fn with_stacktrace(self: Self, ip: usize, call_stack: &Vec<CallFrame>, functions: &Vec<Rc<FunctionImpl>>, locations: &Locations) -> DetailRuntimeError {
+    pub fn with_stacktrace(self: Self, ip: usize, call_stack: &Vec<CallFrame>, functions: &Vec<Value>, locations: &Vec<Location>) -> DetailRuntimeError {
         const REPEAT_LIMIT: usize = 0;
 
         // Top level stack frame refers to the code being executed
@@ -146,8 +145,9 @@ impl AsErrorWithContext for DetailRuntimeError {
 
 /// The owning function for a given IP can be defined as the closest function which encloses the desired instruction
 /// We annotate both head and tail of `FunctionImpl` to make this search easy
-fn find_owning_function(ip: usize, functions: &Vec<Rc<FunctionImpl>>) -> String {
+fn find_owning_function(ip: usize, functions: &Vec<Value>) -> String {
     functions.iter()
+        .filter_map(|f| match f { Value::Function(f) => Some(f), _ => None})
         .filter(|f| f.head <= ip && ip <= f.tail)
         .min_by_key(|f| f.tail - f.head)
         .map(|f| f.as_str())

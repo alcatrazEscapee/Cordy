@@ -1,0 +1,54 @@
+=== Scan Tokens ===
+
+Identifier("h1")
+NewLine
+NewLine
+IntLiteral(123)
+NewLine
+
+=== Scan Errors ===
+
+ScanError { error: InvalidNumericPrefix('h'), loc: Location { start: 32, width: 2, index: 0 } }
+ScanError { error: InvalidNumericValue(ParseIntError { kind: Empty }), loc: Location { start: 57, width: 2, index: 0 } }
+ScanError { error: InvalidNumericValue(ParseIntError { kind: Empty }), loc: Location { start: 60, width: 2, index: 0 } }
+ScanError { error: InvalidNumericPrefix('1'), loc: Location { start: 82, width: 2, index: 0 } }
+ScanError { error: InvalidNumericValue(ParseIntError { kind: Empty }), loc: Location { start: 118, width: 3, index: 0 } }
+ScanError { error: InvalidNumericValue(ParseIntError { kind: Empty }), loc: Location { start: 122, width: 3, index: 0 } }
+
+=== Formatted Scan Errors ===
+
+Invalid numeric prefix: '0h'
+  at: line 1 (invalid_numeric_prefix.cor)
+
+1 | /* invalid prefix characters */ 0h1
+2 |                                 ^^
+
+Invalid numeric value: cannot parse integer from empty string
+  at: line 2 (invalid_numeric_prefix.cor)
+
+2 | /* empty strings */ 0b 0x
+3 |                     ^^
+
+Invalid numeric value: cannot parse integer from empty string
+  at: line 2 (invalid_numeric_prefix.cor)
+
+2 | /* empty strings */ 0b 0x
+3 |                        ^^
+
+Invalid numeric prefix: '01'
+  at: line 3 (invalid_numeric_prefix.cor)
+
+3 | /* zero prefix */ 0123
+4 |                   ^^
+
+Invalid numeric value: cannot parse integer from empty string
+  at: line 4 (invalid_numeric_prefix.cor)
+
+4 | /* empty strings + complex */ 0bi 0xj
+5 |                               ^^^
+
+Invalid numeric value: cannot parse integer from empty string
+  at: line 4 (invalid_numeric_prefix.cor)
+
+4 | /* empty strings + complex */ 0bi 0xj
+5 |                                   ^^^

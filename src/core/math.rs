@@ -59,4 +59,3 @@ pub fn count_ones(value: Value) -> ValueResult {
 pub fn count_zeros(value: Value) -> ValueResult {
     Ok(Int(value.as_int()?.count_zeros() as i64))
 }
-

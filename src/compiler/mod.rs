@@ -1,14 +1,10 @@
-use std::rc::Rc;
-
 use crate::compiler::parser::ParseRule;
 use crate::compiler::scanner::ScanResult;
-use crate::reporting::{Locations, SourceView};
-use crate::vm::{FunctionImpl, Opcode, RuntimeError, StructTypeImpl};
+use crate::reporting::{Location, SourceView};
+use crate::vm::{Opcode, RuntimeError, Value};
 
 pub use crate::compiler::parser::{Locals, Fields, ParserError, ParserErrorType, default};
 pub use crate::compiler::scanner::{ScanError, ScanErrorType, ScanToken};
-
-use Opcode::{*};
 
 mod scanner;
 mod parser;
@@ -45,7 +41,7 @@ pub fn compile(enable_optimization: bool, view: &SourceView) -> Result<CompileRe
 pub fn incremental_compile(mut params: CompileParameters) -> IncrementalCompileResult {
     // Stage changes, so an error or aborted compile doesn't overwrite the current valid compile state
     let state: CompileState = params.save();
-    let ret: IncrementalCompileResult = try_incremental_compile(&mut params, parser::RULE_REPL, true);
+    let ret: IncrementalCompileResult = try_incremental_compile(&mut params, |parser| parser.parse_incremental_repl(), true);
 
     if !ret.is_success() { // Revert staged changes
         params.restore(state);
@@ -62,7 +58,7 @@ pub fn incremental_compile(mut params: CompileParameters) -> IncrementalCompileR
 /// This is the API used to run an `eval()` statement.
 pub fn eval_compile(text: &String, mut params: CompileParameters) -> Result<(), Box<RuntimeError>> {
     params.view.push(String::from("<eval>"), text.clone());
-    try_incremental_compile(&mut params, parser::RULE_EVAL, false)
+    try_incremental_compile(&mut params, |parser| parser.parse_incremental_eval(), false)
         .as_ok_or_runtime_error()
 }
 
@@ -102,14 +98,13 @@ pub struct CompileParameters<'a> {
     enable_optimization: bool,
 
     code: &'a mut Vec<Opcode>,
-    locals: &'a mut Vec<Locals>,
-    fields: &'a mut Fields,
-    strings: &'a mut Vec<String>,
-    constants: &'a mut Vec<i64>,
-    functions: &'a mut Vec<Rc<FunctionImpl>>,
-    structs: &'a mut Vec<Rc<StructTypeImpl>>,
-    locations: &'a mut Locations,
+
+    constants: &'a mut Vec<Value>,
     globals: &'a mut Vec<String>,
+    locations: &'a mut Vec<Location>,
+    fields: &'a mut Fields,
+
+    locals: &'a mut Vec<Locals>,
     view: &'a mut SourceView,
 }
 
@@ -117,17 +112,16 @@ pub struct CompileParameters<'a> {
 /// This save-restore is used during incremental compiles that get aborted.
 ///
 /// - `locals`, `fields` are mutable and require the full state to be saved.
-/// - `code`, `strings`, `constants`, `structs`, `locations`, `globals` are append-only, and thus we can optimize by only saving the length, and restoring by truncating.
-/// - `functions` are only modified during teardown, during conversion from un-baked functions, to baked functions, and so no save/restore state is needed
+/// - `code`, `constants`, `locations`, `globals` are append-only, and thus we can optimize by only saving the length, and restoring by truncating.
 struct CompileState {
     code: usize,
-    locals: Vec<Locals>,
-    fields: Fields,
-    strings: usize,
+
     constants: usize,
-    structs: usize,
-    locations: usize,
     globals: usize,
+    locations: usize,
+    fields: Fields,
+
+    locals: Vec<Locals>,
 }
 
 impl<'a> CompileParameters<'a> {
@@ -135,58 +129,54 @@ impl<'a> CompileParameters<'a> {
     pub fn new(
         enable_optimization: bool,
         code: &'a mut Vec<Opcode>,
-        locals: &'a mut Vec<Locals>,
-        fields: &'a mut Fields,
-        strings: &'a mut Vec<String>,
-        constants: &'a mut Vec<i64>,
-        functions: &'a mut Vec<Rc<FunctionImpl>>,
-        structs: &'a mut Vec<Rc<StructTypeImpl>>,
-        locations: &'a mut Locations,
+        constants: &'a mut Vec<Value>,
         globals: &'a mut Vec<String>,
+        locations: &'a mut Vec<Location>,
+        fields: &'a mut Fields,
+        locals: &'a mut Vec<Locals>,
         view: &'a mut SourceView,
     ) -> CompileParameters<'a> {
-        CompileParameters { enable_optimization, code, locals, fields, strings, constants, functions, structs, locations, globals, view }
+        CompileParameters { enable_optimization, code, constants, globals, locations, fields, locals, view }
     }
 
     fn save(self: &Self) -> CompileState {
         CompileState {
             code: self.code.len(),
-            locals: self.locals.clone(),
-            fields: self.fields.clone(),
-            strings: self.strings.len(),
             constants: self.constants.len(),
-            structs: self.structs.len(),
-            locations: self.locations.len(),
             globals: self.globals.len(),
+            locations: self.locations.len(),
+            fields: self.fields.clone(),
+            locals: self.locals.clone(),
         }
     }
 
     fn restore(self: &mut Self, state: CompileState) {
         self.code.truncate(state.code);
-        *self.locals = state.locals;
-        *self.fields = state.fields;
-        self.strings.truncate(state.strings);
         self.constants.truncate(state.constants);
-        self.structs.truncate(state.structs);
-        self.locations.truncate(state.locations);
         self.globals.truncate(state.globals);
+        self.locations.truncate(state.locations);
+        *self.fields = state.fields;
+        *self.locals = state.locals;
     }
 }
 
 
 pub struct CompileResult {
     pub code: Vec<Opcode>,
-    pub errors: Vec<ParserError>,
 
-    pub strings: Vec<String>,
-    pub constants: Vec<i64>,
-    pub functions: Vec<Rc<FunctionImpl>>,
-    pub structs: Vec<Rc<StructTypeImpl>>,
+    /// Errors returned by the parser/semantic/codegen stage of the compiler.
+    /// Since `parser::parse()` returns a `CompileResult`, these errors are checked in the various public interface methods on `compiler`.
+    /// Incremental compiles will return a `Vec<ParserError>` instead as they don't own the structures to create a `CompileResult`.
+    errors: Vec<ParserError>,
 
-    pub locations: Locations,
-    pub locals: Vec<String>,
+    pub constants: Vec<Value>,
     pub globals: Vec<String>,
+    pub locations: Vec<Location>,
     pub fields: Fields,
+
+    /// Local variable names, by order of access (either `Push` or `Store` local/global opcodes) in the output code.
+    /// This is only used for the decompiler to report local variable names. Otherwise these are discarded before passing to the VM
+    locals: Vec<String>,
 }
 
 impl CompileResult {
@@ -201,8 +191,8 @@ impl CompileResult {
         }
 
         let mut last_line_no: usize = 0;
-        let mut locals = self.locals.iter();
-        for (ip, token) in self.code.iter().enumerate() {
+        let mut locals = self.locals.iter().cloned();
+        for (ip, opcode) in self.code.iter().enumerate() {
             let loc = self.locations[ip];
             let line_no = view.lineno(loc);
             let label: String = if line_no + 1 != last_line_no {
@@ -211,20 +201,8 @@ impl CompileResult {
             } else {
                 " ".repeat(width + 3)
             };
-            let asm: String = match *token {
-                Int(cid) | CheckLengthEqualTo(cid) | CheckLengthGreaterThan(cid) => format!("{:?} -> {}", token, self.constants[cid as usize]),
-                Str(sid) => format!("Str({}) -> {:?}", sid, self.strings[sid as usize]),
-                Function(fid) => format!("Function({}) -> {:?}", fid, self.functions[fid as usize]),
-                PushGlobal(_) | StoreGlobal(_) | PushLocal(_) | StoreLocal(_) => match locals.next() {
-                    Some(local) => format!("{:?} -> {}", token, local),
-                    None => format!("{:?}", token),
-                },
-                GetField(fid) | SetField(fid) | GetFieldFunction(fid) => format!("{:?} -> {}", token, self.fields.get_field_name(fid)),
-                _ => format!("{:?}", token.to_absolute_jump(ip)),
-            };
+            let asm: String = opcode.disassembly(ip, &mut locals, &self.fields, &self.constants);
             lines.push(format!("{}{:0>4} {}", label, ip % 10_000, asm));
-            // Debug for locations
-            //lines.push(format!("{}{:0>4}[{:>4}{:>4}] {}", label, ip % 10_000, loc.start(), loc.end(), asm));
         }
         lines
     }

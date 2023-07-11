@@ -6,13 +6,13 @@ L3: 0004 IncGlobalCount
     0005 IncGlobalCount
     0006 Nil
     0007 Nil
-L4: 0008 Int(2) -> 3
+L4: 0008 Int(3)
     0009 IncGlobalCount
 L5: 0010 Nil
     0011 IncGlobalCount
-L6: 0012 Int(3) -> 6
-    0013 Int(4) -> 5
-    0014 Binary(Add)
+L6: 0012 Int(6)
+    0013 Int(5)
+    0014 Add
     0015 IncGlobalCount
 L7: 0016 Nil
     0017 IncGlobalCount
