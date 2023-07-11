@@ -1538,13 +1538,27 @@ impl Parser<'_> {
                 // In general, if we see a identifier, followed by equals, this can never be legal, as the left hand side would be a function evaluation
                 //
                 // Note 2: We have to be careful about accepting `fn` tokens here:
-                // If we have a decorator, like `@ a fn`, we need to be aware of the fact the decorator will try and parse the function.
-                // In some situations, this might be fine, but the rest of the parser is not designed to handle it - it will expect a function, not a expression which `a fn() { ... }` translates to `a ( fn() { ... } )` - which is exactly what the decorator would do anyway.
-                // todo: add `KeywordFn` and handle the above complications. For now we don't allow `fn` as a bare eval argument to avoid this problem
+                // Decorators are not allowed on anonymous functions, because they desugar as just a function call (i.e. `@ a b` is just `a(b)`)
+                // But more importantly, in an anonymous function, we need some syntax, generally, to identify when the function *stops*. Consider:
+                //
+                // input . filter fn(x) -> x < 3 . sum
+                //
+                // Normally, we would have enclosing brackets around the `fn`, but it's more ambiguous with that fact in mind.
+                // In practice, this makes it less useful than bare evaluation, but it is technically legal to support (as there's no other legal syntax that it could clash with). It's just a shoot-yourself-in-the-foot type of feature.
+                // We also have to worry about decorators on named functions:
+                //
+                // @ foo fn bar() { ... }
+                //
+                // Normally, this would be fine as either a `;` or newline would separate `foo` and `fn`, and bare evaluation requires being on the same line
+                // However, we explicitly deal with this case, as we can tell that `fn` followed by a identifier is not legal syntax for a bare evaluation.
+                // More explicitly, we can tell it is legal if we see `fn` followed by `(` - no other syntax will allow bare evaluation.
                 Some(Identifier(_)) if self.peek2() != Some(&Equals) => {
                     expr = self.parse_expr_2_bare_suffix(expr);
                 },
-                Some(KeywordNil | KeywordTrue | KeywordFalse | KeywordExit | IntLiteral(_) | StringLiteral(_) | At | KeywordIf) => {
+                Some(KeywordFn) if self.peek2() == Some(&OpenParen) => {
+                    expr = self.parse_expr_2_bare_suffix(expr);
+                }
+                Some(KeywordNil | KeywordTrue | KeywordFalse | KeywordExit | IntLiteral(_) | ComplexLiteral(_) | StringLiteral(_) | At | KeywordIf) => {
                     expr = self.parse_expr_2_bare_suffix(expr);
                 },
 
