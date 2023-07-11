@@ -1,4 +1,4 @@
-L1: 0000 IncGlobalCount
+L1: 0000 InitGlobal
     0001 Function(fn foo() -> L[4, 8])
 L3: 0002 Pop
     0003 Exit

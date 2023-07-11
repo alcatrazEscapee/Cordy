@@ -376,9 +376,9 @@ impl<R, W> VirtualMachine<R, W> where
                 core::set_index(a1, a2, a3)?;
             },
 
-            IncGlobalCount => {
+            InitGlobal => {
                 self.global_count += 1;
-            },
+            }
 
             Closure => {
                 match self.pop() {
@@ -476,7 +476,7 @@ impl<R, W> VirtualMachine<R, W> where
                 self.push(top.to_value());
             },
 
-            OpUnroll(first) => {
+            Unroll(first) => {
                 if first {
                     self.unroll_stack.push(0);
                 }
@@ -489,13 +489,13 @@ impl<R, W> VirtualMachine<R, W> where
                 *self.unroll_stack.last_mut().unwrap() += len;
             }
 
-            OpFuncEval(nargs) => {
+            Call(mut nargs, any_unroll) => {
+                if any_unroll {
+                    let unrolled_nargs: i32 = self.unroll_stack.pop().unwrap();
+                    nargs = nargs.add_offset(unrolled_nargs);
+                }
                 self.invoke(nargs)?;
             },
-            OpFuncEvalUnrolled(nargs) => {
-                let unrolled_nargs: i32 = self.unroll_stack.pop().unwrap();
-                self.invoke(nargs.add_offset(unrolled_nargs))?;
-            }
 
             CheckLengthGreaterThan(len) => {
                 let a1: &Value = self.peek(0);

@@ -1,4 +1,4 @@
-L1: 0000 IncGlobalCount
+L1: 0000 InitGlobal
     0001 Nil
 L2: 0002 Int(1)
     0003 Nil

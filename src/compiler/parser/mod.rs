@@ -187,7 +187,7 @@ impl Parser<'_> {
         if self.delay_pop_from_expression_statement {
             self.push(NativeFunction(Print));
             self.push(Swap);
-            self.push(OpFuncEval(1));
+            self.push(Call(1, false));
             self.push(Opcode::Pop);
         }
         // Don't pop locals
@@ -351,7 +351,7 @@ impl Parser<'_> {
             Some(KeywordFn) => self.parse_named_function(),
             _ => self.error_with(ExpectedAnnotationOrNamedFunction),
         }
-        self.push(OpFuncEval(1)) // Evaluate the annotation
+        self.push(Call(1, false)) // Evaluate the annotation
     }
 
     fn parse_named_function(self: &mut Self) {

@@ -12,7 +12,7 @@ L4: 0006 LiftUpValue(1)
     0011 LiftUpValue(0)
     0012 PopN(3)
 L5: 0013 Jump(0)
-L7: 0014 IncGlobalCount
+L7: 0014 InitGlobal
     0015 Function(fn bomb() -> L[24, 25])
     0016 Pop
     0017 Exit

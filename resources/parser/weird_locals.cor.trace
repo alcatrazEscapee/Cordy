@@ -1,6 +1,6 @@
 L1: 0000 Pop
 L2: 0001 Int(3)
-    0002 IncGlobalCount
+    0002 InitGlobal
 L4: 0003 PushGlobal(0) -> y
     0004 Pop
 L5: 0005 Pop

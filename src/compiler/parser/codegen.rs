@@ -79,7 +79,7 @@ impl<'a> Parser<'a> {
             },
             Expr(loc, ExprType::Unroll(arg, first)) => {
                 self.emit_expr(*arg);
-                self.push_with(OpUnroll(first), loc);
+                self.push_with(Unroll(first), loc);
             },
             Expr(loc, ExprType::Eval(f, args, any_unroll)) => {
                 let nargs: u32 = args.len() as u32;
@@ -87,13 +87,13 @@ impl<'a> Parser<'a> {
                 for arg in args {
                     self.emit_expr(arg);
                 }
-                self.push_with(if any_unroll { OpFuncEvalUnrolled(nargs) } else { OpFuncEval(nargs) }, loc);
+                self.push_with(Call(nargs, any_unroll), loc);
             },
             Expr(loc, ExprType::Compose(arg, f)) => {
                 self.emit_expr(*arg);
                 self.emit_expr(*f);
                 self.push(Swap);
-                self.push_with(OpFuncEval(1), loc);
+                self.push_with(Call(1, false), loc);
             },
             Expr(_, ExprType::LogicalAnd(lhs, rhs)) => {
                 self.emit_expr(*lhs);
@@ -173,7 +173,7 @@ impl<'a> Parser<'a> {
                 match op {
                     BinaryOp::NotEqual => { // Marker to indicate this is a `array[index] .= rhs`
                         self.push(Swap);
-                        self.push_with(OpFuncEval(1), loc);
+                        self.push_with(Call(1, false), loc);
                     },
                     op => self.push_with(Binary(op), loc),
                 }

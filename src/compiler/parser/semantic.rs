@@ -864,7 +864,7 @@ impl<'a> Parser<'a> {
         let local = &mut self.current_locals_mut().locals[index];
         local.initialized = true;
         if local.is_global() {
-            self.push(IncGlobalCount);
+            self.push(InitGlobal);
         }
     }
 
