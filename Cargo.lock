@@ -69,6 +69,7 @@ dependencies = [
  "indexmap",
  "itertools",
  "lazy_static",
+ "num-complex",
  "num-integer",
  "rustyline",
 ]
@@ -256,6 +257,15 @@ dependencies = [
  "cfg-if",
  "libc",
  "static_assertions",
+]
+
+[[package]]
+name = "num-complex"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "02e0d21255c828d6f128a1e41534206671e8c3ea0c62f32291e808dc82cff17d"
+dependencies = [
+ "num-traits",
 ]
 
 [[package]]

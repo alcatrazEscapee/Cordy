@@ -4,6 +4,8 @@ use crate::vm::value::LiteralType;
 use crate::util::OffsetAdd;
 
 use Opcode::{*};
+use crate::compiler::Fields;
+use crate::vm::Value;
 
 #[derive(Eq, PartialEq, Debug, Clone, Copy)]
 pub enum Opcode {
@@ -66,13 +68,14 @@ pub enum Opcode {
     /// This is intended to be followed by a `JumpIfFalsePop(end of loop)`
     TestIterable,
 
-    // Push
+    /// Pushes constant values `Nil`, `True` and `False
     Nil,
     True,
     False,
-    Int(u32),
-    Str(u32),
-    Function(u32),
+
+    /// Pushes a constant from `vm.constants[index]`.
+    /// This is used for  all integer, complex, string, function and struct types.
+    Constant(u32),
     NativeFunction(NativeFunction),
 
     /// Pushes a new, empty `Literal` onto the literal stack, of a given literal sequence type (`list`, `set`, `dict`, or `vector`), and size hint `u32`.
@@ -89,14 +92,9 @@ pub enum Opcode {
     // Pops the top of the literal stack, and pushes it as a value onto the stack.
     LiteralEnd,
 
-    /// The parameter corresponds to the `type index` of the struct.
-    Struct(u32),
-
-    // Runtime specific type checks
-
-    /// Takes an `Int` constant, and checks that the top of the stack is an iterable with length > the provided constant
+    /// Checks that the top of the stack is an iterable with length > the provided value
     CheckLengthGreaterThan(u32),
-    /// Takes an `Int` constant, and checks that the top of the stack is an iterable with length = the provided constant
+    /// Checks that the top of the stack is an iterable with length = the provided value
     CheckLengthEqualTo(u32),
 
     /// Opcode for function evaluation (either with `()` or with `.`). The `u8` parameter is the number of arguments to the function.
@@ -140,15 +138,45 @@ pub enum Opcode {
 }
 
 impl Opcode {
-    /// Replaces the parameter of a relative jump, with an absolute offset. Only used for debugging, i.e. disassembly purposes.
-    pub fn to_absolute_jump(self: Self, ip: usize) -> Opcode {
+
+    pub fn disassembly<I : Iterator<Item=String>>(self: &Opcode, ip: usize, locals: &mut I, fields: &Fields, constants: &Vec<Value>) -> String {
         match self {
-            JumpIfFalse(offset) => JumpIfFalse(ip.add_offset(offset) as i32 + 1),
-            JumpIfFalsePop(offset) => JumpIfFalsePop(ip.add_offset(offset) as i32 + 1),
-            JumpIfTrue(offset) => JumpIfTrue(ip.add_offset(offset) as i32 + 1),
-            JumpIfTruePop(offset) => JumpIfTruePop(ip.add_offset(offset) as i32 + 1),
-            Jump(offset) => Jump(ip.add_offset(offset) as i32 + 1),
-            _ => self,
+            Constant(id) => {
+                let constant = &constants[*id as usize];
+                match constant {
+                    Value::Nil => String::from("Nil"),
+                    Value::Bool(it) => String::from(if *it { "True" } else { "False" }),
+                    Value::Function(it) => format!("Function({} -> L[{}, {}])", it.as_str(), it.head, it.tail),
+                    Value::StructType(it) => format!("StructType({})", it.as_str()),
+                    _ => format!("{}({})", match constant {
+                        Value::Int(_) => "Int",
+                        Value::Str(_) => "Str",
+                        Value::Complex(_) => "Complex",
+                        _ => panic!("Not a constant: {:?}", constant),
+                    }, constant.to_repr_str())
+                }
+            },
+            CheckLengthEqualTo(len) | CheckLengthGreaterThan(len) => format!("{:?} -> {}", self, len),
+            PushGlobal(_) | StoreGlobal(_) | PushLocal(_) | StoreLocal(_) => match locals.next() {
+                Some(local) => format!("{:?} -> {}", self, local),
+                None => format!("{:?}", self),
+            },
+            GetField(fid) | SetField(fid) | GetFieldFunction(fid) => format!("{:?} -> {}", self, fields.get_field_name(*fid)),
+            JumpIfFalse(offset) | JumpIfFalsePop(offset) | JumpIfTrue(offset) | JumpIfTruePop(offset) | Jump(offset) => format!("{}({})", match self {
+                JumpIfFalse(_) => "JumpIfFalse",
+                JumpIfFalsePop(_) => "JumpIfFalsePop",
+                JumpIfTrue(_) => "JumpIfTrue",
+                JumpIfTruePop(_) => "JumpIfTruePop",
+                Jump(_) => "Jump",
+                _ => unreachable!()
+            }, ip.add_offset(*offset + 1)),
+            Binary(op) => format!("{:?}", op),
+            Unary(op) => format!("{:?}", op),
+            NativeFunction(op) => format!("{:?}", op),
+            OpUnroll(_) => format!("Unroll"),
+            OpFuncEval(n) => format!("Call({})", n),
+            OpFuncEvalUnrolled(n) => format!("Call...({})", n),
+            _ => format!("{:?}", self),
         }
     }
 }

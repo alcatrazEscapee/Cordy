@@ -39,6 +39,7 @@ pub enum NativeFunction {
     Argv,
     Bool,
     Int,
+    Complex,
     Str,
     List,
     Set,
@@ -266,6 +267,7 @@ fn load_native_functions() -> Vec<NativeFunctionInfo> {
     declare!(Argv, "argv", "", 0);
     declare!(Bool, "bool", "x", 1);
     declare!(Int, "int", "x", 1);
+    declare!(Complex, "complex", "x", 1);
     declare!(Str, "str", "x", 1);
     declare!(List, "list", "...");
     declare!(Set, "set", "...");
@@ -607,7 +609,20 @@ pub fn invoke<VM>(native: NativeFunction, nargs: u32, vm: &mut VM) -> ValueResul
         Set => dispatch_varargs!(Ok(IndexSet::new().to_value()), an, Ok(an.to_set())),
         Dict => dispatch_varargs!(Ok(IndexMap::new().to_value()), an, collections::collect_into_dict(an)),
         Heap => dispatch_varargs!(Ok(BinaryHeap::new().to_value()), an, Ok(an.to_heap())),
-        Vector => dispatch_varargs!(Ok(vec![].to_value()), an, Ok(an.to_vector())),
+        Vector => match nargs {
+            0 => Ok(Vec::new().to_value()),
+            1 => {
+                let arg = vm.pop(); // Handle `a + bi . vector` as a special case here
+                if let Value::Complex(it) = arg {
+                    return Ok(vec![Value::Int(it.re), Value::Int(it.im)].to_value())
+                }
+                match vm.pop().as_iter() {
+                    Ok(an) => Ok(an.to_vector()),
+                    Err(e) => Err(e),
+                }
+            },
+            _ => Ok(vm.popn(nargs).to_value()), // Optimization: we can skip iterating, and instead just create a vector from `popn`
+        },
         Repr => dispatch!(a1, Ok(a1.to_repr_str().to_value())),
         Eval => dispatch!(a1, vm.invoke_eval(a1.as_str()?)),
         TypeOf => dispatch!(a1, Ok(type_of(a1))),
@@ -727,7 +742,7 @@ pub fn invoke<VM>(native: NativeFunction, nargs: u32, vm: &mut VM) -> ValueResul
         CountOnes => dispatch!(a1, math::count_ones(a1)),
         CountZeros => dispatch!(a1, math::count_zeros(a1)),
 
-        Function | Iterable => ValueIsNotFunctionEvaluable(Value::NativeFunction(native)).err()
+        Function | Iterable | Complex => ValueIsNotFunctionEvaluable(Value::NativeFunction(native)).err()
     }
 }
 
@@ -821,6 +836,7 @@ fn type_of(value: Value) -> Value {
         Value::Nil => Value::Nil,
         Value::Bool(_) => Bool.to_value(),
         Value::Int(_) => Int.to_value(),
+        Value::Complex(_) => Complex.to_value(),
         Value::Str(_) => Str.to_value(),
 
         Value::List(_) => List.to_value(),

@@ -16,6 +16,9 @@ pub enum ExprType {
     Exit,
     Bool(bool),
     Int(i64),
+    /// The optimizer considers complex numbers as a full `C64` equivalent pair.
+    /// This allows us to optimize complex expressions
+    Complex(i64, i64),
     Str(String),
     LValue(LValueReference),
     NativeFunction(NativeFunction),
@@ -65,6 +68,7 @@ impl Expr {
     pub fn exit() -> Expr { Expr(Location::empty(), ExprType::Exit) }
     pub fn bool(it: bool) -> Expr { Expr(Location::empty(), ExprType::Bool(it)) }
     pub fn int(it: i64) -> Expr { Expr(Location::empty(), ExprType::Int(it)) }
+    pub fn complex(it: i64) -> Expr { Expr(Location::empty(), ExprType::Complex(0, it)) }
     pub fn str(it: String) -> Expr { Expr(Location::empty(), ExprType::Str(it)) }
     pub fn lvalue(loc: Location, lvalue: LValueReference) -> Expr {
         match lvalue {

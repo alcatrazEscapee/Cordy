@@ -1,6 +1,6 @@
 use crate::compiler::parser::expr::{Expr, ExprType};
 use crate::compiler::parser::Parser;
-use crate::vm::Opcode;
+use crate::vm::{C64, Opcode};
 use crate::vm::operator::BinaryOp;
 
 use Opcode::{*};
@@ -14,17 +14,21 @@ impl<'a> Parser<'a> {
             Expr(_, ExprType::Bool(true)) => self.push(True),
             Expr(_, ExprType::Bool(false)) => self.push(False),
             Expr(_, ExprType::Int(it)) => {
-                let id = self.declare_constant(it);
-                self.push(Int(id));
+                let id = self.declare_const(it);
+                self.push(Constant(id));
             },
+            Expr(_, ExprType::Complex(a, bi)) => {
+                let id = self.declare_const(C64::new(a, bi));
+                self.push(Constant(id))
+            }
             Expr(_, ExprType::Str(it)) => {
-                let id = self.declare_string(it);
-                self.push(Str(id));
+                let id = self.declare_const(it);
+                self.push(Constant(id));
             },
             Expr(loc, ExprType::LValue(lvalue)) => self.push_load_lvalue(loc, lvalue),
             Expr(_, ExprType::NativeFunction(native)) => self.push(NativeFunction(native)),
             Expr(_, ExprType::Function(id, closed_locals)) => {
-                self.push(Function(id));
+                self.push(Constant(id));
                 self.emit_closure_and_closed_locals(closed_locals)
             },
             Expr(loc, ExprType::SliceLiteral(arg1, arg2, arg3)) => {

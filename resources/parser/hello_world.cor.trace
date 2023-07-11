@@ -1,5 +1,5 @@
-L1: 0000 NativeFunction(Print)
-    0001 Str(1) -> "Hello World!"
-    0002 OpFuncEval(1)
+L1: 0000 Print
+    0001 Str('Hello World!')
+    0002 Call(1)
     0003 Pop
     0004 Exit

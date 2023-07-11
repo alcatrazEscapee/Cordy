@@ -1,14 +1,14 @@
 L1: 0000 Nil
-    0001 Str(1) -> "abcdef"
+    0001 Str('abcdef')
     0002 InitIterable
     0003 TestIterable
     0004 JumpIfFalsePop(13)
     0005 StoreLocal(0) -> letter
     0006 Pop
 L2: 0007 PushLocal(0) -> letter
-    0008 NativeFunction(Print)
+    0008 Print
     0009 Swap
-    0010 OpFuncEval(1)
+    0010 Call(1)
 L3: 0011 Pop
     0012 Jump(3)
     0013 PopN(2)

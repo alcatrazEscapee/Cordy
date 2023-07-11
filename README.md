@@ -40,8 +40,9 @@ This language is inspired by parts from Python, Rust, Haskell, Java, and JavaScr
     - Functions can be used in expressions, too, as anonymous functions by omitting the name, i.e. `let x = fn() -> 3`. They can be followed by either `->` or `{` when used in expressions.
 - A few basic types:
     - `nil`: The absence of a value, and the default value for all declared uninitialized variables
-    - `bool`: A boolean
+    - `bool`: A boolean, which can be either `true` or `false
     - `int`: A 64-bit signed integer
+    - `complex`: A 64-bit signed integral complex number. Declared with the `i` or `j` suffix, i.e. `1 + 3i`
     - `str`: A UTF-8 string
     - `function`: The type of all functions
 - Along with some basic library collections:
@@ -53,7 +54,7 @@ This language is inspired by parts from Python, Rust, Haskell, Java, and JavaScr
 - And user definable named tuple types, with the `struct` keyword.
 - Expressions should be familiar from most imperative programming languages, as should be operator precedence.
     - Operators on their own are functions, so `(+)` is a two argument function which adds values.
-    - `%` is mathematical modulo, and `/` rounds to negative infinity, and `-(a / b) == -a / b == a / -b` (similar to Python)
+    - `/` is floor division, and `%` a modulo operator (same as Python)
     - The `.` operator is actually a low precedence function composition operator: `a . b . c` is equivalent to `c(b(a))`, and it can be chained in a functional style.
     - Short-circuiting `and` and `or` use the keywords from Python.
 - Most functions (that aren't variadic) can be partially evaluated (like Haskell): `(+ 3)` is a function which takes one argument and adds three.

@@ -1,5 +1,5 @@
 L01: 0000 IncGlobalCount
-     0001 Function(0) -> FunctionImpl { head: 4, tail: 12, name: "foo", args: [], default_args: [], var_arg: false }
+     0001 Function(fn foo() -> L[4, 12])
 L10: 0002 Pop
      0003 Exit
 L02: 0004 Nil

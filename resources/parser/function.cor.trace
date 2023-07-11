@@ -1,9 +1,9 @@
 L1: 0000 IncGlobalCount
-    0001 Function(0) -> FunctionImpl { head: 4, tail: 8, name: "foo", args: [], default_args: [], var_arg: false }
+    0001 Function(fn foo() -> L[4, 8])
 L3: 0002 Pop
     0003 Exit
-L2: 0004 Str(1) -> "hello"
-    0005 NativeFunction(Print)
+L2: 0004 Str('hello')
+    0005 Print
     0006 Swap
-    0007 OpFuncEval(1)
+    0007 Call(1)
 L3: 0008 Return

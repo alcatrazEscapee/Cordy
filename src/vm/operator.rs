@@ -4,7 +4,7 @@ use crate::core;
 use crate::core::NativeFunction;
 use crate::vm::ValueResult;
 use crate::vm::error::RuntimeError;
-use crate::vm::value::{IntoIterableValue, IntoValue, IntoValueResult, Mut, Value};
+use crate::vm::value::{C64, IntoIterableValue, IntoValue, IntoValueResult, Mut, Value};
 
 use RuntimeError::{*};
 use Value::{*};
@@ -13,7 +13,7 @@ use Value::{*};
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum UnaryOp {
-    Minus, Not
+    Neg, Not
 }
 
 #[repr(u8)]
@@ -25,7 +25,7 @@ pub enum BinaryOp {
 impl UnaryOp {
     pub fn apply(self: Self, arg: Value) -> ValueResult {
         match self {
-            UnaryOp::Minus => unary_sub(arg),
+            UnaryOp::Neg => unary_sub(arg),
             UnaryOp::Not => unary_not(arg),
         }
     }
@@ -65,8 +65,9 @@ impl BinaryOp {
 pub fn unary_sub(a1: Value) -> ValueResult {
     match a1 {
         Int(it) => Ok(Int(-it)),
+        Complex(it) => Ok((-*it).to_value()),
         Vector(it) => apply_vector_unary(it, unary_sub),
-        v => TypeErrorUnaryOp(UnaryOp::Minus, v).err(),
+        v => TypeErrorUnaryOp(UnaryOp::Neg, v).err(),
     }
 }
 
@@ -74,6 +75,7 @@ pub fn unary_not(a1: Value) -> ValueResult {
     match a1 {
         Bool(b1) => Ok(Bool(!b1)),
         Int(i1) => Ok(Int(!i1)),
+        Complex(it) => Ok(it.conj().to_value()),
         Vector(it) => apply_vector_unary(it, unary_not),
         v => TypeErrorUnaryOp(UnaryOp::Not, v).err(),
     }
@@ -82,7 +84,8 @@ pub fn unary_not(a1: Value) -> ValueResult {
 
 pub fn binary_mul(a1: Value, a2: Value) -> ValueResult {
     match (a1, a2) {
-        (l @ (Bool(_) | Int(_)), r @ (Bool(_) | Int(_))) => Ok(Int(l.as_int()? * r.as_int()?)),
+        (l @ (Bool(_) | Int(_)), r @ (Bool(_) | Int(_))) => Ok(Int(l.as_int_unchecked() * r.as_int_unchecked())),
+        (l @ (Bool(_) | Int(_) | Complex(_)), r @ (Bool(_) | Int(_) | Complex(_))) => Ok((l.as_complex_unchecked() * r.as_complex_unchecked()).to_value()),
         (Str(s1), Int(i2)) if i2 >= 0 => Ok(s1.repeat(i2 as usize).to_value()),
         (Int(i1), Str(s2)) if i1 >= 0 => Ok(s2.repeat(i1 as usize).to_value()),
         (List(l1), Int(i1)) if i1 > 0 => {
@@ -98,17 +101,24 @@ pub fn binary_mul(a1: Value, a2: Value) -> ValueResult {
     }
 }
 
-/// Division of (a / b) will be equal to sign(a * b) * floor(abs(a) / abs(b))
-/// The sign will be treated independently of the division, so if a, b > 0, then a / b == -a / -b, and -a / b = a / -b = -(a / b)
 pub fn binary_div(a1: Value, a2: Value) -> ValueResult {
     match (a1, a2) {
         (l @ (Bool(_) | Int(_)), r @ (Bool(_) | Int(_))) => {
-            let i1 = l.as_int()?;
-            let i2 = r.as_int()?;
-            if i2 == 0 {
+            let l = l.as_int_unchecked();
+            let r = r.as_int_unchecked();
+            if r == 0 {
                 ValueErrorValueMustBeNonZero.err()
             } else {
-                Ok(Int(if i2 < 0 { -(-i1).div_euclid(i2) } else { i1.div_euclid(i2) }))
+                Ok(Int(num_integer::div_floor(l, r)))
+            }
+        },
+        (l @ (Bool(_) | Int(_) | Complex(_)), r @ (Bool(_) | Int(_) | Complex(_))) => {
+            let l = l.as_complex_unchecked();
+            let r = r.as_complex_unchecked();
+            if r.norm_sqr() == 0 {
+                ValueErrorValueMustBeNonZero.err()
+            } else {
+                Ok(c64_div_floor(l, r).to_value())
             }
         },
         (Vector(l), Vector(r)) => apply_vector_binary(l, r, binary_div),
@@ -118,20 +128,19 @@ pub fn binary_div(a1: Value, a2: Value) -> ValueResult {
     }
 }
 
-/// Modulo is defined by where a2 > 0, it is equal to x in [0, a2) s.t. x + n*a2 = a1 for some integer n
-/// This corresponds to the mathematical definition of a modulus, and matches the operator in Python (for positive integers)
-/// Unlike Python, we don't define the behavior for negative modulus.
+/// The `C64` type provided by `num-complex` defines `div()` using regular rust division.
+/// This is a clone of that but using `floor_div` provided by `num-integer`, which keeps consistency with how we define division for `complex / int`
+#[inline]
+fn c64_div_floor(lhs: C64, rhs: C64) -> C64 {
+    let norm_sqr = rhs.norm_sqr();
+    let re = lhs.re.clone() * rhs.re.clone() + lhs.im.clone() * rhs.im.clone();
+    let im = lhs.im * rhs.re - lhs.re * rhs.im;
+    C64::new(num_integer::div_floor(re, norm_sqr.clone()), num_integer::div_floor(im, norm_sqr))
+}
+
 pub fn binary_mod(a1: Value, a2: Value) -> ValueResult {
     match (a1, a2) {
-        (l @ (Bool(_) | Int(_)), r @ (Bool(_) | Int(_))) => {
-            let i1 = l.as_int()?;
-            let i2 = r.as_int()?;
-            if i2 > 0 {
-                Ok(Int(i1.rem_euclid(i2)))
-            } else {
-                ValueErrorValueMustBePositive(i2).err()
-            }
-        }
+        (l @ (Bool(_) | Int(_)), r @ (Bool(_) | Int(_))) => Ok(Int(num_integer::mod_floor(l.as_int_unchecked(), r.as_int_unchecked()))),
         (Str(l), r) => core::format_string(&*l, r),
         (Vector(l), Vector(r)) => apply_vector_binary(l, r, binary_mod),
         (Vector(l), r) => apply_vector_binary_scalar_rhs(l, r, binary_mod),
@@ -143,12 +152,19 @@ pub fn binary_mod(a1: Value, a2: Value) -> ValueResult {
 pub fn binary_pow(a1: Value, a2: Value) -> ValueResult {
     match (a1, a2) {
         (l @ (Bool(_) | Int(_)), r @ (Bool(_) | Int(_))) => {
-            let i1 = l.as_int()?;
-            let i2 = r.as_int()?;
-            if i2 >= 0 {
-                Ok(Int(i1.pow(i2 as u32)))
+            let r = r.as_int_unchecked();
+            if r >= 0 {
+                Ok(Int(l.as_int_unchecked().pow(r as u32)))
             } else {
-                ValueErrorValueMustBeNonNegative(i2).err()
+                ValueErrorValueMustBeNonNegative(r).err()
+            }
+        },
+        (Complex(l), r @ (Bool(_) | Int(_))) => {
+            let r = r.as_int_unchecked();
+            if r >= 0 {
+                Ok(l.powu(r as u32).to_value())
+            } else {
+                ValueErrorValueMustBeNonNegative(r).err()
             }
         },
         (Vector(l), Vector(r)) => apply_vector_binary(l, r, binary_pow),
@@ -168,6 +184,7 @@ pub fn binary_is(lhs: Value, rhs: Value) -> Result<bool, Box<RuntimeError>> {
             let ret: bool = match b {
                 NativeFunction::Bool => lhs.is_bool(),
                 NativeFunction::Int => lhs.is_int(),
+                NativeFunction::Complex => lhs.is_complex(),
                 NativeFunction::Str => lhs.is_str(),
                 NativeFunction::Function => lhs.is_function(),
                 NativeFunction::List => lhs.is_list(),
@@ -199,17 +216,18 @@ pub fn binary_in(a1: Value, a2: Value) -> Result<bool, Box<RuntimeError>> {
 
 pub fn binary_add(a1: Value, a2: Value) -> ValueResult {
     match (a1, a2) {
-        (l @ (Bool(_) | Int(_)), r @ (Bool(_) | Int(_))) => Ok(Int(l.as_int()? + r.as_int()?)),
-        (List(l1), List(l2)) => {
-            let list1 = l1.unbox();
-            let list2 = l2.unbox();
+        (l @ (Bool(_) | Int(_)), r @ (Bool(_) | Int(_))) => Ok(Int(l.as_int_unchecked() + r.as_int_unchecked())),
+        (l @ (Bool(_) | Int(_) | Complex(_)), r @ (Bool(_) | Int(_) | Complex(_))) => Ok((l.as_complex_unchecked() + r.as_complex_unchecked()).to_value()),
+        (List(l), List(r)) => {
+            let list1 = l.unbox();
+            let list2 = r.unbox();
             let mut list3: VecDeque<Value> = VecDeque::with_capacity(list1.len() + list2.len());
             list3.extend(list1.iter().cloned());
             list3.extend(list2.iter().cloned());
             Ok(list3.to_value())
-        },
-        (Str(s1), r) => Ok(format!("{}{}", s1, r.to_str()).to_value()),
-        (l, Str(s2)) => Ok(format!("{}{}", l.to_str(), s2).to_value()),
+        }
+        (Str(l), r) => Ok(format!("{}{}", l, r.to_str()).to_value()),
+        (l, Str(r)) => Ok(format!("{}{}", l.to_str(), r).to_value()),
         (Vector(l), Vector(r)) => apply_vector_binary(l, r, binary_add),
         (Vector(l), r) => apply_vector_binary_scalar_rhs(l, r, binary_add),
         (l, Vector(r)) => apply_vector_binary_scalar_lhs(l, r, binary_add),
@@ -219,7 +237,8 @@ pub fn binary_add(a1: Value, a2: Value) -> ValueResult {
 
 pub fn binary_sub(a1: Value, a2: Value) -> ValueResult {
     match (a1, a2) {
-        (l @ (Bool(_) | Int(_)), r @ (Bool(_) | Int(_))) => Ok(Int(l.as_int()? - r.as_int()?)),
+        (l @ (Bool(_) | Int(_)), r @ (Bool(_) | Int(_))) => Ok(Int(l.as_int_unchecked() - r.as_int_unchecked())),
+        (l @ (Bool(_) | Int(_) | Complex(_)), r @ (Bool(_) | Int(_) | Complex(_))) => Ok((l.as_complex_unchecked() - r.as_complex_unchecked()).to_value()),
         (Set(s1), Set(s2)) => {
             let s1 = s1.unbox();
             let s2 = s2.unbox();
@@ -235,10 +254,10 @@ pub fn binary_sub(a1: Value, a2: Value) -> ValueResult {
 /// Left shifts by negative values are defined as right shifts by the corresponding positive value. So (a >> -b) == (a << b)
 pub fn binary_left_shift(a1: Value, a2: Value) -> ValueResult {
     match (a1, a2) {
-        (l @ (Bool(_) | Int(_)), r @ (Bool(_) | Int(_))) => {
-            let i1 = l.as_int()?;
-            let i2 = r.as_int()?;
-            Ok(Int(if i2 >= 0 { i1 << i2 } else { i1 >> (-i2) }))
+        (l @ (Bool(_) | Int(_)), r @ (Bool(_) | Int(_))) => Ok(Int(i64_left_shift(l.as_int_unchecked(), r.as_int_unchecked()))),
+        (Complex(l), r @ (Bool(_) | Int(_))) => {
+            let r = r.as_int_unchecked();
+            Ok(C64::new(i64_left_shift(l.re, r), i64_left_shift(l.im, r)).to_value())
         },
         (Vector(l), Vector(r)) => apply_vector_binary(l, r, binary_left_shift),
         (Vector(l), r) => apply_vector_binary_scalar_rhs(l, r, binary_left_shift),
@@ -250,10 +269,10 @@ pub fn binary_left_shift(a1: Value, a2: Value) -> ValueResult {
 /// Right shifts by negative values are defined as left shifts by the corresponding positive value. So (a >> -b) == (a << b)
 pub fn binary_right_shift(a1: Value, a2: Value) -> ValueResult {
     match (a1, a2) {
-        (l @ (Bool(_) | Int(_)), r @ (Bool(_) | Int(_))) => {
-            let i1 = l.as_int()?;
-            let i2 = r.as_int()?;
-            Ok(Int(if i2 >= 0 { i1 >> i2 } else { i1 << (-i2) }))
+        (l @ (Bool(_) | Int(_)), r @ (Bool(_) | Int(_))) => Ok(Int(i64_left_shift(l.as_int_unchecked(), -r.as_int_unchecked()))),
+        (Complex(l), r @ (Bool(_) | Int(_))) => {
+            let r = -r.as_int_unchecked();
+            Ok(C64::new(i64_left_shift(l.re, r), i64_left_shift(l.im, r)).to_value())
         },
         (Vector(l), Vector(r)) => apply_vector_binary(l, r, binary_right_shift),
         (Vector(l), r) => apply_vector_binary_scalar_rhs(l, r, binary_right_shift),
@@ -262,16 +281,30 @@ pub fn binary_right_shift(a1: Value, a2: Value) -> ValueResult {
     }
 }
 
+/// Performs a binary shift either left or right, based on the sign of `rhs`. Positive values shift left, negative values shift right.
+#[inline]
+fn i64_left_shift(lhs: i64, rhs: i64) -> i64 {
+    if rhs >= 0 {
+        lhs << rhs
+    } else {
+        lhs >> (-rhs)
+    }
+}
+
 
 pub fn binary_bitwise_and(a1: Value, a2: Value) -> ValueResult {
     match (a1, a2) {
-        (Bool(b1), Bool(b2)) => Ok(Bool(b1 & b2)),
-        (Int(i1), Int(i2)) => Ok(Int(i1 & i2)),
-        (Set(s1), Set(s2)) => {
-            let s1 = s1.unbox();
-            let s2 = s2.unbox();
-            Ok(s1.set.intersection(&s2.set).cloned().to_set())
-        },
+        (Bool(l), Bool(r)) => Ok(Bool(l & r)),
+        (l @ (Bool(_) | Int(_)), r @ (Bool(_) | Int(_))) => Ok(Int(l.as_int_unchecked() & r.as_int_unchecked())),
+        (Complex(l), r @ (Bool(_) | Int(_))) => {
+            let r = r.as_int_unchecked();
+            Ok(C64::new(l.re & r, l.im & r).to_value())
+        }
+        (Set(l), Set(r)) => {
+            let l = l.unbox();
+            let r = r.unbox();
+            Ok(l.set.intersection(&r.set).cloned().to_set())
+        }
         (Vector(l), Vector(r)) => apply_vector_binary(l, r, binary_bitwise_and),
         (Vector(l), r) => apply_vector_binary_scalar_rhs(l, r, binary_bitwise_and),
         (l, Vector(r)) => apply_vector_binary_scalar_lhs(l, r, binary_bitwise_and),
@@ -281,12 +314,16 @@ pub fn binary_bitwise_and(a1: Value, a2: Value) -> ValueResult {
 
 pub fn binary_bitwise_or(a1: Value, a2: Value) -> ValueResult {
     match (a1, a2) {
-        (Bool(b1), Bool(b2)) => Ok(Bool(b1 | b2)),
-        (Int(i1), Int(i2)) => Ok(Int(i1 | i2)),
-        (Set(s1), Set(s2)) => {
-            let s1 = s1.unbox();
-            let s2 = s2.unbox();
-            Ok(s1.set.union(&s2.set).cloned().to_set())
+        (Bool(l), Bool(r)) => Ok(Bool(l | r)),
+        (l @ (Bool(_) | Int(_)), r @ (Bool(_) | Int(_))) => Ok(Int(l.as_int_unchecked() | r.as_int_unchecked())),
+        (Complex(l), r @ (Bool(_) | Int(_))) => {
+            let r = r.as_int_unchecked();
+            Ok(C64::new(l.re | r, l.im | r).to_value())
+        }
+        (Set(l), Set(r)) => {
+            let l = l.unbox();
+            let r = r.unbox();
+            Ok(l.set.union(&r.set).cloned().to_set())
         },
         (Vector(l), Vector(r)) => apply_vector_binary(l, r, binary_bitwise_or),
         (Vector(l), r) => apply_vector_binary_scalar_rhs(l, r, binary_bitwise_or),
@@ -297,13 +334,17 @@ pub fn binary_bitwise_or(a1: Value, a2: Value) -> ValueResult {
 
 pub fn binary_bitwise_xor(a1: Value, a2: Value) -> ValueResult {
     match (a1, a2) {
-        (Bool(b1), Bool(b2)) => Ok(Bool(b1 ^ b2)),
-        (Int(i1), Int(i2)) => Ok(Int(i1 ^ i2)),
-        (Set(s1), Set(s2)) => {
-            let s1 = s1.unbox();
-            let s2 = s2.unbox();
-            Ok(s1.set.symmetric_difference(&s2.set).cloned().to_set())
-        },
+        (Bool(l), Bool(r)) => Ok(Bool(l ^ r)),
+        (l @ (Bool(_) | Int(_)), r @ (Bool(_) | Int(_))) => Ok(Int(l.as_int_unchecked() ^ r.as_int_unchecked())),
+        (Complex(l), r @ (Bool(_) | Int(_))) => {
+            let r = r.as_int_unchecked();
+            Ok(C64::new(l.re ^ r, l.im ^ r).to_value())
+        }
+        (Set(l), Set(r)) => {
+            let l = l.unbox();
+            let r = r.unbox();
+            Ok(l.set.symmetric_difference(&r.set).cloned().to_set())
+        }
         (Vector(l), Vector(r)) => apply_vector_binary(l, r, binary_bitwise_xor),
         (Vector(l), r) => apply_vector_binary_scalar_rhs(l, r, binary_bitwise_xor),
         (l, Vector(r)) => apply_vector_binary_scalar_lhs(l, r, binary_bitwise_xor),
@@ -350,41 +391,50 @@ fn apply_vector_binary_scalar_rhs(lhs: Mut<Vec<Value>>, scalar_rhs: Value, binar
 
 #[cfg(test)]
 mod test {
-    use crate::vm::operator;
+    use crate::vm::{IntoValue, operator, RuntimeError};
+    use crate::vm::value::C64;
     use crate::vm::value::Value::Int;
 
     #[test]
-    fn test_binary_mod() {
-        assert_eq!(Int(1), operator::binary_mod(Int(-5), Int(3)).unwrap());
-        assert_eq!(Int(2), operator::binary_mod(Int(-4), Int(3)).unwrap());
-        assert_eq!(Int(0), operator::binary_mod(Int(-3), Int(3)).unwrap());
-        assert_eq!(Int(1), operator::binary_mod(Int(-2), Int(3)).unwrap());
-        assert_eq!(Int(2), operator::binary_mod(Int(-1), Int(3)).unwrap());
-        assert_eq!(Int(0), operator::binary_mod(Int(0), Int(3)).unwrap());
-        assert_eq!(Int(1), operator::binary_mod(Int(1), Int(3)).unwrap());
-        assert_eq!(Int(2), operator::binary_mod(Int(2), Int(3)).unwrap());
-        assert_eq!(Int(0), operator::binary_mod(Int(3), Int(3)).unwrap());
-        assert_eq!(Int(1), operator::binary_mod(Int(4), Int(3)).unwrap());
-        assert_eq!(Int(2), operator::binary_mod(Int(5), Int(3)).unwrap());
+    fn test_binary_int_div() {
+        for (a, b, c) in vec![
+            (1, 3, 0), (2, 3, 0), (3, 3, 1), (4, 3, 1), (5, 3, 1), (6, 3, 2), (7, 3, 2), // + / +
+            (1, -3, -1), (2, -3, -1), (3, -3, -1), (4, -3, -2), (5, -3, -2), (6, -3, -2), (7, -3, -3), // + / -
+            (-1, 3, -1), (-2, 3, -1), (-3, 3, -1), (-4, 3, -2), (-5, 3, -2), (-6, 3, -2), (-7, 3, -3), // - / +
+            (-1, -3, 0), (-2, -3, 0), (-3, -3, 1), (-4, -3, 1), (-5, -3, 1), (-6, -3, 2), (-7, -3, 2) // - / -
+        ] {
+            assert_eq!(operator::binary_div(Int(a), Int(b)), Ok(Int(c)), "{} / {}", a, b)
+        }
 
-        assert!(operator::binary_mod(Int(5), Int(0)).is_err());
-        assert!(operator::binary_mod(Int(5), Int(-3)).is_err());
+        for a in -5..=-5 {
+            assert_eq!(operator::binary_div(Int(a), Int(0)), RuntimeError::ValueErrorValueMustBeNonZero.err())
+        }
     }
 
     #[test]
-    fn test_binary_div() {
-        assert_eq!(Int(-2), operator::binary_div(Int(-5), Int(3)).unwrap());
-        assert_eq!(Int(-1), operator::binary_div(Int(-2), Int(3)).unwrap());
-        assert_eq!(Int(0), operator::binary_div(Int(0), Int(3)).unwrap());
-        assert_eq!(Int(0), operator::binary_div(Int(2), Int(3)).unwrap());
-        assert_eq!(Int(1), operator::binary_div(Int(5), Int(3)).unwrap());
+    fn test_binary_complex_by_int_div() {
+        for ((a, ai), b, (c, ci)) in vec![
+            ((3, 3), 2, (1, 1)), ((2, 3), 2, (1, 1)), ((1, 3), 2, (0, 1)), ((0, 3), 2, (0, 1)), ((-1, 3), 2, (-1, 1)), ((-2, 3), 2, (-1, 1)), ((-3, 3), 2, (-2, 1)),
+            ((3, 2), 2, (1, 1)), ((2, 2), 2, (1, 1)), ((1, 2), 2, (0, 1)), ((0, 2), 2, (0, 1)), ((-1, 2), 2, (-1, 1)), ((-2, 2), 2, (-1, 1)), ((-3, 2), 2, (-2, 1)),
+            ((3, 1), 2, (1, 0)), ((2, 1), 2, (1, 0)), ((1, 1), 2, (0, 0)), ((0, 1), 2, (0, 0)), ((-1, 1), 2, (-1, 0)), ((-2, 1), 2, (-1, 0)), ((-3, 1), 2, (-2, 0)),
+            ((3, 0), 2, (1, 0)), ((2, 0), 2, (1, 0)), ((1, 0), 2, (0, 0)), ((0, 0), 2, (0, 0)), ((-1, 0), 2, (-1, 0)), ((-2, 0), 2, (-1, 0)), ((-3, 0), 2, (-2, 0)),
+            ((3, 1), 2, (1, 0)), ((2, 1), 2, (1, 0)), ((1, 1), 2, (0, 0)), ((0, 1), 2, (0, 0)), ((-1, 1), 2, (-1, 0)), ((-2, 1), 2, (-1, 0)), ((-3, 1), 2, (-2, 0)),
+            ((3, 2), 2, (1, 1)), ((2, 2), 2, (1, 1)), ((1, 2), 2, (0, 1)), ((0, 2), 2, (0, 1)), ((-1, 2), 2, (-1, 1)), ((-2, 2), 2, (-1, 1)), ((-3, 2), 2, (-2, 1)),
+            ((3, 3), 2, (1, 1)), ((2, 3), 2, (1, 1)), ((1, 3), 2, (0, 1)), ((0, 3), 2, (0, 1)), ((-1, 3), 2, (-1, 1)), ((-2, 3), 2, (-1, 1)), ((-3, 3), 2, (-2, 1)),
+        ] {
+            assert_eq!(operator::binary_div(C64::new(a, ai).to_value(), Int(b)), Ok(C64::new(c, ci).to_value()), "{:?} / {}", (a, ai), b)
+        }
+    }
 
-        assert_eq!(Int(1), operator::binary_div(Int(-5), Int(-3)).unwrap());
-        assert_eq!(Int(0), operator::binary_div(Int(-2), Int(-3)).unwrap());
-        assert_eq!(Int(0), operator::binary_div(Int(0), Int(-3)).unwrap());
-        assert_eq!(Int(-1), operator::binary_div(Int(2), Int(-3)).unwrap());
-        assert_eq!(Int(-2), operator::binary_div(Int(5), Int(-3)).unwrap());
-
-        assert!(operator::binary_div(Int(5), Int(0)).is_err());
+    #[test]
+    fn test_binary_int_mod() {
+        for (a, b, c) in vec![
+            (1, 3, 1), (2, 3, 2), (3, 3, 0), (4, 3, 1), (5, 3, 2), (6, 3, 0), (7, 3, 1), // + % +
+            (1, -3, -2), (2, -3, -1), (3, -3, 0), (4, -3, -2), (5, -3, -1), (6, -3, 0), (7, -3, -2), // + % -
+            (-1, 3, 2), (-2, 3, 1), (-3, 3, 0), (-4, 3, 2), (-5, 3, 1), (-6, 3, 0), (-7, 3, 2), // - % +
+            (-1, -3, -1), (-2, -3, -2), (-3, -3, 0), (-4, -3, -1), (-5, -3, -2), (-6, -3, 0), (-7, -3, -1), // - % -
+        ] {
+            assert_eq!(operator::binary_mod(Int(a), Int(b)), Ok(Int(c)), "{} % {}", a, b);
+        }
     }
 }

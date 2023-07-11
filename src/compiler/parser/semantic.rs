@@ -5,13 +5,12 @@
 
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::rc::Rc;
 
 use itertools::Itertools;
 
 use crate::compiler::parser::{Parser, ParserError, ParserErrorType};
 use crate::core;
-use crate::vm::{FunctionImpl, Opcode};
+use crate::vm::{FunctionImpl, IntoValue, Opcode, Value};
 use crate::reporting::Location;
 
 use ParserErrorType::{*};
@@ -98,6 +97,9 @@ pub struct Fields {
     /// The `field index` is known at compile time, based on the identifier that it resolves to.
     /// The resultant `field offset` is a index into a specific struct object's `Vec<Value>` of fields.
     lookup: HashMap<(u32, u32), usize>,
+
+    /// The next available `type_index`
+    types: u32,
 }
 
 impl Fields {
@@ -105,6 +107,7 @@ impl Fields {
         Fields {
             fields: HashMap::new(),
             lookup: HashMap::new(),
+            types: 0,
         }
     }
 
@@ -386,10 +389,9 @@ impl LValue {
         let terms = self.as_terms();
 
         let is_variadic = terms.iter().any(|t| t.is_variadic_term());
-        let len: i64 = if is_variadic { terms.len() - 1 } else { terms.len() } as i64;
-        let constant_len = parser.declare_constant(len);
+        let len: u32 = if is_variadic { terms.len() - 1 } else { terms.len() } as u32;
 
-        parser.push(if is_variadic { CheckLengthGreaterThan(constant_len) } else { CheckLengthEqualTo(constant_len) });
+        parser.push(if is_variadic { CheckLengthGreaterThan(len) } else { CheckLengthEqualTo(len) });
 
         let mut index: i64 = 0;
         for term in terms {
@@ -400,12 +402,12 @@ impl LValue {
                 },
                 LValue::VarEmpty => {
                     // Advance the index by the missing elements (start indexing in reverse)
-                    index = -(len - index);
+                    index = -(len as i64 - index);
                 },
                 LValue::Named(lvalue) => {
-                    let constant_index = parser.declare_constant(index);
+                    let constant_index = parser.declare_const(index);
 
-                    parser.push(Int(constant_index));
+                    parser.push(Constant(constant_index));
                     parser.push(OpIndexPeek); // [ it[index], index, it, ...]
                     parser.push_store_lvalue(lvalue); // stores it[index]
                     parser.push(PopN(2)); // [it, ...]
@@ -417,22 +419,22 @@ impl LValue {
                     // therefor, len - index = the number of elements left we need to access exactly, which must be indices -1, -2, ... -(len - index)
                     // so our slice excludes these, so the 'high' value must be -(len - index)
                     // this is then also exactly what we set our index to next
-                    let constant_low = parser.declare_constant(index);
-                    index = -(len - index);
-                    let constant_high = parser.declare_constant(index);
+                    let constant_low = parser.declare_const(index);
+                    index = -(len as i64 - index);
+                    let constant_high = parser.declare_const(index);
 
                     parser.push(Dup); // [it, it, ...]
-                    parser.push(Int(constant_low)); // [low, it, it, ...]
-                    parser.push(if index == 0 { Nil } else { Int(constant_high) }); // [high, low, it, it, ...]
+                    parser.push(Constant(constant_low)); // [low, it, it, ...]
+                    parser.push(if index == 0 { Nil } else { Constant(constant_high) }); // [high, low, it, it, ...]
                     parser.push(OpSlice); // [it[low:high], it, ...]
                     parser.push_store_lvalue(lvalue); // stores it[low:high]
                     parser.push(Pop); // [it, ...]
                 }
                 terms @ LValue::Terms(_) => {
                     // Index as if this was a `Term`, but then invoke the emit recursively, with the value still on the stack, treating it as the iterable.
-                    let constant_index = parser.declare_constant(index);
+                    let constant_index = parser.declare_const(index);
 
-                    parser.push(Int(constant_index));
+                    parser.push(Constant(constant_index));
                     parser.push(OpIndexPeek); // [ it[index], index, it, ...]
                     terms.emit_destructuring(parser, false, false); // [ index, it, ...]
                     parser.push(Pop); // [it, ...]
@@ -500,6 +502,9 @@ pub struct ParserFunctionImpl {
 
     /// Entries for `locals_reference`, that need to be held until the function code is emitted
     locals_reference: Vec<String>,
+
+    /// Constant index for this function, which is used to fix the function later
+    constant_id: u32,
 }
 
 impl ParserFunctionImpl {
@@ -515,8 +520,8 @@ impl ParserFunctionImpl {
 
     /// Bakes this parser function into an immutable `FunctionImpl`.
     /// The `head` and `tail` pointers are computed based on the surrounding code.
-    pub(super) fn bake(self, head: usize, tail: usize) -> Rc<FunctionImpl> {
-        Rc::new(FunctionImpl::new(head, tail, self.name, self.args, self.default_args, self.var_arg))
+    pub(super) fn bake(self, constants: &mut Vec<Value>, head: usize, tail: usize) {
+        constants[self.constant_id as usize] = FunctionImpl::new(head, tail, self.name, self.args, self.default_args, self.var_arg).to_value();
     }
 
     /// Marks a default argument as finished.
@@ -546,28 +551,22 @@ impl<'a> Parser<'a> {
         }
     }
 
-
-    pub fn declare_string(self: &mut Self, str: String) -> u32 {
-        if let Some(id) = self.strings.iter().position(|s| s == &str) {
+    pub fn declare_const<T : IntoValue>(self: &mut Self, value: T) -> u32 {
+        let value = value.to_value();
+        if let Some(id) = self.constants.iter().position(|i| i == &value) {
             return id as u32
         }
-        self.strings.push(str);
-        (self.strings.len() - 1) as u32
-    }
-
-    pub fn declare_constant(self: &mut Self, int: i64) -> u32 {
-        if let Some(id) = self.constants.iter().position(|i| *i == int) {
-            return id as u32
-        }
-        self.constants.push(int);
+        self.constants.push(value);
         (self.constants.len() - 1) as u32
     }
 
-    /// Declares a function with a given name and arguments
-    /// Returns the function ID, which is the runtime identifier for the function
-    ///
-    /// **N.B.** The function ID is not an index into `self.functions`, due to the existence of `self.baked_functions`
+    /// Declares a function with a given name and arguments.
+    /// Returns the constant identifier for this function, however the function itself is currently located in `self.functions`, not `self.constants`.
+    /// Instead, we push a dummy `Nil` into the constants array, and store the constant index on our parser function. During teardown, we inject these into the right spots.
     pub fn declare_function(self: &mut Self, name: String, args: &Vec<LValue>, var_arg: bool) -> u32 {
+        let constant_id: u32 = self.constants.len() as u32;
+
+        self.constants.push(Value::Nil);
         self.functions.push(ParserFunctionImpl {
             name,
             args: args.iter().map(|u| u.to_code_str()).collect(),
@@ -575,8 +574,9 @@ impl<'a> Parser<'a> {
             var_arg,
             code: Vec::new(),
             locals_reference: Vec::new(),
+            constant_id,
         });
-        (self.functions.len() + self.baked_functions.len() - 1) as u32
+        constant_id
     }
 
     /// After a `let <name>`, `fn <name>`, or `struct <name>` declaration, tries to declare this as a local variable in the current scope.
@@ -881,6 +881,12 @@ impl<'a> Parser<'a> {
         self.fields.lookup.insert((type_index, field_index), field_offset);
 
         field_index
+    }
+
+    /// Declares a new type, and returns the corresponding `type index`.
+    pub fn declare_type(self: &mut Self) -> u32 {
+        self.fields.types += 1;
+        self.fields.types - 1
     }
 
     /// Resolves a field name to a specific field index. If the field is not present, raises a parse error.

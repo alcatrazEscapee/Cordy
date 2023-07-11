@@ -19,7 +19,8 @@ use crate::vm::error::RuntimeError;
 use Value::{*};
 use RuntimeError::{*};
 
-type ValueResult = Result<Value, Box<RuntimeError>>;
+pub type ValueResult = Result<Value, Box<RuntimeError>>;
+pub type C64 = num_complex::Complex<i64>;
 
 
 /// The runtime sum type used by the virtual machine
@@ -30,6 +31,7 @@ pub enum Value {
     Nil,
     Bool(bool),
     Int(i64),
+    Complex(Box<C64>),
     Str(Rc<String>),
 
     // Reference (Mutable) Types
@@ -150,6 +152,11 @@ impl Value {
             Nil => String::from("nil"),
             Bool(b) => b.to_string(),
             Int(i) => i.to_string(),
+            Complex(c) => if c.re == 0 {
+                format!("{}i", c.im)
+            } else {
+                format!("{} + {}i", c.re, c.im)
+            },
             Str(s) => {
                 let escaped = format!("{:?}", s);
                 format!("'{}'", &escaped[1..escaped.len() - 1])
@@ -224,6 +231,7 @@ impl Value {
             Nil => "nil",
             Bool(_) => "bool",
             Int(_) => "int",
+            Complex(_) => "complex",
             Str(_) => "str",
             List(_) => "list",
             Set(_) => "set",
@@ -256,6 +264,7 @@ impl Value {
             Nil => false,
             Bool(it) => *it,
             Int(it) => *it != 0,
+            Complex(_) => false, // complex will never be zero
             Str(it) => !it.is_empty(),
             List(it) => !it.unbox().is_empty(),
             Set(it) => !it.unbox().set.is_empty(),
@@ -272,9 +281,38 @@ impl Value {
     /// Unwraps the value as an `int`, or raises a type error
     pub fn as_int(self: &Self) -> Result<i64, Box<RuntimeError>> {
         match self {
+            Bool(b) => Ok(*b as i64),
             Int(i) => Ok(*i),
-            Bool(b) => Ok(if *b { 1 } else { 0 }),
             _ => TypeErrorArgMustBeInt(self.clone()).err(),
+        }
+    }
+
+    #[inline]
+    pub fn as_int_unchecked(self: &Self) -> i64 {
+        match self {
+            Bool(b) => *b as i64,
+            Int(i) => *i,
+            _ => 0,
+        }
+    }
+
+    /// Unwraps the value as a `complex`, or raises a type error.
+    pub fn as_complex(self: &Self) -> Result<C64, Box<RuntimeError>> {
+        match self {
+            Bool(b) => Ok(C64::new(*b as i64, 0)),
+            Int(i) => Ok(C64::new(*i, 0)),
+            Complex(c) => Ok(*c.clone()),
+            _ => TypeErrorArgMustBeInt(self.clone()).err(),
+        }
+    }
+
+    #[inline]
+    pub fn as_complex_unchecked(self: &Self) -> C64 {
+        match self {
+            Bool(b) => C64::new(*b as i64, 0),
+            Int(i) => C64::new(*i, 0),
+            Complex(c) => *c.clone(),
+            _ => C64::new(0, 0),
         }
     }
 
@@ -444,7 +482,8 @@ impl Value {
     }
 
     pub fn is_bool(self: &Self) -> bool { match self { Bool(_) => true, _ => false } }
-    pub fn is_int(self: &Self) -> bool { match self { Int(_) => true, _ => false } }
+    pub fn is_int(self: &Self) -> bool { match self { Bool(_) | Int(_) => true, _ => false } }
+    pub fn is_complex(self: &Self) -> bool { match self { Bool(_) | Int(_) | Complex(_) => true, _ => false } }
     pub fn is_str(self: &Self) -> bool { match self { Str(_) => true, _ => false } }
 
     pub fn is_list(self: &Self) -> bool { match self { List(_) => true, _ => false } }
@@ -525,6 +564,7 @@ pub trait IntoValue {
     fn to_value(self) -> Value;
 }
 
+impl IntoValue for Value { fn to_value(self) -> Value { self } }
 impl IntoValue for bool { fn to_value(self) -> Value { Bool(self) } }
 impl IntoValue for i64 { fn to_value(self) -> Value { Int(self) } }
 impl IntoValue for char { fn to_value(self) -> Value { Str(Rc::new(String::from(self))) } }
@@ -536,6 +576,14 @@ impl IntoValue for Vec<Value> { fn to_value(self) -> Value { Vector(Mut::new(sel
 impl IntoValue for IndexSet<Value> { fn to_value(self) -> Value { Set(Mut::new(SetImpl { set: self })) } }
 impl IntoValue for IndexMap<Value, Value> { fn to_value(self) -> Value { Dict(Mut::new(DictImpl { dict: self, default: None })) } }
 impl IntoValue for BinaryHeap<Reverse<Value>> { fn to_value(self) -> Value { Heap(Mut::new(HeapImpl { heap: self }))} }
+impl IntoValue for FunctionImpl { fn to_value(self) -> Value { Function(Rc::new(self)) }}
+impl IntoValue for StructTypeImpl { fn to_value(self) -> Value { StructType(Rc::new(self)) } }
+
+impl IntoValue for C64 {
+    fn to_value(self) -> Value {
+        if self.im == 0 { Int(self.re) } else { Complex(Box::new(self)) }
+    }
+}
 
 impl<'a> IntoValue for Sliceable<'a> {
     fn to_value(self: Self) -> Value {
@@ -625,7 +673,6 @@ impl<T : Eq + PartialEq + Debug + Clone + Hash> Hash for Mut<T> {
         (*self).unbox().hash(state)
     }
 }
-
 
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub struct FunctionImpl {

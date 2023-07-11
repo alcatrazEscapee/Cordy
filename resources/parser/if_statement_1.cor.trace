@@ -1,9 +1,9 @@
-L1: 0000 Int(2) -> 3
-    0001 Int(3) -> 5
-    0002 Binary(LessThan)
+L1: 0000 Int(3)
+    0001 Int(5)
+    0002 LessThan
     0003 JumpIfFalsePop(8)
-L2: 0004 NativeFunction(Print)
-    0005 Str(1) -> "yes"
-    0006 OpFuncEval(1)
+L2: 0004 Print
+    0005 Str('yes')
+    0006 Call(1)
 L3: 0007 Pop
     0008 Exit

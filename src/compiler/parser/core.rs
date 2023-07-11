@@ -152,25 +152,16 @@ impl<'a> Parser<'a> {
 
     /// Like `advance()`, but returns the boxed `Identifier` token.
     /// **Important**: Must only be called once `peek()` has identified an `Identifier` token is present, as this will panic otherwise.
-    pub fn take_identifier(self: &mut Self) -> String {
+    pub fn advance_identifier(self: &mut Self) -> String {
         match self.advance() {
             Some(Identifier(name)) => name,
             t => panic!("Token mismatch in advance_identifier() -> expected an Some(Identifier(String)), got a {:?} instead", t)
         }
     }
 
-    /// Like `advance()`, but returns the boxed `Int` token.
-    /// **Important**: Must only be called once `peek()` has identified an `Int` token is present, as this will panic otherwise.
-    pub fn take_int(self: &mut Self) -> i64 {
-        match self.advance() {
-            Some(IntLiteral(i)) => i,
-            t => panic!("Token mismatch in advance_int() -> expected an Some(Int(i64)), got a {:?} instead", t)
-        }
-    }
-
     /// Like `advance()`, but returns the boxed `String` literal token.
     /// **Important**: Must only be called once `peek()` has identified a `StringLiteral` token is present, as this will panic otherwise.
-    pub fn take_str(self: &mut Self) -> String {
+    pub fn advance_str(self: &mut Self) -> String {
         match self.advance() {
             Some(StringLiteral(s)) => s,
             t => panic!("Token mismatch in advance_str() -> expected a Some(StringLiteral(String)), got a {:?} instead", t)

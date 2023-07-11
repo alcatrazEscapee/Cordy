@@ -257,7 +257,10 @@ Returns the *type* of the argument. This returns either the value, or a function
 
 1. The return value of this function will **always** be comparable using `==` to distinguish different types. That is, if `typeof(x) == typeof(y)`, these objects are of the exact same underlying type.
 2. The expression `x is typeof(x)` will **always** be `true`, for any value of `x`.
-3. Note that `x is y` **does not** imply that `typeof(x) == y`, as there are unique type names such as `any` and `iterable`, which will break this assumption (`[] is iterable` is `true`, but `typeof(x) != iterable`).
+3. Note that `x is y` **does not** imply that `typeof(x) == y`. This assumption is broken by some types which are considered subtypes of another:
+    - `bool` is a subtype of `int`, and `int` is a subtype of `complex`.
+    - Collection types, and `str` are subtypes of `iterable`
+    - All types are a subtype of `any`
 
 **Example**
 

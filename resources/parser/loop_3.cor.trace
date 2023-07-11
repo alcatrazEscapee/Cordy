@@ -1,13 +1,13 @@
-L1: 0000 Int(0) -> 0
+L1: 0000 Int(0)
     0001 IncGlobalCount
 L3: 0002 PushGlobal(0) -> x
-    0003 Int(1) -> 1
-    0004 Binary(Add)
+    0003 Int(1)
+    0004 Add
     0005 StoreGlobal(0) -> x
 L4: 0006 Pop
     0007 PushGlobal(0) -> x
-    0008 Int(2) -> 10
-    0009 Binary(GreaterThan)
+    0008 Int(10)
+    0009 GreaterThan
     0010 JumpIfFalsePop(12)
     0011 Jump(13)
 L5: 0012 Jump(2)
