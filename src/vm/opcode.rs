@@ -43,9 +43,9 @@ pub enum Opcode {
 
     StoreArray,
 
-    // Increments the count of currently declared global variables. This is checked on every `CheckGlobalCount` to verify that no global is referenced before it is initialized
+    // Increments the count of currently declared global variables. This is checked on every `PushGlobal` and `StoreGlobal` to verify that no global is referenced before it is initialized
     // Due to late binding allowed in the parser, we cannot ensure this does not happen at runtime, so it needs to be checked.
-    IncGlobalCount,
+    InitGlobal,
 
     // Create a closure from a function (with no upvalues yet)
     Closure,
@@ -92,24 +92,31 @@ pub enum Opcode {
     // Pops the top of the literal stack, and pushes it as a value onto the stack.
     LiteralEnd,
 
+    /// Creates a `slice` object, which is used to perform slice operations
+    Slice,
+    SliceWithStep,
+
     /// Checks that the top of the stack is an iterable with length > the provided value
     CheckLengthGreaterThan(u32),
     /// Checks that the top of the stack is an iterable with length = the provided value
     CheckLengthEqualTo(u32),
 
-    /// Opcode for function evaluation (either with `()` or with `.`). The `u8` parameter is the number of arguments to the function.
+    /// Opcode for function evaluation (either with `()` or with `.`).
     ///
     /// - The stack must be setup with the function to be called (which must be a callable type, i.e. return `true` to `value.is_function()`, followed by `n` arguments.
     /// - A call frame will be pushed, and the `frame_pointer()` of the VM will point to the first local of the new frame. The function itself can be accessed via `stack[frame_pointer() - 1]`.
     /// - Upon reaching a `Return` opcode, everything above and including `frame_pointer() - 1` will be popped off the stack, and the return value will be pushed onto the stack (replacing the spot where the function was).
     ///
     /// Implementation Note: In order to implement function composition (the `.` operator), this is preceded with a `Swap` opcode to reverse the order of the argument and function to be called.
-    OpFuncEval(u32),
-    OpFuncEvalUnrolled(u32),
+    ///
+    /// Parameters:
+    /// - `nargs: u8` : The number of arguments.
+    /// - `unroll: bool` : If any unrolls are present in the call and need to be accounted for.
+    Call(u32, bool),
 
     /// Unrolls an iterable on the stack. Used in combination with `OpFuncEvalUnrolled` to call functions with `...`. Also can be used with list, vector, and dict initializations.
     /// The argument is if this unroll is the first one we've seen in the *current function invocation*. If so, it pushes a new counter onto the stack.
-    OpUnroll(bool),
+    Unroll(bool),
 
     /// Takes a stack of `[index, list, ...]`, pops the top two elements, and pushes `list[index]`
     OpIndex,
@@ -126,10 +133,6 @@ pub enum Opcode {
 
     Unary(UnaryOp),
     Binary(BinaryOp),
-
-    /// Creates a `slice` object, which is used to perform slice operations
-    Slice,
-    SliceWithStep,
 
     // Special
     Exit,
@@ -156,7 +159,6 @@ impl Opcode {
                     }, constant.to_repr_str())
                 }
             },
-            CheckLengthEqualTo(len) | CheckLengthGreaterThan(len) => format!("{:?} -> {}", self, len),
             PushGlobal(_) | StoreGlobal(_) | PushLocal(_) | StoreLocal(_) => match locals.next() {
                 Some(local) => format!("{:?} -> {}", self, local),
                 None => format!("{:?}", self),
@@ -173,9 +175,8 @@ impl Opcode {
             Binary(op) => format!("{:?}", op),
             Unary(op) => format!("{:?}", op),
             NativeFunction(op) => format!("{:?}", op),
-            OpUnroll(_) => format!("Unroll"),
-            OpFuncEval(n) => format!("Call({})", n),
-            OpFuncEvalUnrolled(n) => format!("Call...({})", n),
+            Unroll(_) => format!("Unroll"),
+            Call(nargs, unroll) => format!("Call{}({})", if *unroll { "..." } else { "" }, nargs),
             _ => format!("{:?}", self),
         }
     }

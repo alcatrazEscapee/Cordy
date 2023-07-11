@@ -1,10 +1,10 @@
-L1: 0000 IncGlobalCount
-    0001 IncGlobalCount
-    0002 IncGlobalCount
-    0003 IncGlobalCount
-    0004 IncGlobalCount
-    0005 IncGlobalCount
-    0006 IncGlobalCount
+L1: 0000 InitGlobal
+    0001 InitGlobal
+    0002 InitGlobal
+    0003 InitGlobal
+    0004 InitGlobal
+    0005 InitGlobal
+    0006 InitGlobal
     0007 Nil
     0008 Nil
     0009 Nil

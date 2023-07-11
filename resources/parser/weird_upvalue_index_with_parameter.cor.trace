@@ -1,4 +1,4 @@
-L1: 0000 IncGlobalCount
+L1: 0000 InitGlobal
     0001 Function(fn problem(param) -> L[8, 18])
 L6: 0002 PushGlobal(0) -> problem
     0003 Nil

@@ -1,4 +1,4 @@
-L1: 0000 IncGlobalCount
+L1: 0000 InitGlobal
     0001 Function(fn foo(x) -> L[11, 18])
 L7: 0002 PushGlobal(0) -> foo
     0003 Int(2)

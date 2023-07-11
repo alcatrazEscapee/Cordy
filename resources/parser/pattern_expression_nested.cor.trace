@@ -1,6 +1,6 @@
-L1: 0000 IncGlobalCount
-    0001 IncGlobalCount
-    0002 IncGlobalCount
+L1: 0000 InitGlobal
+    0001 InitGlobal
+    0002 InitGlobal
     0003 Nil
     0004 Nil
     0005 Nil
@@ -9,7 +9,7 @@ L2: 0006 LiteralBegin(Vector, 2)
     0008 Int(2)
     0009 LiteralAcc(2)
     0010 LiteralEnd
-    0011 CheckLengthEqualTo(2) -> 2
+    0011 CheckLengthEqualTo(2)
     0012 Int(0)
     0013 OpIndexPeek
     0014 StoreGlobal(1) -> y

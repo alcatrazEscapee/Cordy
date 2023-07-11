@@ -1,5 +1,5 @@
 L1: 0000 Int(0)
-    0001 IncGlobalCount
+    0001 InitGlobal
 L2: 0002 PushGlobal(0) -> x
     0003 Int(10)
     0004 GreaterThan

@@ -1,6 +1,6 @@
-L1: 0000 IncGlobalCount
-    0001 IncGlobalCount
-    0002 IncGlobalCount
+L1: 0000 InitGlobal
+    0001 InitGlobal
+    0002 InitGlobal
     0003 Nil
     0004 Nil
     0005 Nil
@@ -10,7 +10,7 @@ L2: 0006 LiteralBegin(List, 3)
     0009 Int(3)
     0010 LiteralAcc(3)
     0011 LiteralEnd
-    0012 CheckLengthEqualTo(3) -> 3
+    0012 CheckLengthEqualTo(3)
     0013 Int(0)
     0014 OpIndexPeek
     0015 StoreGlobal(0) -> x
