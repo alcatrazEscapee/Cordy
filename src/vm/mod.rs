@@ -28,6 +28,11 @@ mod value;
 mod opcode;
 mod error;
 
+/// Per-test, how many instructions should be allowed to execute.
+/// This primarily prevents infinite-loop tests from causing tests to hang, allowing easier debugging.
+#[cfg(test)]
+const TEST_EXECUTION_LIMIT: usize = 1000;
+
 
 pub struct VirtualMachine<R, W> {
     ip: usize,
@@ -178,12 +183,6 @@ impl<R, W> VirtualMachine<R, W> where
         ExitType::of(self, result)
     }
 
-    #[cfg(test)]
-    pub fn run_until_completion_with_limit(self: &mut Self, limit: usize) -> ExitType {
-        let result = self.run_limit(limit);
-        ExitType::of(self, result)
-    }
-
     /// Recovers the VM into an operational state, in case previous instructions terminated in an error or in the middle of a function
     pub fn run_recovery(self: &mut Self, locals: usize) {
         self.call_stack.truncate(1);
@@ -205,19 +204,16 @@ impl<R, W> VirtualMachine<R, W> where
     }
 
     fn run(self: &mut Self) -> AnyResult {
+        #[cfg(test)]
+        let mut limit = 0;
         loop {
-            let op: Opcode = self.next_op();
-            self.run_instruction(op)?;
-        }
-    }
-
-    #[cfg(test)]
-    fn run_limit(self: &mut Self, mut limit: usize) -> AnyResult {
-        loop {
-            if limit == 0 {
-                panic!("Execution limit reached!");
+            #[cfg(test)]
+            {
+                limit += 1;
+                if limit == TEST_EXECUTION_LIMIT {
+                    panic!("Execution limit reached");
+                }
             }
-            limit -= 1;
             let op: Opcode = self.next_op();
             self.run_instruction(op)?;
         }
@@ -1624,6 +1620,10 @@ mod test {
     #[test] fn test_split_regex_on_substring() { run_str("'the horse escaped the barn' . split('the') . print", "['', ' horse escaped ', ' barn']\n"); }
     #[test] fn test_split_regex_on_substring_with_or() { run_str("'the horse escaped the barn' . split('(the| )') . print", "['', '', 'horse', 'escaped', '', '', 'barn']\n"); }
     #[test] fn test_split_regex_on_substring_with_wildcard() { run_str("'the horse escaped the barn' . split(' *e *') . print", "['th', 'hors', '', 'scap', 'd th', 'barn']\n"); }
+    #[test] fn test_join_empty() { run_str("[] . join('test') . print", "\n"); }
+    #[test] fn test_join_single() { run_str("['apples'] . join('test') . print", "apples\n"); }
+    #[test] fn test_join_strings() { run_str("'test' . join(' ') . print", "t e s t\n"); }
+    #[test] fn test_join_ints() { run_str("[1, 3, 5, 7, 9] . join('') . print", "13579\n"); }
     #[test] fn test_find_value_empty() { run_str("[] . find(1) . print", "nil\n"); }
     #[test] fn test_find_func_empty() { run_str("[] . find(==3) . print", "nil\n"); }
     #[test] fn test_find_value_not_found() { run_str("[1, 3, 5, 7] . find(6) . print", "nil\n"); }
@@ -1732,10 +1732,6 @@ mod test {
     #[test] fn test_runtime_error_with_trace() { run("runtime_error_with_trace"); }
     #[test] fn test_upvalue_never_captured() { run("upvalue_never_captured"); }
 
-    /// Per-test, how many instructions should be allowed to execute.
-    /// This primarily prevents infinite-loop tests from causing tests to hang, allowing easier debugging.
-    const EXECUTION_LIMIT: usize = 1000;
-
 
     fn run_str(text: &'static str, expected: &'static str) {
         let view: SourceView = SourceView::new(String::from("<test>"), String::from(text));
@@ -1755,7 +1751,7 @@ mod test {
         let mut buf: Vec<u8> = Vec::new();
         let mut vm = VirtualMachine::new(compile, view, &b""[..], &mut buf, vec![]);
 
-        let result: ExitType = vm.run_until_completion_with_limit(EXECUTION_LIMIT);
+        let result: ExitType = vm.run_until_completion();
         assert!(vm.stack.is_empty() || result.is_early_exit());
 
         let view: SourceView = vm.view;
@@ -1787,7 +1783,7 @@ mod test {
         let mut buf: Vec<u8> = Vec::new();
         let mut vm = VirtualMachine::new(compile, view, &b""[..], &mut buf, vec![]);
 
-        let result: ExitType = vm.run_until_completion_with_limit(EXECUTION_LIMIT);
+        let result: ExitType = vm.run_until_completion();
         assert!(vm.stack.is_empty() || result.is_early_exit());
 
         let view: SourceView = vm.view;
