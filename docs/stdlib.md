@@ -681,6 +681,19 @@ Regex syntax is the same as used by the `replace`, and `search` functions.
 ['hello', 'the', 'world', '!']
 ```
 
+### (Str) Join `join(joiner: str, iter: iterable<any>) -> str`
+
+Joins an iterable into a single string. First calls `str()` on any arguments, and joins them seperated by `joiner`.
+
+**Example**
+
+```
+>>> [1, 2, 3, 4, 5] . join(' + ')
+'1 + 2 + 3 + 4 + 5'
+>>> 'hello' . join(' ')
+'h e l l o'
+```
+
 ### (Str) Replace `replace(...) -> str`
 
 **Possible Signatures**

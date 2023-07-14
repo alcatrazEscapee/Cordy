@@ -1,6 +1,7 @@
 use std::iter::{FusedIterator, Peekable};
 use std::str::Chars;
 use fancy_regex::{Captures, Matches, Regex};
+use itertools::Itertools;
 
 use crate::vm::{IntoIterableValue, IntoValue, Iterable, Value, RuntimeError, VirtualInterface};
 use crate::util;
@@ -138,6 +139,14 @@ impl<'r, 't> Iterator for FancySplit<'r, 't> {
 }
 
 impl<'r, 't> FusedIterator for FancySplit<'r, 't> {}
+
+
+pub fn join(joiner: Value, it: Value) -> ValueResult {
+    Ok(it.as_iter()?
+        .map(|u| u.to_str())
+        .join(joiner.as_str()?)
+        .to_value())
+}
 
 
 pub fn to_char(value: Value) -> ValueResult {

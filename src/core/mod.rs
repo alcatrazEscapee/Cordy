@@ -99,6 +99,7 @@ pub enum NativeFunction {
     Search,
     Trim,
     Split,
+    Join,
     Char,
     Ord,
     Hex,
@@ -327,6 +328,7 @@ fn load_native_functions() -> Vec<NativeFunctionInfo> {
     declare!(Search, "search", "pattern, x", 2);
     declare!(Trim, "trim", "x", 1);
     declare!(Split, "split", "pattern, x", 2);
+    declare!(Join, "join", "joiner, iter", 2);
     declare!(Char, "char", "x", 1);
     declare!(Ord, "ord", "x", 1);
     declare!(Hex, "hex", "x", 1);
@@ -673,6 +675,7 @@ pub fn invoke<VM>(native: NativeFunction, nargs: u32, vm: &mut VM) -> ValueResul
         Search => dispatch!(a1, a2, strings::search(a1, a2)),
         Trim => dispatch!(a1, strings::trim(a1)),
         Split => dispatch!(a1, a2, strings::split(a1, a2)),
+        Join => dispatch!(a1, a2, strings::join(a1, a2)),
         Char => dispatch!(a1, strings::to_char(a1)),
         Ord => dispatch!(a1, strings::to_ord(a1)),
         Hex => dispatch!(a1, strings::to_hex(a1)),
