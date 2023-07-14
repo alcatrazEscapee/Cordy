@@ -1,3 +1,6 @@
+#[cfg(test)]
+use itertools::Itertools;
+
 use crate::compiler::parser::ParseRule;
 use crate::compiler::scanner::ScanResult;
 use crate::reporting::{Location, SourceView};
@@ -161,6 +164,7 @@ impl<'a> CompileParameters<'a> {
 }
 
 
+#[derive(Debug)]
 pub struct CompileResult {
     pub code: Vec<Opcode>,
 
@@ -190,13 +194,13 @@ impl CompileResult {
             longest /= 10;
         }
 
-        let mut last_line_no: usize = 0;
+        let mut last_line_no: usize = usize::MAX;
         let mut locals = self.locals.iter().cloned();
         for (ip, opcode) in self.code.iter().enumerate() {
             let loc = self.locations[ip];
-            let line_no = view.lineno(loc);
-            let label: String = if line_no + 1 != last_line_no {
-                last_line_no = line_no + 1;
+            let line_no = view.lineno(loc).unwrap_or(last_line_no);
+            let label: String = if line_no != last_line_no {
+                last_line_no = line_no;
                 format!("L{:0>width$}: ", line_no + 1, width = width)
             } else {
                 " ".repeat(width + 3)
@@ -205,6 +209,19 @@ impl CompileResult {
             lines.push(format!("{}{:0>4} {}", label, ip % 10_000, asm));
         }
         lines
+    }
+
+    /// Outputs the raw disassembly view, used for testing
+    /// This would emit a sequence of `\n` seperated opcodes, i.e. `Int(1)\nInt(2)\nAdd`
+    #[cfg(test)]
+    pub fn raw_disassembly(self: Self) -> String {
+        let mut locals = self.locals.iter().cloned();
+        self.code
+            .iter()
+            .enumerate()
+            .map(|(ip, op)| op.disassembly(ip, &mut locals, &self.fields, &self.constants)
+                .replace(" ", "")) // This replacement is the easiest solution to a test DSL problem where we split instructions by " "
+            .join("\n")
     }
 }
 

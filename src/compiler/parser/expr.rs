@@ -1,7 +1,7 @@
 use crate::compiler::parser::semantic::{LValue, LValueReference};
 use crate::reporting::Location;
 use crate::core::NativeFunction;
-use crate::vm::{LiteralType, Opcode, RuntimeError, Value, ValueResult};
+use crate::vm::{C64, LiteralType, Opcode, RuntimeError, Value, ValueResult};
 use crate::vm::operator::{BinaryOp, UnaryOp};
 
 #[derive(Debug, Clone)]
@@ -16,9 +16,7 @@ pub enum ExprType {
     Exit,
     Bool(bool),
     Int(i64),
-    /// The optimizer considers complex numbers as a full `C64` equivalent pair.
-    /// This allows us to optimize complex expressions
-    Complex(i64, i64),
+    Complex(C64),
     Str(String),
     LValue(LValueReference),
     NativeFunction(NativeFunction),
@@ -68,7 +66,8 @@ impl Expr {
     pub fn exit() -> Expr { Expr(Location::empty(), ExprType::Exit) }
     pub fn bool(it: bool) -> Expr { Expr(Location::empty(), ExprType::Bool(it)) }
     pub fn int(it: i64) -> Expr { Expr(Location::empty(), ExprType::Int(it)) }
-    pub fn complex(it: i64) -> Expr { Expr(Location::empty(), ExprType::Complex(0, it)) }
+    pub fn complex(it: i64) -> Expr { Expr::c64(C64::new(0, it)) }
+    pub fn c64(it: C64) -> Expr { Expr(Location::empty(), ExprType::Complex(it)) }
     pub fn str(it: String) -> Expr { Expr(Location::empty(), ExprType::Str(it)) }
     pub fn lvalue(loc: Location, lvalue: LValueReference) -> Expr {
         match lvalue {
@@ -99,7 +98,7 @@ impl Expr {
     pub fn index(self: Self, loc: Location, index: Expr) -> Expr { Expr(loc, ExprType::Index(Box::new(self), Box::new(index))) }
     pub fn slice(self: Self, loc: Location, arg1: Expr, arg2: Expr) -> Expr { Expr(loc, ExprType::Slice(Box::new(self), Box::new(arg1), Box::new(arg2))) }
     pub fn slice_step(self: Self, loc: Location, arg1: Expr, arg2: Expr, arg3: Expr) -> Expr { Expr(loc, ExprType::SliceWithStep(Box::new(self), Box::new(arg1), Box::new(arg2), Box::new(arg3))) }
-    pub fn if_then_else(self: Self, if_true: Expr, if_false: Expr) -> Expr { Expr(Location::empty(), ExprType::IfThenElse(Box::new(self), Box::new(if_true), Box::new(if_false))) }
+    pub fn if_then_else(self: Self, loc: Location, if_true: Expr, if_false: Expr) -> Expr { Expr(loc, ExprType::IfThenElse(Box::new(self), Box::new(if_true), Box::new(if_false))) }
     pub fn get_field(self: Self, loc: Location, field_index: u32) -> Expr { Expr(loc, ExprType::GetField(Box::new(self), field_index)) }
     pub fn set_field(self: Self, loc: Location, field_index: u32, rhs: Expr) -> Expr { Expr(loc, ExprType::SetField(Box::new(self), field_index, Box::new(rhs))) }
     pub fn swap_field(self: Self, loc: Location, field_index: u32, rhs: Expr, op: BinaryOp) -> Expr { Expr(loc, ExprType::SwapField(Box::new(self), field_index, Box::new(rhs), op)) }
@@ -118,8 +117,9 @@ impl Expr {
             Value::Nil => Expr::nil(),
             Value::Bool(it) => Expr::bool(it),
             Value::Int(it) => Expr::int(it),
+            Value::Complex(it) => Expr::c64(*it),
             Value::Str(it) => Expr::str((*it).clone()),
-            _ => panic!(),
+            _ => panic!("Not a constant value type"),
         }
     }
 

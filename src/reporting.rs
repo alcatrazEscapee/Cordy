@@ -129,7 +129,7 @@ impl SourceView {
         self.0.last().unwrap().index().lines.len()
     }
 
-    pub fn lineno(self: &Self, loc: Location) -> usize {
+    pub fn lineno(self: &Self, loc: Location) -> Option<usize> {
         self.0[loc.index as usize].lineno(loc)
     }
 
@@ -145,11 +145,11 @@ impl SourceView {
 
 impl SourceEntry {
 
-    pub fn lineno(self: &Self, loc: Location) -> usize {
+    pub fn lineno(self: &Self, loc: Location) -> Option<usize> {
         if loc.is_empty() {
-            self.index().lines.len() - 1
+            None
         } else {
-            self.index().starts.partition_point(|u| u <= &loc.start) - 1
+            Some(self.index().starts.partition_point(|u| u <= &loc.start) - 1)
         }
     }
 
@@ -157,7 +157,7 @@ impl SourceEntry {
         let mut text = error.as_error();
         let index: Ref<'_, SourceIndex> = self.index();
         let loc = error.location();
-        let start_lineno = self.lineno(loc);
+        let start_lineno = self.lineno(loc).unwrap_or(0);
         let mut end_lineno = start_lineno;
 
         if !loc.is_empty() {

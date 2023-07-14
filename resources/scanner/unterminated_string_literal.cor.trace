@@ -11,10 +11,6 @@ StringLiteral("... this doesn't end\n\nbut it continues...\n\n")
 
 === Scan Errors ===
 
-ScanError { error: UnterminatedStringLiteral, loc: Location { start: 9, width: 49, index: 0 } }
-
-=== Formatted Scan Errors ===
-
 Unterminated string literal (missing a closing single quote)
   at: line 1 - 4 (unterminated_string_literal.cor)
 

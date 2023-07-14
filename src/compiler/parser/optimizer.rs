@@ -79,10 +79,13 @@ impl Optimize for Expr {
                         }
                     },
 
-                    // If we can assert the inner function is partial, then we can merge the two calls
+                    // If we can assert the inner function is partial, then we can merge the two calls:
+                    // - We know the function being called is partial with the given number of arguments, and
+                    // - The call is not unrolled (because then we can never prove it is partial
+                    //
                     // Note this does not require any reordering of the arguments
                     // This re-calls `.optimize()` as we might be able to replace the operator on the constant-eval'd function
-                    Expr(_, ExprType::Eval(f_inner, mut args_inner, any_unroll)) if f_inner.is_partial(args_inner.len()) => {
+                    Expr(_, ExprType::Eval(f_inner, mut args_inner, false)) if f_inner.is_partial(args_inner.len()) => {
                         args_inner.append(&mut args);
                         f_inner.eval(loc, args_inner, any_unroll).optimize()
                     },
@@ -95,10 +98,13 @@ impl Optimize for Expr {
                 let arg: Expr = arg.optimize();
                 let f: Expr = f.optimize();
 
+                // Check for various optimizations that can be performed without reordering, as those don't depend on purity
+                // If we can't optimize compose directly, then try and swap into a eval (if purity allows).
+                // At worst, that will eliminate the overhead of a `Swap`, and potentially allow more optimizations like function call merging.
                 match f {
+                    // Found `arg . [b, ...]`
+                    // Compile time check that the list contains a single argument, then inline as `arg[b]`
                     Expr(_, ExprType::Literal(LiteralType::List, mut args)) if !any_unroll(&args) => {
-                        // Found `a . [b, ...]`
-                        // We can compile-time check this list contains a single element, and rephrase this as `a[b]`
                         let nargs: usize = args.len();
                         if nargs != 1 {
                             Expr::error(loc, Box::new(RuntimeError::ValueErrorEvalListMustHaveUnitLength(nargs)))
@@ -107,9 +113,14 @@ impl Optimize for Expr {
                             arg.index(loc, index)
                         }
                     },
+                    // Found `arg . [a:b:c]`. Inline into `arg[a:b:c]`
+                    Expr(_, ExprType::SliceLiteral(a, b, c)) => match *c {
+                        Some(c) => arg.slice_step(loc, *a, *b, c),
+                        None => arg.slice(loc, *a, *b),
+                    },
+                    // If possible, replace `arg . f` with `f(arg)`
+                    // Then re-optimize the new `eval` expression
                     f => {
-                        // If possible, reorder f, arg
-                        // Then re-call optimization with the new eval
                         if f.can_reorder(&arg) {
                             f.eval(loc, vec![arg], false).optimize()
                         } else {
@@ -126,11 +137,11 @@ impl Optimize for Expr {
             Expr(loc, ExprType::SliceWithStep(array, arg1, arg2, arg3)) => array.optimize().slice_step(loc, arg1.optimize(), arg2.optimize(), arg3.optimize()),
 
             // Ternary conditions perform basic dead code elimination, if the condition is constant.
-            Expr(_, ExprType::IfThenElse(condition, if_true, if_false)) => {
+            Expr(loc, ExprType::IfThenElse(condition, if_true, if_false)) => {
                 let condition = condition.optimize();
                 match condition.as_constant() {
                     Ok(condition) => if condition.as_bool() { if_true.optimize() } else { if_false.optimize() },
-                    Err(condition) => condition.if_then_else(if_true.optimize(), if_false.optimize()),
+                    Err(condition) => condition.if_then_else(loc, if_true.optimize(), if_false.optimize()),
                 }
             },
 
@@ -151,11 +162,15 @@ impl Optimize for Expr {
 
 impl Expr {
     /// Attempts to fold this expression into a constant value. Either returns `Ok(constant)` or `Err(self)`
+    ///
+    /// **N.B.** This can only be supported for immutable types. If we attempt to const-expr evaluate a non-constant `Value`, like a list, we would have to
+    /// un-const-expr it to emit the code - otherwise in `VM.constants` we would have a single instance that gets copied and re-used. This is **very bad**.
     fn as_constant(self: Self) -> Result<Value, Expr> {
         match self {
             Expr(_, ExprType::Nil) => Ok(Value::Nil),
             Expr(_, ExprType::Bool(it)) => Ok(it.to_value()),
             Expr(_, ExprType::Int(it)) => Ok(it.to_value()),
+            Expr(_, ExprType::Complex(it)) => Ok(it.to_value()),
             Expr(_, ExprType::Str(it)) => Ok(it.to_value()),
             _ => Err(self)
         }
@@ -197,7 +212,7 @@ impl Expr {
     fn is_partial(self: &Self, nargs: usize) -> bool {
         match &self.1 {
             ExprType::NativeFunction(native) => match native.nargs() {
-                Some(expected_nargs) => expected_nargs > nargs as u32 && nargs > 0,
+                Some(expected_nargs) => expected_nargs > nargs as u32,
                 None => false,
             },
             _ => false
@@ -213,4 +228,60 @@ fn any_unroll(args: &Vec<Expr>) -> bool {
 #[derive(Debug, Copy, Clone, Ord, PartialOrd, PartialEq, Eq)]
 enum Purity {
     None, Weak, Strong
+}
+
+
+#[cfg(test)]
+mod tests {
+    use crate::{compiler, SourceView};
+
+    #[test] fn test_constant_folding_int_add() { run_expr("1 + 2", "Int(3)") }
+    #[test] fn test_constant_folding_bool_add() { run_expr("1 + true - 4", "Int(-2)") }
+    #[test] fn test_constant_folding_int_complex_add() { run_expr("1 + 1i + (2 + 2j)", "Complex(3+3i)") }
+    #[test] fn test_constant_folding_constant_ternary_if_true() { run_expr("(if 1 > 0 then 'yes' else 'no')", "Str('yes')") }
+    #[test] fn test_constant_folding_constant_ternary_if_false() { run_expr("(if 1 + 1 == 3 then 'yes' else 'no')", "Str('no')") }
+    #[test] fn test_constant_folding_constant_ternary_top_level_if_true() { run_expr("if 1 + 1 == 3 then 'yes' else 'no'", "Str('no')") }
+    #[test] fn test_constant_folding_constant_ternary_top_level_if_false() { run_expr("if 1 + 1 == 3 then 'yes' else 'no'", "Str('no')") }
+    #[test] fn test_compose_list_inlining() { run_expr("1 . [2]", "Int(1) Int(2) OpIndex") }
+    #[test] fn test_compose_slice_inlining_1() { run_expr("1 . [2:3]", "Int(1) Int(2) Int(3) OpSlice") }
+    #[test] fn test_compose_slice_inlining_2() { run_expr("1 . [2:3:4]", "Int(1) Int(2) Int(3) Int(4) OpSliceWithStep") }
+    #[test] fn test_compose_reordering_pure_strong_strong() { run_expr("1 . 2", "Int(2) Int(1) Call(1)") }
+    #[test] fn test_compose_reordering_both_strong_weak() { run_expr("do { let x ; 1 . x }", "Nil PushLocal(0)->x Int(1) Call(1) Pop") }
+    #[test] fn test_compose_reordering_both_strong_impure() { run_expr("do { let x ; 1 . (x = 2) }", "Nil Int(2) StoreLocal(0)->x Int(1) Call(1) Pop") }
+    #[test] fn test_compose_reordering_both_weak_weak() { run_expr("do { let x, y ; x . y }", "Nil Nil PushLocal(1)->y PushLocal(0)->x Call(1) PopN(2)") }
+    #[test] fn test_compose_reordering_both_weak_impure() { run_expr("do { let x, y ; x . (y = 2) }", "Nil Nil PushLocal(0)->x Int(2) StoreLocal(1)->y Swap Call(1) PopN(2)") }
+    #[test] fn test_compose_reordering_both_impure_impure() { run_expr("do { let x, y ; (x = 1) . (y = 2) }", "Nil Nil Int(1) StoreLocal(0)->x Int(2) StoreLocal(1)->y Swap Call(1) PopN(2)") }
+    #[test] fn test_operator_function_inlining_constant_1() { run_expr("(+)(1)(2)", "Int(1) Int(2) Add") }
+    #[test] fn test_operator_function_inlining_constant_2() { run_expr("1 . (+2)", "OperatorAddSwap Int(2) Int(1) Call(2)") }
+    #[test] fn test_operator_function_inlining_constant_3() { run_expr("1 . (2+)", "Int(2) Int(1) Add") }
+    #[test] fn test_operator_function_inlining_constant_4() { run_expr("(+1)(2)", "OperatorAddSwap Int(1) Int(2) Call(2)") }
+    #[test] fn test_operator_function_inlining_constant_5() { run_expr("(1+)(2)", "Int(1) Int(2) Add") }
+    #[test] fn test_inline_int_min() { run_expr("min(int)", "Int(-9223372036854775808)") }
+    #[test] fn test_inline_int_max() { run_expr("int.max", "Int(9223372036854775807)") }
+    #[test] fn test_partial_function_call_merge_no_args_1() { run_expr("vector()()", "Vector Call(0) Call(0)"); }
+    #[test] fn test_partial_function_call_merge_no_args_2() { run_expr("vector()(1)", "Vector Call(0) Int(1) Call(1)"); }
+    #[test] fn test_partial_function_call_merge_one_arg_1() { run_expr("int()()", "Int Call(0)") }
+    #[test] fn test_partial_function_call_merge_one_arg_2() { run_expr("int()(1)", "Int Int(1) Call(1)") }
+    #[test] fn test_partial_function_call_merge_one_arg_3() { run_expr("int()(1)(2)", "Int Int(1) Call(1) Int(2) Call(1)") }
+    #[test] fn test_partial_function_call_merge_one_arg_4() { run_expr("int()(1)()(2)", "Int Int(1) Call(1) Call(0) Int(2) Call(1)") }
+    #[test] fn test_partial_function_call_merge_one_arg_5() { run_expr("int()()(1)()()", "Int Int(1) Call(1) Call(0) Call(0)") }
+    #[test] fn test_partial_function_call_merge_two_arg_1() { run_expr("map(1)(2)", "Map Int(1) Int(2) Call(2)"); }
+    #[test] fn test_partial_function_call_merge_two_arg_2() { run_expr("map()(1)(2)", "Map Int(1) Int(2) Call(2)"); }
+    #[test] fn test_partial_function_call_merge_two_arg_3() { run_expr("map()(1)()(2)", "Map Int(1) Int(2) Call(2)"); }
+    #[test] fn test_partial_function_call_merge_two_arg_4() { run_expr("map(1)(2)()", "Map Int(1) Int(2) Call(2) Call(0)"); }
+    #[test] fn test_partial_function_call_merge_two_arg_5() { run_expr("map(1)()(2, 3)", "Map Int(1) Int(2) Int(3) Call(3)"); }
+    #[test] fn test_partial_function_call_merge_two_arg_6() { run_expr("map(1, 2)()(3)", "Map Int(1) Int(2) Call(2) Call(0) Int(3) Call(1)"); }
+    #[test] fn test_partial_function_call_merge_two_arg_7() { run_expr("map(1)()()", "Map Int(1) Call(1)"); }
+    #[test] fn test_partial_function_call_merge_two_arg_unroll_1() { run_expr("map()(...1)", "Map Int(1) Unroll Call...(1)"); }
+    #[test] fn test_partial_function_call_merge_two_arg_unroll_2() { run_expr("map(1)(...2)", "Map Int(1) Int(2) Unroll Call...(2)"); }
+    #[test] fn test_partial_function_call_merge_two_arg_unroll_3() { run_expr("map(...1)()", "Map Int(1) Unroll Call...(1) Call(0)"); }
+
+    fn run_expr(text: &'static str, expected: &'static str) {
+        let expected: String = format!("{}\nPop\nExit", expected.replace(" ", "\n"));
+        let actual: String = compiler::compile(true, &SourceView::new(String::new(), String::from(text)))
+            .expect("Failed to compile")
+            .raw_disassembly();
+
+        assert_eq!(actual, expected);
+    }
 }

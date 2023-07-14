@@ -135,7 +135,7 @@ impl AsErrorWithContext for DetailRuntimeError {
     fn add_stack_trace_elements(self: &Self, view: &SourceView, text: &mut String) {
         for frame in &self.stack {
             text.push_str(match frame {
-                StackFrame::Simple(_, loc, site) => format!("  at: `{}` (line {})\n", site, view.lineno(*loc) + 1),
+                StackFrame::Simple(_, loc, site) => format!("  at: `{}` (line {})\n", site, view.lineno(*loc).unwrap_or(0) + 1),
                 StackFrame::Repeat(n) => format!("  ... above line repeated {} more time(s) ...\n", n),
             }.as_str());
         }

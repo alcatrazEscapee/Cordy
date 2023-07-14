@@ -1,31 +1,3 @@
-L1: 0000 InitGlobal
-    0001 Nil
-L2: 0002 Int(1)
-    0003 Nil
-    0004 Add
-    0005 StoreGlobal(0) -> x
-    0006 Pop
-L3: 0007 Nil
-    0008 Neg
-    0009 StoreGlobal(0) -> x
-    0010 Pop
-L4: 0011 Print
-    0012 Nil
-    0013 Swap
-    0014 Call(1)
-    0015 StoreGlobal(0) -> x
-    0016 Pop
-L5: 0017 Print
-    0018 Int(4)
-    0019 Nil
-    0020 Call(2)
-    0021 StoreGlobal(0) -> x
-    0022 Pop
-L6: 0023 Nil
-    0024 StoreGlobal(0) -> x
-    0025 Pop
-    0026 Pop
-    0027 Exit
 Expected an expression terminal, got '+' token instead
   at: line 2 (invalid_expressions.cor)
 
