@@ -597,10 +597,6 @@ mod tests {
         if !result.errors.is_empty() {
             actual.push(String::from("\n=== Scan Errors ===\n"));
             for error in &result.errors {
-                actual.push(format!("{:?}", error));
-            }
-            actual.push(String::from("\n=== Formatted Scan Errors ===\n"));
-            for error in &result.errors {
                 actual.push(view.format(error))
             }
         }

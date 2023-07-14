@@ -1,13 +1,26 @@
 use crate::compiler::parser::expr::{Expr, ExprType};
 use crate::compiler::parser::Parser;
-use crate::vm::{C64, Opcode};
+use crate::vm::Opcode;
 use crate::vm::operator::BinaryOp;
+use crate::compiler::parser::optimizer::Optimize;
+use crate::reporting::Location;
 
 use Opcode::{*};
 
+
 impl<'a> Parser<'a> {
 
-    pub fn emit_expr(self: &mut Self, expr: Expr) {
+    /// Emits an expression, with optimizations (if enabled)
+    pub fn emit_optimized_expr(self: &mut Self, mut expr: Expr) {
+        if self.enable_optimization {
+            expr = expr.optimize();
+        }
+        self.emit_expr(expr);
+    }
+
+    /// Recursive version of the above.
+    /// Does not call optimizations as the expression is already assumed to be optimized.
+    fn emit_expr(self: &mut Self, expr: Expr) {
         match expr {
             Expr(_, ExprType::Nil) => self.push(Nil),
             Expr(_, ExprType::Exit) => self.push(Exit),
@@ -17,8 +30,8 @@ impl<'a> Parser<'a> {
                 let id = self.declare_const(it);
                 self.push(Constant(id));
             },
-            Expr(_, ExprType::Complex(a, bi)) => {
-                let id = self.declare_const(C64::new(a, bi));
+            Expr(_, ExprType::Complex(it)) => {
+                let id = self.declare_const(it);
                 self.push(Constant(id))
             }
             Expr(_, ExprType::Str(it)) => {
@@ -129,9 +142,9 @@ impl<'a> Parser<'a> {
             },
             Expr(_, ExprType::IfThenElse(condition, if_true, if_false)) => {
                 self.emit_expr(*condition);
-                let jump_if_false_pop = self.reserve();
+                let jump_if_false_pop = self.reserve_with(Location::empty());
                 self.emit_expr(*if_true);
-                let jump = self.reserve();
+                let jump = self.reserve_with(Location::empty());
                 self.fix_jump(jump_if_false_pop, JumpIfFalsePop);
                 self.emit_expr(*if_false);
                 self.fix_jump(jump, Jump);

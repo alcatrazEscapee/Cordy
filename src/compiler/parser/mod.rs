@@ -4,7 +4,6 @@ use crate::compiler::{CompileParameters, CompileResult};
 use crate::compiler::parser::core::ParserState;
 use crate::compiler::parser::expr::{Expr, ExprType};
 use crate::compiler::parser::semantic::{LateBoundGlobal, LValue, LValueReference, ParserFunctionImpl, Reference};
-use crate::compiler::parser::optimizer::Optimize;
 use crate::compiler::scanner::{ScanResult, ScanToken};
 use crate::core::NativeFunction;
 use crate::vm::{Opcode, StructTypeImpl, Value};
@@ -92,9 +91,6 @@ pub(super) struct Parser<'a> {
 
     /// If we are in error recover mode, this flag is set
     error_recovery: bool,
-    /// If a expression statement has already been parsed before a new line or ';', this flag is set
-    /// This denies two unrelated expression statements on the same line, unless seperated by a token such as `;`, `{` or `}`
-    prevent_expression_statement: bool,
     /// We delay the last `Pop` emitted from an expression statement wherever possible
     /// This allows more statement-like constructs to act like expression statements automatically
     /// If this flag is `true`, then we need to emit a `Pop` or risk mangling the stack.
@@ -155,7 +151,6 @@ impl Parser<'_> {
             globals_reference,
 
             error_recovery: false,
-            prevent_expression_statement: false,
             delay_pop_from_expression_statement: false,
             restore_state: None,
 
@@ -260,7 +255,6 @@ impl Parser<'_> {
                     self.push(Exit);
                 },
                 Some(Semicolon) => {
-                    self.prevent_expression_statement = false;
                     self.push_delayed_pop();
                     self.advance();
                 },
@@ -275,9 +269,7 @@ impl Parser<'_> {
         self.push_delayed_pop();
         self.expect(OpenBrace);
         self.scope_depth += 1;
-        self.prevent_expression_statement = false;
         self.parse_statements();
-        self.prevent_expression_statement = false;
         self.pop_locals(Some(self.scope_depth), true, true, true);
         self.scope_depth -= 1;
         self.expect_resync(CloseBrace);
@@ -486,7 +478,7 @@ impl Parser<'_> {
         // After the locals have been pushed, we now can push function code
         // Before the body of the function, we emit code for each default argument, and mark it as such.
         for arg in default_args {
-            self.emit_expr(arg);
+            self.emit_optimized_expr(arg);
             self.current_function_impl().mark_default_arg();
         }
 
@@ -522,7 +514,6 @@ impl Parser<'_> {
 
         // Scope of the function itself
         self.scope_depth += 1;
-        self.prevent_expression_statement = false;
 
         let is_block_function = match self.peek() {
             Some(OpenBrace) => {
@@ -552,7 +543,6 @@ impl Parser<'_> {
         // Since `Return` cleans up all function locals, we just discard them from the parser without emitting any `Pop` tokens.
         // But, we still need to do this first, as we need to ensure `LiftUpValue` opcodes are still emitted before the `Return`
         // We do this twice, once for function locals, and once for function parameters (since they live in their own scope)
-        self.prevent_expression_statement = false;
         self.pop_locals(Some(self.scope_depth), true, false, true);
         self.scope_depth -= 1;
 
@@ -611,27 +601,24 @@ impl Parser<'_> {
         // }                 | L2:
 
         trace::trace_parser!("rule <if-statement>");
-        self.advance();
+        let loc = self.advance_with(); // Consume `if`
         self.push_delayed_pop();
-        self.parse_expression();
 
-        let jump_if_false = self.reserve(); // placeholder for jump to the beginning of an if branch, if it exists
-
+        // If we see a top-level `if <expression> then`, we want to consider this an expression, with a top level `if-then-else` statement
+        // Note that unlike `if { }`, an `if then else` **does** count as an expression, and leaves a value on the stack, so we set the flag for delay pop = true
+        let condition: Expr = self.parse_expr_top_level();
         if let Some(KeywordThen) = self.peek() {
-            // If we see a top-level `if <expression> then`, we want to consider this an expression, with a top level `if-then-else` statement
-            // We duplicate the structure here, as there's not many optimizations we could've performed if we treat this as a top-level expression.
-            // Note that unlike `if { }`, an `if then else` **does** count as an expression, and leaves a value on the stack, so we set the flag for delay pop = true
-            self.advance();
-            self.parse_expression(); // Value if true
-            let jump = self.reserve();
-            self.fix_jump(jump_if_false, JumpIfFalsePop);
+            self.advance(); // Consume `then`
+            let if_true: Expr = self.parse_expr_top_level();
             self.expect(KeywordElse);
-            self.parse_expression(); // Value if false
-            self.fix_jump(jump, Jump);
+            let if_false: Expr = self.parse_expr_top_level();
+            self.emit_optimized_expr(condition.if_then_else(loc, if_true, if_false));
             self.delay_pop_from_expression_statement = true;
             return;
         }
 
+        self.emit_optimized_expr(condition); // Emit the expression we held earlier
+        let jump_if_false = self.reserve(); // placeholder for jump to the beginning of an if branch, if it exists
         self.parse_block_statement();
         self.push_delayed_pop();
 
@@ -892,7 +879,6 @@ impl Parser<'_> {
                     match self.peek() {
                         Some(Comma) => {
                             self.advance(); // Consume `,`
-                            self.prevent_expression_statement = false;
                         },
                         _ => break,
                     }
@@ -904,23 +890,15 @@ impl Parser<'_> {
 
     fn parse_expression_statement(self: &mut Self) {
         trace::trace_parser!("rule <expression-statement>");
-        //if !self.prevent_expression_statement {
-            self.prevent_expression_statement = true;
-            self.push_delayed_pop();
-            self.parse_expression();
-            self.delay_pop_from_expression_statement = true;
-        //} else {
-        //    self.error_with(ExpectedStatement)
-        //}
+        self.push_delayed_pop();
+        self.parse_expression();
+        self.delay_pop_from_expression_statement = true;
     }
 
     fn parse_expression(self: &mut Self) {
         trace::trace_parser!("rule <expression>");
-        let mut expr: Expr = self.parse_expr_top_level();
-        if self.enable_optimization {
-            expr = expr.optimize();
-        }
-        self.emit_expr(expr);
+        let expr: Expr = self.parse_expr_top_level();
+        self.emit_optimized_expr(expr);
     }
 
     #[must_use = "For parsing expressions from non-expressions, use parse_expression()"]
@@ -1396,14 +1374,14 @@ impl Parser<'_> {
     fn parse_expr_1_inline_if_then_else(self: &mut Self) -> Expr {
         trace::trace_parser!("rule <expr-1-inline-if-then-else>");
 
-        self.advance(); // Consume `if`
+        let loc = self.advance_with(); // Consume `if`
         let condition = self.parse_expr_top_level(); // condition
         self.expect(KeywordThen);
         let if_true = self.parse_expr_top_level(); // Value if true
         self.expect(KeywordElse);
         let if_false = self.parse_expr_top_level(); // Value if false
 
-        condition.if_then_else(if_true, if_false)
+        condition.if_then_else(loc, if_true, if_false)
     }
 
     fn parse_expr_2_unary(self: &mut Self) -> Expr {
@@ -1935,11 +1913,8 @@ impl Parser<'_> {
 
 #[cfg(test)]
 mod tests {
-    use itertools::Itertools;
-    use crate::compiler::{CompileResult, parser, scanner};
-    use crate::compiler::scanner::ScanResult;
     use crate::reporting::SourceView;
-    use crate::test_util;
+    use crate::{compiler, test_util};
 
 
     #[test] fn test_nil() { run_expr("nil", "Nil") }
@@ -2075,35 +2050,17 @@ mod tests {
 
 
     fn run_expr(text: &'static str, expected: &'static str) {
-        let scan: ScanResult = scanner::scan(&SourceView::new(String::new(), String::from(text)));
-        assert!(scan.errors.is_empty());
-
-        let result: CompileResult = parser::parse(false, scan);
-        assert!(result.errors.is_empty(), "Found parser errors: {:?}", result.errors);
-
-        let mut locals = result.locals.iter().cloned();
-        let actual: String = result.code
-            .iter()
-            .enumerate()
-            .map(|(ip, op)| op.disassembly(ip, &mut locals, &result.fields, &result.constants))
-            .join("\n");
-
         let expected: String = format!("{}\nPop\nExit", expected.replace(" ", "\n"));
+        let actual: String = compiler::compile(false, &SourceView::new(String::new(), String::from(text)))
+            .expect("Failed to compile")
+            .raw_disassembly();
+
         assert_eq!(actual, expected);
     }
 
     fn run_err(text: &'static str, expected: &'static str) {
         let view: SourceView = SourceView::new(String::from("<test>"), String::from(text));
-        let scan_result: ScanResult = scanner::scan(&view);
-        assert!(scan_result.errors.is_empty());
-
-        let compile: CompileResult = parser::parse(false, scan_result);
-        assert!(!compile.errors.is_empty());
-
-        let mut actual: Vec<String> = Vec::new();
-        for error in &compile.errors {
-            actual.push(view.format(error));
-        }
+        let actual: Vec<String> = compiler::compile(false, &view).expect_err("Expected a parser error");
 
         assert_eq!(actual.join("\n"), expected);
     }
@@ -2111,16 +2068,10 @@ mod tests {
     fn run(path: &'static str) {
         let resource = test_util::get_resource("parser", path);
         let view: SourceView = resource.view();
-        let scan_result: ScanResult = scanner::scan(&view);
-        assert!(scan_result.errors.is_empty());
-
-        let parse_result: CompileResult = parser::parse(false, scan_result);
-        let mut actual: Vec<String> = parse_result.disassemble(&view);
-        if !parse_result.errors.is_empty() {
-            for error in &parse_result.errors {
-                actual.push(view.format(error));
-            }
-        }
+        let actual: Vec<String> = match compiler::compile(false, &view) {
+            Ok(compile) => compile.disassemble(&view),
+            Err(err) => err
+        };
 
         resource.compare(actual)
     }

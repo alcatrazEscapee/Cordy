@@ -21,8 +21,6 @@ pub struct ParserState {
 
     output_len: usize, // Validity check
     error_len: usize,
-
-    prevent_expression_statement: bool,
 }
 
 impl ParserState {
@@ -31,7 +29,6 @@ impl ParserState {
             input: Vec::new(),
             output_len: parser.output.len(),
             error_len: parser.errors.len(),
-            prevent_expression_statement: parser.prevent_expression_statement,
         }
     }
 
@@ -45,7 +42,6 @@ impl ParserState {
 
         parser.errors.truncate(self.error_len);
         parser.error_recovery = false;
-        parser.prevent_expression_statement = self.prevent_expression_statement;
     }
 }
 
@@ -228,7 +224,6 @@ impl<'a> Parser<'a> {
             if let Some(state) = &mut self.restore_state {
                 state.input.push(token);
             }
-            self.prevent_expression_statement = false;
         }
         trace::trace_parser!("advance {:?}", self.input.front());
         let ret = self.input.pop_front();
@@ -248,8 +243,16 @@ impl<'a> Parser<'a> {
     ///
     /// N.B. This cannot reserve across functions - the reserved token must be set from within the current function's parse.
     pub fn reserve(self: &mut Self) -> usize {
+        self.reserve_with(self.prev_location())
+    }
+
+    /// Reserves a space in the output code by inserting a `Noop` token.
+    /// Returns an index to the token, which can later be used to set the correct value.
+    /// The location is either the previous location (provided by `self.reserve()`), or a custom location passed in here.
+    ///
+    /// N.B. This cannot reserve across functions - the reserved token must be set from within the current function's parse.
+    pub fn reserve_with(self: &mut Self, loc: Location) -> usize {
         trace::trace_parser!("reserve at {}", self.current_function().len());
-        let loc = self.prev_location();
         self.current_function_mut().push((loc, Noop));
         self.current_function().len() - 1
     }

@@ -9,14 +9,6 @@ NewLine
 
 === Scan Errors ===
 
-ScanError { error: InvalidCharacter('$'), loc: Location { start: 41, width: 1, index: 0 } }
-ScanError { error: InvalidCharacter('#'), loc: Location { start: 44, width: 1, index: 0 } }
-ScanError { error: InvalidCharacter('#'), loc: Location { start: 74, width: 1, index: 0 } }
-ScanError { error: InvalidCharacter('$'), loc: Location { start: 101, width: 1, index: 0 } }
-ScanError { error: InvalidCharacter('$'), loc: Location { start: 179, width: 1, index: 0 } }
-
-=== Formatted Scan Errors ===
-
 Invalid character: '$'
   at: line 2 (invalid_character.cor)
 

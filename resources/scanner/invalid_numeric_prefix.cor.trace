@@ -8,15 +8,6 @@ NewLine
 
 === Scan Errors ===
 
-ScanError { error: InvalidNumericPrefix('h'), loc: Location { start: 32, width: 2, index: 0 } }
-ScanError { error: InvalidNumericValue(ParseIntError { kind: Empty }), loc: Location { start: 57, width: 2, index: 0 } }
-ScanError { error: InvalidNumericValue(ParseIntError { kind: Empty }), loc: Location { start: 60, width: 2, index: 0 } }
-ScanError { error: InvalidNumericPrefix('1'), loc: Location { start: 82, width: 2, index: 0 } }
-ScanError { error: InvalidNumericValue(ParseIntError { kind: Empty }), loc: Location { start: 118, width: 3, index: 0 } }
-ScanError { error: InvalidNumericValue(ParseIntError { kind: Empty }), loc: Location { start: 122, width: 3, index: 0 } }
-
-=== Formatted Scan Errors ===
-
 Invalid numeric prefix: '0h'
   at: line 1 (invalid_numeric_prefix.cor)
 

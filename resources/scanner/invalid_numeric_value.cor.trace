@@ -6,12 +6,6 @@ NewLine
 
 === Scan Errors ===
 
-ScanError { error: InvalidNumericValue(ParseIntError { kind: PosOverflow }), loc: Location { start: 47, width: 23, index: 0 } }
-ScanError { error: InvalidNumericValue(ParseIntError { kind: PosOverflow }), loc: Location { start: 72, width: 25, index: 0 } }
-ScanError { error: InvalidNumericValue(ParseIntError { kind: PosOverflow }), loc: Location { start: 99, width: 68, index: 0 } }
-
-=== Formatted Scan Errors ===
-
 Invalid numeric value: number too large to fit in target type
   at: line 2 (invalid_numeric_value.cor)
 
