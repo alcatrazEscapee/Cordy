@@ -10,10 +10,10 @@ L7: 0002 PushGlobal(0) -> foo
     0009 Pop
     0010 Exit
 L2: 0011 PushLocal(0) -> x
-    0012 Int(1)
-    0013 GreaterThan
+L4: 0012 Int(1)
+L2: 0013 GreaterThan
     0014 JumpIfFalsePop(17)
-L3: 0015 True
+L4: 0015 True
     0016 Jump(18)
-L4: 0017 False
+    0017 False
 L5: 0018 Return
