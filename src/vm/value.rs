@@ -4,6 +4,7 @@ use std::cmp::{Ordering, Reverse};
 use std::collections::{BinaryHeap, HashMap, VecDeque};
 use std::fmt::{Debug, Formatter};
 use std::hash::{Hash, Hasher};
+use std::iter::FusedIterator;
 use std::mem;
 use std::rc::Rc;
 use std::str::Chars;
@@ -1149,7 +1150,7 @@ impl Iterable {
     pub fn len(&self) -> usize {
         match &self {
             Iterable::Str(it, _) => it.chars().count(),
-            Iterable::Unit(it) => if it.is_some() { 1 } else { 0 },
+            Iterable::Unit(it) => it.is_some() as usize,
             Iterable::Collection(_, it) => it.len(),
             Iterable::Range(_, it) => it.len(),
             Iterable::Enumerate(_, it) => it.len(),
@@ -1231,6 +1232,9 @@ impl Iterator for IterableRev {
         }
     }
 }
+
+impl FusedIterator for Iterable {}
+impl FusedIterator for IterableRev {}
 
 // Instead of deriving these, assert that they panic because it should never happen.
 impl PartialEq for Iterable { fn eq(&self, _: &Self) -> bool { panic!("Iter() is a synthetic type and should not be =='d"); } }

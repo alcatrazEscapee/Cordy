@@ -694,6 +694,12 @@ Joins an iterable into a single string. First calls `str()` on any arguments, an
 'h e l l o'
 ```
 
+This is a native optimized form of the below usage of `reduce`:
+
+```
+>>> reduce(fn(x, y) -> str(x) + joiner + str(y), iter)
+```
+
 ### (Str) Replace `replace(...) -> str`
 
 **Possible Signatures**
