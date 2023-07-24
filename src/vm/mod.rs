@@ -1442,6 +1442,9 @@ mod test {
     #[test] fn test_list_recursive_knot_repr() { run_str("let x = [] ; let y = [x] ; x.push(y) ; x.print", "[[[...]]]\n"); }
     #[test] fn test_list_recursive_complex_repr() { run_str("struct S(x) ; let x = [S(nil)] ; x[0]->x = [S(x)] ; x.print", "[S(x=[S(x=[...])])]\n"); }
     #[test] fn test_vector_empty_constructor() { run_str("vector() . print", "()\n"); }
+    #[test] fn test_vector_empty_iterable_constructor() { run_str("vector([]) . print", "()\n"); }
+    #[test] fn test_vector_iterable_constructor() { run_str("vector([1, 2, 3]) . print", "(1, 2, 3)\n"); }
+    #[test] fn test_vector_multiple_constructor() { run_str("vector(1, 2, 3) . print", "(1, 2, 3)\n"); }
     #[test] fn test_vector_literal_single() { run_str("(1,) . print", "(1)\n"); }
     #[test] fn test_vector_literal_multiple() { run_str("(1,2,3) . print", "(1, 2, 3)\n"); }
     #[test] fn test_vector_literal_multiple_trailing_comma() { run_str("(1,2,3,) . print", "(1, 2, 3)\n"); }
