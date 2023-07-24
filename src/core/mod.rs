@@ -614,11 +614,11 @@ pub fn invoke<VM>(native: NativeFunction, nargs: u32, vm: &mut VM) -> ValueResul
         Vector => match nargs {
             0 => Ok(Vec::new().to_value()),
             1 => {
-                let arg = vm.pop(); // Handle `a + bi . vector` as a special case here
+                let arg: Value = vm.pop(); // Handle `a + bi . vector` as a special case here
                 if let Value::Complex(it) = arg {
                     return Ok(vec![Value::Int(it.re), Value::Int(it.im)].to_value())
                 }
-                match vm.pop().as_iter() {
+                match arg.as_iter() {
                     Ok(an) => Ok(an.to_vector()),
                     Err(e) => Err(e),
                 }
