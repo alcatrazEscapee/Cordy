@@ -42,15 +42,15 @@ impl Optimize for Expr {
             },
 
             // Binary Operators
-            Expr(loc, ExprType::Binary(op, lhs, rhs)) => {
+            Expr(loc, ExprType::Binary(op, lhs, rhs, swap)) => {
                 let lhs: Expr = lhs.optimize();
                 let rhs: Expr = rhs.optimize();
                 match lhs.as_constant() {
                     Ok(lhs) => match rhs.as_constant() {
-                        Ok(rhs) => Expr::value_result(loc, op.apply(lhs, rhs)),
-                        Err(rhs) => Expr::value(lhs).binary(loc, op, rhs),
+                        Ok(rhs) => Expr::value_result(loc, if swap { op.apply(rhs, lhs) } else { op.apply(lhs, rhs) }),
+                        Err(rhs) => Expr::value(lhs).binary(loc, op, rhs, swap),
                     },
-                    Err(lhs) => lhs.binary(loc, op, rhs),
+                    Err(lhs) => lhs.binary(loc, op, rhs, swap),
                 }
             },
 
@@ -60,18 +60,32 @@ impl Optimize for Expr {
             Expr(loc, ExprType::Eval(f, args, any_unroll)) => {
                 let f: Expr = f.optimize();
                 let mut args: Vec<Expr> = args.optimize();
+                let nargs: Option<usize> = if any_unroll { None } else { Some(args.len()) }; // nargs is only valid if no unrolls are present
 
                 match f {
-                    // Certain native functions, we can transform into operators, with two arguments
-                    Expr(_, ExprType::NativeFunction(native_f)) if native_f.is_standard_binary_operator() && args.len() == 2 => {
-                        let f_op = native_f.as_standard_binary_operator().unwrap();
+                    // Replace invokes on a binary operator with the operator itself
+                    Expr(_, ExprType::NativeFunction(native_f)) if native_f.is_binary_operator() && nargs == Some(2) => {
+                        let f_op = native_f.as_binary_operator().unwrap();
                         let rhs = args.pop().unwrap();
                         let lhs = args.pop().unwrap();
-                        lhs.binary(loc, f_op, rhs)
+                        lhs.binary(loc, f_op, rhs, false).optimize() // Re-call optimize, for constant folding
+                    },
+
+                    // Same optimization as above, but with swapped operators, if we can safely reorder them
+                    Expr(_, ExprType::NativeFunction(native_f)) if native_f.is_binary_operator_swap() && nargs == Some(2) => {
+                        let f_op = native_f.swap().as_binary_operator().unwrap();
+                        // lhs and rhs are the arguments, post swap
+                        // If we can re-order the arguments, then create just a normal binary(lhs, rhs)
+                        // If we *can't*, then we can create a swapped operator instead
+                        let lhs = args.pop().unwrap();
+                        let rhs = args.pop().unwrap();
+                        let swap: bool = !lhs.can_reorder(&rhs);
+
+                        lhs.binary(loc, f_op, rhs, swap).optimize() // Re-call optimize, for constant folding
                     },
 
                     // This is a special case, for `min(int)` and `max(int)`, we can replace this with a compile time constant
-                    Expr(_, ExprType::NativeFunction(native_f @ (NativeFunction::Min | NativeFunction::Max))) if args.len() == 1 => {
+                    Expr(_, ExprType::NativeFunction(native_f @ (NativeFunction::Min | NativeFunction::Max))) if nargs == Some(1) => {
                         if let Expr(_, ExprType::NativeFunction(NativeFunction::Int)) = args[0] {
                             Expr::int(if native_f == NativeFunction::Min { i64::MIN } else { i64::MAX })
                         } else {
@@ -120,13 +134,26 @@ impl Optimize for Expr {
                     },
                     // If possible, replace `arg . f` with `f(arg)`
                     // Then re-optimize the new `eval` expression
-                    f => {
-                        if f.can_reorder(&arg) {
-                            f.eval(loc, vec![arg], false).optimize()
+                    f if f.can_reorder(&arg) => f.eval(loc, vec![arg], false).optimize(),
+
+                    // If we can't reorder, then we won't fall into optimization cases for binary operators
+                    // This hits cases such as `a . (<op> b)` where a and b cannot be re-ordered
+                    // We can replace this with `a b <op>`, or in the case of the opposite partial, with a `Swap` opcode as well, in both cases avoiding the function call
+                    Expr(_, ExprType::Eval(f_inner, mut args, false)) if is_native_operator(&f_inner) && args.len() == 1 => {
+                        let native_f = match *f_inner {
+                            Expr(_, ExprType::NativeFunction(f)) => f,
+                            _ => panic!()
+                        };
+                        let rhs = args.pop().unwrap();
+                        if native_f.is_binary_operator() {
+                            rhs.binary(loc, native_f.as_binary_operator().unwrap(), arg, true)
                         } else {
-                            arg.compose(loc, f)
+                            arg.binary(loc, native_f.swap().as_binary_operator().unwrap(), rhs, false)
                         }
-                    }
+                    },
+
+                    // Default, return the compose
+                    f => arg.compose(loc, f),
                 }
             },
 
@@ -190,7 +217,7 @@ impl Expr {
             ExprType::LValue(_) => Purity::Weak,
 
             ExprType::Unary(_, arg) => arg.purity(),
-            ExprType::Binary(_, lhs, rhs) | ExprType::LogicalOr(lhs, rhs) | ExprType::LogicalAnd(lhs, rhs) => lhs.purity().min(rhs.purity()),
+            ExprType::Binary(_, lhs, rhs, _) | ExprType::LogicalOr(lhs, rhs) | ExprType::LogicalAnd(lhs, rhs) => lhs.purity().min(rhs.purity()),
             ExprType::Literal(_, args) => args.iter().map(|u| u.purity()).min().unwrap_or(Purity::Strong),
             ExprType::Unroll(arg, _) => arg.purity(),
             ExprType::IfThenElse(condition, if_true, if_false) => condition.purity().min(if_true.purity()).min(if_false.purity()),
@@ -224,6 +251,13 @@ fn any_unroll(args: &Vec<Expr>) -> bool {
     args.iter().any(|u| u.is_unroll())
 }
 
+fn is_native_operator(expr: &Expr) -> bool {
+    match expr {
+        Expr(_, ExprType::NativeFunction(native)) => native.is_operator(),
+        _ => false,
+    }
+}
+
 
 #[derive(Debug, Copy, Clone, Ord, PartialOrd, PartialEq, Eq)]
 enum Purity {
@@ -251,11 +285,27 @@ mod tests {
     #[test] fn test_compose_reordering_both_weak_weak() { run_expr("do { let x, y ; x . y }", "Nil Nil PushLocal(1)->y PushLocal(0)->x Call(1) PopN(2)") }
     #[test] fn test_compose_reordering_both_weak_impure() { run_expr("do { let x, y ; x . (y = 2) }", "Nil Nil PushLocal(0)->x Int(2) StoreLocal(1)->y Swap Call(1) PopN(2)") }
     #[test] fn test_compose_reordering_both_impure_impure() { run_expr("do { let x, y ; (x = 1) . (y = 2) }", "Nil Nil Int(1) StoreLocal(0)->x Int(2) StoreLocal(1)->y Swap Call(1) PopN(2)") }
-    #[test] fn test_operator_function_inlining_constant_1() { run_expr("(+)(1)(2)", "Int(1) Int(2) Add") }
-    #[test] fn test_operator_function_inlining_constant_2() { run_expr("1 . (+2)", "OperatorAddSwap Int(2) Int(1) Call(2)") }
-    #[test] fn test_operator_function_inlining_constant_3() { run_expr("1 . (2+)", "Int(2) Int(1) Add") }
-    #[test] fn test_operator_function_inlining_constant_4() { run_expr("(+1)(2)", "OperatorAddSwap Int(1) Int(2) Call(2)") }
-    #[test] fn test_operator_function_inlining_constant_5() { run_expr("(1+)(2)", "Int(1) Int(2) Add") }
+    #[test] fn test_operator_function_inlining_constant_1() { run_expr("(+)(1)(2)", "Int(3)") }
+    #[test] fn test_operator_function_inlining_constant_2() { run_expr("1 . (+2)", "Int(3)") }
+    #[test] fn test_operator_function_inlining_constant_3() { run_expr("1 . (2+)", "Int(3)") }
+    #[test] fn test_operator_function_inlining_constant_4() { run_expr("(+1)(2)", "Int(3)") }
+    #[test] fn test_operator_function_inlining_constant_5() { run_expr("(1+)(2)", "Int(3)") }
+    #[test] fn test_operator_function_inlining_non_constant_1() { run_expr("do { let x ; (+)(x)(2) }", "Nil PushLocal(0)->x Int(2) Add Pop") }
+    #[test] fn test_operator_function_inlining_non_constant_2() { run_expr("do { let x ; x . (+2) }", "Nil PushLocal(0)->x Int(2) Add Pop") }
+    #[test] fn test_operator_function_inlining_non_constant_3() { run_expr("do { let x ; x . (2+) }", "Nil Int(2) PushLocal(0)->x Add Pop") }
+    #[test] fn test_operator_function_inlining_non_constant_4() { run_expr("do { let x ; (+x)(2) }", "Nil Int(2) PushLocal(0)->x Add Pop") }
+    #[test] fn test_operator_function_inlining_non_constant_5() { run_expr("do { let x ; (x+)(2) }", "Nil PushLocal(0)->x Int(2) Add Pop") }
+    #[test] fn test_operator_function_inlining_asymmetric_1() { run_expr("(/)(2)(5)", "Int(0)") }
+    #[test] fn test_operator_function_inlining_asymmetric_2() { run_expr("2 . (/5)", "Int(0)") }
+    #[test] fn test_operator_function_inlining_asymmetric_3() { run_expr("2 . (5/)", "Int(2)") }
+    #[test] fn test_operator_function_inlining_asymmetric_4() { run_expr("(/2)(5)", "Int(2)") }
+    #[test] fn test_operator_function_inlining_asymmetric_5() { run_expr("(2/)(5)", "Int(0)") }
+    #[test] fn test_operator_function_inlining_impure_1() { run_expr("do { let x, y ; (/)(x)(y = 2) }", "Nil Nil PushLocal(0)->x Int(2) StoreLocal(1)->y Div PopN(2)") }
+    #[test] fn test_operator_function_inlining_impure_2() { run_expr("do { let x, y ; x . (/(y = 2)) }", "Nil Nil PushLocal(0)->x Int(2) StoreLocal(1)->y Div PopN(2)") }
+    #[test] fn test_operator_function_inlining_impure_3() { run_expr("do { let x, y ; x . ((y = 2)/) }", "Nil Nil PushLocal(0)->x Int(2) StoreLocal(1)->y Swap Div PopN(2)") }
+    #[test] fn test_operator_function_inlining_impure_4() { run_expr("do { let x, y ; (/x)(y = 2) }", "Nil Nil PushLocal(0)->x Int(2) StoreLocal(1)->y Swap Div PopN(2)") }
+    #[test] fn test_operator_function_inlining_impure_5() { run_expr("do { let x, y ; (x/)(y = 2) }", "Nil Nil PushLocal(0)->x Int(2) StoreLocal(1)->y Div PopN(2)") }
+    #[test] fn test_operator_function_inlining_with_unroll() { run_expr("(/)(...1, 2)", "OperatorDiv Int(1) Unroll Int(2) Call...(2)") }
     #[test] fn test_inline_int_min() { run_expr("min(int)", "Int(-9223372036854775808)") }
     #[test] fn test_inline_int_max() { run_expr("int.max", "Int(9223372036854775807)") }
     #[test] fn test_partial_function_call_merge_no_args_1() { run_expr("vector()()", "Vector Call(0) Call(0)"); }

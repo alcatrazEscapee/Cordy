@@ -58,9 +58,15 @@ impl<'a> Parser<'a> {
                 self.emit_expr(*arg);
                 self.push_with(Unary(op), loc);
             },
-            Expr(loc, ExprType::Binary(op, lhs, rhs)) => {
-                self.emit_expr(*lhs);
-                self.emit_expr(*rhs);
+            Expr(loc, ExprType::Binary(op, lhs, rhs, swap)) => {
+                if swap {
+                    self.emit_expr(*rhs);
+                    self.emit_expr(*lhs);
+                    self.push(Swap);
+                } else {
+                    self.emit_expr(*lhs);
+                    self.emit_expr(*rhs);
+                }
                 self.push_with(Binary(op), loc);
             },
             Expr(loc, ExprType::Literal(op, args)) => {
