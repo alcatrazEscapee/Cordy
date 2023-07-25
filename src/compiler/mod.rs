@@ -164,7 +164,7 @@ impl<'a> CompileParameters<'a> {
 }
 
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CompileResult {
     pub code: Vec<Opcode>,
 

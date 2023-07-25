@@ -98,6 +98,8 @@ struct SourceIndex {
 
 impl SourceView {
 
+    pub fn empty() -> SourceView { SourceView(Vec::new()) }
+
     pub fn new(name: String, text: String) -> SourceView {
         let mut view = SourceView(Vec::new());
         view.push(name, text);
