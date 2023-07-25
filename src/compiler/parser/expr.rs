@@ -25,7 +25,17 @@ pub enum ExprType {
 
     // Operators + Functions
     Unary(UnaryOp, Arg),
-    Binary(BinaryOp, Arg, Arg),
+
+    /// Arguments are `op, lhs, rhs, swap`
+    /// If `swap` is `true`, then **both** of the following effects will apply:
+    ///
+    /// 1. The arguments `lhs` and `rhs` will be evaluated in the opposite semantic order
+    /// 2. A `Swap` opcode will be emitted.
+    ///
+    /// This means that a `binary_with(op, lhs, rhs, swap)` is equivalent to saying that "rhs needs to be evaluated before lhs in the operation op(lhs, rhs)"
+    ///
+    /// **The side (right vs left) of each argument is still correct!!!**
+    Binary(BinaryOp, Arg, Arg, bool),
     Literal(LiteralType, Vec<Expr>),
     Unroll(Arg, bool), // first: bool
     Eval(Arg, Vec<Expr>, bool), // any_unroll: bool
@@ -91,7 +101,7 @@ impl Expr {
     pub fn raw_slice(loc: Location, arg1: Expr, arg2: Expr, arg3: Option<Expr>) -> Expr { Expr(loc, ExprType::SliceLiteral(Box::new(arg1), Box::new(arg2), Box::new(arg3))) }
 
     pub fn unary(self: Self, loc: Location, op: UnaryOp) -> Expr { Expr(loc, ExprType::Unary(op, Box::new(self))) }
-    pub fn binary(self: Self, loc: Location, op: BinaryOp, rhs: Expr) -> Expr { Expr(loc, ExprType::Binary(op, Box::new(self), Box::new(rhs))) }
+    pub fn binary(self: Self, loc: Location, op: BinaryOp, rhs: Expr, swap: bool) -> Expr { Expr(loc, ExprType::Binary(op, Box::new(self), Box::new(rhs), swap)) }
     pub fn unroll(self: Self, loc: Location, first: bool) -> Expr { Expr(loc, ExprType::Unroll(Box::new(self), first)) }
     pub fn eval(self: Self, loc: Location, args: Vec<Expr>, any_unroll: bool) -> Expr { Expr(loc, ExprType::Eval(Box::new(self), args, any_unroll)) }
     pub fn compose(self: Self, loc: Location, f: Expr) -> Expr { Expr(loc, ExprType::Compose(Box::new(self), Box::new(f))) }

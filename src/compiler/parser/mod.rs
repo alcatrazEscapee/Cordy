@@ -1155,7 +1155,7 @@ impl Parser<'_> {
                     // This actually means we need to transform the operator if it is asymmetric, to one which looks identical, but is actually the operator in reverse.
                     let arg = self.parse_expr_top_level(); // Parse the expression following a binary prefix operator
                     self.expect(CloseParen);
-                    Some(Expr::native(loc, op.swap_standard_binary_operator()).eval(loc, vec![arg], false))
+                    Some(Expr::native(loc, op.swap()).eval(loc, vec![arg], false))
                 }
             }
         } else {
@@ -1634,7 +1634,7 @@ impl Parser<'_> {
                     if long {
                         loc |= self.advance_with();
                     }
-                    expr = expr.binary(loc, op, self.parse_expr_2_unary());
+                    expr = expr.binary(loc, op, self.parse_expr_2_unary(), false);
                 },
                 None => break
             }
@@ -1657,7 +1657,7 @@ impl Parser<'_> {
             match maybe_op {
                 Some(op) => {
                     let loc = self.advance_with();
-                    expr = expr.binary(loc, op, self.parse_expr_3());
+                    expr = expr.binary(loc, op, self.parse_expr_3(), false);
                 },
                 None => break
             }
@@ -1680,7 +1680,7 @@ impl Parser<'_> {
             match maybe_op {
                 Some(op) => {
                     let loc = self.advance_with();
-                    expr = expr.binary(loc, op, self.parse_expr_4());
+                    expr = expr.binary(loc, op, self.parse_expr_4(), false);
                 },
                 None => break
             }
@@ -1702,7 +1702,7 @@ impl Parser<'_> {
                 break
             }
             match maybe_op {
-                Some(op) => expr = expr.binary(self.advance_with(), op, self.parse_expr_5()),
+                Some(op) => expr = expr.binary(self.advance_with(), op, self.parse_expr_5(), false),
                 None => break
             }
         }
@@ -1745,7 +1745,7 @@ impl Parser<'_> {
             match maybe_op {
                 Some(op) => {
                     let loc = self.advance_with();
-                    expr = expr.binary(loc, op, self.parse_expr_7());
+                    expr = expr.binary(loc, op, self.parse_expr_7(), false);
                 },
                 None => break
             }
@@ -1861,7 +1861,7 @@ impl Parser<'_> {
                         let rhs = self.parse_expr_10();
                         Expr::assign_lvalue(loc, lvalue, match op {
                             BinaryOp::NotEqual => lhs.compose(loc, rhs),
-                            op => lhs.binary(loc, op, rhs),
+                            op => lhs.binary(loc, op, rhs, false),
                         })
                     },
                     Expr(_, ExprType::Index(array, index)) => {

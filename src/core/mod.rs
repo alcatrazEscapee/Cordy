@@ -171,10 +171,14 @@ impl NativeFunction {
         NATIVE_FUNCTIONS[*self as usize].args
     }
 
-    /// A `standard operator` refers to an operator which has a direct opcode representation.
+    pub fn is_operator(self: &Self) -> bool { self.swap() != *self }
+
+    /// An `operator` refers to an operator which has a direct opcode representation.
     /// Note this excludes asymmetric 'swap' operators
-    pub fn is_standard_binary_operator(self: &Self) -> bool { self.as_standard_binary_operator().is_some() }
-    pub fn as_standard_binary_operator(self: &Self) -> Option<BinaryOp> {
+    pub fn is_binary_operator(self: &Self) -> bool { self.as_binary_operator().is_some() }
+    pub fn is_binary_operator_swap(self: &Self) -> bool { self.swap().as_binary_operator().is_some() }
+
+    pub fn as_binary_operator(self: &Self) -> Option<BinaryOp> {
         match self {
             OperatorMul => Some(BinaryOp::Mul),
             OperatorDiv => Some(BinaryOp::Div),
@@ -201,22 +205,36 @@ impl NativeFunction {
         }
     }
 
-    pub fn swap_standard_binary_operator(self: Self) -> NativeFunction {
+    pub fn swap(self: Self) -> NativeFunction {
         match self {
             OperatorDiv => OperatorDivSwap,
+            OperatorDivSwap => OperatorDiv,
             OperatorPow => OperatorPowSwap,
+            OperatorPowSwap => OperatorPow,
             OperatorMod => OperatorModSwap,
+            OperatorModSwap => OperatorMod,
             OperatorIs => OperatorIsSwap,
+            OperatorIsSwap => OperatorIs,
             OperatorIsNot => OperatorIsNotSwap,
+            OperatorIsNotSwap => OperatorIsNot,
             OperatorIn => OperatorInSwap,
+            OperatorInSwap => OperatorIn,
             OperatorNotIn => OperatorNotInSwap,
+            OperatorNotInSwap => OperatorNotIn,
             OperatorAdd => OperatorAddSwap,
+            OperatorAddSwap => OperatorAdd,
             OperatorLeftShift => OperatorLeftShiftSwap,
+            OperatorLeftShiftSwap => OperatorLeftShift,
             OperatorRightShift => OperatorRightShiftSwap,
+            OperatorRightShiftSwap => OperatorRightShift,
             OperatorLessThan => OperatorLessThanSwap,
+            OperatorLessThanSwap => OperatorLessThan,
             OperatorLessThanEqual => OperatorLessThanEqualSwap,
+            OperatorLessThanEqualSwap => OperatorLessThanEqual,
             OperatorGreaterThan => OperatorGreaterThanSwap,
+            OperatorGreaterThanSwap => OperatorGreaterThan,
             OperatorGreaterThanEqual => OperatorGreaterThanEqualSwap,
+            OperatorGreaterThanEqualSwap => OperatorGreaterThanEqual,
             op => op,
         }
     }
