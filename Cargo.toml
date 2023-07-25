@@ -5,12 +5,19 @@
 
 [dependencies]
     lazy_static = "1.4.0"
-    rustyline = "11.0.0"
+    rustyline = "12.0.0"
     num-integer = "0.1.45"
     num-complex = "0.4.3"
     itertools = "0.10.5"
-    indexmap = "1.9.2"
+    indexmap = "2.0.0"
     fancy-regex = "0.11.0"
+
+[dev-dependencies]
+    criterion = "0.5.1"
 
 #[profile.release]
 #    debug = true
+
+[[bench]]
+    name = "vm"
+    harness = false
