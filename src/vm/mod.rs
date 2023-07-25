@@ -643,6 +643,7 @@ impl<R, W> VirtualMachine<R, W> where
                 if func.in_range(nargs) {
                     // Evaluate directly
                     self.call_function(func.jump_offset(nargs), nargs, func.num_var_args(nargs));
+                    Ok(FunctionType::User)
                 } else if func.min_args() > nargs {
                     // Evaluate as a partial function
                     // Special case if nargs == 0, we can avoid creating a partial wrapper and doing any stack manipulations
@@ -652,10 +653,11 @@ impl<R, W> VirtualMachine<R, W> where
                         let partial: Value = Value::partial(func, arg);
                         self.push(partial);
                     }
+                    // Partial functions are already evaluated, so we return native, since we don't need to spin
+                    Ok(FunctionType::Native)
                 } else {
-                    return IncorrectArgumentsUserFunction((**func).clone(), nargs).err();
+                    IncorrectArgumentsUserFunction((**func).clone(), nargs).err()
                 }
-                Ok(FunctionType::User)
             },
             Value::PartialFunction(_) => {
                 // Surgically extract the partial binding from the stack
@@ -673,6 +675,8 @@ impl<R, W> VirtualMachine<R, W> where
                     }
                     self.pop(); // Should pop the `Nil` we swapped earlier
                     self.push(Value::PartialFunction(Box::new(partial)));
+                    // Partial functions are already evaluated, so we return native, since we don't need to spin
+                    Ok(FunctionType::Native)
                 } else if func.in_range(total_nargs) {
                     // Exactly enough arguments to invoke the function
                     // Before we call, we need to pop-push to reorder the arguments and setup partial arguments, so we have the correct calling convention
@@ -688,11 +692,10 @@ impl<R, W> VirtualMachine<R, W> where
                         self.push(arg);
                     }
                     self.call_function(head, total_nargs, num_var_args);
-
+                    Ok(FunctionType::User)
                 } else {
-                    return IncorrectArgumentsUserFunction((**func).clone(), total_nargs).err()
+                    IncorrectArgumentsUserFunction((**func).clone(), total_nargs).err()
                 }
-                Ok(FunctionType::User)
             },
             Value::NativeFunction(b) => {
                 match core::invoke(*b, nargs, self) {
@@ -1175,6 +1178,14 @@ mod test {
     #[test] fn test_partial_function_zero_arg_user_not_optimized() { run_str("fn f(x) -> x() ; f(f(f(f))) . repr . print", "fn f(x)\n"); }
     #[test] fn test_partial_function_zero_arg_native_not_optimized() { run_str("fn f(x) -> x() ; f(f(f(len))) . repr . print", "fn len(x)\n"); }
     #[test] fn test_partial_function_zero_arg_operator_not_optimized() { run_str("fn f(x) -> x() ; f(f(f(+))) . repr . print", "fn (+)(lhs, rhs)\n"); }
+    #[test] fn test_partial_user_functions_1() { run_str("fn foo(x) -> print(x) ; foo()('hi')", "hi\n"); }
+    #[test] fn test_partial_user_functions_2() { run_str("fn foo(x, y) -> print(x, y) ; foo()('hi', 'there')", "hi there\n"); }
+    #[test] fn test_partial_user_functions_3() { run_str("fn foo(x, y) -> print(x, y) ; foo('hi')('there')", "hi there\n"); }
+    #[test] fn test_partial_user_functions_4() { run_str("fn foo(x, y) -> print(x, y) ; foo('hi')()('there')", "hi there\n"); }
+    #[test] fn test_partial_user_functions_5() { run_str("fn foo(x, y) -> print(x, y) ; [1, 2] . map(foo('hello'))", "hello 1\nhello 2\n"); }
+    #[test] fn test_partial_user_functions_6() { run_str("fn add(x, y) -> x + y ; [1, 2, 3] . map(add(3)) . print", "[4, 5, 6]\n"); }
+    #[test] fn test_partial_user_functions_7() { run_str("fn add(x, y, z) -> x + y ; [1, 2, 3] . map(add(3)) . print", "[fn add(x, y, z), fn add(x, y, z), fn add(x, y, z)]\n"); }
+    #[test] fn test_partial_user_functions_8() { run_str("fn add(x, y) -> x + y ; add(1)(2) . print", "3\n"); }
     #[test] fn test_function_with_one_default_arg() { run_str("fn foo(a, b?) { print(a, b) } ; foo('test') ; foo('test', 'bar')", "test nil\ntest bar\n"); }
     #[test] fn test_function_with_one_default_arg_not_enough() { run_str("fn foo(a, b?) { print(a, b) } ; foo()", ""); }
     #[test] fn test_function_with_one_default_arg_too_many() { run_str("fn foo(a, b?) { print(a, b) } ; foo(1, 2, 3)", "Incorrect number of arguments for fn foo(a, b), got 3\n  at: line 1 (<test>)\n\n1 | fn foo(a, b?) { print(a, b) } ; foo(1, 2, 3)\n2 |                                    ^^^^^^^^^\n"); }
