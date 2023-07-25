@@ -448,7 +448,7 @@ Possible signatures:
 
 Returns the elements from `it` in a sorted ascending order, either by the key function `key`, or by the comparator function `cmp`, depending on the number of arguments required by `key` / `cmp`.
 
-### Group By <T, K> group_by(by: int | fn(T) -> K, it: iterable<T>) -> list<vector<T>> | dict<K, vector<T>>
+### Group By `<T, K> group_by(by: int | fn(T) -> K, it: iterable<T>) -> list<vector<T>> | dict<K, vector<T>>`
 
 Possible signatures:
 
