@@ -680,17 +680,10 @@ impl<R, W> VirtualMachine<R, W> where
                 } else if func.in_range(total_nargs) {
                     // Exactly enough arguments to invoke the function
                     // Before we call, we need to pop-push to reorder the arguments and setup partial arguments, so we have the correct calling convention
-                    let iter = self.popn(nargs);
                     let head: usize = func.jump_offset(total_nargs);
                     let num_var_args: Option<u32> = func.num_var_args(nargs);
-                    self.pop(); // Should pop the `Nil` we swapped earlier
-                    self.push(partial.func);
-                    for par in partial.args {
-                        self.push(par);
-                    }
-                    for arg in iter {
-                        self.push(arg);
-                    }
+                    self.stack[i] = partial.func; // Replace the `Nil` from earlier
+                    insert(&mut self.stack, partial.args.into_iter(), nargs);
                     self.call_function(head, total_nargs, num_var_args);
                     Ok(FunctionType::User)
                 } else {
@@ -721,9 +714,8 @@ impl<R, W> VirtualMachine<R, W> where
                 // When evaluating a partial function the vm stack will contain [..., argN+1, ... argM]
                 // The partial args will contain the vector [argN, argN-1, ... arg1]
                 // After this, the vm stack should contain the args [..., arg1, arg2, ... argM]
-                let j: usize = self.stack.len() - nargs as usize;
                 let partial_args = args.len() as u32;
-                self.stack.splice(j..j, args.into_iter().rev());
+                insert(&mut self.stack, args.into_iter().rev(), nargs);
 
                 match core::invoke(native, nargs + partial_args, self) {
                     Ok(v) => {
@@ -939,11 +931,25 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
 ///
 /// **N.B.** This is not implemented as a method on `VirtualMachine` as we want to take a partial borrow only of
 /// `&mut self.stack` when called, and which means we can interact with other methods on the VM (e.g. the literal stack).
+#[inline]
 fn splice(stack: &mut Vec<Value>, n: u32) -> Splice<Empty<Value>> {
     let start: usize = stack.len() - n as usize;
     let end: usize = stack.len();
     stack.splice(start..end, std::iter::empty())
 }
+
+/// Inserts the contents of `args`, at the top of the stack minus `n`.
+/// Uses `Vec::splice` to be optimal.
+///
+/// Where : `n = N`, `args = [b0, b1, ... bM]`
+/// <br>Before : `stack = [..., a0, a1, ... aN]`
+/// <br>After : `stack = [..., b0, b1, ... bM, a0, a1, ... aN]`
+#[inline]
+fn insert<I : Iterator<Item=Value>>(stack: &mut Vec<Value>, args: I, n: u32) {
+    let at: usize = stack.len() - n as usize;
+    stack.splice(at..at, args);
+}
+
 
 
 #[cfg(test)]
