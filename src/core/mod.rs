@@ -1,7 +1,6 @@
 use std::collections::{BinaryHeap, VecDeque};
 use std::fs;
 use indexmap::{IndexMap, IndexSet};
-use lazy_static::lazy_static;
 
 use crate::vm::{operator, IntoIterableValue, IntoValue, IntoValueResult, Value, VirtualInterface, RuntimeError};
 use crate::vm::operator::BinaryOp;
@@ -27,6 +26,7 @@ pub fn find_native_function(name: &String) -> Option<NativeFunction> {
 }
 
 
+/// A native function implemented in Cordy
 #[repr(u8)]
 #[derive(Eq, PartialEq, Debug, Clone, Copy, Hash)]
 pub enum NativeFunction {
@@ -131,7 +131,7 @@ pub enum NativeFunction {
     Memoize,
     SyntheticMemoizedFunction,
 
-    Peek,
+    Peek, // Peek first value
     Pop, // Remove value at end
     PopFront, // Remove value at front
     Push, // Insert value at end
@@ -156,20 +156,20 @@ pub enum NativeFunction {
     CountZeros,
 }
 
+/// Information associated with a native function, including compiler-visible data (such as name, hidden), and argument information.
+struct NativeFunctionInfo {
+    native: NativeFunction,
+    name: &'static str,
+    args: &'static str,
+    nargs: Option<u32>,
+    hidden: bool,
+}
+
+
 impl NativeFunction {
-    pub fn get(op: u8) -> NativeFunction { NATIVE_FUNCTIONS[op as usize].native }
-
-    pub fn nargs(self: &Self) -> Option<u32> {
-        NATIVE_FUNCTIONS[*self as usize].nargs
-    }
-
-    pub fn name(self: &Self) -> &'static str {
-        NATIVE_FUNCTIONS[*self as usize].name
-    }
-
-    pub fn args(self: &Self) -> &'static str {
-        NATIVE_FUNCTIONS[*self as usize].args
-    }
+    pub fn nargs(self: &Self) -> Option<u32> { self.info().nargs }
+    pub fn name(self: &Self) -> &'static str { self.info().name }
+    pub fn args(self: &Self) -> &'static str { self.info().args }
 
     pub fn is_operator(self: &Self) -> bool { self.swap() != *self }
 
@@ -238,170 +238,148 @@ impl NativeFunction {
             op => op,
         }
     }
-}
 
-
-struct NativeFunctionInfo {
-    native: NativeFunction,
-    name: &'static str,
-    args: &'static str,
-    nargs: Option<u32>,
-    hidden: bool,
-}
-
-impl NativeFunctionInfo {
-    fn new(native: NativeFunction, name: &'static str, args: &'static str, nargs: Option<u32>, hidden: bool) -> NativeFunctionInfo {
-        NativeFunctionInfo { native, name, args, nargs, hidden }
+    fn info(self: Self) -> &'static NativeFunctionInfo {
+        &NATIVE_FUNCTIONS[self as usize]
     }
 }
 
-lazy_static! {
-    static ref NATIVE_FUNCTIONS: Vec<NativeFunctionInfo> = load_native_functions();
-}
+
+const N_NATIVE_FUNCTIONS: usize = 114; //std::mem::variant_count::<NativeFunction>(); // unstable
+static NATIVE_FUNCTIONS: [NativeFunctionInfo; N_NATIVE_FUNCTIONS] = load_native_functions();
 
 
-fn load_native_functions() -> Vec<NativeFunctionInfo> {
-    let mut natives: Vec<NativeFunctionInfo> = Vec::new();
+const fn load_native_functions() -> [NativeFunctionInfo; N_NATIVE_FUNCTIONS] {
     macro_rules! declare {
-        ($native:expr, $name:expr, $args:expr) => {
-            declare!($native, $name, $args, None, false);
-        };
-        ($native:expr, $name:expr, $args:expr, $nargs:expr) => {
-            declare!($native, $name, $args, Some($nargs), false);
-        };
-        ($native:expr, $name:expr, $args:expr, $nargs:expr, $hidden:expr) => {
-            let info = NativeFunctionInfo::new($native, $name, $args, $nargs, $hidden);
-            debug_assert_eq!(natives.len(), $native as usize, "Native Function {:?} (index = {}) declared in order {}", $native, $native as usize, natives.len());
-            natives.push(info);
-        };
+        ($native:expr, $name:expr, $args:expr) => { declare!($native, $name, $args, None, false) };
+        ($native:expr, $name:expr, $args:expr, $nargs:expr) => { declare!($native, $name, $args, Some($nargs), false) };
+        ($native:expr, $name:expr, $args:expr, $nargs:expr, $hidden:expr) => { NativeFunctionInfo { native: $native, name: $name, args: $args, nargs: $nargs, hidden: $hidden } };
     }
+    [
+        declare!(Read, "read", "", 1),
+        declare!(ReadLine, "read_line", "", 0),
+        declare!(Print, "print", "..."),
+        declare!(ReadText, "read_text", "file", 1),
+        declare!(WriteText, "write_text", "file, text", 2),
+        declare!(Env, "env", "..."),
+        declare!(Argv, "argv", "", 0),
+        declare!(Bool, "bool", "x", 1),
+        declare!(Int, "int", "x", 1),
+        declare!(Complex, "complex", "x", 1),
+        declare!(Str, "str", "x", 1),
+        declare!(List, "list", "..."),
+        declare!(Set, "set", "..."),
+        declare!(Dict, "dict", "..."),
+        declare!(Heap, "heap", "..."),
+        declare!(Vector, "vector", "..."),
+        declare!(Function, "function", "", None, false),
+        declare!(Iterable, "iterable", "", None, false),
+        declare!(Repr, "repr", "x", 1),
+        declare!(Eval, "eval", "expr", 1),
+        declare!(TypeOf, "typeof", "x", 1),
 
-    // core
-    declare!(Read, "read", "", 0);
-    declare!(ReadLine, "read_line", "", 0);
-    declare!(Print, "print", "...");
-    declare!(ReadText, "read_text", "file", 1);
-    declare!(WriteText, "write_text", "file, text", 2);
-    declare!(Env, "env", "...");
-    declare!(Argv, "argv", "", 0);
-    declare!(Bool, "bool", "x", 1);
-    declare!(Int, "int", "x", 1);
-    declare!(Complex, "complex", "x", 1);
-    declare!(Str, "str", "x", 1);
-    declare!(List, "list", "...");
-    declare!(Set, "set", "...");
-    declare!(Dict, "dict", "...");
-    declare!(Heap, "heap", "...");
-    declare!(Vector, "vector", "...");
-    declare!(Function, "function", "", None, false);
-    declare!(Iterable, "iterable", "", None, false);
-    declare!(Repr, "repr", "x", 1);
-    declare!(Eval, "eval", "expr", 1);
-    declare!(TypeOf, "typeof", "x", 1);
+        // operator
+        declare!(OperatorUnarySub, "(-)", "x", Some(1), true),
+        declare!(OperatorUnaryNot, "(!)", "x", Some(1), true),
 
-    // operator
-    declare!(OperatorUnarySub, "(-)", "x", Some(1), true);
-    declare!(OperatorUnaryNot, "(!)", "x", Some(1), true);
+        declare!(OperatorMul, "(*)", "lhs, rhs", Some(2), true),
+        declare!(OperatorDiv, "(/)", "lhs, rhs", Some(2), true),
+        declare!(OperatorDivSwap, "(/)", "lhs, rhs", Some(2), true),
+        declare!(OperatorPow, "(**)", "lhs, rhs", Some(2), true),
+        declare!(OperatorPowSwap, "(**)", "lhs, rhs", Some(2), true),
+        declare!(OperatorMod, "(%)", "lhs, rhs", Some(2), true),
+        declare!(OperatorModSwap, "(%)", "lhs, rhs", Some(2), true),
+        declare!(OperatorIs, "(is)", "lhs, rhs", Some(2), true),
+        declare!(OperatorIsSwap, "(is)", "lhs, rhs", Some(2), true),
+        declare!(OperatorIsNot, "(is not)", "lhs, rhs", Some(2), true),
+        declare!(OperatorIsNotSwap, "(is not)", "lhs, rhs", Some(2), true),
+        declare!(OperatorIn, "(in)", "lhs, rhs", Some(2), true),
+        declare!(OperatorInSwap, "(in)", "lhs, rhs", Some(2), true),
+        declare!(OperatorNotIn, "(not in)", "lhs, rhs", Some(2), true),
+        declare!(OperatorNotInSwap, "(not in)", "lhs, rhs", Some(2), true),
+        declare!(OperatorAdd, "(+)", "lhs, rhs", Some(2), true),
+        declare!(OperatorAddSwap, "(+)", "lhs, rhs", Some(2), true),
+        declare!(OperatorSub, "(-)", "lhs, rhs", Some(2), true),
+        declare!(OperatorLeftShift, "(<<)", "lhs, rhs", Some(2), true),
+        declare!(OperatorLeftShiftSwap, "(<<)", "lhs, rhs", Some(2), true),
+        declare!(OperatorRightShift, "(>>)", "lhs, rhs", Some(2), true),
+        declare!(OperatorRightShiftSwap, "(>>)", "lhs, rhs", Some(2), true),
+        declare!(OperatorBitwiseAnd, "(&)", "lhs, rhs", Some(2), true),
+        declare!(OperatorBitwiseOr, "(|)", "lhs, rhs", Some(2), true),
+        declare!(OperatorBitwiseXor, "(^)", "lhs, rhs", Some(2), true),
+        declare!(OperatorLessThan, "(<)", "lhs, rhs", Some(2), true),
+        declare!(OperatorLessThanSwap, "(<)", "lhs, rhs", Some(2), true),
+        declare!(OperatorLessThanEqual, "(<=)", "lhs, rhs", Some(2), true),
+        declare!(OperatorLessThanEqualSwap, "(<=)", "lhs, rhs", Some(2), true),
+        declare!(OperatorGreaterThan, "(>)", "lhs, rhs", Some(2), true),
+        declare!(OperatorGreaterThanSwap, "(>)", "lhs, rhs", Some(2), true),
+        declare!(OperatorGreaterThanEqual, "(>=)", "lhs, rhs", Some(2), true),
+        declare!(OperatorGreaterThanEqualSwap, "(>=)", "lhs, rhs", Some(2), true),
+        declare!(OperatorEqual, "(==)", "lhs, rhs", Some(2), true),
+        declare!(OperatorNotEqual, "(!=)", "lhs, rhs", Some(2), true),
 
-    declare!(OperatorMul, "(*)", "lhs, rhs", Some(2), true);
-    declare!(OperatorDiv, "(/)", "lhs, rhs", Some(2), true);
-    declare!(OperatorDivSwap, "(/)", "lhs, rhs", Some(2), true);
-    declare!(OperatorPow, "(**)", "lhs, rhs", Some(2), true);
-    declare!(OperatorPowSwap, "(**)", "lhs, rhs", Some(2), true);
-    declare!(OperatorMod, "(%)", "lhs, rhs", Some(2), true);
-    declare!(OperatorModSwap, "(%)", "lhs, rhs", Some(2), true);
-    declare!(OperatorIs, "(is)", "lhs, rhs", Some(2), true);
-    declare!(OperatorIsSwap, "(is)", "lhs, rhs", Some(2), true);
-    declare!(OperatorIsNot, "(is not)", "lhs, rhs", Some(2), true);
-    declare!(OperatorIsNotSwap, "(is not)", "lhs, rhs", Some(2), true);
-    declare!(OperatorIn, "(in)", "lhs, rhs", Some(2), true);
-    declare!(OperatorInSwap, "(in)", "lhs, rhs", Some(2), true);
-    declare!(OperatorNotIn, "(not in)", "lhs, rhs", Some(2), true);
-    declare!(OperatorNotInSwap, "(not in)", "lhs, rhs", Some(2), true);
-    declare!(OperatorAdd, "(+)", "lhs, rhs", Some(2), true);
-    declare!(OperatorAddSwap, "(+)", "lhs, rhs", Some(2), true);
-    declare!(OperatorSub, "(-)", "lhs, rhs", Some(2), true); // Cannot be referenced as (- <expr>)
-    declare!(OperatorLeftShift, "(<<)", "lhs, rhs", Some(2), true);
-    declare!(OperatorLeftShiftSwap, "(<<)", "lhs, rhs", Some(2), true);
-    declare!(OperatorRightShift, "(>>)", "lhs, rhs", Some(2), true);
-    declare!(OperatorRightShiftSwap, "(>>)", "lhs, rhs", Some(2), true);
-    declare!(OperatorBitwiseAnd, "(&)", "lhs, rhs", Some(2), true);
-    declare!(OperatorBitwiseOr, "(|)", "lhs, rhs", Some(2), true);
-    declare!(OperatorBitwiseXor, "(^)", "lhs, rhs", Some(2), true);
-    declare!(OperatorLessThan, "(<)", "lhs, rhs", Some(2), true);
-    declare!(OperatorLessThanSwap, "(<)", "lhs, rhs", Some(2), true);
-    declare!(OperatorLessThanEqual, "(<=)", "lhs, rhs", Some(2), true);
-    declare!(OperatorLessThanEqualSwap, "(<=)", "lhs, rhs", Some(2), true);
-    declare!(OperatorGreaterThan, "(>)", "lhs, rhs", Some(2), true);
-    declare!(OperatorGreaterThanSwap, "(>)", "lhs, rhs", Some(2), true);
-    declare!(OperatorGreaterThanEqual, "(>=)", "lhs, rhs", Some(2), true);
-    declare!(OperatorGreaterThanEqualSwap, "(>=)", "lhs, rhs", Some(2), true);
-    declare!(OperatorEqual, "(==)", "lhs, rhs", Some(2), true);
-    declare!(OperatorNotEqual, "(!=)", "lhs, rhs", Some(2), true);
+        // strings
+        declare!(ToLower, "to_lower", "x", 1),
+        declare!(ToUpper, "to_upper", "x", 1),
+        declare!(Replace, "replace", "pattern, replacer, x", 3),
+        declare!(Search, "search", "pattern, x", 2),
+        declare!(Trim, "trim", "x", 1),
+        declare!(Split, "split", "pattern, x", 2),
+        declare!(Join, "join", "joiner, iter", 2),
+        declare!(Char, "char", "x", 1),
+        declare!(Ord, "ord", "x", 1),
+        declare!(Hex, "hex", "x", 1),
+        declare!(Bin, "bin", "x", 1),
 
-    // strings
-    declare!(ToLower, "to_lower", "x", 1);
-    declare!(ToUpper, "to_upper", "x", 1);
-    declare!(Replace, "replace", "pattern, replacer, x", 3);
-    declare!(Search, "search", "pattern, x", 2);
-    declare!(Trim, "trim", "x", 1);
-    declare!(Split, "split", "pattern, x", 2);
-    declare!(Join, "join", "joiner, iter", 2);
-    declare!(Char, "char", "x", 1);
-    declare!(Ord, "ord", "x", 1);
-    declare!(Hex, "hex", "x", 1);
-    declare!(Bin, "bin", "x", 1);
+        declare!(Len, "len", "x", 1),
+        declare!(Range, "range", "start, stop, step", None, false),
+        declare!(Enumerate, "enumerate", "iter", 1),
+        declare!(Sum, "sum", "..."),
+        declare!(Min, "min", "..."),
+        declare!(Max, "max", "..."),
+        declare!(MinBy, "min_by", "key_or_cmp, iter", 2),
+        declare!(MaxBy, "max_by", "key_or_cmp, iter", 2),
+        declare!(Map, "map", "f, iter", 2),
+        declare!(Filter, "filter", "f, iter", 2),
+        declare!(FlatMap, "flat_map", "f, iter", 2),
+        declare!(Concat, "concat", "iter", 1),
+        declare!(Zip, "zip", "..."),
+        declare!(Reduce, "reduce", "f, iter", 2),
+        declare!(Sort, "sort", "..."),
+        declare!(SortBy, "sort_by", "f, iter", 2),
+        declare!(GroupBy, "group_by", "f, iter", 2),
+        declare!(Reverse, "reverse", "iter", 1),
+        declare!(Permutations, "permutations", "n, iter", 2),
+        declare!(Combinations, "combinations", "n, iter", 2),
+        declare!(Any, "any", "..."),
+        declare!(All, "all", "..."),
+        declare!(Memoize, "memoize", "f", 1),
+        declare!(SyntheticMemoizedFunction, "<synthetic memoized>", "f, ...", None, true),
 
-    declare!(Len, "len", "x", 1);
-    declare!(Range, "range", "start, stop, step", None, false);
-    declare!(Enumerate, "enumerate", "iter", 1);
-    declare!(Sum, "sum", "...");
-    declare!(Min, "min", "...");
-    declare!(Max, "max", "...");
-    declare!(MinBy, "min_by", "key_or_cmp, iter", 2);
-    declare!(MaxBy, "max_by", "key_or_cmp, iter", 2);
-    declare!(Map, "map", "f, iter", 2);
-    declare!(Filter, "filter", "f, iter", 2);
-    declare!(FlatMap, "flat_map", "f, iter", 2);
-    declare!(Concat, "concat", "iter", 1);
-    declare!(Zip, "zip", "...");
-    declare!(Reduce, "reduce", "f, iter", 2);
-    declare!(Sort, "sort", "...");
-    declare!(SortBy, "sort_by", "f, iter", 2);
-    declare!(GroupBy, "group_by", "f, iter", 2);
-    declare!(Reverse, "reverse", "iter", 1);
-    declare!(Permutations, "permutations", "n, iter", 2);
-    declare!(Combinations, "combinations", "n, iter", 2);
-    declare!(Any, "any", "...");
-    declare!(All, "all", "...");
-    declare!(Memoize, "memoize", "f", 1);
-    declare!(SyntheticMemoizedFunction, "<synthetic memoized>", "f, ...", None, true);
+        declare!(Peek, "peek", "collection", 1),
+        declare!(Pop, "pop", "collection", 1),
+        declare!(PopFront, "pop_front", "collection", 1),
+        declare!(Push, "push", "value, collection", 2),
+        declare!(PushFront, "push_front", "value, collection", 2),
+        declare!(Insert, "insert", "index, value, collection", 3),
+        declare!(Remove, "remove", "param, collection", 2),
+        declare!(Clear, "clear", "collection", 1),
+        declare!(Find, "find", "predicate, collection", 2),
+        declare!(RightFind, "rfind", "predicate, collection", 2),
+        declare!(IndexOf, "index_of", "value_or_predicate, collection", 2),
+        declare!(RightIndexOf, "rindex_of", "value_or_predicate, collection", 2),
+        declare!(Default, "default", "value, dictionary", 2),
+        declare!(Keys, "keys", "dictionary", 1),
+        declare!(Values, "values", "dictionary", 1),
 
-    declare!(Peek, "peek", "collection", 1); // Peek first value
-    declare!(Pop, "pop", "collection", 1); // Remove value at end
-    declare!(PopFront, "pop_front", "collection", 1); // Remove value at front
-    declare!(Push, "push", "value, collection", 2); // Insert value at end
-    declare!(PushFront, "push_front", "value, collection", 2); // Insert value at front
-    declare!(Insert, "insert", "index, value, collection", 3); // Insert value at index
-    declare!(Remove, "remove", "param, collection", 2); // Remove (list: by index, set: by value, dict: by key)
-    declare!(Clear, "clear", "collection", 1); // Remove all values - shortcut for `retain(fn(_) -> false)`
-    declare!(Find, "find", "predicate, collection", 2); // Find first value (list, set) or key (dict) by predicate
-    declare!(RightFind, "rfind", "predicate, collection", 2); // Find last index of value (list, set), or key (dict) by predicate
-    declare!(IndexOf, "index_of", "value_or_predicate, collection", 2); // Find first index of value, or index by predicate
-    declare!(RightIndexOf, "rindex_of", "value_or_predicate, collection", 2); // Find last index of a value, or index by predicate
-    declare!(Default, "default", "value, dictionary", 2); // For a `Dict`, sets the default value
-    declare!(Keys, "keys", "dictionary", 1); // `Dict.keys` -> returns a set of all keys
-    declare!(Values, "values", "dictionary", 1); // `Dict.values` -> returns a list of all values
-
-    // math
-    declare!(Abs, "abs", "x", 1);
-    declare!(Sqrt, "sqrt", "x", 1);
-    declare!(Gcd, "gcd", "...");
-    declare!(Lcm, "lcm", "...");
-    declare!(CountOnes, "count_ones", "x", 1);
-    declare!(CountZeros, "count_zeros", "x", 1);
-
-    natives
+        // math
+        declare!(Abs, "abs", "x", 1),
+        declare!(Sqrt, "sqrt", "x", 1),
+        declare!(Gcd, "gcd", "..."),
+        declare!(Lcm, "lcm", "..."),
+        declare!(CountOnes, "count_ones", "x", 1),
+        declare!(CountZeros, "count_zeros", "x", 1),
+    ]
 }
 
 
@@ -884,6 +862,13 @@ fn type_of(value: Value) -> Value {
 mod tests {
     use crate::{compiler, SourceView, core};
     use crate::vm::{IntoValue, Value, VirtualInterface, VirtualMachine};
+
+    #[test]
+    fn test_native_functions_are_declared_in_order() {
+        for (i, info) in core::NATIVE_FUNCTIONS.iter().enumerate() {
+            assert_eq!(info.native as usize, i, "Native function {} / {:?} declared in order {} != {}", info.name, info.native, i, info.native as usize)
+        }
+    }
 
     #[test]
     fn test_consistency_condition() {
