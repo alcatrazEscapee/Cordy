@@ -5,12 +5,10 @@ use indexmap::IndexMap;
 use itertools::Itertools;
 
 use crate::{util, vm};
-use crate::vm::{IntoDictValue, IntoIterableValue, IntoValue, Iterable, RuntimeError, Value, VirtualInterface};
+use crate::vm::{IntoDictValue, IntoIterableValue, IntoValue, Iterable, RuntimeError, Value, ValueResult, VirtualInterface};
 
 use RuntimeError::{*};
 use Value::{*};
-
-type ValueResult = Result<Value, Box<RuntimeError>>;
 
 
 pub fn list_slice(slice: Value, low: Value, high: Value, step: Value) -> ValueResult {

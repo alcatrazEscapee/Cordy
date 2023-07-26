@@ -3,14 +3,11 @@ use std::str::Chars;
 use fancy_regex::{Captures, Matches, Regex};
 use itertools::Itertools;
 
-use crate::vm::{IntoIterableValue, IntoValue, Iterable, Value, RuntimeError, VirtualInterface};
+use crate::vm::{IntoIterableValue, IntoValue, Iterable, Value, RuntimeError, VirtualInterface, ValueResult};
 use crate::util;
 
 use Value::{*};
 use RuntimeError::{*};
-
-
-type ValueResult = Result<Value, Box<RuntimeError>>;
 
 
 pub fn to_lower(value: Value) -> ValueResult {
