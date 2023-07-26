@@ -2,7 +2,7 @@ use std::collections::{BinaryHeap, VecDeque};
 use std::fs;
 use indexmap::{IndexMap, IndexSet};
 
-use crate::vm::{operator, IntoIterableValue, IntoValue, IntoValueResult, Value, VirtualInterface, RuntimeError};
+use crate::vm::{operator, IntoIterableValue, IntoValue, IntoValueResult, Value, VirtualInterface, RuntimeError, ValueResult};
 use crate::vm::operator::BinaryOp;
 use crate::{trace, vm};
 
@@ -10,8 +10,6 @@ pub use crate::core::collections::{list_slice, literal_slice, to_index};
 
 use NativeFunction::{*};
 use RuntimeError::{*};
-
-type ValueResult = Result<Value, Box<RuntimeError>>;
 
 mod strings;
 mod collections;

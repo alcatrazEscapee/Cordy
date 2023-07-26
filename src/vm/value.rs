@@ -15,12 +15,13 @@ use crate::compiler::Fields;
 use crate::util::RecursionGuard;
 use crate::core;
 use crate::core::NativeFunction;
+use crate::vm::ValueResult;
 use crate::vm::error::RuntimeError;
 
 use Value::{*};
 use RuntimeError::{*};
 
-pub type ValueResult = Result<Value, Box<RuntimeError>>;
+
 pub type C64 = num_complex::Complex<i64>;
 
 

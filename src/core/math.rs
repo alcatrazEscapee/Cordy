@@ -1,11 +1,10 @@
 use num_integer::Roots;
 
-use crate::vm::{Value, RuntimeError};
+use crate::vm::{Value, RuntimeError, ValueResult};
 
 use RuntimeError::{*};
 use Value::{*};
 
-type ValueResult = Result<Value, Box<RuntimeError>>;
 
 pub fn convert_to_int(target: Value, default: Option<Value>) -> ValueResult {
     match &target {
