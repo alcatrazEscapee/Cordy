@@ -14,7 +14,7 @@ use itertools::Itertools;
 use crate::compiler::Fields;
 use crate::util::RecursionGuard;
 use crate::core;
-use crate::core::NativeFunction;
+use crate::core::{NativeFunction, PartialArgument};
 use crate::vm::ValueResult;
 use crate::vm::error::RuntimeError;
 
@@ -65,9 +65,7 @@ pub enum Value {
     /// This will never be user-code-accessible, as it will only be on the stack as a synthetic variable, or in native code.
     Iter(Box<Iterable>),
 
-    /// Synthetic Memoized Function Argument
-    /// This is a argument which is partially evaluated to the result of a `Memoized` stdlib function.
-    /// It will only ever be present as the first partial argument for a `SyntheticMemoizedFunction` native function.
+    /// Synthetic Memoized Function.
     Memoized(Box<MemoizedImpl>),
 
     /// A unique type for a partially evaluated `->` operator, i.e. `(->some_field)`
@@ -78,7 +76,7 @@ pub enum Value {
     Function(Rc<FunctionImpl>),
     PartialFunction(Box<PartialFunctionImpl>),
     NativeFunction(NativeFunction),
-    PartialNativeFunction(NativeFunction, Box<Vec<Value>>),
+    PartialNativeFunction(NativeFunction, Box<PartialArgument>),
     Closure(Box<ClosureImpl>),
 }
 
@@ -90,11 +88,7 @@ impl Value {
     pub fn partial(func: Value, args: Vec<Value>) -> Value { PartialFunction(Box::new(PartialFunctionImpl { func, args }))}
     pub fn closure(func: Rc<FunctionImpl>) -> Value { Closure(Box::new(ClosureImpl { func, environment: Vec::new() })) }
     pub fn instance(type_impl: Rc<StructTypeImpl>, values: Vec<Value>) -> Value { Struct(Mut::new(StructImpl { type_index: type_impl.type_index, type_impl, values }))}
-
-    /// Creates a memoized `PartialNativeFunction`, which wraps the provided function `func`, as a memoized function.
-    pub fn memoized(func: Value) -> Value {
-        PartialNativeFunction(NativeFunction::SyntheticMemoizedFunction, Box::new(vec![Memoized(Box::new(MemoizedImpl::new(func)))]))
-    }
+    pub fn memoized(func: Value) -> Value { Memoized(Box::new(MemoizedImpl::new(func))) }
 
     /// Creates a new `Range()` value from a given set of integer parameters.
     /// Raises an error if `step == 0`
@@ -215,14 +209,14 @@ impl Value {
             }
 
             Iter(_) => String::from("<synthetic> iterator"),
-            Memoized(_) => String::from("<synthetic> memoized"),
+            Memoized(it) => format!("@memoize {}", it.func.safe_to_repr_str(rc)),
 
             GetField(_) => String::from("(->)"),
 
             Function(f) => (*f).as_ref().borrow().as_str(),
             PartialFunction(f) => (*f).as_ref().borrow().func.safe_to_repr_str(rc),
-            NativeFunction(b) => format!("fn {}({})", b.name(), b.args()),
-            PartialNativeFunction(b, _) => format!("fn {}({})", b.name(), b.args()),
+            NativeFunction(f) => f.repr(),
+            PartialNativeFunction(f, _) => f.repr(),
             Closure(c) => (*c).func.as_ref().borrow().as_str(),
         }
     }
@@ -415,7 +409,7 @@ impl Value {
 
     /// Returns the internal `FunctionImpl` of this value.
     /// Must only be called on a `Function` or `Closure`, will panic otherwise.
-    pub fn unbox_func(self: &Self) -> &Rc<FunctionImpl> {
+    pub fn as_function(self: &Self) -> &Rc<FunctionImpl> {
         match self {
             Function(f) => f,
             Closure(c) => &c.func,
@@ -429,9 +423,9 @@ impl Value {
     pub fn unbox_func_args(self: &Self) -> Option<Option<u32>> {
         match self {
             Function(it) => Some(Some(it.min_args())),
-            PartialFunction(it) => Some(Some(it.func.unbox_func().min_args() - it.args.len() as u32)),
-            NativeFunction(it) => Some(it.nargs()),
-            PartialNativeFunction(it, args) => Some(it.nargs().map(|u| u - args.len() as u32)),
+            PartialFunction(it) => Some(Some(it.func.as_function().min_args() - it.args.len() as u32)),
+            NativeFunction(it) => Some(Some(it.min_nargs())),
+            PartialNativeFunction(_, it) => Some(Some(it.min_nargs())),
             Closure(it) => Some(Some(it.func.min_args())),
             StructType(it) => Some(Some(it.field_names.len() as u32)),
             Slice(_) => Some(Some(1)),
@@ -569,6 +563,7 @@ pub trait IntoValue {
 impl IntoValue for Value { fn to_value(self) -> Value { self } }
 impl IntoValue for bool { fn to_value(self) -> Value { Bool(self) } }
 impl IntoValue for i64 { fn to_value(self) -> Value { Int(self) } }
+impl IntoValue for usize { fn to_value(self) -> Value { Int(self as i64) } }
 impl IntoValue for char { fn to_value(self) -> Value { Str(Rc::new(String::from(self))) } }
 impl<'a> IntoValue for &'a str { fn to_value(self) -> Value { Str(Rc::new(String::from(self))) } }
 impl IntoValue for NativeFunction { fn to_value(self) -> Value { NativeFunction(self) } }
@@ -1440,7 +1435,7 @@ mod test {
     use std::collections::VecDeque;
     use std::rc::Rc;
     use indexmap::{IndexMap, IndexSet};
-    use crate::core::NativeFunction;
+    use crate::core::{NativeFunction, PartialArgument};
     use crate::vm::error::RuntimeError;
     use crate::vm::value::{FunctionImpl, IntoIterableValue, IntoValue, Value};
 
@@ -1477,7 +1472,7 @@ mod test {
             Value::Function(function.clone()),
             Value::partial(Value::Function(function.clone()), vec![]),
             Value::NativeFunction(NativeFunction::Print),
-            Value::PartialNativeFunction(NativeFunction::Print, Box::new(vec![])),
+            Value::PartialNativeFunction(NativeFunction::Map, Box::new(PartialArgument::Arg2Par1(Value::Nil))),
             Value::closure(function.clone())
         ]
     }

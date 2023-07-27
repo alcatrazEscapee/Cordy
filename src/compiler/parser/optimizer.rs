@@ -238,10 +238,7 @@ impl Expr {
 
     fn is_partial(self: &Self, nargs: usize) -> bool {
         match &self.1 {
-            ExprType::NativeFunction(native) => match native.nargs() {
-                Some(expected_nargs) => expected_nargs > nargs as u32,
-                None => false,
-            },
+            ExprType::NativeFunction(f) => f.min_nargs() as usize > nargs,
             _ => false
         }
     }

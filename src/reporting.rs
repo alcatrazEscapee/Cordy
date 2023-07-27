@@ -380,7 +380,7 @@ impl AsError for BinaryOp {
 
 impl AsError for NativeFunction {
     fn as_error(self: &Self) -> String {
-        format!("native fn {}({})", self.name(), self.args())
+        self.repr()
     }
 }
 
