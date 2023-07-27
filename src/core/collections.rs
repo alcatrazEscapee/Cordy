@@ -11,6 +11,69 @@ use RuntimeError::{*};
 use Value::{*};
 
 
+pub fn get_index<VM>(vm: &mut VM, target: Value, index: Value) -> ValueResult where VM : VirtualInterface {
+    if target.is_dict() {
+        return get_dict_index(vm, target, index);
+    }
+
+    let indexable = target.as_index()?;
+    let index: usize = indexable.check_index(index)?;
+
+    Ok(indexable.get_index(index))
+}
+
+fn get_dict_index<VM>(vm: &mut VM, dict: Value, key: Value) -> ValueResult where VM : VirtualInterface {
+    // Dict objects have their own overload of indexing to mean key-value lookups, that doesn't fit with ValueAsIndex (as it doesn't take integer keys, always)
+    // The handling for this is a bit convoluted due to `clone()` issues, and possible cases of default / no default / functional default
+
+    // Initially unbox (non mutable) to clone out the default value.
+    // If the default is a function, we can't have a reference out of the dict while we're accessing the default.
+
+    let dict = match dict { Dict(it) => it, _ => panic!() };
+    let default_factory: Value;
+    {
+        let mut dict = dict.unbox_mut(); // mutable as we might insert in the immutable default case
+        match dict.default.clone() {
+            Some(default) if default.is_function() => match dict.dict.get(&key) {
+                Some(existing_value) => return Ok(existing_value.clone()),
+                None => {
+                    // We need to insert, so fallthrough as we need to drop the borrow on `dict`
+                    default_factory = default;
+                },
+            },
+            Some(default_value) => {
+                return Ok(dict.dict.entry(key).or_insert(default_value).clone())
+            }
+            None => return match dict.dict.get(&key) {
+                Some(existing_value) => Ok(existing_value.clone()),
+                None => ValueErrorKeyNotPresent(key).err()
+            },
+        }
+    }
+
+    // Invoke the new value supplier - this might modify the dict
+    // We go through the `.entry()` API again in this case
+    let new_value: Value = vm.invoke_func0(default_factory)?;
+    let mut dict = dict.unbox_mut();
+    Ok(dict.dict.entry(key).or_insert(new_value).clone())
+}
+
+pub fn set_index(target: &Value, index: Value, value: Value) -> Result<(), Box<RuntimeError>> {
+
+    if let Dict(it) = target {
+        match vm::guard_recursive_hash(|| it.unbox_mut().dict.insert(index, value)) {
+            Err(_) => ValueErrorRecursiveHash(target.clone()).err(),
+            Ok(_) => Ok(())
+        }
+    } else {
+        let mut indexable = target.as_index()?;
+        let index: usize = indexable.check_index(index)?;
+
+        indexable.set_index(index, value)
+    }
+}
+
+
 pub fn list_slice(slice: Value, low: Value, high: Value, step: Value) -> ValueResult {
     literal_slice(slice, low.as_int_or()?, high.as_int_or()?, step.as_int_or()?)
 }
@@ -525,29 +588,4 @@ pub fn create_memoized(f: Value) -> ValueResult {
         true => Ok(Value::memoized(f)),
         false => TypeErrorArgMustBeFunction(f).err()
     }
-}
-
-pub fn invoke_memoized<VM>(vm: &mut VM, memoized: Value, args: Vec<Value>) -> ValueResult where VM : VirtualInterface {
-    let memoized = match memoized {
-        Memoized(it) => it,
-        _ => panic!("Missing partial argument for `Memoize`")
-    };
-
-    // We cannot use the `.entry()` API, as that requires we mutably borrow the cache during the call to `vm.invoke_func()`
-    // We only lookup by key once (in the cached case), and twice (in the uncached case)
-    {
-        let cache = memoized.cache.unbox();
-        match cache.get(&args) {
-            Some(ret) => return Ok(ret.clone()),
-            None => {}
-        }
-    } // cache falls out of scope, and thus is no longer borrowed
-
-    let value: Value = vm.invoke_func(memoized.func.clone(), &args)?;
-
-    // The above computation might've entered a value into the cache - so we have to go through `.entry()` again
-    return Ok(memoized.cache.unbox_mut()
-        .entry(args)
-        .or_insert(value)
-        .clone());
 }

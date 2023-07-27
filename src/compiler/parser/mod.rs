@@ -1079,7 +1079,7 @@ impl Parser<'_> {
         match self.peek() {
             // Unary operators *can* be present at the start of an expression, but we would see something after
             // So, we peek ahead again and see if the next token is a `)` - that's the only way you evaluate unary operators as functions
-            Some(Minus) => unary = Some(OperatorUnarySub),
+            Some(Minus) => unary = Some(OperatorSub),
             Some(Not) => unary = Some(OperatorUnaryNot),
 
             Some(Mul) => binary = Some(OperatorMul),
@@ -1980,7 +1980,7 @@ mod tests {
     #[test] fn test_slice_10() { run_expr("1 [2:]", "Int(1) Int(2) Nil OpSlice") }
     #[test] fn test_slice_11() { run_expr("1 [:3]", "Int(1) Nil Int(3) OpSlice") }
     #[test] fn test_slice_12() { run_expr("1 [2:3]", "Int(1) Int(2) Int(3) OpSlice") }
-    #[test] fn test_partial_unary_ops() { run_expr("(-) (!)", "OperatorUnarySub OperatorUnaryNot Call(1)") }
+    #[test] fn test_partial_unary_ops() { run_expr("(-) (!)", "OperatorSub OperatorUnaryNot Call(1)") }
     #[test] fn test_partial_binary_ops() { run_expr("(+) ((*)) (/)", "OperatorAdd OperatorMul Call(1) OperatorDiv Call(1)") }
     #[test] fn test_partial_binary_op_left_eval() { run_expr("(+1)", "OperatorAddSwap Int(1) Call(1)"); }
     #[test] fn test_partial_binary_op_right_eval() { run_expr("(1+)", "OperatorAdd Int(1) Call(1)"); }

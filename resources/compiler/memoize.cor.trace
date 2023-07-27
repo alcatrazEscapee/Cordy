@@ -1,5 +1,5 @@
-<synthetic memoized>
-fn <synthetic memoized>(f, ...)
+@memoize fn add(a, b)
+@memoize fn add(a, b)
 adding 3 5
 8
 adding 3 5
