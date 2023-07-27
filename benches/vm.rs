@@ -30,6 +30,10 @@ fn bench_fib_for_range(c: &mut Criterion) { run("fn fib() for i in range()", "fn
 fn bench_fib_for_range_discard(c: &mut Criterion) { run("fn fib() for _ in range()", "fn fib(x) { let a = 1, b = 1 ; for _ in range(10) { a += b ; b = a - b } a } ; fib(10)", c) }
 fn bench_is_prime_any(c: &mut Criterion) { run("fn is_prime() with any()", "fn is_prime(n) -> range(2, 1 + sqrt(n)) . any(fn(p) -> n % p == 0) ; is_prime(53)", c); }
 fn bench_is_prime_for(c: &mut Criterion) { run("fn is_prime() with for", "fn is_prime(n) { for p in range(2, 1 + sqrt(n)) { if n % p == 0 { return true } } false } ; is_prime(53)", c); }
+fn bench_dict_default(c: &mut Criterion) { run("dict default()", "let d = dict().default(0) ; for c in 'hello the world this is mister skizzleface' { d[c] += 1 }", c) }
+fn bench_dict_manual_default(c: &mut Criterion) { run("dict manual default", "let d = dict() ; for c in 'hello the world this is mister skizzleface' { if c not in d { d[c] = 0 } d[c] += 1 }", c) }
+fn bench_dict_fn_default(c: &mut Criterion) { run("dict default(fn)", "let d = dict().default(list) ; for i, c in 'hello the world this is mister skizzleface'.enumerate { d[c] . push(i) }", c) }
+fn bench_dict_manual_fn_default(c: &mut Criterion) { run("dict manual default fn", "let d = dict() ; for i, c in 'hello the world this is mister skizzleface'.enumerate { if c not in d { d[c] = list() } d[c] . push(i) }", c) }
 
 
 criterion_group!(benches,
@@ -55,7 +59,11 @@ criterion_group!(benches,
     bench_fib_for_range,
     bench_fib_for_range_discard,
     bench_is_prime_any,
-    bench_is_prime_for
+    bench_is_prime_for,
+    bench_dict_default,
+    bench_dict_manual_default,
+    bench_dict_fn_default,
+    bench_dict_manual_fn_default
 );
 criterion_main!(benches);
 
