@@ -14,7 +14,7 @@ use itertools::Itertools;
 use crate::compiler::Fields;
 use crate::util::RecursionGuard;
 use crate::core;
-use crate::core::{NativeFunction, PartialArgument};
+use crate::core::{InvokeArg0, NativeFunction, PartialArgument};
 use crate::vm::ValueResult;
 use crate::vm::error::RuntimeError;
 
@@ -417,18 +417,17 @@ impl Value {
         }
     }
 
-    /// Returns `None` if this value is not a function
-    /// Returns `Some(None)` if this value is a function with an unknown number of arguments
-    /// Returns `Some(Some(nargs))` if this value is a function with a known number of arguments
-    pub fn unbox_func_args(self: &Self) -> Option<Option<u32>> {
+    /// Returns `None` if this value is not function evaluable.
+    /// Returns `Some(nargs)` if this value is a function with the given number of minimum arguments
+    pub fn min_nargs(self: &Self) -> Option<u32> {
         match self {
-            Function(it) => Some(Some(it.min_args())),
-            PartialFunction(it) => Some(Some(it.func.as_function().min_args() - it.args.len() as u32)),
-            NativeFunction(it) => Some(Some(it.min_nargs())),
-            PartialNativeFunction(_, it) => Some(Some(it.min_nargs())),
-            Closure(it) => Some(Some(it.func.min_args())),
-            StructType(it) => Some(Some(it.field_names.len() as u32)),
-            Slice(_) => Some(Some(1)),
+            Function(it) => Some(it.min_args()),
+            PartialFunction(it) => Some(it.func.as_function().min_args() - it.args.len() as u32),
+            NativeFunction(it) => Some(it.min_nargs()),
+            PartialNativeFunction(_, it) => Some(it.min_nargs()),
+            Closure(it) => Some(it.func.min_args()),
+            StructType(it) => Some(it.field_names.len() as u32),
+            Slice(_) => Some(1),
             _ => None,
         }
     }
@@ -878,17 +877,15 @@ pub fn guard_recursive_hash<T, F : FnOnce() -> T>(f: F) -> Result<(), ()> {
 
 
 /// Boxes a `IndexMap<Value, Value>`, along with an optional default value
-#[derive(PartialEq, Eq, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct DictImpl {
     pub dict: IndexMap<Value, Value>,
-    pub default: Option<Value>
+    pub default: Option<InvokeArg0>
 }
 
-impl PartialOrd for DictImpl {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
+impl Eq for DictImpl {}
+impl PartialEq<Self> for DictImpl { fn eq(&self, other: &Self) -> bool { self.dict == other.dict } }
+impl PartialOrd for DictImpl { fn partial_cmp(&self, other: &Self) -> Option<Ordering> { Some(self.cmp(other)) } }
 
 impl Ord for DictImpl {
     fn cmp(&self, other: &Self) -> Ordering {
@@ -1447,7 +1444,7 @@ mod test {
         for v in all_values() {
             assert_eq!(v.is_iter(), v.as_iter().is_ok(), "is_iter() and as_iter() not consistent for {}", v.as_type_str());
             assert_eq!(v.is_iter(), v.len().is_ok(), "is_iter() and len() not consistent for {}", v.as_type_str());
-            assert_eq!(v.is_function(), v.unbox_func_args().is_some(), "is_function() and as_function_args() not consistent for {}", v.as_type_str());
+            assert_eq!(v.is_function(), v.min_nargs().is_some(), "is_function() and min_nargs() not consistent for {}", v.as_type_str());
 
             if v.as_index().is_ok() {
                 assert!(v.len().is_ok(), "as_index() and len() not consistent for {}", v.as_type_str());

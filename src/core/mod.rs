@@ -280,7 +280,7 @@ const fn load_native_functions() -> [NativeFunctionInfo; N_NATIVE_FUNCTIONS] {
         new(Argv, "argv", "", Arg0),
         new(Bool, "bool", "x", Arg1),
         new(Int, "int", "x, default?", Arg1To2),
-        new(Complex, "complex", "x", Arg1),
+        new(Complex, "complex", "", Invalid),
         new(Str, "str", "x", Arg1),
         new(List, "list", "...", Iter),
         new(Set, "set", "...", Iter),
@@ -362,7 +362,7 @@ const fn load_native_functions() -> [NativeFunctionInfo; N_NATIVE_FUNCTIONS] {
         new(Sort, "sort", "...", IterNonEmpty),
         new(SortBy, "sort_by", "f, iter", Arg2),
         new(GroupBy, "group_by", "f, iter", Arg2),
-        new(Reverse, "reverse", "...", Iter),
+        new(Reverse, "reverse", "...", IterNonEmpty),
         new(Permutations, "permutations", "n, iter", Arg2),
         new(Combinations, "combinations", "n, iter", Arg2),
         new(Any, "any", "f, it", Arg2),
@@ -480,6 +480,143 @@ impl PartialArgument {
         Ok(Value::PartialNativeFunction(f, Box::new(self)))
     }
 }
+
+
+/// An `InvokeArg` is an optimized structure for a function that is meant to be invoked multiple times, from native code.
+/// It pre-dispatches the function against the expected number of arguments, and will either throw an error, or return a `InvokeArg<N>`.
+/// This elides having to push **anything** onto the stack for native and partial native functions.
+///
+/// We expose the following types in `InvokeArg0`, `InvokeArg1`, and `InvokeArg2`:
+///
+/// - `User`           : User functions are always invoked on the stack, and so they get no special treatment other than categorizing.
+/// - `Native`         : For a `InvokeArg<N>`, this represents a native function with a compatible argument type, that can dispatch to `core::invoke_arg<N>`
+/// - `NativePar<M>`   : Similar to the above, but where `InvokeArg<N>` dispatches to `core::invoke_arg<N+M>`
+/// - `Arg<M>Par<N-1>` : Indicates that a new partial native function will be created based on `PartialArgument::Arg<M>Par<N>`
+///
+/// `NativeVar` is also a unique type for `InvokeArg1` and `InvokeArg2`:
+///
+/// - With `InvokeArg1`, it indicates the single argument needs to be iterable-expanded and passed to `core::invoke_var`
+/// - With `InvokeArg2`, it indicates the two arguments need to be *boxed* into an iterable and passed to `core::invoke_var`
+///
+/// Note that `InvokeArg0` can not, definitionally, have partially evaluated arguments, as it would no-op.
+/// We do still have to handle that case, however, since it is technically legal code (if contrived).
+#[derive(Debug, Clone)]
+pub enum InvokeArg0 {
+    Noop(Value),
+    User(Value),
+    Native(NativeFunction),
+}
+
+#[derive(Debug, Clone)]
+enum InvokeArg1 {
+    User(Value),
+    Native(NativeFunction),
+    NativePar1(NativeFunction, Value),
+    NativePar2(NativeFunction, Value, Value),
+    NativeVar(NativeFunction),
+    Arg2Par1(NativeFunction),
+    Arg3Par1(NativeFunction),
+    Arg3Par2(NativeFunction, Value),
+}
+
+#[derive(Debug, Clone)]
+enum InvokeArg2 {
+    User(Value),
+    Native(NativeFunction),
+    NativePar1(NativeFunction, Value),
+    NativeVar(NativeFunction),
+    Arg3Par1(NativeFunction),
+}
+
+impl InvokeArg0 {
+    fn from(f: Value) -> Result<InvokeArg0, Box<RuntimeError>> {
+        match f {
+            f @ (Value::Function(_) | Value::Closure(_) | Value::PartialFunction(_) | Value::StructType(_) | Value::Memoized(_)) => Ok(InvokeArg0::User(f)),
+            Value::NativeFunction(f) => match f.info().arg {
+                Arg0 | Arg0To1 | Unique | Iter => Ok(InvokeArg0::Native(f)),
+                Arg1 | Arg1To2 | Arg1To3 | Arg2 | Arg3 => Ok(InvokeArg0::Noop(Value::NativeFunction(f))), // Partial with zero arg = no-op
+                IterNonEmpty => IncorrectArgumentsNativeFunction(f, 0).err(),
+                Invalid => ValueIsNotFunctionEvaluable(Value::NativeFunction(f)).err(),
+            },
+            f @ Value::PartialNativeFunction(_, _) => Ok(InvokeArg0::Noop(f)),
+            _ => ValueIsNotFunctionEvaluable(f).err()
+        }
+    }
+
+    fn invoke<VM : VirtualInterface>(self: Self, vm: &mut VM) -> ValueResult {
+        match self {
+            InvokeArg0::Noop(f) => Ok(f),
+            InvokeArg0::User(f) => vm.invoke_func0(f),
+            InvokeArg0::Native(f) => invoke_arg0(f, vm),
+        }
+    }
+}
+
+impl InvokeArg1 {
+    fn from(f: Value) -> Result<InvokeArg1, Box<RuntimeError>> {
+        match f {
+            f @ (Value::Function(_) | Value::Closure(_) | Value::PartialFunction(_) | Value::List(_) | Value::Slice(_) | Value::StructType(_) | Value::GetField(_) | Value::Memoized(_)) => Ok(InvokeArg1::User(f)),
+            Value::NativeFunction(f) => match f.info().arg {
+                Arg0To1 | Arg1 | Arg1To2 | Arg1To3 | Unique => Ok(InvokeArg1::Native(f)),
+                Iter | IterNonEmpty => Ok(InvokeArg1::NativeVar(f)),
+                Arg2 => Ok(InvokeArg1::Arg2Par1(f)),
+                Arg3 => Ok(InvokeArg1::Arg3Par1(f)),
+                Arg0 => IncorrectArgumentsNativeFunction(f, 1).err(),
+                Invalid => ValueIsNotFunctionEvaluable(Value::NativeFunction(f)).err(),
+            },
+            Value::PartialNativeFunction(f, partial) => match *partial {
+                PartialArgument::Arg2Par1(arg) => Ok(InvokeArg1::NativePar1(f, arg)),
+                PartialArgument::Arg3Par1(arg) => Ok(InvokeArg1::Arg3Par2(f, arg)),
+                PartialArgument::Arg3Par2(arg1, arg2) => Ok(InvokeArg1::NativePar2(f, arg1, arg2)),
+            },
+            _ => ValueIsNotFunctionEvaluable(f).err()
+        }
+    }
+
+    fn invoke<VM: VirtualInterface>(self: &Self, arg: Value, vm: &mut VM) -> ValueResult {
+        match self {
+            InvokeArg1::User(f) => vm.invoke_func1(f.clone(), arg),
+            InvokeArg1::Native(f) => invoke_arg1(*f, arg, vm),
+            InvokeArg1::NativePar1(f, a1) => invoke_arg2(*f, a1.clone(), arg, vm),
+            InvokeArg1::NativePar2(f, a1, a2) => invoke_arg3(*f, a1.clone(), a2.clone(), arg, vm),
+            InvokeArg1::NativeVar(f) => invoke_var(*f, arg.as_iter()?, vm),
+            InvokeArg1::Arg2Par1(f) => PartialArgument::Arg2Par1(arg).to_value(*f),
+            InvokeArg1::Arg3Par1(f) => PartialArgument::Arg3Par1(arg).to_value(*f),
+            InvokeArg1::Arg3Par2(f, a1) => PartialArgument::Arg3Par2(a1.clone(), arg).to_value(*f),
+        }
+    }
+}
+
+impl InvokeArg2 {
+    fn from(f: Value) -> Result<InvokeArg2, Box<RuntimeError>> {
+        match f {
+            f @ (Value::Function(_) | Value::Closure(_) | Value::PartialFunction(_) | Value::List(_) | Value::Slice(_) | Value::StructType(_) | Value::GetField(_) | Value::Memoized(_)) => Ok(InvokeArg2::User(f)),
+            Value::NativeFunction(f) => match f.info().arg {
+                Arg1To2 | Arg1To3 | Arg2 | Unique => Ok(InvokeArg2::Native(f)),
+                Iter | IterNonEmpty => Ok(InvokeArg2::NativeVar(f)),
+                Arg3 => Ok(InvokeArg2::Arg3Par1(f)),
+                Arg0 | Arg0To1 | Arg1 => IncorrectArgumentsNativeFunction(f, 2).err(),
+                Invalid => ValueIsNotFunctionEvaluable(Value::NativeFunction(f)).err(),
+            },
+            Value::PartialNativeFunction(f, partial) => match *partial {
+                PartialArgument::Arg2Par1(_) | PartialArgument::Arg3Par2(_, _) => IncorrectArgumentsNativeFunction(f, 3).err(),
+                PartialArgument::Arg3Par1(arg) => Ok(InvokeArg2::NativePar1(f, arg)),
+            },
+            _ => ValueIsNotFunctionEvaluable(f).err()
+        }
+    }
+
+    fn invoke<VM : VirtualInterface>(self: &Self, arg1: Value, arg2: Value, vm: &mut VM) -> ValueResult {
+        match self {
+            InvokeArg2::User(f) => vm.invoke_func2(f.clone(), arg1, arg2),
+            InvokeArg2::Native(f) => invoke_arg2(*f, arg1, arg2, vm),
+            InvokeArg2::NativePar1(f, a1) => invoke_arg3(*f, a1.clone(), arg1, arg2, vm),
+            InvokeArg2::NativeVar(f) => invoke_var(*f, vec![arg1, arg2].into_iter(), vm),
+            InvokeArg2::Arg3Par1(f) => PartialArgument::Arg3Par2(arg1, arg2).to_value(*f),
+        }
+    }
+}
+
 
 
 /// Invokes a function with arguments laid out on the stack.
@@ -825,6 +962,8 @@ fn invoke_var<VM : VirtualInterface, I : Iterator<Item=Value>>(f: NativeFunction
         Vector => Ok(an.to_vector()),
 
         Sum => collections::sum(an),
+        Min => collections::min(an),
+        Max => collections::max(an),
         Zip => collections::zip(an),
         Sort => collections::sort(an),
         Reverse => collections::reverse(an),
@@ -911,7 +1050,7 @@ mod tests {
     #[test]
     fn test_native_functions_arg_matches_args() {
         // Tests various conventions about the `args` field, based on `arg`
-        for info in core::NATIVE_FUNCTIONS.iter() {
+        for info in &core::NATIVE_FUNCTIONS {
             match info.arg {
                 Argument::Arg0 => assert_eq!(info.args, "", "in {:?}", info),
                 Argument::Arg1 => assert!(!info.args.contains(","), "in {:?}", info),
@@ -923,11 +1062,59 @@ mod tests {
         }
     }
 
+    /// Asserts that no panics are generated from calling all supported combinations of argument types.
+    #[test]
+    fn test_native_functions_support_from_arg() {
+        let mut vm = VirtualMachine::new(compiler::default(), SourceView::empty(), &b""[..], vec![], vec![]);
+
+        for info in &core::NATIVE_FUNCTIONS {
+            match info.arg {
+                Argument::Arg0 => {
+                    let _ = core::invoke_arg0(info.native, &mut vm);
+                },
+                Argument::Arg0To1 => {
+                    let _ = core::invoke_arg0(info.native, &mut vm);
+                    let _ = core::invoke_arg1(info.native, Value::Nil, &mut vm);
+                },
+                Argument::Arg1 => {
+                    let _ = core::invoke_arg1(info.native, Value::Nil, &mut vm);
+                },
+                Argument::Arg1To2 => {
+                    let _ = core::invoke_arg1(info.native, Value::Nil, &mut vm);
+                    let _ = core::invoke_arg2(info.native, Value::Nil, Value::Nil, &mut vm);
+                },
+                Argument::Arg1To3 => {
+                    let _ = core::invoke_arg1(info.native, Value::Nil, &mut vm);
+                    let _ = core::invoke_arg2(info.native, Value::Nil, Value::Nil, &mut vm);
+                    let _ = core::invoke_arg3(info.native, Value::Nil, Value::Nil, Value::Nil, &mut vm);
+                },
+                Argument::Arg2 => {
+                    let _ = core::invoke_arg2(info.native, Value::Nil, Value::Nil, &mut vm);
+                },
+                Argument::Arg3 => {
+                    let _ = core::invoke_arg3(info.native, Value::Nil, Value::Nil, Value::Nil, &mut vm);
+                },
+                Argument::Unique => {
+                    let _ = core::invoke_arg0(info.native, &mut vm);
+                    let _ = core::invoke_arg1(info.native, Value::Nil, &mut vm);
+                    let _ = core::invoke_var(info.native, vec![Value::Nil].into_iter(), &mut vm);
+                },
+                Argument::Iter => {
+                    let _ = core::invoke_arg0(info.native, &mut vm);
+                    let _ = core::invoke_var(info.native, vec![].into_iter(), &mut vm);
+                },
+                Argument::IterNonEmpty => {
+                    let _ = core::invoke_var(info.native, vec![].into_iter(), &mut vm);
+                },
+                Argument::Invalid => {},
+            }
+        }
+    }
+
+    /// Asserts that `nargs < native.nargs()` is a sufficient condition for declaring a function is consistent
     #[test]
     fn test_consistency_condition() {
-        // Asserts that `nargs < native.nargs()` is a sufficient condition for declaring a function is consistent
-        let mut buffer = Vec::new();
-        let mut vm = VirtualMachine::new(compiler::default(), SourceView::new(String::new(), String::new()), &b""[..], &mut buffer, vec![]);
+        let mut vm = VirtualMachine::new(compiler::default(), SourceView::empty(), &b""[..], vec![], vec![]);
 
         fn is_partial(v: &Value, f: NativeFunction) -> bool {
             match v { Value::PartialNativeFunction(f1, _) => f == *f1, _ => false }

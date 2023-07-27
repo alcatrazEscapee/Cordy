@@ -3,6 +3,7 @@ use std::str::Chars;
 use fancy_regex::{Captures, Matches, Regex};
 use itertools::Itertools;
 
+use crate::core::InvokeArg1;
 use crate::vm::{IntoIterableValue, IntoValue, Iterable, Value, RuntimeError, VirtualInterface, ValueResult};
 use crate::util;
 
@@ -25,17 +26,16 @@ pub fn trim(value: Value) -> ValueResult {
 pub fn replace<VM: VirtualInterface>(vm: &mut VM, pattern: Value, replacer: Value, target: Value) -> ValueResult {
     let regex: Regex = compile_regex(pattern)?;
     let text = target.as_str()?;
-    match replacer.unbox_func_args() {
-        Some(Some(1)) => {
-            let mut err = None;
-            let replaced: Value = regex.replace_all(text, |captures: &Captures| {
-                let arg: Value = as_result(captures);
-                util::yield_result(&mut err, || vm.invoke_func1(replacer.clone(), arg)?.as_str().cloned(), String::new())
-            }).to_value();
-            util::join_result(replaced, err)
-        },
-        Some(None) => TypeErrorArgMustBeReplaceFunction(replacer).err(),
-        _ => Ok(regex.replace_all(text, replacer.as_str()?).to_value())
+    if replacer.is_function() {
+        let replacer: InvokeArg1 = InvokeArg1::from(replacer)?;
+        let mut err = None;
+        let replaced: Value = regex.replace_all(text, |captures: &Captures| {
+            let arg: Value = as_result(captures);
+            util::yield_result(&mut err, || replacer.invoke(arg, vm)?.as_str().cloned(), String::new())
+        }).to_value();
+        util::join_result(replaced, err)
+    } else {
+        Ok(regex.replace_all(text, replacer.as_str()?).to_value())
     }
 }
 

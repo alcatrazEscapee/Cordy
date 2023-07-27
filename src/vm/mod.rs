@@ -1611,8 +1611,7 @@ mod test {
     #[test] fn test_replace_regex_1() { run_str("'apples and bananas' . replace('[abe]+', 'o') . print", "opplos ond ononos\n"); }
     #[test] fn test_replace_regex_2() { run_str("'[a] [b] [c] [d]' . replace('[ac]', '$0$0') . print", "[aa] [b] [cc] [d]\n"); }
     #[test] fn test_replace_regex_with_function() { run_str("'apples and bananas' . replace('apples', fn((c, *_)) -> c . to_upper) . print", "APPLES and bananas\n"); }
-    // todo: re-enable once we implement better function deduction
-    //#[test] fn test_replace_regex_with_wrong_function() { run_str("'apples and bananas' . replace('apples', min) . print", "TypeError: Expected 'min' of type 'native function' to be a 'fn replace(vector<str>) -> str' function\n  at: line 1 (<test>)\n\n1 | 'apples and bananas' . replace('apples', min) . print\n2 |                      ^^^^^^^^^^^^^^^^^^^^^^^^\n"); }
+    #[test] fn test_replace_regex_with_wrong_function() { run_str("'apples and bananas' . replace('apples', argv) . print", "Incorrect number of arguments for fn argv(), got 1\n  at: line 1 (<test>)\n\n1 | 'apples and bananas' . replace('apples', argv) . print\n2 |                      ^^^^^^^^^^^^^^^^^^^^^^^^^\n"); }
     #[test] fn test_replace_regex_with_capture_group() { run_str("'apples and bananas' . replace('([a-z])([a-z]+)', 'yes') . print", "yes yes yes\n"); }
     #[test] fn test_replace_regex_with_capture_group_function() { run_str("'apples and bananas' . replace('([a-z])([a-z]+)', fn((_, a, b)) -> to_upper(a) + b) . print", "Apples And Bananas\n"); }
     #[test] fn test_replace_regex_implicit_newline() { run_str("'first\nsecond\nthird\nfourth' . replace('\\n', ', ') . print", "first, second, third, fourth\n"); }
