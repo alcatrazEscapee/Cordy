@@ -5,6 +5,7 @@ use indexmap::IndexMap;
 use itertools::Itertools;
 
 use crate::{util, vm};
+use crate::core::{InvokeArg0, InvokeArg1, InvokeArg2};
 use crate::vm::{IntoDictValue, IntoIterableValue, IntoValue, Iterable, RuntimeError, Value, ValueResult, VirtualInterface};
 
 use RuntimeError::{*};
@@ -30,20 +31,17 @@ fn get_dict_index<VM>(vm: &mut VM, dict: Value, key: Value) -> ValueResult where
     // If the default is a function, we can't have a reference out of the dict while we're accessing the default.
 
     let dict = match dict { Dict(it) => it, _ => panic!() };
-    let default_factory: Value;
+    let default_factory: InvokeArg0;
     {
-        let mut dict = dict.unbox_mut(); // mutable as we might insert in the immutable default case
-        match dict.default.clone() {
-            Some(default) if default.is_function() => match dict.dict.get(&key) {
+        let dict = dict.unbox();
+        match &dict.default {
+            Some(default) => match dict.dict.get(&key) {
                 Some(existing_value) => return Ok(existing_value.clone()),
                 None => {
                     // We need to insert, so fallthrough as we need to drop the borrow on `dict`
-                    default_factory = default;
+                    default_factory = default.clone();
                 },
             },
-            Some(default_value) => {
-                return Ok(dict.dict.entry(key).or_insert(default_value).clone())
-            }
             None => return match dict.dict.get(&key) {
                 Some(existing_value) => Ok(existing_value.clone()),
                 None => ValueErrorKeyNotPresent(key).err()
@@ -53,7 +51,7 @@ fn get_dict_index<VM>(vm: &mut VM, dict: Value, key: Value) -> ValueResult where
 
     // Invoke the new value supplier - this might modify the dict
     // We go through the `.entry()` API again in this case
-    let new_value: Value = vm.invoke_func0(default_factory)?;
+    let new_value: Value = default_factory.invoke(vm)?;
     let mut dict = dict.unbox_mut();
     Ok(dict.dict.entry(key).or_insert(new_value).clone())
 }
@@ -144,30 +142,26 @@ pub fn sum(args: impl Iterator<Item=Value>) -> ValueResult {
 }
 
 pub fn min(args: impl Iterator<Item=Value>) -> ValueResult {
-    match args.min() {
-        Some(v) => Ok(v),
-        None => ValueErrorValueMustBeNonEmpty.err()
-    }
+    non_empty(args.min())
 }
 
 pub fn min_by<VM>(vm: &mut VM, by: Value, args: Value) -> ValueResult where VM : VirtualInterface {
     let iter = args.as_iter()?;
-    match by.unbox_func_args() {
-        Some(Some(2)) => {
+    match by.min_nargs() {
+        Some(2) => {
+            let by: InvokeArg2 = InvokeArg2::from(by)?;
             let mut err: Option<Box<RuntimeError>> = None;
-            let ret = iter
-                .min_by(|a, b| util::yield_result(&mut err, || {
-                    let cmp = vm.invoke_func2(by.clone(), (*a).clone(), (*b).clone())?.as_int()?;
-                    cmp_to_ord(cmp)
-                }, Ordering::Equal));
-
+            let ret = iter.min_by(|a, b|
+                util::yield_result(&mut err, ||
+                    cmp_to_ord(by.invoke((*a).clone(), (*b).clone(), vm)?.as_int()?), Ordering::Equal));
             non_empty(util::join_result(ret, err)?)
         },
-        Some(Some(1)) => {
+        Some(1) => {
+            let by: InvokeArg1 = InvokeArg1::from(by)?;
             let mut err = None;
-            let ret = iter
-                .min_by_key(|u| util::yield_result(&mut err, || vm.invoke_func1(by.clone(), (*u).clone()), Nil));
-
+            let ret = iter.min_by_key(|u|
+                util::yield_result(&mut err, ||
+                    by.invoke((*u).clone(), vm), Nil));
             non_empty(util::join_result(ret, err)?)
         },
         Some(_) => TypeErrorArgMustBeCmpOrKeyFunction(by).err(),
@@ -181,27 +175,58 @@ pub fn max(args: impl Iterator<Item=Value>) -> ValueResult {
 
 pub fn max_by<VM>(vm: &mut VM, by: Value, args: Value) -> ValueResult where VM : VirtualInterface {
     let iter = args.as_iter()?;
-    match by.unbox_func_args() {
-        Some(Some(2)) => {
+    match by.min_nargs() {
+        Some(2) => {
+            let by: InvokeArg2 = InvokeArg2::from(by)?;
             let mut err: Option<Box<RuntimeError>> = None;
-            let ret = iter
-                .max_by(|a, b| util::yield_result(&mut err, || {
-                    let cmp = vm.invoke_func2(by.clone(), (*a).clone(), (*b).clone())?.as_int()?;
-                    cmp_to_ord(cmp)
-                }, Ordering::Equal));
-
+            let ret = iter.max_by(|a, b|
+                util::yield_result(&mut err, ||
+                    cmp_to_ord(by.invoke((*a).clone(), (*b).clone(), vm)?.as_int()?), Ordering::Equal));
             non_empty(util::join_result(ret, err)?)
         },
-        Some(Some(1)) => {
+        Some(1) => {
+            let by: InvokeArg1 = InvokeArg1::from(by)?;
             let mut err = None;
-            let ret = iter
-                .max_by_key(|u| util::yield_result(&mut err, || vm.invoke_func1(by.clone(), (*u).clone()), Nil));
-
+            let ret = iter.max_by_key(|u|
+                util::yield_result(&mut err, ||
+                    by.invoke((*u).clone(), vm), Nil));
             non_empty(util::join_result(ret, err)?)
         },
         Some(_) => TypeErrorArgMustBeCmpOrKeyFunction(by).err(),
         None => TypeErrorArgMustBeFunction(by).err(),
     }
+}
+
+
+pub fn sort(args: impl Iterator<Item=Value>) -> ValueResult {
+    let mut sorted: Vec<Value> = args.collect::<Vec<Value>>();
+    sorted.sort_unstable();
+    Ok(sorted.into_iter().to_list())
+}
+
+pub fn sort_by<VM : VirtualInterface>(vm: &mut VM, by: Value, args: Value) -> ValueResult {
+    let mut sorted: Vec<Value> = args.as_iter()?.collect::<Vec<Value>>();
+    match by.min_nargs() {
+        Some(2) => {
+            let by: InvokeArg2 = InvokeArg2::from(by)?;
+            let mut err: Option<Box<RuntimeError>> = None;
+            sorted.sort_unstable_by(|a, b|
+                util::yield_result(&mut err, ||
+                    cmp_to_ord(by.invoke(a.clone(), b.clone(), vm)?.as_int()?), Ordering::Equal));
+            util::join_result((), err)?
+        },
+        Some(1) => {
+            let by: InvokeArg1 = InvokeArg1::from(by)?;
+            let mut err: Option<Box<RuntimeError>> = None;
+            sorted.sort_unstable_by_key(|a|
+                util::yield_result(&mut err, ||
+                    by.invoke(a.clone(), vm), Nil));
+            util::join_result((), err)?
+        },
+        Some(_) => return TypeErrorArgMustBeCmpOrKeyFunction(by).err(),
+        None => return TypeErrorArgMustBeFunction(by).err(),
+    }
+    Ok(sorted.into_iter().to_list())
 }
 
 #[inline(always)]
@@ -223,34 +248,6 @@ fn cmp_to_ord<E>(i: i64) -> Result<Ordering, E> {
     })
 }
 
-
-pub fn sort(args: impl Iterator<Item=Value>) -> ValueResult {
-    let mut sorted: Vec<Value> = args.collect::<Vec<Value>>();
-    sorted.sort_unstable();
-    Ok(sorted.into_iter().to_list())
-}
-
-pub fn sort_by<VM : VirtualInterface>(vm: &mut VM, by: Value, args: Value) -> ValueResult {
-    let mut sorted: Vec<Value> = args.as_iter()?.collect::<Vec<Value>>();
-    match by.unbox_func_args() {
-        Some(Some(2)) => {
-            let mut err: Option<Box<RuntimeError>> = None;
-            sorted.sort_unstable_by(|a, b| util::yield_result(&mut err, || {
-                let cmp = vm.invoke_func2(by.clone(), a.clone(), b.clone())?.as_int()?;
-                cmp_to_ord(cmp)
-            }, Ordering::Equal));
-            util::join_result((), err)?
-        },
-        Some(Some(1)) => {
-            let mut err: Option<Box<RuntimeError>> = None;
-            sorted.sort_unstable_by_key(|a| util::yield_result(&mut err, || vm.invoke_func1(by.clone(), a.clone()), Nil));
-            util::join_result((), err)?
-        },
-        Some(_) => return TypeErrorArgMustBeCmpOrKeyFunction(by).err(),
-        None => return TypeErrorArgMustBeFunction(by).err(),
-    }
-    Ok(sorted.into_iter().to_list())
-}
 
 pub fn group_by<VM : VirtualInterface>(vm: &mut VM, by: Value, args: Value) -> ValueResult {
     let iter = args.as_iter()?;
@@ -279,8 +276,9 @@ pub fn group_by<VM : VirtualInterface>(vm: &mut VM, by: Value, args: Value) -> V
             // Otherwise, we assume this is a group_by(f), in which case we assume the function to be a item -> key, and create a dictionary of keys -> vector of values
             // For capacity, we guess that we're halving. That seems to be a reasonable compromise between overestimating, and optimal values.
             let mut groups: IndexMap<Value, Value> = IndexMap::with_capacity(iter.len() / 2);
+            let by: InvokeArg1 = InvokeArg1::from(by)?;
             for value in iter {
-                let key = vm.invoke_func1(by.clone(), value.clone())?;
+                let key = by.invoke(value.clone(), vm)?;
                 match groups.entry(key)
                     .or_insert_with(|| Vec::new().to_value()) {
                     Vector(it) => it.unbox_mut().push(value),
@@ -315,8 +313,9 @@ pub fn combinations(n: Value, args: Value) -> ValueResult {
 }
 
 pub fn any<VM>(vm: &mut VM, f: Value, args: Value) -> ValueResult where VM : VirtualInterface {
+    let f: InvokeArg1 = InvokeArg1::from(f)?;
     for r in args.as_iter()? {
-        if vm.invoke_func1(f.clone(), r)?.as_bool() {
+        if f.invoke(r, vm)?.as_bool() {
             return Ok(Bool(true))
         }
     }
@@ -324,8 +323,9 @@ pub fn any<VM>(vm: &mut VM, f: Value, args: Value) -> ValueResult where VM : Vir
 }
 
 pub fn all<VM>(vm: &mut VM, f: Value, args: Value) -> ValueResult where VM : VirtualInterface {
+    let f: InvokeArg1 = InvokeArg1::from(f)?;
     for r in args.as_iter()? {
-        if !vm.invoke_func1(f.clone(), r)?.as_bool() {
+        if !f.invoke(r, vm)?.as_bool() {
             return Ok(Bool(false))
         }
     }
@@ -336,8 +336,9 @@ pub fn all<VM>(vm: &mut VM, f: Value, args: Value) -> ValueResult where VM : Vir
 pub fn map<VM>(vm: &mut VM, f: Value, args: Value) -> ValueResult where VM : VirtualInterface {
     let len: usize = args.len().unwrap_or(0);
     let mut acc: VecDeque<Value> = VecDeque::with_capacity(len);
+    let f: InvokeArg1 = InvokeArg1::from(f)?;
     for r in args.as_iter()? {
-        acc.push_back(vm.invoke_func1(f.clone(), r)?);
+        acc.push_back(f.invoke(r, vm)?);
     }
     Ok(acc.to_value())
 }
@@ -345,8 +346,9 @@ pub fn map<VM>(vm: &mut VM, f: Value, args: Value) -> ValueResult where VM : Vir
 pub fn filter<VM>(vm: &mut VM, f: Value, args: Value) -> ValueResult where VM : VirtualInterface {
     let len: usize = args.len().unwrap_or(0);
     let mut acc: VecDeque<Value> = VecDeque::with_capacity(len);
+    let f: InvokeArg1 = InvokeArg1::from(f)?;
     for r in args.as_iter()? {
-        let ret = vm.invoke_func1(f.clone(), r.clone())?;
+        let ret = f.invoke(r.clone(), vm)?;
         if ret.as_bool() {
             acc.push_back(r);
         }
@@ -357,9 +359,13 @@ pub fn filter<VM>(vm: &mut VM, f: Value, args: Value) -> ValueResult where VM : 
 pub fn flat_map<VM>(vm: &mut VM, f: Option<Value>, args: Value) -> ValueResult where VM : VirtualInterface {
     let len: usize = args.len().unwrap_or(0);
     let mut acc: VecDeque<Value> = VecDeque::with_capacity(len);
+    let f: Option<InvokeArg1> = match f {
+        Some(f) => Some(InvokeArg1::from(f)?),
+        None => None,
+    };
     for r in args.as_iter()? {
         let elem = match &f {
-            Some(l) => vm.invoke_func1(l.clone(), r)?,
+            Some(l) => l.invoke(r, vm)?,
             None => r
         };
         for e in elem.as_iter()? {
@@ -373,9 +379,16 @@ pub fn zip(args: impl Iterator<Item=Value>) -> ValueResult {
     let mut iters = args
         .map(|v| v.as_iter())
         .collect::<Result<Vec<Iterable>, Box<RuntimeError>>>()?;
-    let mut acc = VecDeque::new();
+    if iters.len() == 0 {
+        return ValueErrorValueMustBeNonEmpty.err()
+    }
+    let size: usize = iters.iter()
+        .map(|u| u.len())
+        .min()
+        .unwrap_or(0);
+    let mut acc = VecDeque::with_capacity(size);
     loop {
-        let mut vec = Vec::new();
+        let mut vec = Vec::with_capacity(iters.len());
         for iter in &mut iters {
             match iter.next() {
                 Some(it) => vec.push(it),
@@ -393,8 +406,9 @@ pub fn reduce<VM>(vm: &mut VM, f: Value, args: Value) -> ValueResult where VM : 
         None => return ValueErrorValueMustBeNonEmpty.err()
     };
 
+    let f: InvokeArg2 = InvokeArg2::from(f)?;
     for r in iter {
-        acc = vm.invoke_func2(f.clone(), acc, r)?;
+        acc = f.invoke(acc, r, vm)?;
     }
     Ok(acc)
 }
@@ -516,7 +530,11 @@ pub fn collect_into_dict(iter: impl Iterator<Item=Value>) -> ValueResult {
 pub fn dict_set_default(def: Value, target: Value) -> ValueResult {
     match target {
         Dict(it) => {
-            it.unbox_mut().default = Some(def);
+            it.unbox_mut().default = Some(if def.is_function() {
+                InvokeArg0::from(def)?
+            } else {
+                InvokeArg0::Noop(def) // Treat single argument defaults still as a function, which is optimized to just copy its value
+            });
             Ok(Dict(it))
         },
         a2 => TypeErrorArgMustBeDict(a2).err()
@@ -544,8 +562,9 @@ pub fn left_find<VM>(vm: &mut VM, finder: Value, args: Value, return_index: bool
     // For value with value, we just use `.find()`
     let mut iter = args.as_iter()?;
     if finder.is_function() {
+        let finder: InvokeArg1 = InvokeArg1::from(finder)?;
         for (i, v) in iter.enumerate() {
-            let ret = vm.invoke_func1(finder.clone(), v.clone())?;
+            let ret = finder.invoke(v.clone(), vm)?;
             if ret.as_bool() {
                 return Ok(if return_index { Int(i as i64) } else { v })
             }
@@ -566,8 +585,9 @@ pub fn right_find<VM>(vm: &mut VM, finder: Value, args: Value, return_index: boo
     let mut iter = args.as_iter()?.reverse();
     let len = iter.len();
     if finder.is_function() {
+        let finder: InvokeArg1 = InvokeArg1::from(finder)?;
         for (i, v) in iter.enumerate() {
-            let ret = vm.invoke_func1(finder.clone(), v.clone())?;
+            let ret = finder.invoke(v.clone(), vm)?;
             if ret.as_bool() {
                 return Ok(if return_index { Int((len - 1 - i) as i64) } else { v })
             }
