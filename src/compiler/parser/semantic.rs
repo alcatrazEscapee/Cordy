@@ -5,6 +5,7 @@
 
 use std::collections::HashMap;
 use std::fmt::Debug;
+use fxhash::FxBuildHasher;
 
 use itertools::Itertools;
 
@@ -90,13 +91,13 @@ impl Locals {
 pub struct Fields {
     /// A mapping of `field name` to `field index`. This is used to record unique fields.
     /// For example, `struct Foo(a, b, c)` would generate the fields `"a"`, `"b"`, and `"c"` at index `0`, `1`, and `2`, respectively.
-    fields: HashMap<String, u32>,
+    fields: HashMap<String, u32, FxBuildHasher>,
 
     /// A table which maps pairs of `(type index, field index)` to a `field offset`
     /// The `type index` is known at runtime, based on the runtime type of the struct in use.
     /// The `field index` is known at compile time, based on the identifier that it resolves to.
     /// The resultant `field offset` is a index into a specific struct object's `Vec<Value>` of fields.
-    lookup: HashMap<(u32, u32), usize>,
+    lookup: HashMap<(u32, u32), usize, FxBuildHasher>,
 
     /// The next available `type_index`
     types: u32,
@@ -105,8 +106,8 @@ pub struct Fields {
 impl Fields {
     pub(super) fn new() -> Fields {
         Fields {
-            fields: HashMap::new(),
-            lookup: HashMap::new(),
+            fields: HashMap::with_hasher(FxBuildHasher::default()),
+            lookup: HashMap::with_hasher(FxBuildHasher::default()),
             types: 0,
         }
     }

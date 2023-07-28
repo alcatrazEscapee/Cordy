@@ -8,6 +8,7 @@ use std::iter::FusedIterator;
 use std::mem;
 use std::rc::Rc;
 use std::str::Chars;
+use fxhash::FxBuildHasher;
 use indexmap::{IndexMap, IndexSet};
 use itertools::Itertools;
 
@@ -563,8 +564,8 @@ impl IntoValue for NativeFunction { fn to_value(self) -> Value { NativeFunction(
 impl IntoValue for String { fn to_value(self) -> Value { Str(Rc::new(self)) } }
 impl IntoValue for VecDeque<Value> { fn to_value(self) -> Value { List(Mut::new(self)) } }
 impl IntoValue for Vec<Value> { fn to_value(self) -> Value { Vector(Mut::new(self)) } }
-impl IntoValue for IndexSet<Value> { fn to_value(self) -> Value { Set(Mut::new(SetImpl { set: self })) } }
-impl IntoValue for IndexMap<Value, Value> { fn to_value(self) -> Value { Dict(Mut::new(DictImpl { dict: self, default: None })) } }
+impl IntoValue for IndexSet<Value, FxBuildHasher> { fn to_value(self) -> Value { Set(Mut::new(SetImpl { set: self })) } }
+impl IntoValue for IndexMap<Value, Value, FxBuildHasher> { fn to_value(self) -> Value { Dict(Mut::new(DictImpl { dict: self, default: None })) } }
 impl IntoValue for BinaryHeap<Reverse<Value>> { fn to_value(self) -> Value { Heap(Mut::new(HeapImpl { heap: self }))} }
 impl IntoValue for FunctionImpl { fn to_value(self) -> Value { Function(Rc::new(self)) }}
 impl IntoValue for StructTypeImpl { fn to_value(self) -> Value { StructType(Rc::new(self)) } }
@@ -607,7 +608,7 @@ pub trait IntoIterableValue {
 impl<I> IntoIterableValue for I where I : Iterator<Item=Value> {
     fn to_list(self) -> Value { self.collect::<VecDeque<Value>>().to_value() }
     fn to_vector(self) -> Value { self.collect::<Vec<Value>>().to_value() }
-    fn to_set(self) -> Value { self.collect::<IndexSet<Value>>().to_value() }
+    fn to_set(self) -> Value { self.collect::<IndexSet<Value, FxBuildHasher>>().to_value() }
     fn to_heap(self) -> Value { self.map(Reverse).collect::<BinaryHeap<Reverse<Value>>>().to_value() }
 }
 
@@ -618,7 +619,7 @@ pub trait IntoDictValue {
 
 impl<I> IntoDictValue for I where I : Iterator<Item=(Value, Value)> {
     fn to_dict(self) -> Value {
-        self.collect::<IndexMap<Value, Value>>().to_value()
+        self.collect::<IndexMap<Value, Value, FxBuildHasher>>().to_value()
     }
 }
 
@@ -806,7 +807,7 @@ impl Hash for ClosureImpl {
 
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub struct SetImpl {
-    pub set: IndexSet<Value>
+    pub set: IndexSet<Value, FxBuildHasher>
 }
 
 impl PartialOrd for SetImpl {
@@ -873,7 +874,7 @@ pub fn guard_recursive_hash<T, F : FnOnce() -> T>(f: F) -> Result<(), ()> {
 /// Boxes a `IndexMap<Value, Value>`, along with an optional default value
 #[derive(Debug, Clone)]
 pub struct DictImpl {
-    pub dict: IndexMap<Value, Value>,
+    pub dict: IndexMap<Value, Value, FxBuildHasher>,
     pub default: Option<InvokeArg0>
 }
 
@@ -1262,12 +1263,12 @@ impl CollectionIterable {
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub struct MemoizedImpl {
     pub func: Value,
-    pub cache: Mut<HashMap<Vec<Value>, Value>>
+    pub cache: Mut<HashMap<Vec<Value>, Value, FxBuildHasher>>
 }
 
 impl MemoizedImpl {
     pub fn new(func: Value) -> MemoizedImpl {
-        MemoizedImpl { func, cache: Mut::new(HashMap::new()) }
+        MemoizedImpl { func, cache: Mut::new(HashMap::with_hasher(FxBuildHasher::default())) }
     }
 }
 
@@ -1363,8 +1364,8 @@ pub enum LiteralType {
 pub enum Literal {
     List(VecDeque<Value>),
     Vector(Vec<Value>),
-    Set(IndexSet<Value>),
-    Dict(IndexMap<Value, Value>),
+    Set(IndexSet<Value, FxBuildHasher>),
+    Dict(IndexMap<Value, Value, FxBuildHasher>),
 }
 
 impl Literal {
@@ -1372,8 +1373,8 @@ impl Literal {
         match op {
             LiteralType::List => Literal::List(VecDeque::with_capacity(size_hint as usize)),
             LiteralType::Vector => Literal::Vector(Vec::with_capacity(size_hint as usize)),
-            LiteralType::Set => Literal::Set(IndexSet::with_capacity(size_hint as usize)),
-            LiteralType::Dict => Literal::Dict(IndexMap::with_capacity(size_hint as usize)),
+            LiteralType::Set => Literal::Set(IndexSet::with_capacity_and_hasher(size_hint as usize, FxBuildHasher::default())),
+            LiteralType::Dict => Literal::Dict(IndexMap::with_capacity_and_hasher(size_hint as usize, FxBuildHasher::default())),
         }
     }
 
@@ -1417,6 +1418,7 @@ impl IntoValue for Literal {
 mod test {
     use std::collections::VecDeque;
     use std::rc::Rc;
+    use fxhash::FxBuildHasher;
     use indexmap::{IndexMap, IndexSet};
     use crate::core::{NativeFunction, PartialArgument};
     use crate::vm::error::RuntimeError;
@@ -1445,8 +1447,8 @@ mod test {
             Value::Bool(true),
             Value::Int(1),
             VecDeque::new().to_value(),
-            IndexSet::new().to_value(),
-            IndexMap::new().to_value(),
+            IndexSet::with_hasher(FxBuildHasher::default()).to_value(),
+            IndexMap::with_hasher(FxBuildHasher::default()).to_value(),
             std::iter::empty().to_heap(),
             vec![].to_value(),
             Value::range(0, 1, 1).unwrap(),

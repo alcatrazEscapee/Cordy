@@ -2,6 +2,7 @@ use std::cell::Cell;
 use std::collections::HashMap;
 use std::io::{BufRead, Write};
 use std::rc::Rc;
+use fxhash::FxBuildHasher;
 
 
 use crate::{compiler, util, core, trace};
@@ -40,7 +41,7 @@ pub struct VirtualMachine<R, W> {
     call_stack: Vec<CallFrame>,
     literal_stack: Vec<Literal>,
     global_count: usize,
-    open_upvalues: HashMap<usize, Rc<Cell<UpValue>>>,
+    open_upvalues: HashMap<usize, Rc<Cell<UpValue>>, FxBuildHasher>,
     unroll_stack: Vec<i32>,
 
     constants: Vec<Value>,
@@ -136,7 +137,7 @@ impl<R, W> VirtualMachine<R, W> where
             call_stack: vec![CallFrame { return_ip: 0, frame_pointer: 0 }],
             literal_stack: Vec::with_capacity(16),
             global_count: 0,
-            open_upvalues: HashMap::new(),
+            open_upvalues: HashMap::with_hasher(FxBuildHasher::default()),
             unroll_stack: Vec::new(),
 
             constants: result.constants,

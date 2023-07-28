@@ -1,7 +1,9 @@
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, VecDeque};
+use std::default::Default;
 use std::fs;
 use std::hash::{Hash, Hasher};
+use fxhash::FxBuildHasher;
 use indexmap::{IndexMap, IndexSet};
 
 use crate::vm::{operator, IntoIterableValue, IntoValue, IntoValueResult, Value, VirtualInterface, RuntimeError, ValueResult};
@@ -793,8 +795,8 @@ fn invoke_arg0<VM : VirtualInterface>(f: NativeFunction, vm: &mut VM) -> ValueRe
         Argv => Ok(vm.get_args()),
 
         List => Ok(VecDeque::new().to_value()),
-        Set => Ok(IndexSet::new().to_value()),
-        Dict => Ok(IndexMap::new().to_value()),
+        Set => Ok(IndexSet::with_hasher(FxBuildHasher::default()).to_value()),
+        Dict => Ok(IndexMap::with_hasher(FxBuildHasher::default()).to_value()),
         Heap => Ok(BinaryHeap::new().to_value()),
         Vector => Ok(Vec::new().to_value()),
 
