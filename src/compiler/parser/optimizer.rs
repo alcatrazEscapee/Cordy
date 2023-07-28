@@ -35,7 +35,7 @@ impl Optimize for Expr {
             // Unary Operators
             Expr(loc, ExprType::Unary(op, arg)) => {
                 let arg: Expr = arg.optimize();
-                match arg.to_constant() {
+                match arg.into_const() {
                     Ok(arg) => Expr::value_result(loc, op.apply(arg)),
                     Err(arg) => arg.unary(loc, op)
                 }
@@ -45,8 +45,8 @@ impl Optimize for Expr {
             Expr(loc, ExprType::Binary(op, lhs, rhs, swap)) => {
                 let lhs: Expr = lhs.optimize();
                 let rhs: Expr = rhs.optimize();
-                match lhs.to_constant() {
-                    Ok(lhs) => match rhs.to_constant() {
+                match lhs.into_const() {
+                    Ok(lhs) => match rhs.into_const() {
                         Ok(rhs) => Expr::value_result(loc, if swap { op.apply(rhs, lhs) } else { op.apply(lhs, rhs) }),
                         Err(rhs) => Expr::value(lhs).binary(loc, op, rhs, swap),
                     },
@@ -166,7 +166,7 @@ impl Optimize for Expr {
             // Ternary conditions perform basic dead code elimination, if the condition is constant.
             Expr(loc, ExprType::IfThenElse(condition, if_true, if_false)) => {
                 let condition = condition.optimize();
-                match condition.to_constant() {
+                match condition.into_const() {
                     Ok(condition) => if condition.as_bool() { if_true.optimize() } else { if_false.optimize() },
                     Err(condition) => condition.if_then_else(loc, if_true.optimize(), if_false.optimize()),
                 }
@@ -192,7 +192,7 @@ impl Expr {
     ///
     /// **N.B.** This can only be supported for immutable types. If we attempt to const-expr evaluate a non-constant `Value`, like a list, we would have to
     /// un-const-expr it to emit the code - otherwise in `VM.constants` we would have a single instance that gets copied and re-used. This is **very bad**.
-    fn to_constant(self) -> Result<Value, Expr> {
+    fn into_const(self) -> Result<Value, Expr> {
         match self {
             Expr(_, ExprType::Nil) => Ok(Value::Nil),
             Expr(_, ExprType::Bool(it)) => Ok(it.to_value()),
