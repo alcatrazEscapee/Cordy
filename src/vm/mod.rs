@@ -1,9 +1,8 @@
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::io::{BufRead, Write};
-use std::iter::Empty;
 use std::rc::Rc;
-use std::vec::Splice;
+
 
 use crate::{compiler, util, core, trace};
 use crate::compiler::{CompileParameters, CompileResult, Fields, IncrementalCompileResult, Locals};
@@ -279,18 +278,17 @@ impl<R, W> VirtualMachine<R, W> where
                 self.pop();
             },
             PopN(n) => {
-                for _ in 0..n {
-                    self.pop();
-                }
+                let len: usize = self.stack.len();
+                self.stack.truncate(len - n as usize);
+                trace::trace_interpreter_stack!("PopN {}", self.debug_stack());
             },
             Dup => {
                 self.push(self.peek(0).clone());
             },
             Swap => {
-                let a1: Value = self.pop();
-                let a2: Value = self.pop();
-                self.push(a1);
-                self.push(a2);
+                let len: usize = self.stack.len();
+                self.stack.swap(len - 1, len - 2);
+                trace::trace_interpreter_stack!("Swap {}", self.debug_stack());
             },
 
             PushLocal(local) => {
@@ -429,18 +427,13 @@ impl<R, W> VirtualMachine<R, W> where
                 let iter = self.pop().as_iter()?;
                 self.push(Value::Iter(Box::new(iter)));
             },
-            TestIterable => {
+            TestIterable(ip) => {
                 let top: usize = self.stack.len() - 1;
                 let iter = &mut self.stack[top];
                 match iter {
                     Value::Iter(it) => match it.next() {
-                        Some(value) => {
-                            self.push(value);
-                            self.push(Value::Bool(true));
-                        },
-                        None => {
-                            self.push(Value::Bool(false));
-                        }
+                        Some(value) => self.push(value),
+                        None => self.ip = self.ip.add_offset(ip),
                     },
                     _ => panic!("Malformed bytecode"),
                 }
@@ -931,7 +924,7 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
 /// **N.B.** This is not implemented as a method on `VirtualMachine` as we want to take a partial borrow only of
 /// `&mut self.stack` when called, and which means we can interact with other methods on the VM (e.g. the literal stack).
 #[inline]
-fn splice(stack: &mut Vec<Value>, n: u32) -> Splice<Empty<Value>> {
+fn splice(stack: &mut Vec<Value>, n: u32) -> impl Iterator<Item=Value> + '_ {
     let start: usize = stack.len() - n as usize;
     let end: usize = stack.len();
     stack.splice(start..end, std::iter::empty())

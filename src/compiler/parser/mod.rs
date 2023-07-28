@@ -757,8 +757,7 @@ impl Parser<'_> {
 
         // Test
         let jump: usize = self.begin_loop();
-        self.push(TestIterable);
-        let jump_if_false_pop = self.reserve();
+        let test_iterable = self.reserve();
 
         // Initialize locals
         lvalue.emit_destructuring(self, false, false);
@@ -776,7 +775,7 @@ impl Parser<'_> {
         self.push_jump(jump, Jump);
 
         // Fix the jump
-        self.fix_jump(jump_if_false_pop, JumpIfFalsePop);
+        self.fix_jump(test_iterable, TestIterable);
 
         // Cleanup the `for` loop locals, but don't emit lifts as we do them per-iteration.
         self.pop_locals(Some(self.scope_depth), true, true, false);

@@ -3,14 +3,13 @@ L1: 0000 Range
     0002 Int(7)
     0003 Call(2)
     0004 InitIterable
-    0005 TestIterable
-    0006 JumpIfFalsePop(14)
-    0007 Pop
-L2: 0008 Str('hello')
-    0009 Print
-    0010 Swap
-    0011 Call(1)
-L3: 0012 Pop
-    0013 Jump(5)
-    0014 Pop
-    0015 Exit
+    0005 TestIterable(13)
+    0006 Pop
+L2: 0007 Str('hello')
+    0008 Print
+    0009 Swap
+    0010 Call(1)
+L3: 0011 Pop
+    0012 Jump(5)
+    0013 Pop
+    0014 Exit

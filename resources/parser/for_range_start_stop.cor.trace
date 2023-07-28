@@ -4,15 +4,14 @@ L1: 0000 Nil
     0003 Int(7)
     0004 Call(2)
     0005 InitIterable
-    0006 TestIterable
-    0007 JumpIfFalsePop(16)
-    0008 StoreLocal(0) -> x
-    0009 Pop
-L2: 0010 PushLocal(0) -> x
-    0011 Print
-    0012 Swap
-    0013 Call(1)
-L3: 0014 Pop
-    0015 Jump(6)
-    0016 PopN(2)
-    0017 Exit
+    0006 TestIterable(15)
+    0007 StoreLocal(0) -> x
+    0008 Pop
+L2: 0009 PushLocal(0) -> x
+    0010 Print
+    0011 Swap
+    0012 Call(1)
+L3: 0013 Pop
+    0014 Jump(6)
+    0015 PopN(2)
+    0016 Exit
