@@ -8,12 +8,12 @@ use cordy::vm::{ExitType, VirtualMachine};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let (file, mode, enable_optimization, program_args) = match parse_args(args) {
+    let mut options: Options = match parse_args(args) {
         Some(args) => args,
         None => return
     };
-    let result = match file {
-        Some(name) => run_main(name, mode, enable_optimization, program_args),
+    let result = match options.file.take() {
+        Some(name) => run_main(name, options),
         None => repl::run_repl()
     };
     match result {
@@ -22,27 +22,31 @@ fn main() {
     }
 }
 
-fn run_main(name: String, mode: Mode, enable_optimization: bool, program_args: Vec<String>) -> Result<(), String> {
+fn run_main(name: String, options: Options) -> Result<(), String> {
     let text: String = fs::read_to_string(&name).map_err(|_| format!("Unable to read file '{}'", name))?;
     let view: SourceView = SourceView::new(name, text);
-    let compiled: CompileResult = compiler::compile(enable_optimization, &view).map_err(|e| e.join("\n"))?;
+    let compiled: CompileResult = compiler::compile(options.optimize, &view).map_err(|e| e.join("\n"))?;
 
-    match mode {
+    match options.mode {
         Mode::Disassembly => {
-            for line in compiled.disassemble(&view) {
+            for line in compiled.disassemble(&view, !options.no_line_numbers) {
                 println!("{}", line);
             }
             Ok(())
         },
-        Mode::Default => run_vm(compiled, program_args, view)
+        Mode::Default => run_vm(compiled, options.args, view)
     }
 }
 
-fn parse_args(args: Vec<String>) -> Option<(Option<String>, Mode, bool, Vec<String>)> {
+fn parse_args(args: Vec<String>) -> Option<Options> {
     let mut iter = args.into_iter();
-    let mut file: Option<String> = None;
-    let mut enable_optimization: bool = false;
-    let mut mode: Mode = Mode::Default;
+    let mut options: Options = Options {
+        file: None,
+        args: Vec::new(),
+        mode: Mode::Default,
+        optimize: false,
+        no_line_numbers: false
+    };
 
     if iter.next().is_none() {
         panic!("Unexpected first argument");
@@ -54,18 +58,18 @@ fn parse_args(args: Vec<String>) -> Option<(Option<String>, Mode, bool, Vec<Stri
                 print_help();
                 return None;
             },
-            "-d" | "--disassembly" => mode.set(Mode::Disassembly).ok()?,
-            "-o" | "--optimize" => {
-                enable_optimization = true;
-            },
+            "-d" | "--disassembly" => options.mode.set(Mode::Disassembly).ok()?,
+            "-o" | "--optimize" => options.optimize = true,
+            "--no-line-numbers" => options.no_line_numbers = true,
             a => {
-                file = Some(String::from(a));
+                options.file = Some(String::from(a));
                 break
             },
         }
     }
 
-    Some((file, mode, enable_optimization, iter.collect()))
+    options.args.extend(iter);
+    Some(options)
 }
 
 fn run_vm(compiled: CompileResult, program_args: Vec<String>, view: SourceView) -> Result<(), String> {
@@ -84,11 +88,19 @@ fn print_help() {
     println!("cordy [options] <file> [program arguments...]");
     println!("When invoked with no arguments, this will open a REPL for the Cordy language (exit with 'exit' or Ctrl-C)");
     println!("Options:");
-    println!("  -h --help        : Show this message and then exit.");
-    println!("  -d --disassembly : Dump the disassembly view. Does nothing in REPL mode.");
-    println!("  -o --optimize    : Enables compiler optimizations.");
+    println!("  -h --help         : Show this message and then exit.");
+    println!("  -d --disassembly  : Dump the disassembly view. Does nothing in REPL mode.");
+    println!("  --no-line-numbers : In disassembly view, omits the leading '0001' style line numbers");
+    println!("  -o --optimize     : Enables compiler optimizations.");
 }
 
+struct Options {
+    file: Option<String>,
+    args: Vec<String>,
+    mode: Mode,
+    optimize: bool,
+    no_line_numbers: bool,
+}
 
 #[derive(Eq, PartialEq)]
 enum Mode { Default, Disassembly }

@@ -266,65 +266,65 @@ enum Purity {
 mod tests {
     use crate::{compiler, SourceView};
 
-    #[test] fn test_constant_folding_int_add() { run_expr("1 + 2", "Int(3)") }
-    #[test] fn test_constant_folding_bool_add() { run_expr("1 + true - 4", "Int(-2)") }
-    #[test] fn test_constant_folding_int_complex_add() { run_expr("1 + 1i + (2 + 2j)", "Complex(3+3i)") }
-    #[test] fn test_constant_folding_constant_ternary_if_true() { run_expr("(if 1 > 0 then 'yes' else 'no')", "Str('yes')") }
-    #[test] fn test_constant_folding_constant_ternary_if_false() { run_expr("(if 1 + 1 == 3 then 'yes' else 'no')", "Str('no')") }
-    #[test] fn test_constant_folding_constant_ternary_top_level_if_true() { run_expr("if 1 + 1 == 3 then 'yes' else 'no'", "Str('no')") }
-    #[test] fn test_constant_folding_constant_ternary_top_level_if_false() { run_expr("if 1 + 1 == 3 then 'yes' else 'no'", "Str('no')") }
-    #[test] fn test_compose_list_inlining() { run_expr("1 . [2]", "Int(1) Int(2) OpIndex") }
-    #[test] fn test_compose_slice_inlining_1() { run_expr("1 . [2:3]", "Int(1) Int(2) Int(3) OpSlice") }
-    #[test] fn test_compose_slice_inlining_2() { run_expr("1 . [2:3:4]", "Int(1) Int(2) Int(3) Int(4) OpSliceWithStep") }
-    #[test] fn test_compose_reordering_pure_strong_strong() { run_expr("1 . 2", "Int(2) Int(1) Call(1)") }
-    #[test] fn test_compose_reordering_both_strong_weak() { run_expr("do { let x ; 1 . x }", "Nil PushLocal(0)->x Int(1) Call(1) Pop") }
-    #[test] fn test_compose_reordering_both_strong_impure() { run_expr("do { let x ; 1 . (x = 2) }", "Nil Int(2) StoreLocal(0)->x Int(1) Call(1) Pop") }
-    #[test] fn test_compose_reordering_both_weak_weak() { run_expr("do { let x, y ; x . y }", "Nil Nil PushLocal(1)->y PushLocal(0)->x Call(1) PopN(2)") }
-    #[test] fn test_compose_reordering_both_weak_impure() { run_expr("do { let x, y ; x . (y = 2) }", "Nil Nil PushLocal(0)->x Int(2) StoreLocal(1)->y Swap Call(1) PopN(2)") }
-    #[test] fn test_compose_reordering_both_impure_impure() { run_expr("do { let x, y ; (x = 1) . (y = 2) }", "Nil Nil Int(1) StoreLocal(0)->x Int(2) StoreLocal(1)->y Swap Call(1) PopN(2)") }
-    #[test] fn test_operator_function_inlining_constant_1() { run_expr("(+)(1)(2)", "Int(3)") }
-    #[test] fn test_operator_function_inlining_constant_2() { run_expr("1 . (+2)", "Int(3)") }
-    #[test] fn test_operator_function_inlining_constant_3() { run_expr("1 . (2+)", "Int(3)") }
-    #[test] fn test_operator_function_inlining_constant_4() { run_expr("(+1)(2)", "Int(3)") }
-    #[test] fn test_operator_function_inlining_constant_5() { run_expr("(1+)(2)", "Int(3)") }
-    #[test] fn test_operator_function_inlining_non_constant_1() { run_expr("do { let x ; (+)(x)(2) }", "Nil PushLocal(0)->x Int(2) Add Pop") }
-    #[test] fn test_operator_function_inlining_non_constant_2() { run_expr("do { let x ; x . (+2) }", "Nil PushLocal(0)->x Int(2) Add Pop") }
-    #[test] fn test_operator_function_inlining_non_constant_3() { run_expr("do { let x ; x . (2+) }", "Nil Int(2) PushLocal(0)->x Add Pop") }
-    #[test] fn test_operator_function_inlining_non_constant_4() { run_expr("do { let x ; (+x)(2) }", "Nil Int(2) PushLocal(0)->x Add Pop") }
-    #[test] fn test_operator_function_inlining_non_constant_5() { run_expr("do { let x ; (x+)(2) }", "Nil PushLocal(0)->x Int(2) Add Pop") }
-    #[test] fn test_operator_function_inlining_asymmetric_1() { run_expr("(/)(2)(5)", "Int(0)") }
-    #[test] fn test_operator_function_inlining_asymmetric_2() { run_expr("2 . (/5)", "Int(0)") }
-    #[test] fn test_operator_function_inlining_asymmetric_3() { run_expr("2 . (5/)", "Int(2)") }
-    #[test] fn test_operator_function_inlining_asymmetric_4() { run_expr("(/2)(5)", "Int(2)") }
-    #[test] fn test_operator_function_inlining_asymmetric_5() { run_expr("(2/)(5)", "Int(0)") }
-    #[test] fn test_operator_function_inlining_impure_1() { run_expr("do { let x, y ; (/)(x)(y = 2) }", "Nil Nil PushLocal(0)->x Int(2) StoreLocal(1)->y Div PopN(2)") }
-    #[test] fn test_operator_function_inlining_impure_2() { run_expr("do { let x, y ; x . (/(y = 2)) }", "Nil Nil PushLocal(0)->x Int(2) StoreLocal(1)->y Div PopN(2)") }
-    #[test] fn test_operator_function_inlining_impure_3() { run_expr("do { let x, y ; x . ((y = 2)/) }", "Nil Nil PushLocal(0)->x Int(2) StoreLocal(1)->y Swap Div PopN(2)") }
-    #[test] fn test_operator_function_inlining_impure_4() { run_expr("do { let x, y ; (/x)(y = 2) }", "Nil Nil PushLocal(0)->x Int(2) StoreLocal(1)->y Swap Div PopN(2)") }
-    #[test] fn test_operator_function_inlining_impure_5() { run_expr("do { let x, y ; (x/)(y = 2) }", "Nil Nil PushLocal(0)->x Int(2) StoreLocal(1)->y Div PopN(2)") }
-    #[test] fn test_operator_function_inlining_with_unroll() { run_expr("(/)(...1, 2)", "OperatorDiv Int(1) Unroll Int(2) Call...(2)") }
-    #[test] fn test_inline_int_min() { run_expr("min(int)", "Int(-9223372036854775808)") }
-    #[test] fn test_inline_int_max() { run_expr("int.max", "Int(9223372036854775807)") }
-    #[test] fn test_partial_function_call_merge_no_args_1() { run_expr("vector()()", "Vector Call(0) Call(0)"); }
-    #[test] fn test_partial_function_call_merge_no_args_2() { run_expr("vector()(1)", "Vector Call(0) Int(1) Call(1)"); }
-    #[test] fn test_partial_function_call_merge_one_arg_1() { run_expr("int()()", "Int Call(0)") }
-    #[test] fn test_partial_function_call_merge_one_arg_2() { run_expr("int()(1)", "Int Int(1) Call(1)") }
-    #[test] fn test_partial_function_call_merge_one_arg_3() { run_expr("int()(1)(2)", "Int Int(1) Call(1) Int(2) Call(1)") }
-    #[test] fn test_partial_function_call_merge_one_arg_4() { run_expr("int()(1)()(2)", "Int Int(1) Call(1) Call(0) Int(2) Call(1)") }
-    #[test] fn test_partial_function_call_merge_one_arg_5() { run_expr("int()()(1)()()", "Int Int(1) Call(1) Call(0) Call(0)") }
-    #[test] fn test_partial_function_call_merge_two_arg_1() { run_expr("map(1)(2)", "Map Int(1) Int(2) Call(2)"); }
-    #[test] fn test_partial_function_call_merge_two_arg_2() { run_expr("map()(1)(2)", "Map Int(1) Int(2) Call(2)"); }
-    #[test] fn test_partial_function_call_merge_two_arg_3() { run_expr("map()(1)()(2)", "Map Int(1) Int(2) Call(2)"); }
-    #[test] fn test_partial_function_call_merge_two_arg_4() { run_expr("map(1)(2)()", "Map Int(1) Int(2) Call(2) Call(0)"); }
-    #[test] fn test_partial_function_call_merge_two_arg_5() { run_expr("map(1)()(2, 3)", "Map Int(1) Int(2) Int(3) Call(3)"); }
-    #[test] fn test_partial_function_call_merge_two_arg_6() { run_expr("map(1, 2)()(3)", "Map Int(1) Int(2) Call(2) Call(0) Int(3) Call(1)"); }
-    #[test] fn test_partial_function_call_merge_two_arg_7() { run_expr("map(1)()()", "Map Int(1) Call(1)"); }
-    #[test] fn test_partial_function_call_merge_two_arg_unroll_1() { run_expr("map()(...1)", "Map Int(1) Unroll Call...(1)"); }
-    #[test] fn test_partial_function_call_merge_two_arg_unroll_2() { run_expr("map(1)(...2)", "Map Int(1) Int(2) Unroll Call...(2)"); }
-    #[test] fn test_partial_function_call_merge_two_arg_unroll_3() { run_expr("map(...1)()", "Map Int(1) Unroll Call...(1) Call(0)"); }
+    #[test] fn test_constant_folding_int_add() { run_expr("1 + 2", "Int(3) Pop") }
+    #[test] fn test_constant_folding_bool_add() { run_expr("1 + true - 4", "Int(-2) Pop") }
+    #[test] fn test_constant_folding_int_complex_add() { run_expr("1 + 1i + (2 + 2j)", "Complex(3+3i) Pop") }
+    #[test] fn test_constant_folding_constant_ternary_if_true() { run_expr("(if 1 > 0 then 'yes' else 'no')", "Str('yes') Pop") }
+    #[test] fn test_constant_folding_constant_ternary_if_false() { run_expr("(if 1 + 1 == 3 then 'yes' else 'no')", "Str('no') Pop") }
+    #[test] fn test_constant_folding_constant_ternary_top_level_if_true() { run_expr("if 1 + 1 == 3 then 'yes' else 'no'", "Str('no') Pop") }
+    #[test] fn test_constant_folding_constant_ternary_top_level_if_false() { run_expr("if 1 + 1 == 3 then 'yes' else 'no'", "Str('no') Pop") }
+    #[test] fn test_compose_list_inlining() { run_expr("1 . [2]", "Int(1) Int(2) OpIndex Pop") }
+    #[test] fn test_compose_slice_inlining_1() { run_expr("1 . [2:3]", "Int(1) Int(2) Int(3) OpSlice Pop") }
+    #[test] fn test_compose_slice_inlining_2() { run_expr("1 . [2:3:4]", "Int(1) Int(2) Int(3) Int(4) OpSliceWithStep Pop") }
+    #[test] fn test_compose_reordering_pure_strong_strong() { run_expr("1 . 2", "Int(2) Int(1) Call(1) Pop") }
+    #[test] fn test_compose_reordering_both_strong_weak() { run_expr("do { let x ; 1 . x }", "Nil PushLocal(0)->x Int(1) Call(1) PopN(2)") }
+    #[test] fn test_compose_reordering_both_strong_impure() { run_expr("do { let x ; 1 . (x = 2) }", "Nil Int(2) StoreLocal(0)->x Int(1) Call(1) PopN(2)") }
+    #[test] fn test_compose_reordering_both_weak_weak() { run_expr("do { let x, y ; x . y }", "Nil Nil PushLocal(1)->y PushLocal(0)->x Call(1) PopN(3)") }
+    #[test] fn test_compose_reordering_both_weak_impure() { run_expr("do { let x, y ; x . (y = 2) }", "Nil Nil PushLocal(0)->x Int(2) StoreLocal(1)->y Swap Call(1) PopN(3)") }
+    #[test] fn test_compose_reordering_both_impure_impure() { run_expr("do { let x, y ; (x = 1) . (y = 2) }", "Nil Nil Int(1) StoreLocal(0)->x Int(2) StoreLocal(1)->y Swap Call(1) PopN(3)") }
+    #[test] fn test_operator_function_inlining_constant_1() { run_expr("(+)(1)(2)", "Int(3) Pop") }
+    #[test] fn test_operator_function_inlining_constant_2() { run_expr("1 . (+2)", "Int(3) Pop") }
+    #[test] fn test_operator_function_inlining_constant_3() { run_expr("1 . (2+)", "Int(3) Pop") }
+    #[test] fn test_operator_function_inlining_constant_4() { run_expr("(+1)(2)", "Int(3) Pop") }
+    #[test] fn test_operator_function_inlining_constant_5() { run_expr("(1+)(2)", "Int(3) Pop") }
+    #[test] fn test_operator_function_inlining_non_constant_1() { run_expr("do { let x ; (+)(x)(2) }", "Nil PushLocal(0)->x Int(2) Add PopN(2)") }
+    #[test] fn test_operator_function_inlining_non_constant_2() { run_expr("do { let x ; x . (+2) }", "Nil PushLocal(0)->x Int(2) Add PopN(2)") }
+    #[test] fn test_operator_function_inlining_non_constant_3() { run_expr("do { let x ; x . (2+) }", "Nil Int(2) PushLocal(0)->x Add PopN(2)") }
+    #[test] fn test_operator_function_inlining_non_constant_4() { run_expr("do { let x ; (+x)(2) }", "Nil Int(2) PushLocal(0)->x Add PopN(2)") }
+    #[test] fn test_operator_function_inlining_non_constant_5() { run_expr("do { let x ; (x+)(2) }", "Nil PushLocal(0)->x Int(2) Add PopN(2)") }
+    #[test] fn test_operator_function_inlining_asymmetric_1() { run_expr("(/)(2)(5)", "Int(0) Pop") }
+    #[test] fn test_operator_function_inlining_asymmetric_2() { run_expr("2 . (/5)", "Int(0) Pop") }
+    #[test] fn test_operator_function_inlining_asymmetric_3() { run_expr("2 . (5/)", "Int(2) Pop") }
+    #[test] fn test_operator_function_inlining_asymmetric_4() { run_expr("(/2)(5)", "Int(2) Pop") }
+    #[test] fn test_operator_function_inlining_asymmetric_5() { run_expr("(2/)(5)", "Int(0) Pop") }
+    #[test] fn test_operator_function_inlining_impure_1() { run_expr("do { let x, y ; (/)(x)(y = 2) }", "Nil Nil PushLocal(0)->x Int(2) StoreLocal(1)->y Div PopN(3)") }
+    #[test] fn test_operator_function_inlining_impure_2() { run_expr("do { let x, y ; x . (/(y = 2)) }", "Nil Nil PushLocal(0)->x Int(2) StoreLocal(1)->y Div PopN(3)") }
+    #[test] fn test_operator_function_inlining_impure_3() { run_expr("do { let x, y ; x . ((y = 2)/) }", "Nil Nil PushLocal(0)->x Int(2) StoreLocal(1)->y Swap Div PopN(3)") }
+    #[test] fn test_operator_function_inlining_impure_4() { run_expr("do { let x, y ; (/x)(y = 2) }", "Nil Nil PushLocal(0)->x Int(2) StoreLocal(1)->y Swap Div PopN(3)") }
+    #[test] fn test_operator_function_inlining_impure_5() { run_expr("do { let x, y ; (x/)(y = 2) }", "Nil Nil PushLocal(0)->x Int(2) StoreLocal(1)->y Div PopN(3)") }
+    #[test] fn test_operator_function_inlining_with_unroll() { run_expr("(/)(...1, 2)", "OperatorDiv Int(1) Unroll Int(2) Call...(2) Pop") }
+    #[test] fn test_inline_int_min() { run_expr("min(int)", "Int(-9223372036854775808) Pop") }
+    #[test] fn test_inline_int_max() { run_expr("int.max", "Int(9223372036854775807) Pop") }
+    #[test] fn test_partial_function_call_merge_no_args_1() { run_expr("vector()()", "Vector Call(0) Call(0) Pop"); }
+    #[test] fn test_partial_function_call_merge_no_args_2() { run_expr("vector()(1)", "Vector Call(0) Int(1) Call(1) Pop"); }
+    #[test] fn test_partial_function_call_merge_one_arg_1() { run_expr("int()()", "Int Call(0) Pop") }
+    #[test] fn test_partial_function_call_merge_one_arg_2() { run_expr("int()(1)", "Int Int(1) Call(1) Pop") }
+    #[test] fn test_partial_function_call_merge_one_arg_3() { run_expr("int()(1)(2)", "Int Int(1) Call(1) Int(2) Call(1) Pop") }
+    #[test] fn test_partial_function_call_merge_one_arg_4() { run_expr("int()(1)()(2)", "Int Int(1) Call(1) Call(0) Int(2) Call(1) Pop") }
+    #[test] fn test_partial_function_call_merge_one_arg_5() { run_expr("int()()(1)()()", "Int Int(1) Call(1) Call(0) Call(0) Pop") }
+    #[test] fn test_partial_function_call_merge_two_arg_1() { run_expr("map(1)(2)", "Map Int(1) Int(2) Call(2) Pop"); }
+    #[test] fn test_partial_function_call_merge_two_arg_2() { run_expr("map()(1)(2)", "Map Int(1) Int(2) Call(2) Pop"); }
+    #[test] fn test_partial_function_call_merge_two_arg_3() { run_expr("map()(1)()(2)", "Map Int(1) Int(2) Call(2) Pop"); }
+    #[test] fn test_partial_function_call_merge_two_arg_4() { run_expr("map(1)(2)()", "Map Int(1) Int(2) Call(2) Call(0) Pop"); }
+    #[test] fn test_partial_function_call_merge_two_arg_5() { run_expr("map(1)()(2, 3)", "Map Int(1) Int(2) Int(3) Call(3) Pop"); }
+    #[test] fn test_partial_function_call_merge_two_arg_6() { run_expr("map(1, 2)()(3)", "Map Int(1) Int(2) Call(2) Call(0) Int(3) Call(1) Pop"); }
+    #[test] fn test_partial_function_call_merge_two_arg_7() { run_expr("map(1)()()", "Map Int(1) Call(1) Pop"); }
+    #[test] fn test_partial_function_call_merge_two_arg_unroll_1() { run_expr("map()(...1)", "Map Int(1) Unroll Call...(1) Pop"); }
+    #[test] fn test_partial_function_call_merge_two_arg_unroll_2() { run_expr("map(1)(...2)", "Map Int(1) Int(2) Unroll Call...(2) Pop"); }
+    #[test] fn test_partial_function_call_merge_two_arg_unroll_3() { run_expr("map(...1)()", "Map Int(1) Unroll Call...(1) Call(0) Pop"); }
 
     fn run_expr(text: &'static str, expected: &'static str) {
-        let expected: String = format!("{}\nPop\nExit", expected.replace(" ", "\n"));
+        let expected: String = format!("{}\nExit", expected.replace(" ", "\n"));
         let actual: String = compiler::compile(true, &SourceView::new(String::new(), String::from(text)))
             .expect("Failed to compile")
             .raw_disassembly();

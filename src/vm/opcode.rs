@@ -34,9 +34,9 @@ pub enum Opcode {
     Swap,
 
     PushLocal(u32),
-    StoreLocal(u32),
+    StoreLocal(u32, bool), // pop
     PushGlobal(u32),
-    StoreGlobal(u32),
+    StoreGlobal(u32, bool), // pop
 
     PushUpValue(u32), // index
     StoreUpValue(u32), // index
@@ -158,8 +158,16 @@ impl Opcode {
                     }, constant.to_repr_str())
                 }
             },
-            PushGlobal(_) | StoreGlobal(_) | PushLocal(_) | StoreLocal(_) => match locals.next() {
-                Some(local) => format!("{:?} -> {}", self, local),
+            PushGlobal(id) | StoreGlobal(id, _) | PushLocal(id) | StoreLocal(id, _) => match locals.next() {
+                Some(local) => format!("{}({}) -> {}", match self {
+                    StoreGlobal(_, true) => "StoreGlobalPop",
+                    StoreGlobal(_, false) => "StoreGlobal",
+                    StoreLocal(_, true) => "StoreLocalPop",
+                    StoreLocal(_, false) => "StoreLocal",
+                    PushGlobal(_) => "PushGlobal",
+                    PushLocal(_) => "PushLocal",
+                    _ => unreachable!(),
+                }, id, local),
                 None => format!("{:?}", self),
             },
             GetField(fid) | SetField(fid) | GetFieldFunction(fid) => format!("{:?} -> {}", self, fields.get_field_name(*fid)),

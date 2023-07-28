@@ -185,7 +185,8 @@ pub struct CompileResult {
 
 impl CompileResult {
 
-    pub fn disassemble(&self, view: &SourceView) -> Vec<String> {
+    /// `line_numbers` : If true, then the `0001` style line numbers will be included in the output. Turning this off is useful when diffing two outputs.
+    pub fn disassemble(&self, view: &SourceView, line_numbers: bool) -> Vec<String> {
         let mut lines: Vec<String> = Vec::new();
         let mut width: usize = 0;
         let mut longest: usize = view.len();
@@ -206,7 +207,7 @@ impl CompileResult {
                 " ".repeat(width + 3)
             };
             let asm: String = opcode.disassembly(ip, &mut locals, &self.fields, &self.constants);
-            lines.push(format!("{}{:0>4} {}", label, ip % 10_000, asm));
+            lines.push(format!("{}{} {}", label, if line_numbers { format!("{:0>4}", ip % 10_000) } else { String::new() }, asm));
         }
         lines
     }

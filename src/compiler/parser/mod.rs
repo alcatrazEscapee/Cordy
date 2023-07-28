@@ -2060,7 +2060,7 @@ mod tests {
         let resource = test_util::get_resource("parser", path);
         let view: SourceView = resource.view();
         let actual: Vec<String> = match compiler::compile(false, &view) {
-            Ok(compile) => compile.disassemble(&view),
+            Ok(compile) => compile.disassemble(&view, true),
             Err(err) => err
         };
 
