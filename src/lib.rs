@@ -1,3 +1,5 @@
+use mimalloc::MiMalloc;
+
 pub use crate::reporting::{AsError, SourceView};
 
 pub mod compiler;
@@ -11,3 +13,6 @@ mod util;
 
 #[cfg(test)]
 mod test_util;
+
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
