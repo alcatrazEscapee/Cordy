@@ -280,18 +280,34 @@ impl<'a> Parser<'a> {
     pub fn push_delayed_pop(&mut self) {
         if self.delay_pop_from_expression_statement {
             trace::trace_parser!("push Pop (delayed)");
-            self.push(Pop);
+
+            // See if we can merge with a previous store opcode. This means we can elide a `.clone()` in the VM and an additional instruction
+            // Also perform `Pop`, `PopN` merging if possible
+            let mut skip: bool = false;
+            if self.enable_optimization {
+                skip = true;
+                match self.current_function_mut().last_mut() {
+                    Some((_, StoreLocal(_, pop))) if !*pop => *pop = true,
+                    Some((_, StoreGlobal(_, pop))) if !*pop => *pop = true,
+                    Some((_, op)) if *op == Pop => *op = PopN(2),
+                    Some((_, PopN(n))) => *n += 1,
+                    _ => skip = false
+                }
+            }
+            if !skip {
+                self.push_pop(1);
+            }
             self.delay_pop_from_expression_statement = false;
         }
     }
 
     /// Specialization of `push` which may push nothing, Pop, or PopN(n)
-    pub fn push_pop(&mut self, n: u32) {
-        trace::trace_parser!("push Pop/PopN {}", n);
-        match n {
+    pub fn push_pop(&mut self, pops: u32) {
+        trace::trace_parser!("push Pop/PopN {}", pops);
+        match pops {
             0 => {},
             1 => self.push(Pop),
-            n => self.push(PopN(n))
+            _ => self.push(PopN(pops)),
         }
     }
 
@@ -312,8 +328,8 @@ impl<'a> Parser<'a> {
 
     pub fn push_store_lvalue(&mut self, lvalue: LValueReference) {
         match lvalue {
-            LValueReference::Local(index) => self.push(StoreLocal(index)),
-            LValueReference::Global(index) => self.push(StoreGlobal(index)),
+            LValueReference::Local(index) => self.push(StoreLocal(index, false)),
+            LValueReference::Global(index) => self.push(StoreGlobal(index, false)),
             LValueReference::LateBoundGlobal(global) => {
                 self.late_bound_globals.push(Reference::Store(global.update_opcode(self.functions.len() - 1, self.next_opcode())));
                 self.push(Noop); // Will be fixed when the global is declared, or caught at EoF as an error
@@ -326,21 +342,22 @@ impl<'a> Parser<'a> {
 
     /// Pushes a new token into the output stream.
     /// Returns the index of the token pushed, which allows callers to later mutate that token if they need to.
-    pub fn push(&mut self, token: Opcode) {
-        self.push_with(token, self.prev_location());
+    pub fn push(&mut self, opcode: Opcode) {
+        self.push_with(opcode, self.prev_location());
     }
 
-    pub fn push_with(&mut self, token: Opcode, location: Location) {
-        trace::trace_parser!("push {:?}", token);
-        if let Some((depth, id)) = match &token {
-            PushGlobal(id) | StoreGlobal(id) => Some((0, id)),
-            PushLocal(id) | StoreLocal(id) => Some((self.function_depth as usize, id)),
+    pub fn push_with(&mut self, opcode: Opcode, location: Location) {
+        trace::trace_parser!("push {:?}", opcode);
+        if let Some((depth, id)) = match &opcode {
+            PushGlobal(id) | StoreGlobal(id, _) => Some((0, id)),
+            PushLocal(id) | StoreLocal(id, _) => Some((self.function_depth as usize, id)),
             _ => None,
         } {
             let local = self.locals[depth].get_name(*id as usize);
             self.current_locals_reference_mut().push(local);
         }
-        self.current_function_mut().push((location, token));
+
+        self.current_function_mut().push((location, opcode))
     }
 
     /// A specialization of `error()` which provides the last token (the result of `peek()`) to the provided error function

@@ -295,10 +295,10 @@ impl<R, W> VirtualMachine<R, W> where
                 trace::trace_interpreter!("vm::run PushLocal index={}, local={}", local, self.stack[local].as_debug_str());
                 self.push(self.stack[local].clone());
             }
-            StoreLocal(local) => {
+            StoreLocal(local, pop) => {
                 let local: usize = self.frame_pointer() + local as usize;
                 trace::trace_interpreter!("vm::run StoreLocal index={}, value={}, prev={}", local, self.stack.last().unwrap().as_debug_str(), self.stack[local].as_debug_str());
-                self.stack[local] = self.peek(0).clone();
+                self.stack[local] = if pop { self.pop() } else { self.peek(0).clone() };
             },
             PushGlobal(local) => {
                 // Globals are absolute offsets, and allow late binding, which means we have to check the global count before referencing.
@@ -310,11 +310,11 @@ impl<R, W> VirtualMachine<R, W> where
                     return ValueErrorVariableNotDeclaredYet(self.globals[local].clone()).err()
                 }
             },
-            StoreGlobal(local) => {
+            StoreGlobal(local, pop) => {
                 let local: usize = local as usize;
                 trace::trace_interpreter!("vm::run StoreGlobal index={}, value={}, prev={}", local, self.stack.last().unwrap().as_debug_str(), self.stack[local].as_debug_str());
                 if local < self.global_count {
-                    self.stack[local] = self.peek(0).clone();
+                    self.stack[local] = if pop { self.pop() } else { self.peek(0).clone() };
                 } else {
                     return ValueErrorVariableNotDeclaredYet(self.globals[local].clone()).err()
                 }
@@ -1750,7 +1750,7 @@ mod test {
 
         let compile = compile.unwrap();
         println!("[-d] === Compiled ===");
-        for line in compile.disassemble(&view) {
+        for line in compile.disassemble(&view, true) {
             println!("[-d] {}", line);
         }
 
@@ -1782,7 +1782,7 @@ mod test {
 
         let compile = compile.unwrap();
         println!("[-d] === Compiled ===");
-        for line in compile.disassemble(&view) {
+        for line in compile.disassemble(&view, true) {
             println!("[-d] {}", line);
         }
 

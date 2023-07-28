@@ -598,7 +598,7 @@ impl<'a> Parser<'a> {
                     self.functions[opcode.0].code[opcode.1].1 = if global.is_load() {
                         PushGlobal(local.index)
                     } else {
-                        StoreGlobal(local.index)
+                        StoreGlobal(local.index, false)
                     };
                 }
             }
