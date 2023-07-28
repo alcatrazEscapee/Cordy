@@ -56,7 +56,7 @@ pub fn search(pattern: Value, target: Value) -> ValueResult {
 }
 
 pub fn split(pattern: Value, target: Value) -> ValueResult {
-    if pattern.as_str()? == "" {
+    if pattern.as_str()?.is_empty() {
         // Special case for empty string
         return Ok(target.as_str()?.chars().map(|u| u.to_value()).to_list());
     }
@@ -198,17 +198,14 @@ impl<'a> StringFormatter<'a> {
         formatter.run()
     }
 
-    fn run(mut self: Self) -> ValueResult {
+    fn run(mut self) -> ValueResult {
         loop {
             match self.next() {
                 Some('%') => {
-                    match self.peek() {
-                        Some('%') => {
-                            self.next();
-                            self.push('%');
-                            continue
-                        },
-                        _ => {},
+                    if let Some('%') = self.peek() {
+                        self.next();
+                        self.push('%');
+                        continue
                     }
 
                     let is_zero_padded: bool = match self.peek() {
@@ -258,17 +255,17 @@ impl<'a> StringFormatter<'a> {
                 None => break
             }
         }
-        match (&mut self.args).next() {
+        match self.args.next() {
             Some(e) => ValueErrorNotAllArgumentsUsedInStringFormatting(e.clone()).err(),
             None => Ok(self.output.to_value()),
         }
     }
 
-    fn next(self: &mut Self) -> Option<char> { self.chars.next() }
-    fn peek(self: &mut Self) -> Option<&char> { self.chars.peek() }
-    fn push(self: &mut Self, c: char) { self.output.push(c); }
-    fn arg(self: &mut Self) -> Result<Value, Box<RuntimeError>> {
-        match (&mut self.args).next() {
+    fn next(&mut self) -> Option<char> { self.chars.next() }
+    fn peek(&mut self) -> Option<&char> { self.chars.peek() }
+    fn push(&mut self, c: char) { self.output.push(c); }
+    fn arg(&mut self) -> Result<Value, Box<RuntimeError>> {
+        match self.args.next() {
             Some(v) => Ok(v),
             None => ValueErrorMissingRequiredArgumentInStringFormatting.err(),
         }

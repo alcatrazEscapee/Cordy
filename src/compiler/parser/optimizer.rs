@@ -6,11 +6,11 @@ use crate::vm::operator::BinaryOp;
 /// A trait for objects which are able to be optimized via a recursive self-transformation
 /// This is implemented for `Expr` and `Vec<Expr>`, as those are common forms we encounter during expression optimization.
 pub trait Optimize {
-    fn optimize(self: Self) -> Self;
+    fn optimize(self) -> Self;
 }
 
 impl Optimize for Vec<Expr> {
-    fn optimize(self: Self) -> Self {
+    fn optimize(self) -> Self {
         self.into_iter().map(|u| u.optimize()).collect()
     }
 }
@@ -27,7 +27,7 @@ impl Optimize for Expr {
     /// - Consistent Function Eval Merging (`a(b1, b2, ...)(c1, c2, ...)` -> `a(b1, b2, ... c1, c2, ...)` where legal)
     /// - Inlining of partially evaluated operators (`(==)(a, b)` -> `a == b`)
     ///
-    fn optimize(self: Self) -> Self {
+    fn optimize(self) -> Self {
         match self {
             // Terminals
             e @ Expr(_, ExprType::Nil | ExprType::Exit | ExprType::Bool(_) | ExprType::Int(_) | ExprType::Str(_) | ExprType::LValue(_) | ExprType::Function(_, _) | ExprType::NativeFunction(_)) => e,
@@ -35,7 +35,7 @@ impl Optimize for Expr {
             // Unary Operators
             Expr(loc, ExprType::Unary(op, arg)) => {
                 let arg: Expr = arg.optimize();
-                match arg.as_constant() {
+                match arg.to_constant() {
                     Ok(arg) => Expr::value_result(loc, op.apply(arg)),
                     Err(arg) => arg.unary(loc, op)
                 }
@@ -45,8 +45,8 @@ impl Optimize for Expr {
             Expr(loc, ExprType::Binary(op, lhs, rhs, swap)) => {
                 let lhs: Expr = lhs.optimize();
                 let rhs: Expr = rhs.optimize();
-                match lhs.as_constant() {
-                    Ok(lhs) => match rhs.as_constant() {
+                match lhs.to_constant() {
+                    Ok(lhs) => match rhs.to_constant() {
                         Ok(rhs) => Expr::value_result(loc, if swap { op.apply(rhs, lhs) } else { op.apply(lhs, rhs) }),
                         Err(rhs) => Expr::value(lhs).binary(loc, op, rhs, swap),
                     },
@@ -166,7 +166,7 @@ impl Optimize for Expr {
             // Ternary conditions perform basic dead code elimination, if the condition is constant.
             Expr(loc, ExprType::IfThenElse(condition, if_true, if_false)) => {
                 let condition = condition.optimize();
-                match condition.as_constant() {
+                match condition.to_constant() {
                     Ok(condition) => if condition.as_bool() { if_true.optimize() } else { if_false.optimize() },
                     Err(condition) => condition.if_then_else(loc, if_true.optimize(), if_false.optimize()),
                 }
@@ -192,7 +192,7 @@ impl Expr {
     ///
     /// **N.B.** This can only be supported for immutable types. If we attempt to const-expr evaluate a non-constant `Value`, like a list, we would have to
     /// un-const-expr it to emit the code - otherwise in `VM.constants` we would have a single instance that gets copied and re-used. This is **very bad**.
-    fn as_constant(self: Self) -> Result<Value, Expr> {
+    fn to_constant(self) -> Result<Value, Expr> {
         match self {
             Expr(_, ExprType::Nil) => Ok(Value::Nil),
             Expr(_, ExprType::Bool(it)) => Ok(it.to_value()),
@@ -203,7 +203,7 @@ impl Expr {
         }
     }
 
-    fn can_reorder(self: &Self, other: &Self) -> bool {
+    fn can_reorder(&self, other: &Self) -> bool {
         match self.purity() {
             Purity::Strong => true,
             Purity::Weak => other.purity() != Purity::None,
@@ -211,7 +211,7 @@ impl Expr {
         }
     }
 
-    fn purity(self: &Self) -> Purity {
+    fn purity(&self) -> Purity {
         match &self.1 {
             ExprType::Nil | ExprType::Exit | ExprType::Bool(_) | ExprType::Int(_) | ExprType::Str(_) | ExprType::NativeFunction(_) | ExprType::Function(_, _) => Purity::Strong,
             ExprType::LValue(_) => Purity::Weak,
@@ -236,7 +236,7 @@ impl Expr {
         }
     }
 
-    fn is_partial(self: &Self, nargs: usize) -> bool {
+    fn is_partial(&self, nargs: usize) -> bool {
         match &self.1 {
             ExprType::NativeFunction(f) => f.min_nargs() as usize > nargs,
             _ => false
@@ -244,7 +244,7 @@ impl Expr {
     }
 }
 
-fn any_unroll(args: &Vec<Expr>) -> bool {
+fn any_unroll(args: &[Expr]) -> bool {
     args.iter().any(|u| u.is_unroll())
 }
 

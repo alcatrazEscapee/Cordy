@@ -39,7 +39,7 @@ pub fn gcd(args: impl Iterator<Item=Value>) -> ValueResult {
     args.map(|v| v.as_int())
         .collect::<Result<Vec<i64>, Box<RuntimeError>>>()?
         .into_iter()
-        .reduce(|a, b| num_integer::gcd(a, b))
+        .reduce(num_integer::gcd)
         .map_or_else(|| ValueErrorValueMustBeNonEmpty.err(), |v| Ok(Int(v)))
 }
 
@@ -47,7 +47,7 @@ pub fn lcm(args: impl Iterator<Item=Value>) -> ValueResult {
     args.map(|v| v.as_int())
         .collect::<Result<Vec<i64>, Box<RuntimeError>>>()?
         .into_iter()
-        .reduce(|a, b| num_integer::lcm(a, b))
+        .reduce(num_integer::lcm)
         .map_or_else(|| ValueErrorValueMustBeNonEmpty.err(), |v| Ok(Int(v)))
 }
 

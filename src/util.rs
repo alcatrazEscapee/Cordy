@@ -49,7 +49,7 @@ pub trait OffsetAdd<F> {
     fn add_offset(self, offset: F) -> Self;
 }
 
-impl OffsetAdd<i32> for u32 { fn add_offset(self, offset: i32) -> Self { (self as i32 + offset as i32) as u32 } }
+impl OffsetAdd<i32> for u32 { fn add_offset(self, offset: i32) -> Self { (self as i32 + offset) as u32 } }
 impl OffsetAdd<i32> for usize { fn add_offset(self, offset: i32) -> Self { (self as isize + offset as isize) as usize } }
 
 
@@ -59,14 +59,14 @@ impl RecursionGuard {
     pub fn new() -> RecursionGuard { RecursionGuard(Vec::new()) }
 
     /// Returns `true` if the value has been seen before, triggering an early exit
-    pub fn enter(self: &mut Self, value: &Value) -> bool {
+    pub fn enter(&mut self, value: &Value) -> bool {
         let boxed = ValuePtr(value.clone());
         let ret = self.0.contains(&boxed);
         self.0.push(boxed);
         ret
     }
 
-    pub fn leave(self: &mut Self) {
+    pub fn leave(&mut self) {
         self.0.pop().unwrap(); // `.unwrap()` is safe as we should always call `enter()` before `leave()`
     }
 }

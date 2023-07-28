@@ -41,16 +41,13 @@ pub struct ScanError {
 }
 
 impl ScanError {
-    pub fn is_eof(self: &Self) -> bool {
-        match &self.error {
-            UnterminatedStringLiteral => true,
-            _ => false
-        }
+    pub fn is_eof(&self) -> bool {
+        matches!(self.error, UnterminatedStringLiteral)
     }
 }
 
 impl AsErrorWithContext for ScanError {
-    fn location(self: &Self) -> Location {
+    fn location(&self) -> Location {
         self.loc
     }
 }
@@ -167,7 +164,7 @@ struct Scanner<'a> {
 
 impl<'a> Scanner<'a> {
     
-    fn scan(self: &mut Self) {
+    fn scan(&mut self) {
         loop {
            match self.advance() {
                Some(c) => {
@@ -421,7 +418,7 @@ impl<'a> Scanner<'a> {
         }
     }
 
-    fn screen_identifier(self: &mut Self, buffer: Vec<char>) {
+    fn screen_identifier(&mut self, buffer: Vec<char>) {
         let string: String = buffer.iter().collect();
         let len: usize = string.len();
         let token: ScanToken = match string.as_str() {
@@ -454,7 +451,7 @@ impl<'a> Scanner<'a> {
         self.push(len, token);
     }
 
-    fn screen_int(self: &mut Self, buffer: Vec<char>, radix: u32) {
+    fn screen_int(&mut self, buffer: Vec<char>, radix: u32) {
         let string: String = buffer.iter().collect();
         let mut len: usize = string.len();
         let is_complex: bool = match self.peek() {
@@ -476,16 +473,16 @@ impl<'a> Scanner<'a> {
     }
 
 
-    fn push(self: &mut Self, width: usize, token: ScanToken) {
+    fn push(&mut self, width: usize, token: ScanToken) {
         self.tokens.push((Location::new(self.cursor - width, width as u32, self.index), token));
     }
 
-    fn push_skip(self: &mut Self, width: usize, token: ScanToken) {
+    fn push_skip(&mut self, width: usize, token: ScanToken) {
         self.skip();
         self.push(width, token);
     }
 
-    fn push_err(self: &mut Self, offset: usize, width: usize, error: ScanErrorType) {
+    fn push_err(&mut self, offset: usize, width: usize, error: ScanErrorType) {
         self.errors.push(ScanError {
             error,
             loc: Location::new(self.cursor - width + offset, width as u32, self.index)
@@ -495,26 +492,26 @@ impl<'a> Scanner<'a> {
 
     /// Consumes the next character (unconditionally) and adds it to the buffer
     /// **Note**: This function must only be invoked after `Some()` has been matched to a `peek()` variant.
-    fn push_advance(self: &mut Self, buffer: &mut Vec<char>) {
+    fn push_advance(&mut self, buffer: &mut Vec<char>) {
         buffer.push(self.advance().unwrap());
     }
 
     /// Consumes the next character without returning it.
     /// Also see `advance()`
-    fn skip(self: &mut Self) {
+    fn skip(&mut self) {
         self.advance();
     }
 
     /// Consumes the next character, and peeks one character ahead
     /// Chains together `advance()` and `peek()`
-    fn advance_peek(self: &mut Self) -> Option<char> {
+    fn advance_peek(&mut self) -> Option<char> {
         self.advance();
         self.peek()
     }
 
     /// Consumes the next character and returns it
     /// Also see `advance()`
-    fn advance(self: &mut Self) -> Option<char> {
+    fn advance(&mut self) -> Option<char> {
         let c: Option<char> = self.chars.next();
         if c.is_some() {
             self.cursor += 1;
@@ -526,7 +523,7 @@ impl<'a> Scanner<'a> {
     }
 
     /// Inspects the next character and returns it, without consuming it
-    fn peek(self: &mut Self) -> Option<char> {
+    fn peek(&mut self) -> Option<char> {
         self.chars.peek().copied()
     }
 }

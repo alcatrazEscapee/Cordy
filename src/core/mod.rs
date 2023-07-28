@@ -164,22 +164,22 @@ impl NativeFunction {
     }
 
     /// Returns the minimum amount of arguments needed to evaluate this function, where below this number it will return a partial function
-    pub fn min_nargs(self: &Self) -> u32 { self.info().arg.min_nargs() }
+    pub fn min_nargs(&self) -> u32 { self.info().arg.min_nargs() }
 
     /// Returns the name of the function
-    pub fn name(self: &Self) -> &'static str { self.info().name }
+    pub fn name(&self) -> &'static str { self.info().name }
 
     /// Returns the `repr` string of the function, which is the form `fn <name>(<args> ...)`
-    pub fn repr(self: &Self) -> String { let info = self.info(); format!("fn {}({})", info.name, info.args) }
+    pub fn repr(&self) -> String { let info = self.info(); format!("fn {}({})", info.name, info.args) }
 
-    pub fn is_operator(self: &Self) -> bool { self.swap() != *self }
+    pub fn is_operator(&self) -> bool { self.swap() != *self }
 
     /// An `operator` refers to an operator which has a direct opcode representation.
     /// Note this excludes asymmetric 'swap' operators
-    pub fn is_binary_operator(self: &Self) -> bool { self.as_binary_operator().is_some() }
-    pub fn is_binary_operator_swap(self: &Self) -> bool { self.swap().as_binary_operator().is_some() }
+    pub fn is_binary_operator(&self) -> bool { self.as_binary_operator().is_some() }
+    pub fn is_binary_operator_swap(&self) -> bool { self.swap().as_binary_operator().is_some() }
 
-    pub fn as_binary_operator(self: &Self) -> Option<BinaryOp> {
+    pub fn as_binary_operator(&self) -> Option<BinaryOp> {
         match self {
             OperatorMul => Some(BinaryOp::Mul),
             OperatorDiv => Some(BinaryOp::Div),
@@ -205,7 +205,7 @@ impl NativeFunction {
         }
     }
 
-    pub fn swap(self: Self) -> NativeFunction {
+    pub fn swap(self) -> NativeFunction {
         match self {
             OperatorDiv => OperatorDivSwap,
             OperatorDivSwap => OperatorDiv,
@@ -239,7 +239,7 @@ impl NativeFunction {
         }
     }
 
-    fn info(self: Self) -> &'static NativeFunctionInfo {
+    fn info(self) -> &'static NativeFunctionInfo {
         &NATIVE_FUNCTIONS[self as usize]
     }
 }
@@ -434,7 +434,7 @@ pub enum Argument {
 
 impl Argument {
     /// Returns the minimum amount of arguments needed to evaluate this function, where below this number it will return a partial function
-    fn min_nargs(self: Self) -> u32 {
+    fn min_nargs(self) -> u32 {
         match self {
             Arg1 | Arg1To2 | Arg1To3 => 1,
             Arg2 => 2,
@@ -468,7 +468,7 @@ impl Hash for PartialArgument { fn hash<H: Hasher>(&self, _: &mut H) {} }
 
 impl PartialArgument {
     /// Returns the minimum amount of arguments needed to evaluate this function, where below this number it will return a partial function
-    pub fn min_nargs(self: &Self) -> u32 {
+    pub fn min_nargs(&self) -> u32 {
         match self {
             PartialArgument::Arg2Par1(_) | PartialArgument::Arg3Par2(_, _) => 1,
             PartialArgument::Arg3Par1(_) => 2,
@@ -543,7 +543,7 @@ impl InvokeArg0 {
         }
     }
 
-    fn invoke<VM : VirtualInterface>(self: Self, vm: &mut VM) -> ValueResult {
+    fn invoke<VM : VirtualInterface>(self, vm: &mut VM) -> ValueResult {
         match self {
             InvokeArg0::Noop(f) => Ok(f),
             InvokeArg0::User(f) => vm.invoke_func0(f),
@@ -573,7 +573,7 @@ impl InvokeArg1 {
         }
     }
 
-    fn invoke<VM: VirtualInterface>(self: &Self, arg: Value, vm: &mut VM) -> ValueResult {
+    fn invoke<VM: VirtualInterface>(&self, arg: Value, vm: &mut VM) -> ValueResult {
         match self {
             InvokeArg1::User(f) => vm.invoke_func1(f.clone(), arg),
             InvokeArg1::Native(f) => invoke_arg1(*f, arg, vm),
@@ -606,7 +606,7 @@ impl InvokeArg2 {
         }
     }
 
-    fn invoke<VM : VirtualInterface>(self: &Self, arg1: Value, arg2: Value, vm: &mut VM) -> ValueResult {
+    fn invoke<VM : VirtualInterface>(&self, arg1: Value, arg2: Value, vm: &mut VM) -> ValueResult {
         match self {
             InvokeArg2::User(f) => vm.invoke_func2(f.clone(), arg1, arg2),
             InvokeArg2::Native(f) => invoke_arg2(*f, arg1, arg2, vm),
@@ -805,7 +805,7 @@ fn invoke_arg0<VM : VirtualInterface>(f: NativeFunction, vm: &mut VM) -> ValueRe
 fn invoke_arg1<VM : VirtualInterface>(f: NativeFunction, a1: Value, vm: &mut VM) -> ValueResult {
     match f {
         Print => { vm.println(a1.to_str()); NIL },
-        ReadText => Ok(fs::read_to_string::<&str>(a1.as_str()?.as_ref()).unwrap().replace("\r", "").to_value()),
+        ReadText => Ok(fs::read_to_string::<&str>(a1.as_str()?.as_ref()).unwrap().replace('\r', "").to_value()),
         Env => Ok(vm.get_env(a1.as_str()?)),
 
         Bool => Ok(a1.as_bool().to_value()),
@@ -986,13 +986,9 @@ pub fn invoke_memoized<VM : VirtualInterface>(vm: &mut VM, nargs: u32) -> ValueR
 
     // We cannot use the `.entry()` API, as that requires we mutably borrow the cache during the call to `vm.invoke_func()`
     // We only lookup by key once (in the cached case), and twice (in the uncached case)
-    {
-        let cache = memoized.cache.unbox();
-        match cache.get(&args) {
-            Some(ret) => return Ok(ret.clone()),
-            None => {}
-        }
-    } // cache falls out of scope, and thus is no longer borrowed
+    if let Some(ret) = memoized.cache.unbox().get(&args) {
+        return Ok(ret.clone());
+    }
 
     let value: Value = vm.invoke_func(memoized.func.clone(), &args)?;
 

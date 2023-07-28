@@ -100,21 +100,21 @@ impl Expr {
 
     pub fn raw_slice(loc: Location, arg1: Expr, arg2: Expr, arg3: Option<Expr>) -> Expr { Expr(loc, ExprType::SliceLiteral(Box::new(arg1), Box::new(arg2), Box::new(arg3))) }
 
-    pub fn unary(self: Self, loc: Location, op: UnaryOp) -> Expr { Expr(loc, ExprType::Unary(op, Box::new(self))) }
-    pub fn binary(self: Self, loc: Location, op: BinaryOp, rhs: Expr, swap: bool) -> Expr { Expr(loc, ExprType::Binary(op, Box::new(self), Box::new(rhs), swap)) }
-    pub fn unroll(self: Self, loc: Location, first: bool) -> Expr { Expr(loc, ExprType::Unroll(Box::new(self), first)) }
-    pub fn eval(self: Self, loc: Location, args: Vec<Expr>, any_unroll: bool) -> Expr { Expr(loc, ExprType::Eval(Box::new(self), args, any_unroll)) }
-    pub fn compose(self: Self, loc: Location, f: Expr) -> Expr { Expr(loc, ExprType::Compose(Box::new(self), Box::new(f))) }
-    pub fn index(self: Self, loc: Location, index: Expr) -> Expr { Expr(loc, ExprType::Index(Box::new(self), Box::new(index))) }
-    pub fn slice(self: Self, loc: Location, arg1: Expr, arg2: Expr) -> Expr { Expr(loc, ExprType::Slice(Box::new(self), Box::new(arg1), Box::new(arg2))) }
-    pub fn slice_step(self: Self, loc: Location, arg1: Expr, arg2: Expr, arg3: Expr) -> Expr { Expr(loc, ExprType::SliceWithStep(Box::new(self), Box::new(arg1), Box::new(arg2), Box::new(arg3))) }
-    pub fn if_then_else(self: Self, loc: Location, if_true: Expr, if_false: Expr) -> Expr { Expr(loc, ExprType::IfThenElse(Box::new(self), Box::new(if_true), Box::new(if_false))) }
-    pub fn get_field(self: Self, loc: Location, field_index: u32) -> Expr { Expr(loc, ExprType::GetField(Box::new(self), field_index)) }
-    pub fn set_field(self: Self, loc: Location, field_index: u32, rhs: Expr) -> Expr { Expr(loc, ExprType::SetField(Box::new(self), field_index, Box::new(rhs))) }
-    pub fn swap_field(self: Self, loc: Location, field_index: u32, rhs: Expr, op: BinaryOp) -> Expr { Expr(loc, ExprType::SwapField(Box::new(self), field_index, Box::new(rhs), op)) }
+    pub fn unary(self, loc: Location, op: UnaryOp) -> Expr { Expr(loc, ExprType::Unary(op, Box::new(self))) }
+    pub fn binary(self, loc: Location, op: BinaryOp, rhs: Expr, swap: bool) -> Expr { Expr(loc, ExprType::Binary(op, Box::new(self), Box::new(rhs), swap)) }
+    pub fn unroll(self, loc: Location, first: bool) -> Expr { Expr(loc, ExprType::Unroll(Box::new(self), first)) }
+    pub fn eval(self, loc: Location, args: Vec<Expr>, any_unroll: bool) -> Expr { Expr(loc, ExprType::Eval(Box::new(self), args, any_unroll)) }
+    pub fn compose(self, loc: Location, f: Expr) -> Expr { Expr(loc, ExprType::Compose(Box::new(self), Box::new(f))) }
+    pub fn index(self, loc: Location, index: Expr) -> Expr { Expr(loc, ExprType::Index(Box::new(self), Box::new(index))) }
+    pub fn slice(self, loc: Location, arg1: Expr, arg2: Expr) -> Expr { Expr(loc, ExprType::Slice(Box::new(self), Box::new(arg1), Box::new(arg2))) }
+    pub fn slice_step(self, loc: Location, arg1: Expr, arg2: Expr, arg3: Expr) -> Expr { Expr(loc, ExprType::SliceWithStep(Box::new(self), Box::new(arg1), Box::new(arg2), Box::new(arg3))) }
+    pub fn if_then_else(self, loc: Location, if_true: Expr, if_false: Expr) -> Expr { Expr(loc, ExprType::IfThenElse(Box::new(self), Box::new(if_true), Box::new(if_false))) }
+    pub fn get_field(self, loc: Location, field_index: u32) -> Expr { Expr(loc, ExprType::GetField(Box::new(self), field_index)) }
+    pub fn set_field(self, loc: Location, field_index: u32, rhs: Expr) -> Expr { Expr(loc, ExprType::SetField(Box::new(self), field_index, Box::new(rhs))) }
+    pub fn swap_field(self, loc: Location, field_index: u32, rhs: Expr, op: BinaryOp) -> Expr { Expr(loc, ExprType::SwapField(Box::new(self), field_index, Box::new(rhs), op)) }
     pub fn get_field_function(loc: Location, field_index: u32) -> Expr { Expr(loc, ExprType::GetFieldFunction(field_index)) }
 
-    pub fn logical(self: Self, loc: Location, op: BinaryOp, rhs: Expr) -> Expr {
+    pub fn logical(self, loc: Location, op: BinaryOp, rhs: Expr) -> Expr {
         match op {
             BinaryOp::And => Expr(loc, ExprType::LogicalAnd(Box::new(self), Box::new(rhs))),
             BinaryOp::Or => Expr(loc, ExprType::LogicalOr(Box::new(self), Box::new(rhs))),
@@ -144,5 +144,5 @@ impl Expr {
         }
     }
 
-    pub fn is_unroll(self: &Self) -> bool { match self { Expr(_, ExprType::Unroll(_, _)) => true, _ => false } }
+    pub fn is_unroll(&self) -> bool { matches!(self, Expr(_, ExprType::Unroll(_, _))) }
 }

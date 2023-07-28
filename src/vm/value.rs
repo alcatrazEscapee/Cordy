@@ -113,24 +113,24 @@ impl Value {
     }
 
     /// Converts the `Value` to a `String`. This is equivalent to the stdlib function `str()`
-    pub fn to_str(self: &Self) -> String { self.safe_to_str(&mut RecursionGuard::new()) }
+    pub fn to_str(&self) -> String { self.safe_to_str(&mut RecursionGuard::new()) }
 
-    fn safe_to_str(self: &Self, rc: &mut RecursionGuard) -> String {
+    fn safe_to_str(&self, rc: &mut RecursionGuard) -> String {
         match self {
             Str(s) => (**s).to_owned(),
             Function(f) => f.name.clone(),
             PartialFunction(f) => f.func.safe_to_str(rc),
             NativeFunction(b) => String::from(b.name()),
             PartialNativeFunction(b, _) => String::from(b.name()),
-            Closure(c) => (*c).func.as_ref().name.clone(),
+            Closure(c) => c.func.as_ref().name.clone(),
             _ => self.safe_to_repr_str(rc),
         }
     }
 
     /// Converts the `Value` to a representative `String. This is equivalent to the stdlib function `repr()`, and meant to be an inverse of `eval()`
-    pub fn to_repr_str(self: &Self) -> String { self.safe_to_repr_str(&mut RecursionGuard::new()) }
+    pub fn to_repr_str(&self) -> String { self.safe_to_repr_str(&mut RecursionGuard::new()) }
     
-    fn safe_to_repr_str(self: &Self, rc: &mut RecursionGuard) -> String {
+    fn safe_to_repr_str(&self, rc: &mut RecursionGuard) -> String {
         macro_rules! recursive_guard {
             ($default:expr, $recursive:expr) => {{
                 let ret = if rc.enter(self) { $default } else { $recursive };
@@ -204,7 +204,7 @@ impl Value {
             Range(r) => if r.step == 0 { String::from("range(empty)") } else { format!("range({}, {}, {})", r.start, r.stop, r.step) },
             Enumerate(v) => format!("enumerate({})", v.safe_to_repr_str(rc)),
             Slice(v) => match &v.arg3 {
-                Some(arg3) => format!("[{}:{}:{}]", to_str(v.arg1), to_str(v.arg2), arg3.to_string()),
+                Some(arg3) => format!("[{}:{}:{}]", to_str(v.arg1), to_str(v.arg2), arg3),
                 None => format!("[{}:{}]", to_str(v.arg1), to_str(v.arg2)),
             }
 
@@ -214,15 +214,15 @@ impl Value {
             GetField(_) => String::from("(->)"),
 
             Function(f) => (*f).as_ref().borrow().as_str(),
-            PartialFunction(f) => (*f).as_ref().borrow().func.safe_to_repr_str(rc),
+            PartialFunction(f) => f.func.safe_to_repr_str(rc),
             NativeFunction(f) => f.repr(),
             PartialNativeFunction(f, _) => f.repr(),
-            Closure(c) => (*c).func.as_ref().borrow().as_str(),
+            Closure(c) => c.func.as_ref().borrow().as_str(),
         }
     }
 
     /// Represents the type of this `Value`. This is used for runtime error messages,
-    pub fn as_type_str(self: &Self) -> String {
+    pub fn as_type_str(&self) -> String {
         String::from(match self {
             Nil => "nil",
             Bool(_) => "bool",
@@ -251,11 +251,11 @@ impl Value {
     }
 
     /// Used by `trace` disabled code, do not remove!
-    pub fn as_debug_str(self: &Self) -> String {
+    pub fn as_debug_str(&self) -> String {
         format!("{}: {}", self.to_repr_str(), self.as_type_str())
     }
 
-    pub fn as_bool(self: &Self) -> bool {
+    pub fn as_bool(&self) -> bool {
         match self {
             Nil => false,
             Bool(it) => *it,
@@ -275,7 +275,7 @@ impl Value {
     }
 
     /// Unwraps the value as an `int`, or raises a type error
-    pub fn as_int(self: &Self) -> Result<i64, Box<RuntimeError>> {
+    pub fn as_int(&self) -> Result<i64, Box<RuntimeError>> {
         match self {
             Bool(b) => Ok(*b as i64),
             Int(i) => Ok(*i),
@@ -284,7 +284,7 @@ impl Value {
     }
 
     #[inline]
-    pub fn as_int_unchecked(self: &Self) -> i64 {
+    pub fn as_int_unchecked(&self) -> i64 {
         match self {
             Bool(b) => *b as i64,
             Int(i) => *i,
@@ -293,7 +293,7 @@ impl Value {
     }
 
     /// Unwraps the value as a `complex`, or raises a type error.
-    pub fn as_complex(self: &Self) -> Result<C64, Box<RuntimeError>> {
+    pub fn as_complex(&self) -> Result<C64, Box<RuntimeError>> {
         match self {
             Bool(b) => Ok(C64::new(*b as i64, 0)),
             Int(i) => Ok(C64::new(*i, 0)),
@@ -303,7 +303,7 @@ impl Value {
     }
 
     #[inline]
-    pub fn as_complex_unchecked(self: &Self) -> C64 {
+    pub fn as_complex_unchecked(&self) -> C64 {
         match self {
             Bool(b) => C64::new(*b as i64, 0),
             Int(i) => C64::new(*i, 0),
@@ -313,7 +313,7 @@ impl Value {
     }
 
     /// Like `as_int()` but returns an `Option<i64>`, and converts `nil` to `None`
-    pub fn as_int_or(self: &Self) -> Result<Option<i64>, Box<RuntimeError>> {
+    pub fn as_int_or(&self) -> Result<Option<i64>, Box<RuntimeError>> {
         match self {
             Nil => Ok(None),
             Int(i) => Ok(Some(*i)),
@@ -323,7 +323,7 @@ impl Value {
     }
 
     /// Unwraps the value as a `str`, or raises a type error
-    pub fn as_str(self: &Self) -> Result<&String, Box<RuntimeError>> {
+    pub fn as_str(&self) -> Result<&String, Box<RuntimeError>> {
         match self {
             Str(it) => Ok(it),
             v => TypeErrorArgMustBeStr(v.clone()).err()
@@ -332,9 +332,13 @@ impl Value {
 
     /// Unwraps the value as an `iterable`, or raises a type error.
     /// For all value types except `Heap`, this is a O(1) and lazy operation. It also requires no persistent borrows of mutable types that outlast the call to `as_iter()`.
-    pub fn as_iter(self: &Self) -> Result<Iterable, Box<RuntimeError>> {
+    pub fn as_iter(&self) -> Result<Iterable, Box<RuntimeError>> {
         match self {
-            Str(it) => Ok(Iterable::str((**it).clone())),
+            Str(it) => {
+                let string: String = (**it).clone();
+                let chars: Chars<'static> = unsafe { mem::transmute(string.chars()) };
+                Ok(Iterable::Str(string, chars))
+            },
             List(it) => Ok(Iterable::Collection(0, CollectionIterable::List(it.clone()))),
             Set(it) => Ok(Iterable::Collection(0, CollectionIterable::Set(it.clone()))),
             Dict(it) => Ok(Iterable::Collection(0, CollectionIterable::Dict(it.clone()))),
@@ -355,7 +359,7 @@ impl Value {
 
     /// Unwraps the value as an `iterable`, or if it is not, yields an iterable of the single element
     /// Note that this takes a `str` to be a non-iterable primitive type, unlike `is_iter()` and `as_iter()`
-    pub fn as_iter_or_unit(self: &Self) -> Iterable {
+    pub fn as_iter_or_unit(&self) -> Iterable {
         match self {
             List(it) => Iterable::Collection(0, CollectionIterable::List(it.clone())),
             Set(it) => Iterable::Collection(0, CollectionIterable::Set(it.clone())),
@@ -376,7 +380,7 @@ impl Value {
     }
 
     /// Converts this `Value` to a `ValueAsIndex`, which is a index-able object, supported for `List`, `Vector`, and `Str`
-    pub fn as_index(self: &Self) -> Result<Indexable, Box<RuntimeError>> {
+    pub fn as_index(&self) -> Result<Indexable, Box<RuntimeError>> {
         match self {
             Str(it) => Ok(Indexable::Str(it)),
             List(it) => Ok(Indexable::List(it.unbox_mut())),
@@ -386,7 +390,7 @@ impl Value {
     }
 
     /// Converts this `Value` to a `ValueAsSlice`, which is a builder for slice-like structures, supported for `List` and `Str`
-    pub fn as_slice(self: &Self) -> Result<Sliceable, Box<RuntimeError>> {
+    pub fn as_slice(&self) -> Result<Sliceable, Box<RuntimeError>> {
         match self {
             Str(it) => Ok(Sliceable::Str(it, String::new())),
             List(it) => Ok(Sliceable::List(it.unbox(), VecDeque::new())),
@@ -396,7 +400,7 @@ impl Value {
     }
 
     /// Converts this `Value` into a `(Value, Value)` if possible, supported for two-element `List` and `Vector`s
-    pub fn as_pair(self: &Self) -> Result<(Value, Value), Box<RuntimeError>> {
+    pub fn as_pair(&self) -> Result<(Value, Value), Box<RuntimeError>> {
         match match self {
             List(it) => it.unbox().iter().cloned().collect_tuple(),
             Vector(it) => it.unbox().iter().cloned().collect_tuple(),
@@ -409,7 +413,7 @@ impl Value {
 
     /// Returns the internal `FunctionImpl` of this value.
     /// Must only be called on a `Function` or `Closure`, will panic otherwise.
-    pub fn as_function(self: &Self) -> &Rc<FunctionImpl> {
+    pub fn as_function(&self) -> &Rc<FunctionImpl> {
         match self {
             Function(f) => f,
             Closure(c) => &c.func,
@@ -419,7 +423,7 @@ impl Value {
 
     /// Returns `None` if this value is not function evaluable.
     /// Returns `Some(nargs)` if this value is a function with the given number of minimum arguments
-    pub fn min_nargs(self: &Self) -> Option<u32> {
+    pub fn min_nargs(&self) -> Option<u32> {
         match self {
             Function(it) => Some(it.min_args()),
             PartialFunction(it) => Some(it.func.as_function().min_args() - it.args.len() as u32),
@@ -433,7 +437,7 @@ impl Value {
     }
 
     /// Returns the length of this `Value`. Equivalent to the native function `len`. Raises a type error if the value does not have a lenth.
-    pub fn len(self: &Self) -> Result<usize, Box<RuntimeError>> {
+    pub fn len(&self) -> Result<usize, Box<RuntimeError>> {
         match &self {
             Str(it) => Ok(it.chars().count()),
             List(it) => Ok(it.unbox().len()),
@@ -447,7 +451,7 @@ impl Value {
         }
     }
 
-    pub fn get_field(self: Self, fields: &Fields, field_index: u32) -> ValueResult {
+    pub fn get_field(self, fields: &Fields, field_index: u32) -> ValueResult {
         match self {
             Struct(it) => {
                 let mut it = it.unbox_mut();
@@ -460,7 +464,7 @@ impl Value {
         }
     }
 
-    pub fn set_field(self: Self, fields: &Fields, field_index: u32, value: Value) -> ValueResult {
+    pub fn set_field(self, fields: &Fields, field_index: u32, value: Value) -> ValueResult {
         match self {
             Struct(it) => {
                 let mut it = it.unbox_mut();
@@ -476,33 +480,23 @@ impl Value {
         }
     }
 
-    pub fn is_bool(self: &Self) -> bool { match self { Bool(_) => true, _ => false } }
-    pub fn is_int(self: &Self) -> bool { match self { Bool(_) | Int(_) => true, _ => false } }
-    pub fn is_complex(self: &Self) -> bool { match self { Bool(_) | Int(_) | Complex(_) => true, _ => false } }
-    pub fn is_str(self: &Self) -> bool { match self { Str(_) => true, _ => false } }
+    pub fn is_bool(&self) -> bool { matches!(self, Bool(_)) }
+    pub fn is_int(&self) -> bool { matches!(self, Bool(_) | Int(_)) }
+    pub fn is_complex(&self) -> bool { matches!(self, Bool(_) | Int(_) | Complex(_)) }
+    pub fn is_str(&self) -> bool { matches!(self, Str(_)) }
 
-    pub fn is_list(self: &Self) -> bool { match self { List(_) => true, _ => false } }
-    pub fn is_set(self: &Self) -> bool { match self { Set(_) => true, _ => false } }
-    pub fn is_dict(self: &Self) -> bool { match self { Dict(_) => true, _ => false } }
-    pub fn is_vector(self: &Self) -> bool { match self { Vector(_) => true, _ => false } }
+    pub fn is_list(&self) -> bool { matches!(self, List(_)) }
+    pub fn is_set(&self) -> bool { matches!(self, Set(_)) }
+    pub fn is_dict(&self) -> bool { matches!(self, Dict(_)) }
+    pub fn is_vector(&self) -> bool { matches!(self, Vector(_)) }
 
-    pub fn is_iter(self: &Self) -> bool {
-        match self {
-            Str(_) | List(_) | Set(_) | Dict(_) | Heap(_) | Vector(_) | Range(_) | Enumerate(_) => true,
-            _ => false
-        }
-    }
+    pub fn is_iter(&self) -> bool { matches!(self, Str(_) | List(_) | Set(_) | Dict(_) | Heap(_) | Vector(_) | Range(_) | Enumerate(_)) }
 
     /// Returns if the `Value` is function-evaluable.
     /// Note that single-element lists are not considered functions here.
-    pub fn is_function(self: &Self) -> bool {
-        match self {
-            Function(_) | PartialFunction(_) | NativeFunction(_) | PartialNativeFunction(_, _) | Closure(_) | StructType(_) | Slice(_) => true,
-            _ => false
-        }
-    }
+    pub fn is_function(&self) -> bool { matches!(self, Function(_) | PartialFunction(_) | NativeFunction(_) | PartialNativeFunction(_, _) | Closure(_) | StructType(_) | Slice(_)) }
 
-    pub fn ptr_eq(self: &Self, other: &Value) -> bool {
+    pub fn ptr_eq(&self, other: &Value) -> bool {
         match (&self, &other) {
             (List(l), List(r)) => l.ptr_eq(r),
             (Set(l), Set(r)) => l.ptr_eq(r),
@@ -582,7 +576,7 @@ impl IntoValue for C64 {
 }
 
 impl<'a> IntoValue for Sliceable<'a> {
-    fn to_value(self: Self) -> Value {
+    fn to_value(self) -> Value {
         match self {
             Sliceable::Str(_, it) => it.to_value(),
             Sliceable::List(_, it) => it.to_value(),
@@ -614,7 +608,7 @@ impl<I> IntoIterableValue for I where I : Iterator<Item=Value> {
     fn to_list(self) -> Value { self.collect::<VecDeque<Value>>().to_value() }
     fn to_vector(self) -> Value { self.collect::<Vec<Value>>().to_value() }
     fn to_set(self) -> Value { self.collect::<IndexSet<Value>>().to_value() }
-    fn to_heap(self) -> Value { self.map(|u| Reverse(u)).collect::<BinaryHeap<Reverse<Value>>>().to_value() }
+    fn to_heap(self) -> Value { self.map(Reverse).collect::<BinaryHeap<Reverse<Value>>>().to_value() }
 }
 
 /// A trait which is responsible for wrapping conversions from an `Iterator<Item=(Value, Value)>` into a `Value::Dict`
@@ -660,7 +654,7 @@ impl<T : Eq + PartialEq + Debug + Clone> Mut<T> {
 
     /// Returns `true` if the two inner instances are part of the same object.
     pub fn ptr_eq(&self, other: &Mut<T>) -> bool {
-        return Rc::ptr_eq(&self.0, &other.0)
+        Rc::ptr_eq(&self.0, &other.0)
     }
 }
 
@@ -687,21 +681,21 @@ impl FunctionImpl {
     }
 
     /// The minimum number of required arguments, inclusive.
-    pub fn min_args(self: &Self) -> u32 {
+    pub fn min_args(&self) -> u32 {
         (self.args.len() - self.default_args.len()) as u32
     }
 
     /// The maximum number of required arguments, inclusive.
-    pub fn max_args(self: &Self) -> u32 {
+    pub fn max_args(&self) -> u32 {
         self.args.len() as u32
     }
 
-    pub fn in_range(self: &Self, nargs: u32) -> bool {
+    pub fn in_range(&self, nargs: u32) -> bool {
         self.min_args() <= nargs && (self.var_arg || nargs <= self.max_args())
     }
 
     /// Returns the number of variadic arguments that need to be collected, before invoking the function, if needed.
-    pub fn num_var_args(self: &Self, nargs: u32) -> Option<u32> {
+    pub fn num_var_args(&self, nargs: u32) -> Option<u32> {
         if self.var_arg && nargs >= self.max_args() {
             Some(nargs + 1 - self.max_args())
         } else {
@@ -712,7 +706,7 @@ impl FunctionImpl {
     /// Returns the jump offset of the function
     /// For typical functions, this is just the `head`, however when default arguments are present, or not, this is offset by the default argument offsets.
     /// The `nargs` must be legal (between `[min_args(), max_args()]`
-    pub fn jump_offset(self: &Self, nargs: u32) -> usize {
+    pub fn jump_offset(&self, nargs: u32) -> usize {
         self.head + if nargs == self.min_args() {
             0
         } else if self.var_arg && nargs >= self.max_args() {
@@ -722,7 +716,7 @@ impl FunctionImpl {
         }
     }
 
-    pub fn as_str(self: &Self) -> String {
+    pub fn as_str(&self) -> String {
         format!("fn {}({})", self.name, self.args.join(", "))
     }
 }
@@ -947,11 +941,11 @@ pub struct StructImpl {
 }
 
 impl StructImpl {
-    fn get_field(self: &mut Self, field_offset: usize) -> Value {
+    fn get_field(&mut self, field_offset: usize) -> Value {
         self.values[field_offset].clone()
     }
 
-    fn set_field(self: &mut Self, field_offset: usize, value: Value) {
+    fn set_field(&mut self, field_offset: usize, value: Value) {
         self.values[field_offset] = value;
     }
 }
@@ -985,7 +979,7 @@ impl StructTypeImpl {
         StructTypeImpl { name, field_names, type_index }
     }
 
-    pub fn as_str(self: &Self) -> String {
+    pub fn as_str(&self) -> String {
         format!("struct {}({})", self.name, self.field_names.join(", "))
     }
 }
@@ -1018,24 +1012,20 @@ pub struct RangeImpl {
 impl RangeImpl {
     /// Used by `operator in`, to check if a value is in this range.
     pub fn contains(&self, value: i64) -> bool {
-        if self.step == 0 {
-            false
-        } else if self.step > 0 {
-            value >= self.start && value < self.stop && (value - self.start) % self.step == 0
-        } else {
-            value <= self.start && value > self.stop && (self.start - value) % self.step == 0
+        match self.step.cmp(&0) {
+            Ordering::Equal => false,
+            Ordering::Greater => value >= self.start && value < self.stop && (value - self.start) % self.step == 0,
+            Ordering::Less => value <= self.start && value > self.stop && (self.start - value) % self.step == 0
         }
     }
 
     /// Reverses the range, so that iteration advances from the end to the start
     /// Note this is not as simple as just swapping `start` and `stop`, due to non-unit step sizes.
     pub fn reverse(self) -> RangeImpl {
-        if self.step == 0 {
-            self
-        } else if self.step > 0 {
-            RangeImpl { start: self.start + self.len() as i64 * self.step, stop: self.start + 1, step: -self.step }
-        } else {
-            RangeImpl { start: self.start + self.len() as i64 * self.step, stop: self.start - 1, step: -self.step }
+        match self.step.cmp(&0) {
+            Ordering::Equal => self,
+            Ordering::Greater => RangeImpl { start: self.start + self.len() as i64 * self.step, stop: self.start + 1, step: -self.step },
+            Ordering::Less => RangeImpl { start: self.start + self.len() as i64 * self.step, stop: self.start - 1, step: -self.step }
         }
     }
 
@@ -1080,7 +1070,7 @@ pub struct SliceImpl {
 }
 
 impl SliceImpl {
-    pub fn apply(self: Self, arg: Value) -> ValueResult {
+    pub fn apply(self, arg: Value) -> ValueResult {
         core::literal_slice(arg, self.arg1, self.arg2, self.arg3)
     }
 }
@@ -1134,10 +1124,6 @@ pub enum Iterable {
 }
 
 impl Iterable {
-    fn str(string: String) -> Iterable {
-        let chars: Chars<'static> = unsafe { mem::transmute(string.chars()) };
-        Iterable::Str(string, chars)
-    }
 
     /// Returns the original length of the iterable - not the amount of elements remaining.
     pub fn len(&self) -> usize {
@@ -1300,7 +1286,7 @@ pub enum Indexable<'a> {
 
 impl<'a> Indexable<'a> {
 
-    pub fn len(self: &Self) -> usize {
+    pub fn len(&self) -> usize {
         match self {
             Indexable::Str(it) => it.len(),
             Indexable::List(it) => it.len(),
@@ -1309,7 +1295,7 @@ impl<'a> Indexable<'a> {
     }
 
     /// Takes a convertable-to-int value, representing a bounded index in `[-len, len)`, and converts to a real index in `[0, len)`, or raises an error.
-    pub fn check_index(self: &Self, value: Value) -> Result<usize, Box<RuntimeError>> {
+    pub fn check_index(&self, value: Value) -> Result<usize, Box<RuntimeError>> {
         let index: i64 = value.as_int()?;
         let len: usize = self.len();
         let raw: usize = core::to_index(len as i64, index) as usize;
@@ -1320,16 +1306,16 @@ impl<'a> Indexable<'a> {
         }
     }
 
-    pub fn get_index(self: &Self, index: usize) -> Value {
+    pub fn get_index(&self, index: usize) -> Value {
         match self {
             Indexable::Str(it) => it.chars().nth(index).unwrap().to_value(),
-            Indexable::List(it) => (&it[index]).clone(),
-            Indexable::Vector(it) => (&it[index]).clone(),
+            Indexable::List(it) => it[index].clone(),
+            Indexable::Vector(it) => it[index].clone(),
         }
     }
 
     /// Setting indexes only works for immutable collections - so not strings
-    pub fn set_index(self: &mut Self, index: usize, value: Value) -> Result<(), Box<RuntimeError>> {
+    pub fn set_index(&mut self, index: usize, value: Value) -> Result<(), Box<RuntimeError>> {
         match self {
             Indexable::Str(it) => TypeErrorArgMustBeIndexable(Str((*it).clone())).err(),
             Indexable::List(it) => { it[index] = value; Ok(()) },
@@ -1347,7 +1333,7 @@ pub enum Sliceable<'a> {
 
 impl<'a> Sliceable<'a> {
 
-    pub fn len(self: &Self) -> usize {
+    pub fn len(&self) -> usize {
         match self {
             Sliceable::Str(it, _) => it.len(),
             Sliceable::List(it, _) => it.len(),
@@ -1355,13 +1341,13 @@ impl<'a> Sliceable<'a> {
         }
     }
 
-    pub fn accept(self: &mut Self, index: i64) {
+    pub fn accept(&mut self, index: i64) {
         if index >= 0 && index < self.len() as i64 {
             let index = index as usize;
             match self {
                 Sliceable::Str(src, dest) => dest.push(src.chars().nth(index).unwrap()),
-                Sliceable::List(src, dest) => dest.push_back((&src[index]).clone()),
-                Sliceable::Vector(src, dest) => dest.push((&src[index]).clone()),
+                Sliceable::List(src, dest) => dest.push_back(src[index].clone()),
+                Sliceable::Vector(src, dest) => dest.push(src[index].clone()),
             }
         }
     }
@@ -1391,7 +1377,7 @@ impl Literal {
         }
     }
 
-    pub fn accumulate<I : Iterator<Item=Value>>(self: &mut Self, mut iter: I) {
+    pub fn accumulate<I : Iterator<Item=Value>>(&mut self, mut iter: I) {
         match self {
             Literal::List(it) => for value in iter { it.push_back(value); },
             Literal::Vector(it) => for value in iter { it.push(value); },
@@ -1403,7 +1389,7 @@ impl Literal {
         };
     }
 
-    pub fn unroll<I : Iterator<Item=Value>>(self: &mut Self, iter: I) -> Result<(), Box<RuntimeError>> {
+    pub fn unroll<I : Iterator<Item=Value>>(&mut self, iter: I) -> Result<(), Box<RuntimeError>> {
         match self {
             Literal::Dict(it) => for value in iter {
                 let (key, value) = value.as_pair()?;

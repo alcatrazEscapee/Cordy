@@ -31,13 +31,13 @@ impl Location {
     }
 
     /// Returns the start pointer of the location, inclusive
-    pub fn start(self: &Self) -> usize { self.start }
+    pub fn start(&self) -> usize { self.start }
 
     /// Returns the end pointer of the location, inclusive
-    pub fn end(self: &Self) -> usize { self.start + self.width as usize - 1 }
+    pub fn end(&self) -> usize { self.start + self.width as usize - 1 }
 
     // Returns `true` if the location is empty, i.e. zero width
-    pub fn is_empty(self: &Self) -> bool { self.width == 0 }
+    pub fn is_empty(&self) -> bool { self.width == 0 }
 }
 
 impl BitOr for Location {
@@ -107,39 +107,39 @@ impl SourceView {
     }
 
     /// Returns the name of the currently active entry.
-    pub fn name(self: &Self) -> &String {
+    pub fn name(&self) -> &String {
         &self.0.last().unwrap().name
     }
 
     /// Returns the source code of the currently active entry.
-    pub fn text(self: &Self) -> &String {
+    pub fn text(&self) -> &String {
         &self.0.last().unwrap().text
     }
 
     /// Returns a mutable reference to the source code buffer of the currently active entry.
-    pub fn text_mut(self: &mut Self) -> &mut String {
+    pub fn text_mut(&mut self) -> &mut String {
         &mut self.0.last_mut().unwrap().text
     }
 
     /// Returns the currently active entry index.
-    pub fn index(self: &Self) -> u32 {
+    pub fn index(&self) -> u32 {
         self.0.len() as u32 - 1
     }
 
     /// Returns the length (number of lines) of the currently active entry.
-    pub fn len(self: &Self) -> usize {
+    pub fn len(&self) -> usize {
         self.0.last().unwrap().index().lines.len()
     }
 
-    pub fn lineno(self: &Self, loc: Location) -> Option<usize> {
+    pub fn lineno(&self, loc: Location) -> Option<usize> {
         self.0[loc.index as usize].lineno(loc)
     }
 
-    pub fn push(self: &mut Self, name: String, text: String) {
+    pub fn push(&mut self, name: String, text: String) {
         self.0.push(SourceEntry { name, text, index: RefCell::new(None) });
     }
 
-    pub fn format<E : AsErrorWithContext>(self: &Self, error: &E) -> String {
+    pub fn format<E : AsErrorWithContext>(&self, error: &E) -> String {
         self.0[error.location().index as usize].format(self, error)
     }
 }
@@ -147,7 +147,7 @@ impl SourceView {
 
 impl SourceEntry {
 
-    pub fn lineno(self: &Self, loc: Location) -> Option<usize> {
+    pub fn lineno(&self, loc: Location) -> Option<usize> {
         if loc.is_empty() {
             None
         } else {
@@ -155,7 +155,7 @@ impl SourceEntry {
         }
     }
 
-    fn format<E : AsErrorWithContext>(self: &Self, view: &SourceView, error: &E) -> String {
+    fn format<E : AsErrorWithContext>(&self, view: &SourceView, error: &E) -> String {
         let mut text = error.as_error();
         let index: Ref<'_, SourceIndex> = self.index();
         let loc = error.location();
@@ -221,7 +221,7 @@ impl SourceEntry {
         text
     }
 
-    fn index(self: &Self) -> Ref<'_, SourceIndex> {
+    fn index(&self) -> Ref<'_, SourceIndex> {
         if self.index.borrow().is_none() {
             let mut lines: Vec<String> = Vec::new();
             let mut starts: Vec<usize> = Vec::new();
@@ -247,22 +247,22 @@ impl SourceEntry {
 /// A simple common trait for converting arbitrary objects to human-readable errors
 /// This could be implemented directly on the types, but using the trait allows all end-user-exposed text to be concentrated in this module.
 pub trait AsError {
-    fn as_error(self: &Self) -> String;
+    fn as_error(&self) -> String;
 }
 
 /// An extension of `AsError` which is used for actual error types (`ScanError`, `ParserError`, `DetailRuntimeError`)
 /// This is intentionally polymorphic, as it's used in `SourceView::format()`
 pub trait AsErrorWithContext: AsError {
-    fn location(self: &Self) -> Location;
+    fn location(&self) -> Location;
 
     /// When formatting a `RuntimeError`, allows inserting additional stack trace elements.
     /// This is appended *after* the initial `at: line X (source file)` line is appended.
-    fn add_stack_trace_elements(self: &Self, _: &SourceView, _: &mut String) {}
+    fn add_stack_trace_elements(&self, _: &SourceView, _: &mut String) {}
 }
 
 
 impl AsError for RuntimeError {
-    fn as_error(self: &Self) -> String {
+    fn as_error(&self) -> String {
         match self {
             RuntimeError::RuntimeExit | RuntimeError::RuntimeYield => panic!("Not a real error"),
             RuntimeError::RuntimeAssertFailed(reason) => format!("Assertion Failed: {}", reason),
@@ -277,18 +277,18 @@ impl AsError for RuntimeError {
             RuntimeError::ValueErrorIndexOutOfBounds(i, ln) => format!("Index '{}' is out of bounds for list of length [0, {})", i, ln),
             RuntimeError::ValueErrorStepCannotBeZero => String::from("ValueError: 'step' argument cannot be zero"),
             RuntimeError::ValueErrorVariableNotDeclaredYet(x) => format!("ValueError: '{}' was referenced but has not been declared yet", x),
-            RuntimeError::ValueErrorValueMustBeNonEmpty => format!("ValueError: Expected value to be a non empty iterable"),
+            RuntimeError::ValueErrorValueMustBeNonEmpty => String::from("ValueError: Expected value to be a non empty iterable"),
             RuntimeError::ValueErrorCannotUnpackLengthMustBeGreaterThan(e, a, v) => format!("ValueError: Cannot unpack {} with length {}, expected at least {} elements", v.as_error(), a, e),
             RuntimeError::ValueErrorCannotUnpackLengthMustBeEqual(e, a, v) => format!("ValueError: Cannot unpack {} with length {}, expected exactly {} elements", v.as_error(), a, e),
             RuntimeError::ValueErrorValueMustBeNonNegative(v) => format!("ValueError: Expected value '{}: int' to be non-negative", v),
             RuntimeError::ValueErrorValueMustBePositive(v) => format!("ValueError: Expected value '{}: int' to be positive", v),
-            RuntimeError::ValueErrorValueMustBeNonZero => format!("ValueError: Expected value to be non-zero"),
+            RuntimeError::ValueErrorValueMustBeNonZero => String::from("ValueError: Expected value to be non-zero"),
             RuntimeError::ValueErrorCannotCollectIntoDict(v) => format!("ValueError: Cannot collect key-value pair {} into a dict", v.as_error()),
             RuntimeError::ValueErrorKeyNotPresent(v) => format!("ValueError: Key {} not found in dictionary", v.as_error()),
             RuntimeError::ValueErrorInvalidCharacterOrdinal(i) => format!("ValueError: Cannot convert int {} to a character", i),
             RuntimeError::ValueErrorInvalidFormatCharacter(c) => format!("ValueError: Invalid format character '{}' in format string", c.as_error()),
             RuntimeError::ValueErrorNotAllArgumentsUsedInStringFormatting(v) => format!("ValueError: Not all arguments consumed in format string, next: {}", v.as_error()),
-            RuntimeError::ValueErrorMissingRequiredArgumentInStringFormatting => format!("ValueError: Not enough arguments for format string"),
+            RuntimeError::ValueErrorMissingRequiredArgumentInStringFormatting => String::from("ValueError: Not enough arguments for format string"),
             RuntimeError::ValueErrorEvalListMustHaveUnitLength(len) => format!("ValueError: Evaluating an index must have len = 1, got len = {}", len),
             RuntimeError::ValueErrorCannotCompileRegex(raw, err) => format!("ValueError: Cannot compile regex '{}'\n            {}", raw, err),
             RuntimeError::ValueErrorRecursiveHash(value) => format!("ValueError: Cannot create recursive hash based collection from {}", value.as_error()),
@@ -313,7 +313,7 @@ impl AsError for RuntimeError {
 }
 
 impl AsError for Option<char> {
-    fn as_error(self: &Self) -> String {
+    fn as_error(&self) -> String {
         match self {
             None => String::from("end of format string"),
             Some(c) => String::from(*c),
@@ -322,25 +322,25 @@ impl AsError for Option<char> {
 }
 
 impl AsError for Value {
-    fn as_error(self: &Self) -> String {
+    fn as_error(&self) -> String {
         format!("'{}' of type '{}'", self.to_str(), self.as_type_str())
     }
 }
 
 impl AsError for FunctionImpl {
-    fn as_error(self: &Self) -> String {
+    fn as_error(&self) -> String {
         self.as_str()
     }
 }
 
 impl AsError for StructTypeImpl {
-    fn as_error(self: &Self) -> String {
+    fn as_error(&self) -> String {
         self.as_str()
     }
 }
 
 impl AsError for UnaryOp {
-    fn as_error(self: &Self) -> String {
+    fn as_error(&self) -> String {
         String::from(match self {
             UnaryOp::Neg => "-",
             UnaryOp::Not => "!",
@@ -349,7 +349,7 @@ impl AsError for UnaryOp {
 }
 
 impl AsError for BinaryOp {
-    fn as_error(self: &Self) -> String {
+    fn as_error(&self) -> String {
         String::from(match self {
             BinaryOp::Div => "divide",
             BinaryOp::Mul => "multiply",
@@ -379,13 +379,13 @@ impl AsError for BinaryOp {
 }
 
 impl AsError for NativeFunction {
-    fn as_error(self: &Self) -> String {
+    fn as_error(&self) -> String {
         self.repr()
     }
 }
 
 impl AsError for ParserError {
-    fn as_error(self: &Self) -> String {
+    fn as_error(&self) -> String {
         match &self.error {
             ParserErrorType::UnexpectedTokenAfterEoF(e) => format!("Unexpected {} after parsing finished", e.as_error()),
 
@@ -418,9 +418,9 @@ impl AsError for ParserError {
             ParserErrorType::InvalidFieldName(e) => format!("Invalid or unknown field name: '{}'", e),
             ParserErrorType::InvalidLValue(e) => format!("Invalid value used as a function parameter: '{}'", e),
 
-            ParserErrorType::InvalidAssignmentTarget => format!("The left hand side of an assignment expression must be a variable, array access, or property access"),
-            ParserErrorType::MultipleVariadicTermsInPattern => format!("Pattern is not allowed to have more than one variadic (i.e. '*') term."),
-            ParserErrorType::LetWithPatternBindingNoExpression => format!("'let' with a pattern variable must be followed by an expression if the pattern contains non-simple elements such as variadic (i.e. '*'), empty (i.e. '_'), or nested (i.e. 'x, (_, y)) terms."),
+            ParserErrorType::InvalidAssignmentTarget => String::from("The left hand side of an assignment expression must be a variable, array access, or property access"),
+            ParserErrorType::MultipleVariadicTermsInPattern => String::from("Pattern is not allowed to have more than one variadic (i.e. '*') term."),
+            ParserErrorType::LetWithPatternBindingNoExpression => String::from("'let' with a pattern variable must be followed by an expression if the pattern contains non-simple elements such as variadic (i.e. '*'), empty (i.e. '_'), or nested (i.e. 'x, (_, y)) terms."),
             ParserErrorType::BreakOutsideOfLoop => String::from("Invalid 'break' statement outside of an enclosing loop"),
             ParserErrorType::ContinueOutsideOfLoop => String::from("Invalid 'continue' statement outside of an enclosing loop"),
             ParserErrorType::StructNotInGlobalScope => String::from("'struct' statements can only be present in global scope."),
@@ -434,7 +434,7 @@ impl AsError for ParserError {
 }
 
 impl AsError for ScanError {
-    fn as_error(self: &Self) -> String {
+    fn as_error(&self) -> String {
         match &self.error {
             ScanErrorType::InvalidNumericPrefix(c) => format!("Invalid numeric prefix: '0{}'", c),
             ScanErrorType::InvalidNumericValue(e) => format!("Invalid numeric value: {}", e),
@@ -445,7 +445,7 @@ impl AsError for ScanError {
 }
 
 impl AsError for Option<ScanToken> {
-    fn as_error(self: &Self) -> String {
+    fn as_error(&self) -> String {
         match self {
             Some(t) => t.as_error(),
             None => String::from("end of input"),
@@ -454,7 +454,7 @@ impl AsError for Option<ScanToken> {
 }
 
 impl AsError for ScanToken {
-    fn as_error(self: &Self) -> String {
+    fn as_error(&self) -> String {
         match &self {
             ScanToken::Identifier(s) => format!("identifier \'{}\'", s),
             ScanToken::StringLiteral(s) => format!("string '{}'", s),

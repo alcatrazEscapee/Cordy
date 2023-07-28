@@ -18,7 +18,7 @@ impl ParserError {
 
     /// Returns `true` if the error is due to encountering an EoF (end of input) while expecting another token.
     /// Used for detecting if we need to let the user continue entering input in REPL mode.
-    pub fn is_eof(self: &Self) -> bool {
+    pub fn is_eof(&self) -> bool {
         match &self.error {
             UnexpectedTokenAfterEoF(_) => false,
 
@@ -67,7 +67,7 @@ impl ParserError {
 }
 
 impl AsErrorWithContext for ParserError {
-    fn location(self: &Self) -> Location {
+    fn location(&self) -> Location {
         self.loc
     }
 }

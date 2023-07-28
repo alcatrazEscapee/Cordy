@@ -167,7 +167,7 @@ impl Parser<'_> {
         }
     }
 
-    fn parse(self: &mut Self) {
+    fn parse(&mut self) {
         trace::trace_parser!("rule <root>");
         self.parse_statements();
         self.push_delayed_pop();
@@ -176,7 +176,7 @@ impl Parser<'_> {
         self.teardown();
     }
 
-    pub(super) fn parse_incremental_repl(self: &mut Self) {
+    pub(super) fn parse_incremental_repl(&mut self) {
         trace::trace_parser!("rule <root-incremental>");
         self.parse_statements();
         if self.delay_pop_from_expression_statement {
@@ -190,13 +190,13 @@ impl Parser<'_> {
         self.teardown();
     }
 
-    pub(super) fn parse_incremental_eval(self: &mut Self) {
+    pub(super) fn parse_incremental_eval(&mut self) {
         self.parse_expression();
         self.push(Return); // Insert a `Return` at the end, to return out of `eval`'s frame
         self.teardown();
     }
 
-    fn teardown(self: &mut Self) {
+    fn teardown(&mut self) {
         // Emit code from output -> (raw_output, locations)
         for (loc, op) in self.output.drain(..) {
             self.raw_output.push(op);
@@ -216,7 +216,7 @@ impl Parser<'_> {
 
             let tail: usize = self.raw_output.len() - 1;
 
-            func.bake(&mut self.constants, head, tail);
+            func.bake(self.constants, head, tail);
         }
 
         if let Some(t) = self.peek() {
@@ -224,13 +224,13 @@ impl Parser<'_> {
             self.error(UnexpectedTokenAfterEoF(token));
         }
         for global in self.late_bound_globals.drain(..) {
-            if let Some(error) = global.into().error() {
+            if let Some(error) = global.target().error() {
                 self.errors.push(error);
             }
         }
     }
 
-    fn parse_statements(self: &mut Self) {
+    fn parse_statements(&mut self) {
         trace::trace_parser!("rule <statements>");
         loop {
             trace::trace_parser!("rule <statement>");
@@ -264,7 +264,7 @@ impl Parser<'_> {
         }
     }
 
-    fn parse_block_statement(self: &mut Self) {
+    fn parse_block_statement(&mut self) {
         trace::trace_parser!("rule <block-statement>");
         self.push_delayed_pop();
         self.expect(OpenBrace);
@@ -275,7 +275,7 @@ impl Parser<'_> {
         self.expect_resync(CloseBrace);
     }
 
-    fn parse_struct_statement(self: &mut Self) {
+    fn parse_struct_statement(&mut self) {
         self.push_delayed_pop();
         self.advance(); // Consume `struct`
 
@@ -317,9 +317,8 @@ impl Parser<'_> {
                     }
 
                     // Consume `,` and allow trailing comma
-                    match self.peek() {
-                        Some(Comma) => self.skip(),
-                        _ => {},
+                    if let Some(Comma) = self.peek() {
+                        self.skip();
                     }
                 },
                 _ => break, // `CloseParen` also breaks the loop, and hits resync below
@@ -332,7 +331,7 @@ impl Parser<'_> {
         self.expect_resync(CloseParen);
     }
 
-    fn parse_annotated_named_function(self: &mut Self) {
+    fn parse_annotated_named_function(&mut self) {
         trace::trace_parser!("rule <annotated-named-function");
 
         self.push_delayed_pop();
@@ -346,7 +345,7 @@ impl Parser<'_> {
         self.push(Call(1, false)) // Evaluate the annotation
     }
 
-    fn parse_named_function(self: &mut Self) {
+    fn parse_named_function(&mut self) {
         // Before we enter this rule, we instead check if we see `fn` `(`, which would imply this is actually part of an expression
         // If so, we shortcut into that
         if let Some(OpenParen) = self.peek2() {
@@ -383,7 +382,7 @@ impl Parser<'_> {
         self.emit_closure_and_closed_locals(closed_locals);
     }
 
-    fn parse_expression_function(self: &mut Self) -> Expr {
+    fn parse_expression_function(&mut self) -> Expr {
         trace::trace_parser!("rule <expression-function>");
 
         // Function header - `fn` (<arg>, ...)
@@ -399,7 +398,7 @@ impl Parser<'_> {
         Expr::function(func, closed_locals)
     }
 
-    fn parse_function_name(self: &mut Self) -> Option<String> {
+    fn parse_function_name(&mut self) -> Option<String> {
         trace::trace_parser!("rule <function-name>");
         match self.peek() {
             Some(Identifier(_)) => Some(self.advance_identifier()),
@@ -411,7 +410,7 @@ impl Parser<'_> {
     }
 
     /// Returns the pair of `lvalue` parameters, and `Expr` default values, if present.
-    fn parse_function_parameters(self: &mut Self) -> (Vec<LValue>, Vec<Expr>, bool) {
+    fn parse_function_parameters(&mut self) -> (Vec<LValue>, Vec<Expr>, bool) {
         trace::trace_parser!("rule <function-parameters>");
 
         if let Some(CloseParen) = self.peek() {
@@ -463,7 +462,7 @@ impl Parser<'_> {
         (args, default_args, var_arg)
     }
 
-    fn parse_function_body(self: &mut Self, args: Vec<LValue>, default_args: Vec<Expr>) -> Vec<Opcode> {
+    fn parse_function_body(&mut self, args: Vec<LValue>, default_args: Vec<Expr>) -> Vec<Opcode> {
         trace::trace_parser!("rule <function-body>");
         let prev_pop_status: bool = self.delay_pop_from_expression_statement; // Stack semantics for the delayed pop
 
@@ -563,7 +562,7 @@ impl Parser<'_> {
         closed_locals
     }
 
-    fn parse_return_statement(self: &mut Self) {
+    fn parse_return_statement(&mut self) {
         trace::trace_parser!("rule <return-statement>");
         self.push_delayed_pop();
         self.advance(); // Consume `return`
@@ -588,7 +587,7 @@ impl Parser<'_> {
 
     // ===== Control Flow ===== //
 
-    fn parse_if_statement(self: &mut Self) {
+    fn parse_if_statement(&mut self) {
         // Translation:
         // if <expr> {       | JumpIfFalsePop L1
         //     <statements>  | <statements>
@@ -649,7 +648,7 @@ impl Parser<'_> {
         }
     }
 
-    fn parse_while_statement(self: &mut Self) {
+    fn parse_while_statement(&mut self) {
         trace::trace_parser!("rule <while-statement>");
 
         // Translation
@@ -682,7 +681,7 @@ impl Parser<'_> {
     }
 
     /// Parses a `do { }`, which is a syntax for a scoped block, and optionally a `while` at the end
-    fn parse_do_while_statement(self: &mut Self) {
+    fn parse_do_while_statement(&mut self) {
         self.advance(); // Consume `do`
 
         let jump: usize = self.begin_loop();
@@ -705,7 +704,7 @@ impl Parser<'_> {
         self.end_loop();
     }
 
-    fn parse_loop_statement(self: &mut Self) {
+    fn parse_loop_statement(&mut self) {
         trace::trace_parser!("rule <loop-statement>");
 
         // Translation:
@@ -728,7 +727,7 @@ impl Parser<'_> {
         self.end_loop();
     }
 
-    fn parse_for_statement(self: &mut Self) {
+    fn parse_for_statement(&mut self) {
         trace::trace_parser!("rule <for-statement>");
 
         self.push_delayed_pop();
@@ -790,7 +789,7 @@ impl Parser<'_> {
         self.end_loop();
     }
 
-    fn parse_break_statement(self: &mut Self) {
+    fn parse_break_statement(&mut self) {
         trace::trace_parser!("rule <break-statement>");
         self.push_delayed_pop();
         self.advance();
@@ -805,7 +804,7 @@ impl Parser<'_> {
         }
     }
 
-    fn parse_continue_statement(self: &mut Self) {
+    fn parse_continue_statement(&mut self) {
         trace::trace_parser!("rule <continue-statement>");
         self.push_delayed_pop();
         self.advance();
@@ -820,7 +819,7 @@ impl Parser<'_> {
         }
     }
 
-    fn parse_assert_statement(self: &mut Self) {
+    fn parse_assert_statement(&mut self) {
         trace::trace_parser!("rule <assert-statement>");
         self.push_delayed_pop();
         self.advance(); // Consume `assert`
@@ -849,7 +848,7 @@ impl Parser<'_> {
 
     // ===== Variables + Expressions ===== //
 
-    fn parse_let_statement(self: &mut Self) {
+    fn parse_let_statement(&mut self) {
         trace::trace_parser!("rule <let-statement>");
         self.push_delayed_pop();
         self.advance(); // Consume `let`
@@ -887,26 +886,26 @@ impl Parser<'_> {
         }
     }
 
-    fn parse_expression_statement(self: &mut Self) {
+    fn parse_expression_statement(&mut self) {
         trace::trace_parser!("rule <expression-statement>");
         self.push_delayed_pop();
         self.parse_expression();
         self.delay_pop_from_expression_statement = true;
     }
 
-    fn parse_expression(self: &mut Self) {
+    fn parse_expression(&mut self) {
         trace::trace_parser!("rule <expression>");
         let expr: Expr = self.parse_expr_top_level();
         self.emit_optimized_expr(expr);
     }
 
     #[must_use = "For parsing expressions from non-expressions, use parse_expression()"]
-    fn parse_expr_top_level(self: &mut Self) -> Expr {
+    fn parse_expr_top_level(&mut self) -> Expr {
         self.parse_expr_10()
     }
 
     #[must_use = "For parsing expressions from non-expressions, use parse_expression()"]
-    fn parse_expr_top_level_or_unrolled(self: &mut Self, any_unroll: &mut bool) -> Expr {
+    fn parse_expr_top_level_or_unrolled(&mut self, any_unroll: &mut bool) -> Expr {
         let mut unroll = false;
         let first = !*any_unroll;
 
@@ -926,7 +925,7 @@ impl Parser<'_> {
     }
 
     /// Returns an `LValue`, or `None`. If this returns `None`, an error will already have been raised.
-    fn parse_lvalue(self: &mut Self) -> Option<LValue> {
+    fn parse_lvalue(&mut self) -> Option<LValue> {
         trace::trace_parser!("rule <lvalue>");
 
         match self.peek() {
@@ -970,7 +969,7 @@ impl Parser<'_> {
 
     /// Parses a 'bare' `LValue`, so a `LValue::Terms` without any surrounding `,`. Promotes the top level `LValue::Terms` into a single term, if possible.
     /// If `None` is returned, an error will have already been raised.
-    fn parse_bare_lvalue(self: &mut Self) -> Option<LValue> {
+    fn parse_bare_lvalue(&mut self) -> Option<LValue> {
         trace::trace_parser!("rule <bare-lvalue>");
 
         let mut terms: Vec<LValue> = Vec::new();
@@ -1009,7 +1008,7 @@ impl Parser<'_> {
 
     // ===== Expression Parsing ===== //
 
-    fn parse_expr_1_terminal(self: &mut Self) -> Expr {
+    fn parse_expr_1_terminal(&mut self) -> Expr {
         trace::trace_parser!("rule <expr-1>");
         match self.peek() {
             Some(KeywordNil) => { self.advance(); Expr::nil() },
@@ -1027,16 +1026,12 @@ impl Parser<'_> {
             },
             Some(OpenParen) => {
                 let loc_start = self.advance_with(); // Consume the `(`
-                match self.parse_expr_1_partial_operator_left() {
-                    Some(expr) => return expr, // Looks ahead, and parses <op> <expr> `)`
-                    _ => {},
+                if let Some(expr) = self.parse_expr_1_partial_operator_left() {
+                    return expr; // Looks ahead, and parses <op> <expr> `)`
                 }
-                match self.peek() {
-                    Some(Ellipsis) => { // Must be a vector
-                        let arg1 = self.parse_expr_top_level_or_unrolled(&mut false);
-                        return self.parse_expr_1_vector_literal(loc_start, arg1, true);
-                    },
-                    _ => {}
+                if let Some(Ellipsis) = self.peek() { // Must be a vector
+                    let arg1 = self.parse_expr_top_level_or_unrolled(&mut false);
+                    return self.parse_expr_1_vector_literal(loc_start, arg1, true);
                 }
                 let expr = self.parse_expr_top_level(); // Parse <expr>
                 let expr = match self.parse_expr_1_partial_operator_right(expr) {
@@ -1063,7 +1058,7 @@ impl Parser<'_> {
         }
     }
 
-    fn parse_expr_1_partial_operator_left(self: &mut Self) -> Option<Expr> {
+    fn parse_expr_1_partial_operator_left(&mut self) -> Option<Expr> {
         trace::trace_parser!("rule <expr-1-partial-operator-left>");
         // Open `(` usually resolves precedence, so it begins parsing an expression from the top again
         // However it *also* can be used to wrap around a partial evaluation of a literal operator, for example
@@ -1086,12 +1081,9 @@ impl Parser<'_> {
             Some(Pow) => binary = Some(OperatorPow),
             Some(Mod) => binary = Some(OperatorMod),
             Some(KeywordIn) => binary = Some(OperatorIn),
-            Some(KeywordNot) => match self.peek2() { // Lookahead two for `not in`
-                Some(KeywordIn) => {
-                    binary = Some(OperatorNotIn);
-                    long = true;
-                },
-                _ => {},
+            Some(KeywordNot) => if let Some(KeywordIn) = self.peek2() { // Lookahead two for `not in`
+                binary = Some(OperatorNotIn);
+                long = true;
             },
             Some(KeywordIs) => match self.peek2() { // Lookahead two for `is not`
                 Some(KeywordNot) => {
@@ -1162,7 +1154,7 @@ impl Parser<'_> {
         }
     }
 
-    fn parse_expr_1_partial_operator_right(self: &mut Self, expr: Expr) -> Result<Expr, Expr> {
+    fn parse_expr_1_partial_operator_right(&mut self, expr: Expr) -> Result<Expr, Expr> {
         trace::trace_parser!("rule <expr-1-partial-operator-right>");
         // If we see the pattern of BinaryOp `)`, then we recognize this as a partial operator, but evaluated from the left hand side instead.
         // For non-symmetric operators, this means we use the normal operator as we partial evaluate the left hand argument (by having the operator on the right)
@@ -1218,7 +1210,7 @@ impl Parser<'_> {
         }
     }
 
-    fn parse_expr_1_vector_literal(self: &mut Self, loc: Location, arg1: Expr, arg_is_unroll: bool) -> Expr {
+    fn parse_expr_1_vector_literal(&mut self, loc: Location, arg1: Expr, arg_is_unroll: bool) -> Expr {
         trace::trace_parser!("rule <expr-1-vector-literal>");
 
         let mut args: Vec<Expr> = vec![arg1];
@@ -1235,7 +1227,7 @@ impl Parser<'_> {
         Expr::vector(loc | self.prev_location(), args)
     }
 
-    fn parse_expr_1_list_or_slice_literal(self: &mut Self) -> Expr {
+    fn parse_expr_1_list_or_slice_literal(&mut self) -> Expr {
         trace::trace_parser!("rule <expr-1-list-or-slice-literal>");
 
         let loc_start = self.advance_with(); // Consume `[`
@@ -1282,7 +1274,7 @@ impl Parser<'_> {
         Expr::list(loc_start | self.prev_location(), args)
     }
 
-    fn parse_expr_1_slice_literal(self: &mut Self, loc_start: Location, arg1: Expr) -> Expr {
+    fn parse_expr_1_slice_literal(&mut self, loc_start: Location, arg1: Expr) -> Expr {
         self.advance(); // Consume `:`
 
         let arg2: Expr = match self.peek() {
@@ -1322,7 +1314,7 @@ impl Parser<'_> {
 
     /// Parses either a `dict` or `set` literal.
     /// Literals default to being sets, unless a `:` is present in any entry. This means empty literals, and literals with only unrolled terms default to sets.
-    fn parse_expr_1_dict_or_set_literal(self: &mut Self) -> Expr {
+    fn parse_expr_1_dict_or_set_literal(&mut self) -> Expr {
         trace::trace_parser!("rule <expr-1-dict-or-set-literal>");
 
         let mut loc = self.advance_with(); // Consume `{`
@@ -1370,7 +1362,7 @@ impl Parser<'_> {
         if is_dict.unwrap_or(false) { Expr::dict(loc, args) } else { Expr::set(loc, args) }
     }
 
-    fn parse_expr_1_inline_if_then_else(self: &mut Self) -> Expr {
+    fn parse_expr_1_inline_if_then_else(&mut self) -> Expr {
         trace::trace_parser!("rule <expr-1-inline-if-then-else>");
 
         let loc = self.advance_with(); // Consume `if`
@@ -1383,7 +1375,7 @@ impl Parser<'_> {
         condition.if_then_else(loc, if_true, if_false)
     }
 
-    fn parse_expr_2_unary(self: &mut Self) -> Expr {
+    fn parse_expr_2_unary(&mut self) -> Expr {
         trace::trace_parser!("rule <expr-2>");
 
         let stack: Vec<(Location, UnaryOp)> = self.parse_expr_2_prefix_operators();
@@ -1399,7 +1391,7 @@ impl Parser<'_> {
         expr
     }
 
-    fn parse_expr_2_prefix_operators(self: &mut Self) -> Vec<(Location, UnaryOp)> {
+    fn parse_expr_2_prefix_operators(&mut self) -> Vec<(Location, UnaryOp)> {
         let mut stack: Vec<(Location, UnaryOp)> = Vec::new();
         loop {
             match self.peek() {
@@ -1416,7 +1408,7 @@ impl Parser<'_> {
         }
     }
 
-    fn parse_expr_2_suffix_operators(self: &mut Self, mut expr: Expr) -> Expr {
+    fn parse_expr_2_suffix_operators(&mut self, mut expr: Expr) -> Expr {
         loop {
             // The opening token of a suffix operator must be on the same line
             match self.peek_no_newline() {
@@ -1552,13 +1544,13 @@ impl Parser<'_> {
         expr
     }
 
-    fn parse_expr_2_bare_suffix(self: &mut Self, expr: Expr) -> Expr {
+    fn parse_expr_2_bare_suffix(&mut self, expr: Expr) -> Expr {
         let loc_start = self.next_location();
         let arg = self.parse_expr_1_terminal();
         expr.eval(loc_start | self.prev_location(), vec![arg], false)
     }
 
-    fn parse_expr_2_unary_function_call(self: &mut Self, loc_start: Location, expr: Expr) -> Expr {
+    fn parse_expr_2_unary_function_call(&mut self, loc_start: Location, expr: Expr) -> Expr {
         // First argument
         let mut any_unroll: bool = false;
         let mut args: Vec<Expr> = Vec::new();
@@ -1576,7 +1568,7 @@ impl Parser<'_> {
     }
 
     /// Parses a `-> <field>` - either returns a `(Location, field_index)` pairing, or `None` and raises a parse error.
-    fn parse_expr_2_field_access(self: &mut Self) -> Option<(Location, u32)> {
+    fn parse_expr_2_field_access(&mut self) -> Option<(Location, u32)> {
         let loc_start = self.advance_with(); // Consume `->`
         match self.peek() {
             Some(Identifier(_)) => {
@@ -1591,7 +1583,7 @@ impl Parser<'_> {
         None
     }
 
-    fn parse_expr_3(self: &mut Self) -> Expr {
+    fn parse_expr_3(&mut self) -> Expr {
         trace::trace_parser!("rule <expr-3>");
         let mut expr: Expr = self.parse_expr_2_unary();
         loop {
@@ -1641,7 +1633,7 @@ impl Parser<'_> {
         expr
     }
 
-    fn parse_expr_4(self: &mut Self) -> Expr {
+    fn parse_expr_4(&mut self) -> Expr {
         trace::trace_parser!("rule <expr-4>");
         let mut expr: Expr = self.parse_expr_3();
         loop {
@@ -1664,7 +1656,7 @@ impl Parser<'_> {
         expr
     }
 
-    fn parse_expr_5(self: &mut Self) -> Expr {
+    fn parse_expr_5(&mut self) -> Expr {
         trace::trace_parser!("rule <expr-5>");
         let mut expr: Expr = self.parse_expr_4();
         loop {
@@ -1687,7 +1679,7 @@ impl Parser<'_> {
         expr
     }
 
-    fn parse_expr_6(self: &mut Self) -> Expr {
+    fn parse_expr_6(&mut self) -> Expr {
         trace::trace_parser!("rule <expr-6>");
         let mut expr: Expr = self.parse_expr_5();
         loop {
@@ -1708,7 +1700,7 @@ impl Parser<'_> {
         expr
     }
 
-    fn parse_expr_7(self: &mut Self) -> Expr {
+    fn parse_expr_7(&mut self) -> Expr {
         trace::trace_parser!("rule <expr-7>");
         let mut expr: Expr = self.parse_expr_6();
         loop {
@@ -1725,7 +1717,7 @@ impl Parser<'_> {
         expr
     }
 
-    fn parse_expr_8(self: &mut Self) -> Expr {
+    fn parse_expr_8(&mut self) -> Expr {
         trace::trace_parser!("rule <expr-8>");
         let mut expr: Expr = self.parse_expr_7();
         loop {
@@ -1752,7 +1744,7 @@ impl Parser<'_> {
         expr
     }
 
-    fn parse_expr_9(self: &mut Self) -> Expr {
+    fn parse_expr_9(&mut self) -> Expr {
         trace::trace_parser!("rule <expr-9>");
         let mut expr: Expr = self.parse_expr_8();
         loop {
@@ -1775,7 +1767,7 @@ impl Parser<'_> {
         expr
     }
 
-    fn parse_expr_10(self: &mut Self) -> Expr {
+    fn parse_expr_10(&mut self) -> Expr {
         trace::trace_parser!("rule <expr-10>");
         let mut expr: Expr = self.parse_expr_10_pattern_lvalue();
         loop {
@@ -1884,7 +1876,7 @@ impl Parser<'_> {
         expr
     }
 
-    fn parse_expr_10_pattern_lvalue(self: &mut Self) -> Expr {
+    fn parse_expr_10_pattern_lvalue(&mut self) -> Expr {
         // A subset of `<lvalue> = <rvalue>` get parsed as patterns. These are for non-trivial <lvalue>s, which cannot involve array or property access, and cannot involve operator-assignment statements.
         // We use backtracking as for these cases, we want to parse the `lvalue` separately.
 

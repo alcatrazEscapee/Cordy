@@ -11,7 +11,7 @@ use Opcode::{*};
 impl<'a> Parser<'a> {
 
     /// Emits an expression, with optimizations (if enabled)
-    pub fn emit_optimized_expr(self: &mut Self, mut expr: Expr) {
+    pub fn emit_optimized_expr(&mut self, mut expr: Expr) {
         if self.enable_optimization {
             expr = expr.optimize();
         }
@@ -20,7 +20,7 @@ impl<'a> Parser<'a> {
 
     /// Recursive version of the above.
     /// Does not call optimizations as the expression is already assumed to be optimized.
-    fn emit_expr(self: &mut Self, expr: Expr) {
+    fn emit_expr(&mut self, expr: Expr) {
         match expr {
             Expr(_, ExprType::Nil) => self.push(Nil),
             Expr(_, ExprType::Exit) => self.push(Exit),
@@ -208,7 +208,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn emit_closure_and_closed_locals(self: &mut Self, closed_locals: Vec<Opcode>) {
+    pub fn emit_closure_and_closed_locals(&mut self, closed_locals: Vec<Opcode>) {
         if !closed_locals.is_empty() {
             self.push(Closure);
             for op in closed_locals {
