@@ -63,10 +63,9 @@ pub enum Opcode {
     InitIterable,
 
     /// Expects the top of the stack to contain a `Value::Iter()`. Tests if this has reached the end of the iterable.
-    /// If yes, it will push `false`, and do nothing else.
-    /// If no, it will push the next value in the iterable, followed by `true`.
-    /// This is intended to be followed by a `JumpIfFalsePop(end of loop)`
-    TestIterable,
+    /// If yes, jump to the offset given by `i32`, i.e. the end of the loop.
+    /// If no, it will push the next value in the iterable.
+    TestIterable(i32),
 
     /// Pushes constant values `Nil`, `True` and `False
     Nil,
@@ -164,12 +163,13 @@ impl Opcode {
                 None => format!("{:?}", self),
             },
             GetField(fid) | SetField(fid) | GetFieldFunction(fid) => format!("{:?} -> {}", self, fields.get_field_name(*fid)),
-            JumpIfFalse(offset) | JumpIfFalsePop(offset) | JumpIfTrue(offset) | JumpIfTruePop(offset) | Jump(offset) => format!("{}({})", match self {
+            JumpIfFalse(offset) | JumpIfFalsePop(offset) | JumpIfTrue(offset) | JumpIfTruePop(offset) | Jump(offset) | TestIterable(offset) => format!("{}({})", match self {
                 JumpIfFalse(_) => "JumpIfFalse",
                 JumpIfFalsePop(_) => "JumpIfFalsePop",
                 JumpIfTrue(_) => "JumpIfTrue",
                 JumpIfTruePop(_) => "JumpIfTruePop",
                 Jump(_) => "Jump",
+                TestIterable(_) => "TestIterable",
                 _ => unreachable!()
             }, ip.add_offset(*offset + 1)),
             Binary(op) => format!("{:?}", op),
