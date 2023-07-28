@@ -1,5 +1,6 @@
 use std::cmp::{Ordering, Reverse};
 use std::collections::VecDeque;
+use fxhash::FxBuildHasher;
 use indexmap::IndexMap;
 
 use itertools::Itertools;
@@ -264,7 +265,7 @@ pub fn group_by<VM : VirtualInterface>(vm: &mut VM, by: Value, args: Value) -> V
         _ => {
             // Otherwise, we assume this is a group_by(f), in which case we assume the function to be a item -> key, and create a dictionary of keys -> vector of values
             // For capacity, we guess that we're halving. That seems to be a reasonable compromise between overestimating, and optimal values.
-            let mut groups: IndexMap<Value, Value> = IndexMap::with_capacity(iter.len() / 2);
+            let mut groups: IndexMap<Value, Value, FxBuildHasher> = IndexMap::with_capacity_and_hasher(iter.len() / 2, FxBuildHasher::default());
             let by: InvokeArg1 = InvokeArg1::from(by)?;
             for value in iter {
                 let key = by.invoke(value.clone(), vm)?;
