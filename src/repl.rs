@@ -20,7 +20,7 @@ pub trait Repl {
     /// - `Some(Ok(String))` indicates a string was read
     /// - `Some(Err(String))` indicates an error was raised, and should be raised
     /// - `None` indicates the interface was closed.
-    fn read(self: &mut Self, prompt: &'static str) -> Option<Result<String, String>>;
+    fn read(&mut self, prompt: &'static str) -> Option<Result<String, String>>;
 }
 
 /// If `repeat_input` is true, everything written to input will be written directly back to output via the VM's `println` functions
@@ -97,7 +97,7 @@ struct EditorRepl {
 }
 
 impl Repl for EditorRepl {
-    fn read(self: &mut Self, prompt: &'static str) -> Option<Result<String, String>> {
+    fn read(&mut self, prompt: &'static str) -> Option<Result<String, String>> {
         io::stdout().flush().unwrap();
         match self.editor.readline(prompt) {
             Ok(line) => {
@@ -105,7 +105,7 @@ impl Repl for EditorRepl {
                 Some(Ok(line))
             },
             Err(ReadlineError::Interrupted) | Err(ReadlineError::Eof) => None,
-            Err(e) => return Some(Err(format!("Error: {}", e))),
+            Err(e) => Some(Err(format!("Error: {}", e))),
         }
     }
 }

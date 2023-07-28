@@ -44,11 +44,11 @@ fn parse_args(args: Vec<String>) -> Option<(Option<String>, Mode, bool, Vec<Stri
     let mut enable_optimization: bool = false;
     let mut mode: Mode = Mode::Default;
 
-    if let None = iter.next() {
+    if iter.next().is_none() {
         panic!("Unexpected first argument");
     }
 
-    while let Some(arg) = iter.next() {
+    for arg in iter.by_ref() {
         match arg.as_str() {
             "-h" | "--help" => {
                 print_help();
@@ -75,7 +75,7 @@ fn run_vm(compiled: CompileResult, program_args: Vec<String>, view: SourceView) 
     let mut vm = VirtualMachine::new(compiled, view, stdin, stdout, program_args);
 
     match vm.run_until_completion() {
-        ExitType::Error(error) => Err(format!("{}", vm.view().format(&error))),
+        ExitType::Error(error) => Err(vm.view().format(&error)),
         _ => Ok(())
     }
 }

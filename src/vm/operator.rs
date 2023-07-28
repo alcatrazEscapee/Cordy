@@ -23,7 +23,7 @@ pub enum BinaryOp {
 }
 
 impl UnaryOp {
-    pub fn apply(self: Self, arg: Value) -> ValueResult {
+    pub fn apply(self, arg: Value) -> ValueResult {
         match self {
             UnaryOp::Neg => unary_sub(arg),
             UnaryOp::Not => unary_not(arg),
@@ -32,7 +32,7 @@ impl UnaryOp {
 }
 
 impl BinaryOp {
-    pub fn apply(self: Self, lhs: Value, rhs: Value) -> ValueResult {
+    pub fn apply(self, lhs: Value, rhs: Value) -> ValueResult {
         match self {
             BinaryOp::Mul => binary_mul(lhs, rhs),
             BinaryOp::Div => binary_div(lhs, rhs),
@@ -133,15 +133,15 @@ pub fn binary_div(a1: Value, a2: Value) -> ValueResult {
 #[inline]
 fn c64_div_floor(lhs: C64, rhs: C64) -> C64 {
     let norm_sqr = rhs.norm_sqr();
-    let re = lhs.re.clone() * rhs.re.clone() + lhs.im.clone() * rhs.im.clone();
+    let re = lhs.re * rhs.re + lhs.im * rhs.im;
     let im = lhs.im * rhs.re - lhs.re * rhs.im;
-    C64::new(num_integer::div_floor(re, norm_sqr.clone()), num_integer::div_floor(im, norm_sqr))
+    C64::new(num_integer::div_floor(re, norm_sqr), num_integer::div_floor(im, norm_sqr))
 }
 
 pub fn binary_mod(a1: Value, a2: Value) -> ValueResult {
     match (a1, a2) {
         (l @ (Bool(_) | Int(_)), r @ (Bool(_) | Int(_))) => Ok(Int(num_integer::mod_floor(l.as_int_unchecked(), r.as_int_unchecked()))),
-        (Str(l), r) => core::format_string(&*l, r),
+        (Str(l), r) => core::format_string(&l, r),
         (Vector(l), Vector(r)) => apply_vector_binary(l, r, binary_mod),
         (Vector(l), r) => apply_vector_binary_scalar_rhs(l, r, binary_mod),
         (l, Vector(r)) => apply_vector_binary_scalar_lhs(l, r, binary_mod),
@@ -197,7 +197,7 @@ pub fn binary_is(lhs: Value, rhs: Value) -> Result<bool, Box<RuntimeError>> {
             };
             Ok(ret)
         },
-        _ => return TypeErrorBinaryIs(lhs, rhs).err()
+        _ => TypeErrorBinaryIs(lhs, rhs).err()
     }
 }
 
@@ -262,7 +262,7 @@ pub fn binary_left_shift(a1: Value, a2: Value) -> ValueResult {
         (Vector(l), Vector(r)) => apply_vector_binary(l, r, binary_left_shift),
         (Vector(l), r) => apply_vector_binary_scalar_rhs(l, r, binary_left_shift),
         (l, Vector(r)) => apply_vector_binary_scalar_lhs(l, r, binary_left_shift),
-        (l, r) => return TypeErrorBinaryOp(BinaryOp::LeftShift, l, r).err(),
+        (l, r) => TypeErrorBinaryOp(BinaryOp::LeftShift, l, r).err(),
     }
 }
 
@@ -328,7 +328,7 @@ pub fn binary_bitwise_or(a1: Value, a2: Value) -> ValueResult {
         (Vector(l), Vector(r)) => apply_vector_binary(l, r, binary_bitwise_or),
         (Vector(l), r) => apply_vector_binary_scalar_rhs(l, r, binary_bitwise_or),
         (l, Vector(r)) => apply_vector_binary_scalar_lhs(l, r, binary_bitwise_or),
-        (l, r) => return TypeErrorBinaryOp(BinaryOp::Or, l, r).err()
+        (l, r) => TypeErrorBinaryOp(BinaryOp::Or, l, r).err()
     }
 }
 

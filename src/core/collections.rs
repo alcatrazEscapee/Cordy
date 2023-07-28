@@ -153,7 +153,7 @@ pub fn min_by<VM>(vm: &mut VM, by: Value, args: Value) -> ValueResult where VM :
             let mut err: Option<Box<RuntimeError>> = None;
             let ret = iter.min_by(|a, b|
                 util::yield_result(&mut err, ||
-                    cmp_to_ord(by.invoke((*a).clone(), (*b).clone(), vm)?.as_int()?), Ordering::Equal));
+                    Ok(by.invoke((*a).clone(), (*b).clone(), vm)?.as_int()?.cmp(&0)), Ordering::Equal));
             non_empty(util::join_result(ret, err)?)
         },
         Some(1) => {
@@ -181,7 +181,7 @@ pub fn max_by<VM>(vm: &mut VM, by: Value, args: Value) -> ValueResult where VM :
             let mut err: Option<Box<RuntimeError>> = None;
             let ret = iter.max_by(|a, b|
                 util::yield_result(&mut err, ||
-                    cmp_to_ord(by.invoke((*a).clone(), (*b).clone(), vm)?.as_int()?), Ordering::Equal));
+                    Ok(by.invoke((*a).clone(), (*b).clone(), vm)?.as_int()?.cmp(&0)), Ordering::Equal));
             non_empty(util::join_result(ret, err)?)
         },
         Some(1) => {
@@ -212,7 +212,7 @@ pub fn sort_by<VM : VirtualInterface>(vm: &mut VM, by: Value, args: Value) -> Va
             let mut err: Option<Box<RuntimeError>> = None;
             sorted.sort_unstable_by(|a, b|
                 util::yield_result(&mut err, ||
-                    cmp_to_ord(by.invoke(a.clone(), b.clone(), vm)?.as_int()?), Ordering::Equal));
+                    Ok(by.invoke(a.clone(), b.clone(), vm)?.as_int()?.cmp(&0)), Ordering::Equal));
             util::join_result((), err)?
         },
         Some(1) => {
@@ -229,23 +229,12 @@ pub fn sort_by<VM : VirtualInterface>(vm: &mut VM, by: Value, args: Value) -> Va
     Ok(sorted.into_iter().to_list())
 }
 
-#[inline(always)]
+#[inline]
 fn non_empty(it: Option<Value>) -> ValueResult {
     match it {
         Some(v) => Ok(v),
         None => ValueErrorValueMustBeNonEmpty.err()
     }
-}
-
-#[inline(always)]
-fn cmp_to_ord<E>(i: i64) -> Result<Ordering, E> {
-    Ok(if i == 0 {
-        Ordering::Equal
-    } else if i > 0 {
-        Ordering::Greater
-    } else {
-        Ordering::Less
-    })
 }
 
 
@@ -379,7 +368,7 @@ pub fn zip(args: impl Iterator<Item=Value>) -> ValueResult {
     let mut iters = args
         .map(|v| v.as_iter())
         .collect::<Result<Vec<Iterable>, Box<RuntimeError>>>()?;
-    if iters.len() == 0 {
+    if iters.is_empty() {
         return ValueErrorValueMustBeNonEmpty.err()
     }
     let size: usize = iters.iter()
@@ -481,7 +470,7 @@ pub fn insert(index: Value, value: Value, target: Value) -> ValueResult {
                 v.unbox_mut().push_back(value);
                 Ok(target)
             } else {
-                ValueErrorIndexOutOfBounds(index as i64, len).err()
+                ValueErrorIndexOutOfBounds(index, len).err()
             }
         },
         Dict(v) => match vm::guard_recursive_hash(|| v.unbox_mut().dict.insert(index, value)) {
@@ -500,7 +489,7 @@ pub fn remove(needle: Value, target: Value) -> ValueResult {
             if 0 <= index && index < v.unbox().len() as i64 {
                 Ok(v.unbox_mut().remove(index as usize).unwrap()) // .unwrap() is safe, as we pre-checked the index
             } else {
-                ValueErrorIndexOutOfBounds(index as i64, len).err()
+                ValueErrorIndexOutOfBounds(index, len).err()
             }
         },
         Set(v) => Ok(Bool(v.unbox_mut().set.remove(&needle))),

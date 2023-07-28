@@ -141,7 +141,7 @@ pub enum Opcode {
 
 impl Opcode {
 
-    pub fn disassembly<I : Iterator<Item=String>>(self: &Opcode, ip: usize, locals: &mut I, fields: &Fields, constants: &Vec<Value>) -> String {
+    pub fn disassembly<I : Iterator<Item=String>>(self: &Opcode, ip: usize, locals: &mut I, fields: &Fields, constants: &[Value]) -> String {
         match self {
             Constant(id) => {
                 let constant = &constants[*id as usize];
@@ -175,7 +175,7 @@ impl Opcode {
             Binary(op) => format!("{:?}", op),
             Unary(op) => format!("{:?}", op),
             NativeFunction(op) => format!("{:?}", op),
-            Unroll(_) => format!("Unroll"),
+            Unroll(_) => String::from("Unroll"),
             Call(nargs, unroll) => format!("Call{}({})", if *unroll { "..." } else { "" }, nargs),
             _ => format!("{:?}", self),
         }

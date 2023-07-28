@@ -59,12 +59,12 @@ pub enum RuntimeError {
 
 impl RuntimeError {
     #[cold]
-    pub fn err<T>(self: Self) -> Result<T, Box<RuntimeError>> {
+    pub fn err<T>(self) -> Result<T, Box<RuntimeError>> {
         Err(Box::new(self))
     }
 
-    pub fn with_stacktrace(self: Self, ip: usize, call_stack: &Vec<CallFrame>, functions: &Vec<Value>, locations: &Vec<Location>) -> DetailRuntimeError {
-        const REPEAT_LIMIT: usize = 0;
+    pub fn with_stacktrace(self, ip: usize, call_stack: &[CallFrame], functions: &[Value], locations: &[Location]) -> DetailRuntimeError {
+        const REPEAT_LIMIT: usize = 3;
 
         // Top level stack frame refers to the code being executed
         let target: Location = locations.get(ip).copied().unwrap_or(Location::empty());
@@ -122,17 +122,17 @@ enum StackFrame {
 }
 
 impl AsError for DetailRuntimeError {
-    fn as_error(self: &Self) -> String {
+    fn as_error(&self) -> String {
         self.error.as_error()
     }
 }
 
 impl AsErrorWithContext for DetailRuntimeError {
-    fn location(self: &Self) -> Location {
+    fn location(&self) -> Location {
         self.target
     }
 
-    fn add_stack_trace_elements(self: &Self, view: &SourceView, text: &mut String) {
+    fn add_stack_trace_elements(&self, view: &SourceView, text: &mut String) {
         for frame in &self.stack {
             text.push_str(match frame {
                 StackFrame::Simple(_, loc, site) => format!("  at: `{}` (line {})\n", site, view.lineno(*loc).unwrap_or(0) + 1),
@@ -145,7 +145,7 @@ impl AsErrorWithContext for DetailRuntimeError {
 
 /// The owning function for a given IP can be defined as the closest function which encloses the desired instruction
 /// We annotate both head and tail of `FunctionImpl` to make this search easy
-fn find_owning_function(ip: usize, functions: &Vec<Value>) -> String {
+fn find_owning_function(ip: usize, functions: &[Value]) -> String {
     functions.iter()
         .filter_map(|f| match f { Value::Function(f) => Some(f), _ => None})
         .filter(|f| f.head <= ip && ip <= f.tail)

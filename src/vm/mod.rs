@@ -65,11 +65,8 @@ pub enum ExitType {
 }
 
 impl ExitType {
-    pub fn is_early_exit(self: &Self) -> bool {
-        match self {
-            ExitType::Exit | ExitType::Error(_) => true,
-            _ => false,
-        }
+    pub fn is_early_exit(&self) -> bool {
+        matches!(self, ExitType::Exit | ExitType::Error(_))
     }
 
     fn of<R: BufRead, W: Write>(vm: &mut VirtualMachine<R, W>, result: AnyResult) -> ExitType {
@@ -86,30 +83,30 @@ impl ExitType {
 pub trait VirtualInterface {
     // Invoking Functions
 
-    fn invoke_func0(self: &mut Self, f: Value) -> ValueResult;
-    fn invoke_func1(self: &mut Self, f: Value, a1: Value) -> ValueResult;
-    fn invoke_func2(self: &mut Self, f: Value, a1: Value, a2: Value) -> ValueResult;
-    fn invoke_func(self: &mut Self, f: Value, args: &Vec<Value>) -> ValueResult;
+    fn invoke_func0(&mut self, f: Value) -> ValueResult;
+    fn invoke_func1(&mut self, f: Value, a1: Value) -> ValueResult;
+    fn invoke_func2(&mut self, f: Value, a1: Value, a2: Value) -> ValueResult;
+    fn invoke_func(&mut self, f: Value, args: &Vec<Value>) -> ValueResult;
 
-    fn invoke_eval(self: &mut Self, s: &String) -> ValueResult;
+    fn invoke_eval(&mut self, s: &String) -> ValueResult;
 
     // Wrapped IO
-    fn println0(self: &mut Self);
-    fn println(self: &mut Self, str: String);
-    fn print(self: &mut Self, str: String);
+    fn println0(&mut self);
+    fn println(&mut self, str: String);
+    fn print(&mut self, str: String);
 
-    fn read_line(self: &mut Self) -> String;
-    fn read(self: &mut Self) -> String;
+    fn read_line(&mut self) -> String;
+    fn read(&mut self) -> String;
 
-    fn get_envs(self: &Self) -> Value;
-    fn get_env(self: &Self, name: &String) -> Value;
-    fn get_args(self: &Self) -> Value;
+    fn get_envs(&self) -> Value;
+    fn get_env(&self, name: &String) -> Value;
+    fn get_args(&self) -> Value;
 
     // Stack Manipulation
-    fn peek(self: &Self, offset: usize) -> &Value;
-    fn pop(self: &mut Self) -> Value;
-    fn popn(self: &mut Self, n: u32) -> Vec<Value>;
-    fn push(self: &mut Self, value: Value);
+    fn peek(&self, offset: usize) -> &Value;
+    fn pop(&mut self) -> Value;
+    fn popn(&mut self, n: u32) -> Vec<Value>;
+    fn push(&mut self, value: Value);
 }
 
 
@@ -154,36 +151,36 @@ impl<R, W> VirtualMachine<R, W> where
         }
     }
 
-    pub fn view(self: &Self) -> &SourceView {
+    pub fn view(&self) -> &SourceView {
         &self.view
     }
 
-    pub fn view_mut(self: &mut Self) -> &mut SourceView {
+    pub fn view_mut(&mut self) -> &mut SourceView {
         &mut self.view
     }
 
     /// Bridge method to `compiler::incremental_compile`
-    pub fn incremental_compile(self: &mut Self, locals: &mut Vec<Locals>) -> IncrementalCompileResult {
+    pub fn incremental_compile(&mut self, locals: &mut Vec<Locals>) -> IncrementalCompileResult {
         compiler::incremental_compile(self.as_compile_parameters(false, locals))
     }
 
     /// Bridge method to `compiler::eval_compile`
-    pub fn eval_compile(self: &mut Self, text: &String) -> AnyResult {
+    pub fn eval_compile(&mut self, text: &String) -> AnyResult {
         let mut locals = Locals::empty();
         compiler::eval_compile(text, self.as_compile_parameters(false, &mut locals))
     }
 
-    fn as_compile_parameters<'a, 'b: 'a, 'c: 'a>(self: &'b mut Self, enable_optimization: bool, locals: &'c mut Vec<Locals>) -> CompileParameters<'a> {
+    fn as_compile_parameters<'a, 'b: 'a, 'c: 'a>(&'b mut self, enable_optimization: bool, locals: &'c mut Vec<Locals>) -> CompileParameters<'a> {
         CompileParameters::new(enable_optimization, &mut self.code, &mut self.constants, &mut self.globals, &mut self.locations, &mut self.fields, locals, &mut self.view)
     }
 
-    pub fn run_until_completion(self: &mut Self) -> ExitType {
+    pub fn run_until_completion(&mut self) -> ExitType {
         let result = self.run();
         ExitType::of(self, result)
     }
 
     /// Recovers the VM into an operational state, in case previous instructions terminated in an error or in the middle of a function
-    pub fn run_recovery(self: &mut Self, locals: usize) {
+    pub fn run_recovery(&mut self, locals: usize) {
         self.call_stack.truncate(1);
         self.stack.truncate(locals);
         self.literal_stack.clear();
@@ -191,7 +188,7 @@ impl<R, W> VirtualMachine<R, W> where
     }
 
     /// Runs until the current call frame is dropped. Used to invoke a user function from native code.
-    fn run_frame(self: &mut Self) -> AnyResult {
+    fn run_frame(&mut self) -> AnyResult {
         let drop_frame: usize = self.call_stack.len() - 1;
         loop {
             let op: Opcode = self.next_op();
@@ -202,7 +199,7 @@ impl<R, W> VirtualMachine<R, W> where
         }
     }
 
-    fn run(self: &mut Self) -> AnyResult {
+    fn run(&mut self) -> AnyResult {
         #[cfg(test)]
         let mut limit = 0;
         loop {
@@ -219,7 +216,7 @@ impl<R, W> VirtualMachine<R, W> where
     }
 
     /// Executes a single instruction
-    fn run_instruction(self: &mut Self, op: Opcode) -> AnyResult {
+    fn run_instruction(&mut self, op: Opcode) -> AnyResult {
         trace::trace_interpreter!("vm::run op={:?}", op);
         match op {
             Noop => panic!("Noop should only be emitted as a temporary instruction"),
@@ -409,17 +406,14 @@ impl<R, W> VirtualMachine<R, W> where
 
             LiftUpValue(index) => {
                 let index = self.frame_pointer() + index as usize;
-                match self.open_upvalues.remove(&index) {
-                    Some(upvalue) => {
-                        let value: Value = self.stack[index].clone();
-                        let unboxed: UpValue = (*upvalue).replace(UpValue::Open(0));
-                        let closed: UpValue = match unboxed {
-                            UpValue::Open(_) => UpValue::Closed(value),
-                            UpValue::Closed(_) => panic!("Tried to life an already closed upvalue"),
-                        };
-                        (*upvalue).replace(closed);
-                    },
-                    None => {}, // This upvalue was never captured - the code path that would've created a closure didn't run, so we don't need to lift it
+                if let Some(upvalue) = self.open_upvalues.remove(&index) {
+                    let value: Value = self.stack[index].clone();
+                    let unboxed: UpValue = (*upvalue).replace(UpValue::Open(0));
+                    let closed: UpValue = match unboxed {
+                        UpValue::Open(_) => UpValue::Closed(value),
+                        UpValue::Closed(_) => panic!("Tried to life an already closed upvalue"),
+                    };
+                    (*upvalue).replace(closed);
                 }
             },
 
@@ -597,23 +591,23 @@ impl<R, W> VirtualMachine<R, W> where
     // ===== Basic Ops ===== //
 
     /// Returns the current `frame_pointer`
-    fn frame_pointer(self: &Self) -> usize {
+    fn frame_pointer(&self) -> usize {
         self.call_stack[self.call_stack.len() - 1].frame_pointer
     }
 
     /// Returns the current `return_ip`
-    fn return_ip(self: &Self) -> usize {
+    fn return_ip(&self) -> usize {
         self.call_stack[self.call_stack.len() - 1].return_ip
     }
 
     /// Returns the next opcode and increments `ip`
-    fn next_op(self: &mut Self) -> Opcode {
+    fn next_op(&mut self) -> Opcode {
         let op: Opcode = self.code[self.ip];
         self.ip += 1;
         op
     }
 
-    fn invoke_and_spin(self: &mut Self, nargs: u32) -> ValueResult {
+    fn invoke_and_spin(&mut self, nargs: u32) -> ValueResult {
         match self.invoke(nargs)? {
             FunctionType::Native => {},
             FunctionType::User => self.run_frame()?
@@ -627,7 +621,7 @@ impl<R, W> VirtualMachine<R, W> where
     /// The arguments and function will be popped and the return value will be left on the top of the stack.
     ///
     /// Returns a `Result` which may contain an error which occurred during function evaluation.
-    fn invoke(self: &mut Self, nargs: u32) -> Result<FunctionType, Box<RuntimeError>> {
+    fn invoke(&mut self, nargs: u32) -> Result<FunctionType, Box<RuntimeError>> {
         let f: &Value = self.peek(nargs as usize);
         trace::trace_interpreter!("vm::invoke func={:?}, nargs={}", f, nargs);
         match f {
@@ -779,12 +773,12 @@ impl<R, W> VirtualMachine<R, W> where
                 self.push(ret);
                 Ok(FunctionType::Native)
             },
-            _ => return ValueIsNotFunctionEvaluable(f.clone()).err(),
+            _ => ValueIsNotFunctionEvaluable(f.clone()).err(),
         }
     }
 
     /// Calls a user function by building a `CallFrame` and jumping to the function's `head` IP
-    fn call_function(self: &mut Self, head: usize, nargs: u32, num_var_args: Option<u32>) {
+    fn call_function(&mut self, head: usize, nargs: u32, num_var_args: Option<u32>) {
         let frame = CallFrame {
             return_ip: self.ip,
             frame_pointer: self.stack.len() - (nargs as usize),
@@ -801,11 +795,11 @@ impl<R, W> VirtualMachine<R, W> where
 
     // ===== Debug Methods ===== //
 
-    pub fn debug_stack(self: &Self) -> String {
+    pub fn debug_stack(&self) -> String {
         format!(": [{}]", self.stack.iter().rev().map(|t| t.as_debug_str()).collect::<Vec<String>>().join(", "))
     }
 
-    pub fn debug_call_stack(self: &Self) -> String {
+    pub fn debug_call_stack(&self) -> String {
         format!(": [{}]", self.call_stack.iter().rev().map(|t| format!("{{fp: {}, ret: {}}}", t.frame_pointer, t.return_ip)).collect::<Vec<String>>().join(", "))
     }
 }
@@ -817,25 +811,25 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
 {
     // ===== Calling Functions External Interface ===== //
 
-    fn invoke_func0(self: &mut Self, f: Value) -> ValueResult {
+    fn invoke_func0(&mut self, f: Value) -> ValueResult {
         self.push(f);
         self.invoke_and_spin(0)
     }
 
-    fn invoke_func1(self: &mut Self, f: Value, a1: Value) -> ValueResult {
+    fn invoke_func1(&mut self, f: Value, a1: Value) -> ValueResult {
         self.push(f);
         self.push(a1);
         self.invoke_and_spin(1)
     }
 
-    fn invoke_func2(self: &mut Self, f: Value, a1: Value, a2: Value) -> ValueResult {
+    fn invoke_func2(&mut self, f: Value, a1: Value, a2: Value) -> ValueResult {
         self.push(f);
         self.push(a1);
         self.push(a2);
         self.invoke_and_spin(2)
     }
 
-    fn invoke_func(self: &mut Self, f: Value, args: &Vec<Value>) -> ValueResult {
+    fn invoke_func(&mut self, f: Value, args: &Vec<Value>) -> ValueResult {
         self.push(f);
         for arg in args {
             self.push(arg.clone());
@@ -843,7 +837,7 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
         self.invoke_and_spin(args.len() as u32)
     }
 
-    fn invoke_eval(self: &mut Self, text: &String) -> ValueResult {
+    fn invoke_eval(&mut self, text: &String) -> ValueResult {
         let eval_head: usize = self.code.len();
 
         self.eval_compile(text)?;
@@ -856,32 +850,32 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
 
     // ===== IO Methods ===== //
 
-    fn println0(self: &mut Self) { writeln!(&mut self.write, "").unwrap(); }
-    fn println(self: &mut Self, str: String) { writeln!(&mut self.write, "{}", str).unwrap(); }
-    fn print(self: &mut Self, str: String) { write!(&mut self.write, "{}", str).unwrap(); }
+    fn println0(&mut self) { writeln!(&mut self.write).unwrap(); }
+    fn println(&mut self, str: String) { writeln!(&mut self.write, "{}", str).unwrap(); }
+    fn print(&mut self, str: String) { write!(&mut self.write, "{}", str).unwrap(); }
 
-    fn read_line(self: &mut Self) -> String {
+    fn read_line(&mut self) -> String {
         let mut buf = String::new();
         self.read.read_line(&mut buf).unwrap();
         util::strip_line_ending(&mut buf);
         buf
     }
 
-    fn read(self: &mut Self) -> String {
+    fn read(&mut self) -> String {
         let mut buf = String::new();
         self.read.read_to_string(&mut buf).unwrap();
         buf
     }
 
-    fn get_envs(self: &Self) -> Value {
+    fn get_envs(&self) -> Value {
         std::env::vars().map(|(k, v)| (k.to_value(), v.to_value())).to_dict()
     }
 
-    fn get_env(self: &Self, name: &String) -> Value {
+    fn get_env(&self, name: &String) -> Value {
         std::env::var(name).map_or(Value::Nil, |u| u.to_value())
     }
 
-    fn get_args(self: &Self) -> Value {
+    fn get_args(&self) -> Value {
         self.args.clone()
     }
 
@@ -889,7 +883,7 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
     // ===== Stack Manipulations ===== //
 
     /// Peeks at the top element of the stack, or an element `offset` down from the top
-    fn peek(self: &Self, offset: usize) -> &Value {
+    fn peek(&self, offset: usize) -> &Value {
         trace::trace_interpreter_stack!("peek({}) -> {}", offset, self.stack[self.stack.len() - 1 - offset].as_debug_str());
         let ret = self.stack.get(self.stack.len() - 1 - offset).unwrap();
         trace::trace_interpreter_stack!("{}", self.debug_stack());
@@ -897,7 +891,7 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
     }
 
     /// Pops the top of the stack
-    fn pop(self: &mut Self) -> Value {
+    fn pop(&mut self) -> Value {
         trace::trace_interpreter_stack!("pop() -> {}", self.stack.last().unwrap().as_debug_str());
         let ret = self.stack.pop().unwrap();
         trace::trace_interpreter_stack!("{}", self.debug_stack());
@@ -905,14 +899,14 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
     }
 
     /// Pops the top N values off the stack, in order
-    fn popn(self: &mut Self, n: u32) -> Vec<Value> {
-        let ret = splice(&mut self.stack, n as u32).collect();
+    fn popn(&mut self, n: u32) -> Vec<Value> {
+        let ret = splice(&mut self.stack, n).collect();
         trace::trace_interpreter_stack!("{}", self.debug_stack());
         ret
     }
 
     /// Push a value onto the stack
-    fn push(self: &mut Self, value: Value) {
+    fn push(&mut self, value: Value) {
         trace::trace_interpreter_stack!("push({})", value.as_debug_str());
         self.stack.push(value);
         trace::trace_interpreter_stack!("{}", self.debug_stack());

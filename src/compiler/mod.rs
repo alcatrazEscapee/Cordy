@@ -60,9 +60,9 @@ pub fn incremental_compile(mut params: CompileParameters) -> IncrementalCompileR
 ///
 /// This is the API used to run an `eval()` statement.
 pub fn eval_compile(text: &String, mut params: CompileParameters) -> Result<(), Box<RuntimeError>> {
-    params.view.push(String::from("<eval>"), text.clone());
+    params.view.push(String::from("<eval>"), text.to_owned());
     try_incremental_compile(&mut params, |parser| parser.parse_incremental_eval(), false)
-        .as_ok_or_runtime_error()
+        .ok_or_runtime_error()
 }
 
 
@@ -142,7 +142,7 @@ impl<'a> CompileParameters<'a> {
         CompileParameters { enable_optimization, code, constants, globals, locations, fields, locals, view }
     }
 
-    fn save(self: &Self) -> CompileState {
+    fn save(&self) -> CompileState {
         CompileState {
             code: self.code.len(),
             constants: self.constants.len(),
@@ -153,7 +153,7 @@ impl<'a> CompileParameters<'a> {
         }
     }
 
-    fn restore(self: &mut Self, state: CompileState) {
+    fn restore(&mut self, state: CompileState) {
         self.code.truncate(state.code);
         self.constants.truncate(state.constants);
         self.globals.truncate(state.globals);
@@ -185,7 +185,7 @@ pub struct CompileResult {
 
 impl CompileResult {
 
-    pub fn disassemble(self: &Self, view: &SourceView) -> Vec<String> {
+    pub fn disassemble(&self, view: &SourceView) -> Vec<String> {
         let mut lines: Vec<String> = Vec::new();
         let mut width: usize = 0;
         let mut longest: usize = view.len();
@@ -234,7 +234,7 @@ pub enum IncrementalCompileResult {
 }
 
 impl IncrementalCompileResult {
-    fn as_ok_or_runtime_error(self: Self) -> Result<(), Box<RuntimeError>> {
+    fn ok_or_runtime_error(self) -> Result<(), Box<RuntimeError>> {
         match self {
             IncrementalCompileResult::Success => Ok(()),
             IncrementalCompileResult::Errors(e) => RuntimeError::RuntimeCompilationError(e).err(),
@@ -242,11 +242,8 @@ impl IncrementalCompileResult {
         }
     }
 
-    fn is_success(self: &Self) -> bool {
-        match self {
-            IncrementalCompileResult::Success => true,
-            _ => false
-        }
+    fn is_success(&self) -> bool {
+        matches!(self, IncrementalCompileResult::Success)
     }
 }
 
