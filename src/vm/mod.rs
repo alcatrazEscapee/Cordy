@@ -188,21 +188,10 @@ impl<R, W> VirtualMachine<R, W> where
         self.ip = self.code.len();
     }
 
-    /// Runs until the current call frame is dropped. Used to invoke a user function from native code.
-    fn run_frame(&mut self) -> AnyResult {
-        let drop_frame: usize = self.call_stack.len() - 1;
-        loop {
-            let op: Opcode = self.next_op();
-            self.run_instruction(op)?;
-            if drop_frame == self.call_stack.len() {
-                return Ok(())
-            }
-        }
-    }
-
     fn run(&mut self) -> AnyResult {
         #[cfg(test)]
         let mut limit = 0;
+        let drop_frame: usize = self.call_stack.len() - 1;
         loop {
             #[cfg(test)]
             {
@@ -213,10 +202,14 @@ impl<R, W> VirtualMachine<R, W> where
             }
             let op: Opcode = self.next_op();
             self.run_instruction(op)?;
+            if drop_frame == self.call_stack.len() {
+                return Ok(())
+            }
         }
     }
 
     /// Executes a single instruction
+    #[inline(always)]
     fn run_instruction(&mut self, op: Opcode) -> AnyResult {
         trace::trace_interpreter!("vm::run op={:?}", op);
         match op {
@@ -611,7 +604,7 @@ impl<R, W> VirtualMachine<R, W> where
     fn invoke_and_spin(&mut self, nargs: u32) -> ValueResult {
         match self.invoke(nargs)? {
             FunctionType::Native => {},
-            FunctionType::User => self.run_frame()?
+            FunctionType::User => self.run()?
         }
         Ok(self.pop())
     }
@@ -843,7 +836,7 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
 
         self.eval_compile(text)?;
         self.call_function(eval_head, 0, None);
-        self.run_frame()?;
+        self.run()?;
         let ret = self.pop();
         self.push(Value::Nil); // `eval` executes as a user function but is called like a native function, this prevents stack fuckery
         Ok(ret)
