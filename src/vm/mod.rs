@@ -255,13 +255,13 @@ impl<R, W> VirtualMachine<R, W> where
                 // [prev values ... function, local0, local1, ... localN, ret_val ]
                 //                            ^frame pointer
                 // So, we pop the return value, truncate the difference between the frame pointer and the top, then push the return value
-                let ret: Value = self.pop();
-                self.stack.truncate(self.frame_pointer() - 1);
                 trace::trace_interpreter_stack!("drop frame {}", self.debug_stack());
-                self.push(ret);
 
-                self.ip = self.return_ip();
-                self.call_stack.pop().unwrap();
+                let frame: CallFrame = self.call_stack.pop().unwrap(); // Pop the call frame
+
+                self.stack.swap_remove(frame.frame_pointer - 1); // This removes the function, and drops it, and it gets automatically replaced with the return value
+                self.stack.truncate(frame.frame_pointer); // Drop all values above the frame pointer
+                self.ip = frame.return_ip; // And jump to the return address
             },
 
             // Stack Manipulations
@@ -587,11 +587,6 @@ impl<R, W> VirtualMachine<R, W> where
     /// Returns the current `frame_pointer`
     fn frame_pointer(&self) -> usize {
         self.call_stack[self.call_stack.len() - 1].frame_pointer
-    }
-
-    /// Returns the current `return_ip`
-    fn return_ip(&self) -> usize {
-        self.call_stack[self.call_stack.len() - 1].return_ip
     }
 
     /// Returns the next opcode and increments `ip`
