@@ -53,25 +53,14 @@ impl OffsetAdd<i32> for u32 { fn add_offset(self, offset: i32) -> Self { (self a
 impl OffsetAdd<i32> for usize { fn add_offset(self, offset: i32) -> Self { (self as isize + offset as isize) as usize } }
 
 
-pub struct RecursionGuard(Vec<ValuePtr>);
-
-impl RecursionGuard {
-    pub fn new() -> RecursionGuard { RecursionGuard(Vec::new()) }
-
-    /// Returns `true` if the value has been seen before, triggering an early exit
-    pub fn enter(&mut self, value: &Value) -> bool {
-        let boxed = ValuePtr(value.clone());
-        let ret = self.0.contains(&boxed);
-        self.0.push(boxed);
-        ret
-    }
-
-    pub fn leave(&mut self) {
-        self.0.pop().unwrap(); // `.unwrap()` is safe as we should always call `enter()` before `leave()`
-    }
+macro_rules! impl_partial_ord {
+    ($ty:ty) => {
+        impl PartialOrd for $ty {
+            fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+                Some(self.cmp(&other))
+            }
+        }
+    };
 }
 
-struct ValuePtr(Value);
-
-impl PartialEq for ValuePtr { fn eq(&self, other: &Self) -> bool { self.0.ptr_eq(&other.0) } }
-impl Eq for ValuePtr {}
+pub use impl_partial_ord;
