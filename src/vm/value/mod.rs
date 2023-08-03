@@ -5,7 +5,6 @@ use std::collections::{BinaryHeap, HashMap, VecDeque};
 use std::fmt::{Debug, Formatter};
 use std::hash::{Hash, Hasher};
 use std::iter::FusedIterator;
-use std::mem;
 use std::rc::Rc;
 use std::str::Chars;
 use fxhash::FxBuildHasher;
@@ -13,14 +12,178 @@ use indexmap::{IndexMap, IndexSet};
 use itertools::Itertools;
 
 use crate::compiler::Fields;
-use crate::util::RecursionGuard;
 use crate::core;
 use crate::core::{InvokeArg0, NativeFunction, PartialArgument};
-use crate::vm::ValueResult;
 use crate::vm::error::RuntimeError;
+
+pub use crate::vm::value::ptr::ValuePtr;
 
 use Value::{*};
 use RuntimeError::{*};
+use crate::vm::value::ptr::{Prefix, SharedPrefix};
+
+
+mod ptr;
+
+
+/// `Type` is an enumeration of all the possible types (not including user-defined type variants such as `struct`s) possible in Cordy.
+/// These are the types that are present and checked at runtime.
+#[repr(u8)]
+#[derive(Clone, Copy, Eq, PartialEq, Debug)]
+pub enum Type {
+    Nil,
+    Bool,
+    Int,
+    Native,
+    Complex,
+    Str,
+    List,
+    Set,
+    Dict,
+    Heap,
+    Vector,
+    Struct,
+    StructType,
+    Range,
+    Enumerate,
+    Slice,
+    Iter,
+    Memoized,
+    GetField,
+    Function,
+    PartialFunction,
+    PartialNativeFunction,
+    Closure,
+    Error,
+    None, // Useful when we would otherwise hold an `Option<ValuePtr>` - this compresses the `None` state
+}
+
+
+/// A trait marking the value type of an owned piece of data.
+/// This means a `ValuePtr` may point to a `Prefix<T : OwnedValue>`
+pub trait OwnedValue {}
+
+/// A trait marking the value type of a shared (reference counted) piece of data.
+/// This means a `ValuePtr` may point to a `SharedPrefix<T : SharedValue>`
+pub trait SharedValue {}
+
+
+/// A specialized reference-equality version of `ValuePtr`. Unlike `ValuePtr`, this does not manage any memory, and can be created multiple times from a `ValuePtr`
+///
+/// This only is for tracking reference equality between two values. Note that because this is a direct copy of the _pointer_, there is no
+/// guarantee that it stays valid, and converting back to a `ValuePtr` is explicitly undefined behavior.
+#[derive(Debug, Eq, PartialEq)]
+pub struct ValueRef {
+    ptr: usize
+}
+
+impl ValueRef {
+    pub(super) fn new(ptr: usize) -> ValueRef {
+        ValueRef { ptr }
+    }
+}
+
+
+/// An explicit wrapper for `Option<ValuePtr>`. Note that due to unused bit patterns, we don't need to ever wrap `ValuePtr` in an `Option<T>` (as that would waste bytes.
+/// However, it is _very unclear_, and bad coding style, to always have `ValuePtr` when it's unclear if it should be optional. So, in all situations where a `ValuePtr` should be treated as a `Option<ValuePtr>`, we box it in this struct instead.
+///
+/// The contract here ensures that when we match against this, as an optional (which should be completely inline-able, and zero cost), we unwrap something that is not `None`
+pub struct ValueOption {
+    ptr: ValuePtr
+}
+
+impl ValueOption {
+    pub fn none() -> ValueOption {
+        ValueOption { ptr: ValuePtr::none() }
+    }
+
+    pub fn some(ptr: ValuePtr) -> ValueOption {
+        debug_assert!(!ptr.is_none()); // Should never create a `some()` from a `none()`
+        ValueOption { ptr }
+    }
+
+    #[inline(always)]
+    pub fn as_option(self) -> Option<ValuePtr> {
+        match self.ptr.is_none() {
+            true => None,
+            false => Some(self.ptr)
+        }
+    }
+
+    #[inline]
+    pub fn is_none(&self) -> bool {
+        self.ptr.is_none()
+    }
+
+    #[inline]
+    pub fn is_some(&self) -> bool {
+        !self.ptr.is_none()
+    }
+
+    /// Takes the value out of the option, leaving `None` in its place.
+    #[inline]
+    pub fn take(&mut self) -> ValueOption {
+        std::mem::replace(&mut self, ValueOption::none())
+    }
+}
+
+impl From<Option<ValuePtr>> for ValueOption {
+    fn from(value: Option<ValuePtr>) -> Self {
+        match value {
+            Some(ptr) => ValueOption::some(ptr),
+            None => ValueOption::none(),
+        }
+    }
+}
+
+/// Like `Result<ValuePtr, Err>`, but again, since `ValuePtr` boxes the error inside it, this makes it explicit.
+pub struct ValueResult {
+    ptr: ValuePtr
+}
+
+impl ValueResult {
+    pub fn ok(ptr: ValuePtr) -> ValueResult {
+        debug_assert!(!ptr.is_err()); // Should never have an error-type in `ok()`
+        ValueResult { ptr }
+    }
+
+    pub fn err(err: RuntimeError) -> ValueResult {
+        ValueResult { ptr: err.to_value() }
+    }
+
+    /// Boxes this `ValueResult` into a traditional Rust `Result<T, E>`. The left will be guaranteed to contain a non-error type, and the right will be guaranteed to contain an error.
+    #[inline(always)]
+    pub fn as_result(self) -> Result<ValuePtr, ValuePtr> {
+        match self.ptr.is_err() {
+            true => Err(self.ptr),
+            false => Ok(self.ptr)
+        }
+    }
+
+    #[inline]
+    pub fn is_ok(&self) -> bool {
+        !self.ptr.is_err()
+    }
+
+    #[inline]
+    pub fn is_err(&self) -> bool {
+        self.ptr.is_err()
+    }
+}
+
+impl From<Result<ValuePtr, RuntimeError>> for ValueResult {
+    fn from(value: Result<ValuePtr, RuntimeError>) -> Self {
+        match value {
+            Ok(ptr) => ValueResult::ok(ptr),
+            Err(err) => ValueResult::err(err)
+        }
+    }
+}
+
+
+impl ValuePtr {
+
+}
 
 
 pub type C64 = num_complex::Complex<i64>;
@@ -130,7 +293,7 @@ impl Value {
 
     /// Converts the `Value` to a representative `String. This is equivalent to the stdlib function `repr()`, and meant to be an inverse of `eval()`
     pub fn to_repr_str(&self) -> String { self.safe_to_repr_str(&mut RecursionGuard::new()) }
-    
+
     fn safe_to_repr_str(&self, rc: &mut RecursionGuard) -> String {
         macro_rules! recursive_guard {
             ($default:expr, $recursive:expr) => {{
@@ -496,19 +659,6 @@ impl Value {
     /// Returns if the `Value` is function-evaluable.
     /// Note that single-element lists are not considered functions here.
     pub fn is_function(&self) -> bool { matches!(self, Function(_) | PartialFunction(_) | NativeFunction(_) | PartialNativeFunction(_, _) | Closure(_) | StructType(_) | Slice(_)) }
-
-    pub fn ptr_eq(&self, other: &Value) -> bool {
-        match (&self, &other) {
-            (List(l), List(r)) => l.ptr_eq(r),
-            (Set(l), Set(r)) => l.ptr_eq(r),
-            (Dict(l), Dict(r)) => l.ptr_eq(r),
-            (Heap(l), Heap(r)) => l.ptr_eq(r),
-            (Vector(l), Vector(r)) => l.ptr_eq(r),
-            (Struct(l), Struct(r)) => l.ptr_eq(r),
-            _ if mem::discriminant(self) != mem::discriminant(other) => false,
-            _ => panic!("Value::ptr_eq() should only be called on boxed mutable pointer types"),
-        }
-    }
 }
 
 /// Implement Ord and PartialOrd explicitly, to derive implementations for each individual type.
@@ -551,119 +701,89 @@ impl Ord for Value {
 /// A trait which is responsible for converting native types into a `Value`.
 /// It is preferred to boxing these types directly using `Value::Foo()`, as most types have inner complexity that needs to be managed.
 pub trait IntoValue {
-    fn to_value(self) -> Value;
+    fn to_value(self) -> ValuePtr;
 }
 
-impl IntoValue for Value { fn to_value(self) -> Value { self } }
-impl IntoValue for bool { fn to_value(self) -> Value { Bool(self) } }
-impl IntoValue for i64 { fn to_value(self) -> Value { Int(self) } }
-impl IntoValue for usize { fn to_value(self) -> Value { Int(self as i64) } }
-impl IntoValue for char { fn to_value(self) -> Value { Str(Rc::new(String::from(self))) } }
-impl<'a> IntoValue for &'a str { fn to_value(self) -> Value { Str(Rc::new(String::from(self))) } }
-impl IntoValue for NativeFunction { fn to_value(self) -> Value { NativeFunction(self) } }
-impl IntoValue for String { fn to_value(self) -> Value { Str(Rc::new(self)) } }
-impl IntoValue for VecDeque<Value> { fn to_value(self) -> Value { List(Mut::new(self)) } }
-impl IntoValue for Vec<Value> { fn to_value(self) -> Value { Vector(Mut::new(self)) } }
-impl IntoValue for IndexSet<Value, FxBuildHasher> { fn to_value(self) -> Value { Set(Mut::new(SetImpl { set: self })) } }
-impl IntoValue for IndexMap<Value, Value, FxBuildHasher> { fn to_value(self) -> Value { Dict(Mut::new(DictImpl { dict: self, default: None })) } }
-impl IntoValue for BinaryHeap<Reverse<Value>> { fn to_value(self) -> Value { Heap(Mut::new(HeapImpl { heap: self }))} }
-impl IntoValue for FunctionImpl { fn to_value(self) -> Value { Function(Rc::new(self)) }}
-impl IntoValue for StructTypeImpl { fn to_value(self) -> Value { StructType(Rc::new(self)) } }
-
-impl IntoValue for C64 {
-    fn to_value(self) -> Value {
-        if self.im == 0 { Int(self.re) } else { Complex(Box::new(self)) }
-    }
-}
-
-impl<'a> IntoValue for Sliceable<'a> {
-    fn to_value(self) -> Value {
-        match self {
-            Sliceable::Str(_, it) => it.to_value(),
-            Sliceable::List(_, it) => it.to_value(),
-            Sliceable::Vector(_, it) => it.to_value(),
+macro_rules! impl_into {
+    ($ty:ty, $ret:expr) => {
+        impl IntoValue for $ty {
+            fn to_value(self) -> ValuePtr {
+                $ret
+            }
         }
-    }
+    };
 }
 
-pub trait IntoValueResult {
-    fn to_value(self) -> ValueResult;
-}
+impl_into!(ValuePtr, self);
+impl_into!(usize, self as i64);
+impl_into!(i64, ValuePtr::of_int(self));
+impl_into!(Complex<i64>, ComplexImpl { value: self }.to_value());
+impl_into!(C64, if self.value.im == 0 {
+    ValuePtr::of_int(self.value.re)
+} else {
+    ValuePtr::owned(Prefix::prefix(Type::Complex, self))
+});
+impl_into!(bool, ValuePtr::of_bool(self));
+impl_into!(char, String::from(self));
+impl_into!(&str, String::from(self));
+impl_into!(NativeFunction, ValuePtr::of_native(self));
+impl_into!(String, ValuePtr::shared(SharedPrefix::prefix(Type::Str, self)));
+impl_into!(VecDeque<ValuePtr>, ListImpl { list: self }.to_value());
+impl_into!(ListImpl, ValuePtr::shared(SharedPrefix::prefix(Type::List, self)));
+impl_into!(Vec<ValuePtr>, VectorImpl { vector: self }.to_value());
+impl_into!(VectorImpl, ValuePtr::shared(SharedPrefix::prefix(Type::Vector, self)));
+impl_into!(IndexSet<ValuePtr, FxBuildHasher>, SetImpl { set: self }.to_value());
+impl_into!(SetImpl, ValuePtr::shared(SharedPrefix::prefix(Type::Set, self)));
+impl_into!(IndexMap<ValuePtr, ValuePtr, FxBuildHasher>, DictImpl { dict: self, default: None }.to_value());
+impl_into!(DictImpl, ValuePtr::shared(SharedPrefix::prefix(Type::Dict, self)));
+impl_into!(BinaryHeap<Reverse<ValuePtr>>, HeapImpl { heap: self }.to_value());
+impl_into!(HeapImpl, ValuePtr::shared(SharedPrefix::prefix(Type::Heap, self)));
+impl_into!(RuntimeError, ValuePtr::error(self));
+impl_into!(Sliceable, match self {
+    Sliceable::Str(_, it) => it.to_value(),
+    Sliceable::List(_, it) => it.to_value(),
+    Sliceable::Vector(_, it) => it.to_value(),
+});
 
-impl<T : IntoValue> IntoValueResult for Result<T, Box<RuntimeError>> {
-    fn to_value(self) -> ValueResult {
-        self.map(|u| u.to_value())
-    }
-}
 
-
-/// A trait which is responsible for wrapping conversions from a `Iterator<Item=Value>` into `IntoValue`, which then converts to a `Value`.
+/// A trait which is responsible for wrapping conversions from a `Iterator<Item=Value>` into `IntoValue`, which then converts to a `ValuePtr`.
 pub trait IntoIterableValue {
-    fn to_list(self) -> Value;
-    fn to_vector(self) -> Value;
-    fn to_set(self) -> Value;
-    fn to_heap(self) -> Value;
+    fn to_list(self) -> ValuePtr;
+    fn to_vector(self) -> ValuePtr;
+    fn to_set(self) -> ValuePtr;
+    fn to_heap(self) -> ValuePtr;
 }
 
-impl<I> IntoIterableValue for I where I : Iterator<Item=Value> {
-    fn to_list(self) -> Value { self.collect::<VecDeque<Value>>().to_value() }
-    fn to_vector(self) -> Value { self.collect::<Vec<Value>>().to_value() }
-    fn to_set(self) -> Value { self.collect::<IndexSet<Value, FxBuildHasher>>().to_value() }
-    fn to_heap(self) -> Value { self.map(Reverse).collect::<BinaryHeap<Reverse<Value>>>().to_value() }
+impl<I> IntoIterableValue for I where I : Iterator<Item=ValuePtr> {
+    fn to_list(self) -> ValuePtr {
+        self.collect::<VecDeque<ValuePtr>>().to_value()
+    }
+
+    fn to_vector(self) -> ValuePtr {
+        self.collect::<Vec<ValuePtr>>().to_value()
+    }
+
+    fn to_set(self) -> ValuePtr {
+        self.collect::<IndexSet<ValuePtr, FxBuildHasher>>().to_value()
+    }
+
+    fn to_heap(self) -> ValuePtr {
+        self.map(Reverse).collect::<BinaryHeap<Reverse<ValuePtr>>>().to_value()
+    }
 }
 
-/// A trait which is responsible for wrapping conversions from an `Iterator<Item=(Value, Value)>` into a `Value::Dict`
+/// A trait which is responsible for wrapping conversions from an `Iterator<Item=(ValuePtr, ValuePtr)>` into a `dict()`
 pub trait IntoDictValue {
-    fn to_dict(self) -> Value;
+    fn to_dict(self) -> ValuePtr;
 }
 
-impl<I> IntoDictValue for I where I : Iterator<Item=(Value, Value)> {
-    fn to_dict(self) -> Value {
-        self.collect::<IndexMap<Value, Value, FxBuildHasher>>().to_value()
-    }
-}
-
-
-
-/// `Mut<T>` is a wrapper around internally mutable types. It implements the required traits for `Value` through it's inner type.
-/// Note that it also implements `Hash`, even though the internal type is mutable. This is required to satisfy rust's type system.
-/// Mutating values stored in a hash backed structure is legal, from a language point of view, but will just invoke undefined behavior.
-#[derive(Eq, PartialEq, Debug, Clone)]
-pub struct Mut<T : Eq + PartialEq + Debug + Clone>(Rc<RefCell<T>>);
-
-impl<T : Eq + PartialEq + Debug + Clone> Mut<T> {
-
-    pub fn new(value: T) -> Mut<T> {
-        Mut(Rc::new(RefCell::new(value)))
-    }
-
-    /// Unbox the `Mut<T>`, obtaining a borrow on the contents.
-    /// Note that while semantically in Rust, this is a non-unique borrow, and we can treat it as such while in native code, we **cannot** yield into user code while this borrow is active.
-    pub fn unbox(&self) -> Ref<T> {
-        (*self.0).borrow()
-    }
-
-    /// Unbox the `Mut<T>`, obtaining a mutable and unique borrow on the contents.
-    pub fn unbox_mut(&self) -> RefMut<T> {
-        (*self.0).borrow_mut()
-    }
-
-    /// Attempt to unbox the `Mut<T>`, obtaining a borrow on the contents if it not already borrowed - otherwise return `None`
-    pub fn try_unbox(&self) -> Option<Ref<T>> {
-        (*self.0).try_borrow().ok()
-    }
-
-    /// Returns `true` if the two inner instances are part of the same object.
-    pub fn ptr_eq(&self, other: &Mut<T>) -> bool {
-        Rc::ptr_eq(&self.0, &other.0)
+impl<I> IntoDictValue for I where I : Iterator<Item=(ValuePtr, ValuePtr)> {
+    fn to_dict(self) -> ValuePtr {
+        self.collect::<IndexMap<ValuePtr, ValuePtr, FxBuildHasher>>().to_value()
     }
 }
 
-impl<T : Eq + PartialEq + Debug + Clone + Hash> Hash for Mut<T> {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        (*self).unbox().hash(state)
-    }
-}
+
 
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub struct FunctionImpl {
@@ -805,9 +925,19 @@ impl Hash for ClosureImpl {
     }
 }
 
-#[derive(PartialEq, Eq, Debug, Clone)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ListImpl {
+    pub list: VecDeque<ValuePtr>
+}
+
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct VectorImpl {
+    pub vector: Vec<ValuePtr>
+}
+
+#[derive(Debug, PartialEq, Eq)]
 pub struct SetImpl {
-    pub set: IndexSet<Value, FxBuildHasher>
+    pub set: IndexSet<ValuePtr, FxBuildHasher>
 }
 
 impl PartialOrd for SetImpl {
@@ -843,7 +973,7 @@ impl Ord for SetImpl {
 /// - If the borrow check fails, we set a global flag that we've entered this pathological case, which is checked by `ArrayStore` before yielding back to user code
 ///
 /// Note this also applies to `DictImpl` / `dict()`, although only when used as a key.
-impl Hash for Mut<SetImpl> {
+impl Hash for SharedPrefix<SetImpl> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         match self.try_unbox() {
             Some(it) => {
@@ -1424,8 +1554,66 @@ mod test {
     use crate::vm::error::RuntimeError;
     use crate::vm::value::{FunctionImpl, IntoIterableValue, IntoValue, Value};
 
-    #[test] fn test_layout() { assert_eq!(16, std::mem::size_of::<Value>()); }
-    #[test] fn test_result_box_layout() { assert_eq!(16, std::mem::size_of::<Result<Value, Box<RuntimeError>>>()); }
+    #[test]
+    fn test_layout() {
+        // Should be no size overhead, since both error and none states are already represented by `ValuePtr`
+        assert_eq!(std::mem::size_of::<ValueResult>(), std::mem::size_of::<ValuePtr>());
+        assert_eq!(std::mem::size_of::<ValueOption>(), std::mem::size_of::<ValuePtr>());
+    }
+
+    #[test]
+    fn test_value_ref_is_ref_equality() {
+        let ptr1 = ValuePtr::from(vec![1, 2, 3]);
+        let ptr2 = ValuePtr::from(vec![123]);
+        let ptr3 = ValuePtr::from(vec![1, 2, 3]);
+        let ptr4 = ptr1.clone(); // [1, 2, 3]
+
+        assert_eq!(ptr1, ptr1);
+        assert_ne!(ptr1, ptr2);
+        assert_eq!(ptr1, ptr3); // Same value, different reference
+        assert_eq!(ptr1, ptr4);
+
+        assert_eq!(ptr1.as_value_ref(), ptr1.as_value_ref());
+        assert_ne!(ptr1.as_value_ref(), ptr2.as_value_ref());
+        assert_ne!(ptr1.as_value_ref(), ptr3.as_value_ref()); // Same value, different reference
+        assert_eq!(ptr1.as_value_ref(), ptr4.as_value_ref());
+    }
+
+    #[test]
+    fn test_value_option() {
+        let some = ValueOption::some(ValuePtr::nil());
+        let none = ValueOption::none();
+
+        assert!(some.is_some());
+        assert!(none.is_none());
+
+        assert_eq!(some.as_option(), Some(ValuePtr::nil()));
+        assert_eq!(none.as_option(), None);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_value_option_some_of_none() {
+        let _ = ValueOption::some(ValuePtr::none());
+    }
+
+    #[test]
+    fn test_value_result() {
+        let ok = ValueResult::ok(ValuePtr::nil());
+        let err = ValueResult::err(RuntimeError::RuntimeExit);
+
+        assert!(ok.is_ok());
+        assert!(err.is_err());
+
+        assert_eq!(ok.as_result(), Ok(ValuePtr::nil()));
+        assert_eq!(err.as_result(), Err(RuntimeError::RuntimeExit))
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_value_result_ok_of_err() {
+        let _ = ValueResult::ok(ValuePtr::from(RuntimeError::RuntimeExit));
+    }
 
     #[test]
     fn test_consistency() {
