@@ -63,4 +63,4 @@ macro_rules! impl_partial_ord {
     };
 }
 
-pub use impl_partial_ord;
+pub(crate) use impl_partial_ord;

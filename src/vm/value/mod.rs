@@ -1,5 +1,5 @@
 use std::borrow::Borrow;
-use std::cell::{Cell, Ref, RefCell, RefMut};
+use std::cell::{Cell, Ref, RefMut};
 use std::cmp::{Ordering, Reverse};
 use std::collections::{BinaryHeap, HashMap, VecDeque};
 use std::fmt::{Debug, Formatter};
@@ -15,12 +15,79 @@ use crate::compiler::Fields;
 use crate::core;
 use crate::core::{InvokeArg0, NativeFunction, PartialArgument};
 use crate::vm::error::RuntimeError;
+use crate::vm::value::ptr::{Prefix, SharedPrefix};
+use crate::util::impl_partial_ord;
 
 pub use crate::vm::value::ptr::ValuePtr;
 
 use Value::{*};
 use RuntimeError::{*};
-use crate::vm::value::ptr::{Prefix, SharedPrefix};
+
+
+pub mod checks {
+    use crate::vm::{RuntimeError, ValuePtr};
+    use crate::vm::value::Type;
+
+    macro_rules! check {
+        ($result:expr) => {
+            match $result {
+                Ok(ptr) => ptr,
+                Err(err) => return err
+            }
+        };
+        ($ty:ident, $check:expr) => {{
+            if checks::type_check(Type::$ty)(&$check) {
+                return ValueResult::err(checks::type_error(Type::$ty)($check));
+            } else {
+                $check
+            }
+        }};
+        ($check:expr, $err:expr) => {
+            if !$check {
+                return $err
+            }
+        };
+    }
+
+    pub(crate) use check;
+
+    #[inline(always)]
+    pub fn catch<T, E>(err: &mut Option<E>, f: impl FnOnce() -> Result<T, E>, default: T) -> T {
+        match f() {
+            Ok(e) => e,
+            Err(e) => {
+                *err = Some(e);
+                default
+            }
+        }
+    }
+
+    #[inline(always)]
+    pub fn join<T, E>(result: T, err: Option<E>) -> Result<T, E> {
+        match err {
+            Some(e) => Err(e),
+            None => Ok(result)
+        }
+    }
+
+    #[inline(always)]
+    pub const fn type_check(ty: Type) -> fn(&ValuePtr) -> bool {
+        match ty {
+            Type::Int => ValuePtr::is_int,
+            Type::Str => ValuePtr::is_str,
+            _ => unreachable!(),
+        }
+    }
+
+    #[inline(always)]
+    pub const fn type_error(ty: Type) -> fn(ValuePtr) -> RuntimeError {
+        match ty {
+            Type::Int => RuntimeError::TypeErrorArgMustBeInt,
+            Type::Str => RuntimeError::TypeErrorArgMustBeStr,
+            _ => unreachable!(),
+        }
+    }
+}
 
 
 mod ptr;
@@ -34,7 +101,8 @@ pub enum Type {
     Nil,
     Bool,
     Int,
-    Native,
+    NativeFunction,
+    GetField,
     Complex,
     Str,
     List,
@@ -49,13 +117,13 @@ pub enum Type {
     Slice,
     Iter,
     Memoized,
-    GetField,
     Function,
     PartialFunction,
     PartialNativeFunction,
     Closure,
     Error,
     None, // Useful when we would otherwise hold an `Option<ValuePtr>` - this compresses the `None` state
+    Never, // Optimization for type-checking code, to avoid code paths containing `unreachable!()` or similar patterns.
 }
 
 
@@ -66,6 +134,17 @@ pub trait OwnedValue {}
 /// A trait marking the value type of a shared (reference counted) piece of data.
 /// This means a `ValuePtr` may point to a `SharedPrefix<T : SharedValue>`
 pub trait SharedValue {}
+
+/// A trait marking that the shared value is const (immutable), and thus can be directly accessed via `.borrow_const()`
+///
+/// Note that in the absence of negative type bounds (i.e. `SharedValue + !ConstValue`, this can lead to unsafe code, since `borrow_mut()` and `borrow_const()` can both be called for const types.
+/// So, we split that into `MutValue`, and hope that nothing implements both `MutValue` and `SharedValue`
+pub trait ConstValue : SharedValue {}
+
+/// The counterpart to `ConstValue`, this enables `RefCell<T>` like behavior via `.borrow()` and `.borrow_mut()` for the underlying shared value.
+///
+/// This must **not be implemented in addition to `ConstValue`!**
+pub trait MutValue : SharedValue {}
 
 
 /// A specialized reference-equality version of `ValuePtr`. Unlike `ValuePtr`, this does not manage any memory, and can be created multiple times from a `ValuePtr`
@@ -147,15 +226,20 @@ impl ValueResult {
         ValueResult { ptr }
     }
 
+    #[cold]
     pub fn err(err: RuntimeError) -> ValueResult {
         ValueResult { ptr: err.to_value() }
     }
 
+    pub fn new(ptr: ValuePtr) -> ValueResult {
+        ValueResult { ptr }
+    }
+
     /// Boxes this `ValueResult` into a traditional Rust `Result<T, E>`. The left will be guaranteed to contain a non-error type, and the right will be guaranteed to contain an error.
     #[inline(always)]
-    pub fn as_result(self) -> Result<ValuePtr, ValuePtr> {
+    pub fn as_result(self) -> Result<ValuePtr, Box<RuntimeError>> {
         match self.ptr.is_err() {
-            true => Err(self.ptr),
+            true => Err(self.ptr.as_err()),
             false => Ok(self.ptr)
         }
     }
@@ -169,46 +253,79 @@ impl ValueResult {
     pub fn is_err(&self) -> bool {
         self.ptr.is_err()
     }
+
+    #[cold]
+    pub fn to_err(self) -> RuntimeError {
+        *self.ptr.as_err()
+    }
 }
 
-impl From<Result<ValuePtr, RuntimeError>> for ValueResult {
-    fn from(value: Result<ValuePtr, RuntimeError>) -> Self {
+impl From<Result<ValuePtr, Box<RuntimeError>>> for ValueResult {
+    fn from(value: Result<ValuePtr, Box<RuntimeError>>) -> Self {
         match value {
             Ok(ptr) => ValueResult::ok(ptr),
-            Err(err) => ValueResult::err(err)
+            Err(err) => ValueResult::err(*err)
         }
     }
 }
 
-
-impl ValuePtr {
-
+/// Like `ValueOption` or `ValueResult`, this is a type indicating that the underlying `ValuePtr` has a specific form. In this case, it **must** be a `Type::Function` or `Type::Closure`, and provides methods to unbox the underlying `FunctionImpl`
+pub struct ValueFunction {
+    ptr: ValuePtr
 }
 
+impl ValueFunction {
+    pub fn new(ptr: ValuePtr) -> ValueFunction {
+        debug_assert!(ptr.is_function() || ptr.is_closure());
+        ValueFunction { ptr }
+    }
+
+    /// Returns a reference to the function of this pointer.
+    pub fn get(&self) -> &SharedPrefix<FunctionImpl> {
+        self.ptr.get_function()
+    }
+}
+
+/// Like `ValueOption` or `ValueResult`, but indicates via type saftey, that the underlying `ValuePtr` is a `StructType`
+pub struct ValueStructType {
+    ptr: ValuePtr
+}
+
+impl ValueStructType {
+    pub fn new(ptr: ValuePtr) -> ValueStructType {
+        debug_assert!(ptr.is_struct_type());
+        ValueStructType { ptr }
+    }
+
+    pub fn get(&self) -> &StructTypeImpl {
+        self.ptr.as_struct_type()
+    }
+}
 
 pub type C64 = num_complex::Complex<i64>;
 
 
 /// The runtime sum type used by the virtual machine
 /// All `Value` type objects must be cloneable, and so mutable objects must be reference counted to ensure memory safety
+/// todo: remove
 #[derive(Eq, PartialEq, Debug, Clone, Hash)]
 pub enum Value {
     // Primitive (Immutable) Types
     Nil,
     Bool(bool),
     Int(i64),
-    Complex(Box<C64>),
+    _Complex(Box<C64>),
     Str(Rc<String>),
 
     // Reference (Mutable) Types
-    List(Mut<VecDeque<Value>>),
-    Set(Mut<SetImpl>),
-    Dict(Mut<DictImpl>),
-    Heap(Mut<HeapImpl>), // `List` functions as both Array + Deque, but that makes it un-viable for a heap. So, we have a dedicated heap structure
-    Vector(Mut<Vec<Value>>), // `Vector` is a fixed-size list (in theory, not in practice), that most operations will behave elementwise on
+    List(Rc<VecDeque<Value>>),
+    Set(Rc<SetImpl>),
+    Dict(Rc<DictImpl>),
+    Heap(Rc<HeapImpl>), // `List` functions as both Array + Deque, but that makes it un-viable for a heap. So, we have a dedicated heap structure
+    Vector(Rc<Vec<Value>>), // `Vector` is a fixed-size list (in theory, not in practice), that most operations will behave elementwise on
 
     /// A mutable instance of a struct - basically a named tuple.
-    Struct(Mut<StructImpl>),
+    Struct(Rc<StructImpl>),
     /// The constructor / single type instance of a struct. This can be invoked to create new instances.
     StructType(Rc<StructTypeImpl>),
 
@@ -245,14 +362,32 @@ pub enum Value {
 }
 
 
-impl Value {
+impl ValuePtr {
 
     // Constructors
 
-    pub fn partial(func: Value, args: Vec<Value>) -> Value { PartialFunction(Box::new(PartialFunctionImpl { func, args }))}
-    pub fn closure(func: Rc<FunctionImpl>) -> Value { Closure(Box::new(ClosureImpl { func, environment: Vec::new() })) }
-    pub fn instance(type_impl: Rc<StructTypeImpl>, values: Vec<Value>) -> Value { Struct(Mut::new(StructImpl { type_index: type_impl.type_index, type_impl, values }))}
-    pub fn memoized(func: Value) -> Value { Memoized(Box::new(MemoizedImpl::new(func))) }
+    pub fn partial(func: ValuePtr, args: Vec<ValuePtr>) -> ValuePtr {
+        PartialFunctionImpl { func: ValueFunction::new(func), args }.to_value()
+    }
+
+    pub fn closure(func: ValuePtr) -> ValuePtr {
+        func.to_closure()
+    }
+
+    pub fn instance(type_impl: ValueStructType, values: Vec<ValuePtr>) -> ValuePtr {
+        StructImpl {
+            type_index: type_impl.get().type_index,
+            type_impl,
+            values,
+        }.to_value()
+    }
+
+    pub fn memoized(func: ValuePtr) -> ValuePtr {
+        MemoizedImpl {
+            func,
+            cache: HashMap::with_hasher(FxBuildHasher::default()),
+        }.to_value()
+    }
 
     /// Creates a new `Range()` value from a given set of integer parameters.
     /// Raises an error if `step == 0`
@@ -260,33 +395,33 @@ impl Value {
     /// Note: this implementation internally replaces all empty range values with the single `range(0, 0, 0)` instance. This means that `range(1, 2, -1) . str` will have to handle this case as it will not be representative.
     pub fn range(start: i64, stop: i64, step: i64) -> ValueResult {
         if step == 0 {
-            ValueErrorStepCannotBeZero.err()
-        } else if (stop > start && step > 0) || (stop < start && step < 0) {
-            Ok(Range(Box::new(RangeImpl { start, stop, step }))) // Non-empty range
-        } else {
-            Ok(Range(Box::new(RangeImpl { start: 0, stop: 0, step: 0 }))) // Empty range
+            ValueResult::err(ValueErrorStepCannotBeZero)
+        } else if (stop > start && step > 0) || (stop < start && step < 0) { // Non-empty range
+            ValueResult::ok(RangeImpl { start, stop, step }.to_value())
+        } else { // Empty range
+            ValueResult::ok(RangeImpl { start: 0, stop: 0, step: 0 }.to_value())
         }
     }
 
-    pub fn slice(arg1: Value, arg2: Value, arg3: Option<Value>) -> ValueResult {
-        Ok(Slice(Box::new(SliceImpl {
-            arg1: arg1.as_int_or()?,
-            arg2: arg2.as_int_or()?,
-            arg3: arg3.unwrap_or(Nil).as_int_or()?
-        })))
+    pub fn slice(arg1: ValuePtr, arg2: ValuePtr, arg3: ValuePtr) -> ValueResult {
+        checks::check!(arg1.is_int_like_or_nil(), TypeErrorArgMustBeInt(arg1));
+        checks::check!(arg2.is_int_like_or_nil(), TypeErrorArgMustBeInt(arg2));
+        checks::check!(arg3.is_int_like_or_nil(), TypeErrorArgMustBeInt(arg3));
+
+        ValueResult::ok(SliceImpl { arg1, arg2, arg3 }.to_value())
     }
 
     /// Converts the `Value` to a `String`. This is equivalent to the stdlib function `str()`
     pub fn to_str(&self) -> String { self.safe_to_str(&mut RecursionGuard::new()) }
 
     fn safe_to_str(&self, rc: &mut RecursionGuard) -> String {
-        match self {
-            Str(s) => (**s).to_owned(),
-            Function(f) => f.name.clone(),
-            PartialFunction(f) => f.func.safe_to_str(rc),
-            NativeFunction(b) => String::from(b.name()),
-            PartialNativeFunction(b, _) => String::from(b.name()),
-            Closure(c) => c.func.as_ref().name.clone(),
+        match self.ty() {
+            Type::Str => self.as_str().as_ref().to_owned(),
+            Type::Function => self.as_function().as_ref().name.clone(),
+            Type::PartialFunction => self.as_partial_function().as_ref().func.ptr.safe_to_str(rc),
+            Type::NativeFunction => self.as_native().name().to_string(),
+            Type::PartialNativeFunction => self.as_partial_native_ref().value.func.name().to_string(),
+            Type::Closure => self.as_closure().as_ref().func.get().as_ref().name.to_owned(),
             _ => self.safe_to_repr_str(rc),
         }
     }
@@ -303,114 +438,153 @@ impl Value {
             }};
         }
 
-        #[inline]
-        fn to_str(i: Option<i64>) -> String {
-            i.map(|u| u.to_string()).unwrap_or(String::new())
-        }
-
-        match self {
-            Nil => String::from("nil"),
-            Bool(b) => b.to_string(),
-            Int(i) => i.to_string(),
-            Complex(c) => if c.re == 0 {
-                format!("{}i", c.im)
-            } else {
-                format!("{} + {}i", c.re, c.im)
+        match self.ty() {
+            Type::Nil => String::from("nil"),
+            Type::Bool => self.as_bool().to_string(),
+            Type::Int => self.as_int().to_string(),
+            Type::Complex => {
+                let c = &self.as_complex_ref().inner;
+                if c.re == 0 {
+                    format!("{}i", c.im)
+                } else {
+                    format!("{} + {}i", c.re, c.im)
+                }
             },
-            Str(s) => {
-                let escaped = format!("{:?}", s);
+            Type::Str => {
+                let escaped = format!("{:?}", self.as_str().as_ref());
                 format!("'{}'", &escaped[1..escaped.len() - 1])
             },
 
-            List(v) => recursive_guard!(
+            Type::List => recursive_guard!(
                 String::from("[...]"),
-                format!("[{}]", v.unbox().iter()
+                format!("[{}]", self.as_list().borrow().list.iter()
                     .map(|t| t.safe_to_repr_str(rc))
                     .join(", "))
             ),
-            Set(v) => recursive_guard!(
+            Type::Set => recursive_guard!(
                 String::from("{...}"),
-                format!("{{{}}}", v.unbox().set.iter()
+                format!("{{{}}}", self.as_set().borrow().set.iter()
                     .map(|t| t.safe_to_repr_str(rc))
                     .join(", "))
             ),
-            Dict(v) => recursive_guard!(
+            Type::Dict => recursive_guard!(
                 String::from("{...}"),
-                format!("{{{}}}", v.unbox().dict.iter()
+                format!("{{{}}}", self.as_dict().borrow().dict.iter()
                     .map(|(k, v)| format!("{}: {}", k.safe_to_repr_str(rc), v.safe_to_repr_str(rc)))
                     .join(", "))
             ),
-            Heap(v) => recursive_guard!(
+            Type::Heap => recursive_guard!(
                 String::from("[...]"),
-                format!("[{}]", v.unbox().heap.iter()
+                format!("[{}]", self.as_heap().borrow().heap.iter()
                     .map(|t| t.0.safe_to_repr_str(rc))
                     .join(", "))
             ),
-            Vector(v) => recursive_guard!(
+            Type::Vector => recursive_guard!(
                 String::from("(...)"),
-                format!("({})", v.unbox().iter()
+                format!("({})", self.as_vector().borrow().vector.iter()
                     .map(|t| t.safe_to_repr_str(rc))
                     .join(", "))
             ),
 
-            Struct(it) => {
-                let it = it.unbox();
+            Type::Struct => {
+                let it = self.as_struct().borrow();
                 recursive_guard!(
-                    format!("{}(...)", it.type_impl.name),
-                    format!("{}({})", it.type_impl.name.as_str(), it.values.iter()
-                        .zip(it.type_impl.field_names.iter())
+                    format!("{}(...)", it.type_impl.get().name),
+                    format!("{}({})", it.type_impl.get().name.as_str(), it.values.iter()
+                        .zip(it.type_impl.get().field_names.iter())
                         .map(|(v, k)| format!("{}={}", k, v.safe_to_repr_str(rc)))
                         .join(", "))
                 )
             },
-            StructType(it) => format!("struct {}({})", it.name.clone(), it.field_names.join(", ")),
+            Type::StructType => {
+                let it = self.as_struct_type().as_ref();
+                format!("struct {}({})", it.name.clone(), it.field_names.join(", "))
+            },
 
-            Range(r) => if r.step == 0 { String::from("range(empty)") } else { format!("range({}, {}, {})", r.start, r.stop, r.step) },
-            Enumerate(v) => format!("enumerate({})", v.safe_to_repr_str(rc)),
-            Slice(v) => match &v.arg3 {
-                Some(arg3) => format!("[{}:{}:{}]", to_str(v.arg1), to_str(v.arg2), arg3),
-                None => format!("[{}:{}]", to_str(v.arg1), to_str(v.arg2)),
-            }
+            Type::Range => {
+                let r = self.as_range_ref();
+                if r.step == 0 {
+                    String::from("range(empty)")
+                } else {
+                    format!("range({}, {}, {})", r.start, r.stop, r.step)
+                }
+            },
+            Type::Enumerate => format!("enumerate({})", self.as_enumerate_ref().inner.safe_to_repr_str(rc)),
+            Type::Slice => {
+                #[inline]
+                fn to_str(i: ValuePtr) -> String {
+                    if i.is_nil() {
+                        String::new()
+                    } else {
+                        i.as_int_like().to_string()
+                    }
+                }
 
-            Iter(_) => String::from("<synthetic> iterator"),
-            Memoized(it) => format!("@memoize {}", it.func.safe_to_repr_str(rc)),
+                let it = self.as_slice_ref();
+                match it.arg3.is_nil() {
+                    false => format!("[{}:{}:{}]", to_str(it.arg1), to_str(it.arg2), it.arg3.as_int_like()),
+                    true => format!("[{}:{}]", to_str(it.arg1), to_str(it.arg2)),
+                }
+            },
 
-            GetField(_) => String::from("(->)"),
+            Type::Iter => String::from("<synthetic> iterator"),
+            Type::Memoized => format!("@memoize {}", self.as_memoized().borrow().func.safe_to_repr_str(rc)),
 
-            Function(f) => (*f).as_ref().borrow().as_str(),
-            PartialFunction(f) => f.func.safe_to_repr_str(rc),
-            NativeFunction(f) => f.repr(),
-            PartialNativeFunction(f, _) => f.repr(),
-            Closure(c) => c.func.as_ref().borrow().as_str(),
+            Type::GetField => String::from("(->)"),
+
+            Type::Function => self.as_function().as_ref().repr(),
+            Type::PartialFunction => self.as_partial_function().as_ref().func.safe_to_repr_str(rc),
+            Type::NativeFunction => self.as_native().repr(),
+            Type::PartialNativeFunction => self.as_partial_native_ref().func.repr(),
+            Type::Closure => self.as_closure().as_ref().func.get().as_ref().repr(),
+
+            Type::Error | Type::None | Type::Never => unreachable!(),
         }
+    }
+
+    /// Returns the inner user function, either from a `Function` or `Closure` type
+    pub fn get_function(&self) -> &SharedPrefix<FunctionImpl> {
+        match self.is_function() {
+            true => self.as_function(),
+            false => self.as_closure().as_ref().func.get(),
+        }
+    }
+
+    /// Converts a `Function` into a new empty `Closure`
+    pub fn to_closure(self) -> ValuePtr {
+        debug_assert!(self.is_function());
+        ClosureImpl { func: ValueFunction::new(self), environment: Vec::new() }.to_value()
     }
 
     /// Represents the type of this `Value`. This is used for runtime error messages,
     pub fn as_type_str(&self) -> String {
-        String::from(match self {
-            Nil => "nil",
-            Bool(_) => "bool",
-            Int(_) => "int",
-            Complex(_) => "complex",
-            Str(_) => "str",
-            List(_) => "list",
-            Set(_) => "set",
-            Dict(_) => "dict",
-            Heap(_) => "heap",
-            Vector(_) => "vector",
-            Struct(_) => "struct",
-            StructType(_) => "struct type",
-            Range(_) => "range",
-            Enumerate(_) => "enumerate",
-            Slice(_) => "slice",
-            Iter(_) => "iter",
-            Memoized(_) => "memoized",
-            GetField(_) => "get field",
-            Function(_) => "function",
-            PartialFunction(_) => "partial function",
-            NativeFunction(_) => "native function",
-            PartialNativeFunction(_, _) => "partial native function",
-            Closure(_) => "closure",
+        String::from(match self.ty() {
+            Type::Nil => "nil",
+            Type::Bool => "bool",
+            Type::Int => "int",
+            Type::Complex => "complex",
+            Type::Str => "str",
+            Type::List => "list",
+            Type::Set => "set",
+            Type::Dict => "dict",
+            Type::Heap => "heap",
+            Type::Vector => "vector",
+            Type::Struct => "struct",
+            Type::StructType => "struct type",
+            Type::Range => "range",
+            Type::Enumerate => "enumerate",
+            Type::Slice => "slice",
+            Type::Iter => "iter",
+            Type::Memoized => "memoized",
+            Type::GetField => "get field",
+            Type::Function => "function",
+            Type::PartialFunction => "partial function",
+            Type::NativeFunction => "native function",
+            Type::PartialNativeFunction => "partial native function",
+            Type::Closure => "closure",
+            Type::Error => "error",
+            Type::None => "none",
+            Type::Never => "never"
         })
     }
 
@@ -419,103 +593,51 @@ impl Value {
         format!("{}: {}", self.to_repr_str(), self.as_type_str())
     }
 
-    pub fn as_bool(&self) -> bool {
-        match self {
-            Nil => false,
-            Bool(it) => *it,
-            Int(it) => *it != 0,
-            Complex(_) => false, // complex will never be zero
-            Str(it) => !it.is_empty(),
-            List(it) => !it.unbox().is_empty(),
-            Set(it) => !it.unbox().set.is_empty(),
-            Dict(it) => !it.unbox().dict.is_empty(),
-            Heap(it) => !it.unbox().heap.is_empty(),
-            Range(it) => !it.is_empty(),
-            Enumerate(it) => (**it).as_bool(),
-            Iter(_) | Memoized(_) => panic!("{:?} is a synthetic type should not have as_bool() invoked on it", self),
-            Vector(v) => v.unbox().is_empty(),
+    pub fn to_bool(&self) -> bool {
+        match self.ty() {
+            Type::Nil => false,
+            Type::Bool => self.as_bool(),
+            Type::Int => self.as_int() != 0,
+            Type::Str => !self.as_str().as_ref().is_empty(),
+            Type::List => !self.as_list().borrow().list.is_empty(),
+            Type::Set => !self.as_set().borrow().set.is_empty(),
+            Type::Dict => !self.as_dict().borrow().dict.is_empty(),
+            Type::Heap => !self.as_heap().borrow().heap.is_empty(),
+            Type::Vector => !self.as_vector().borrow().vector.is_empty(),
+            Type::Range => !self.as_range_ref().is_empty(),
+            Type::Enumerate => self.as_enumerate_ref().inner.to_bool(),
+            Type::Iter | Type::Memoized => panic!("{:?} is a synthetic type should not have as_bool() invoked on it", self),
             _ => true,
-        }
-    }
-
-    /// Unwraps the value as an `int`, or raises a type error
-    pub fn as_int(&self) -> Result<i64, Box<RuntimeError>> {
-        match self {
-            Bool(b) => Ok(*b as i64),
-            Int(i) => Ok(*i),
-            _ => TypeErrorArgMustBeInt(self.clone()).err(),
-        }
-    }
-
-    #[inline]
-    pub fn as_int_unchecked(&self) -> i64 {
-        match self {
-            Bool(b) => *b as i64,
-            Int(i) => *i,
-            _ => 0,
-        }
-    }
-
-    /// Unwraps the value as a `complex`, or raises a type error.
-    pub fn as_complex(&self) -> Result<C64, Box<RuntimeError>> {
-        match self {
-            Bool(b) => Ok(C64::new(*b as i64, 0)),
-            Int(i) => Ok(C64::new(*i, 0)),
-            Complex(c) => Ok(*c.clone()),
-            _ => TypeErrorArgMustBeInt(self.clone()).err(),
-        }
-    }
-
-    #[inline]
-    pub fn as_complex_unchecked(&self) -> C64 {
-        match self {
-            Bool(b) => C64::new(*b as i64, 0),
-            Int(i) => C64::new(*i, 0),
-            Complex(c) => *c.clone(),
-            _ => C64::new(0, 0),
-        }
-    }
-
-    /// Like `as_int()` but returns an `Option<i64>`, and converts `nil` to `None`
-    pub fn as_int_or(&self) -> Result<Option<i64>, Box<RuntimeError>> {
-        match self {
-            Nil => Ok(None),
-            Int(i) => Ok(Some(*i)),
-            Bool(b) => Ok(Some(if *b { 1 } else { 0 })),
-            _ => TypeErrorArgMustBeInt(self.clone()).err(),
-        }
-    }
-
-    /// Unwraps the value as a `str`, or raises a type error
-    pub fn as_str(&self) -> Result<&String, Box<RuntimeError>> {
-        match self {
-            Str(it) => Ok(it),
-            v => TypeErrorArgMustBeStr(v.clone()).err()
         }
     }
 
     /// Unwraps the value as an `iterable`, or raises a type error.
     /// For all value types except `Heap`, this is a O(1) and lazy operation. It also requires no persistent borrows of mutable types that outlast the call to `as_iter()`.
-    pub fn as_iter(&self) -> Result<Iterable, Box<RuntimeError>> {
-        match self {
-            Str(it) => {
-                let string: String = (**it).clone();
-                let chars: Chars<'static> = unsafe { mem::transmute(string.chars()) };
-                Ok(Iterable::Str(string, chars))
+    ///
+    /// Guaranteed to return either a `Error` or `Iter`
+    pub fn as_iter(self) -> Result<Iterable, Box<RuntimeError>> {
+        match self.ty() {
+            Type::Str => {
+                let string: String = self.as_str().as_ref().clone();
+                let chars: Chars<'static> = unsafe {
+                    std::mem::transmute(string.chars())
+                };
+                ValueResult::ok(Iterable::Str(string, chars).to_value())
             },
-            List(it) => Ok(Iterable::Collection(0, CollectionIterable::List(it.clone()))),
-            Set(it) => Ok(Iterable::Collection(0, CollectionIterable::Set(it.clone()))),
-            Dict(it) => Ok(Iterable::Collection(0, CollectionIterable::Dict(it.clone()))),
-            Vector(it) => Ok(Iterable::Collection(0, CollectionIterable::Vector(it.clone()))),
+            Type::List | Type::Set | Type::Dict | Type::Vector => ValueResult::ok(Iterable::Collection(0, self).to_value()),
 
-            Heap(it) => {
-                // Heaps completely unbox themselves to be iterated over
-                let vec = it.unbox().heap.iter().cloned().map(|u| u.0).collect::<Vec<Value>>();
-                Ok(Iterable::Collection(0, CollectionIterable::RawVector(vec)))
+            // Heaps completely unbox themselves to be iterated over
+            Type::Heap => ValueResult::ok(Iterable::RawVector(0, self.as_heap().borrow().heap
+                .iter()
+                .cloned().map(|u| u.0)
+                .collect::<Vec<ValuePtr>>())
+                .to_value()),
+
+            Type::Range => {
+                let it = self.as_range_ref();
+                ValueResult::ok(Iterable::Range(it.start, (**it).clone()).to_value())
             },
-
-            Range(it) => Ok(Iterable::Range(it.start, (**it).clone())),
-            Enumerate(it) => Ok(Iterable::Enumerate(0, Box::new((**it).as_iter()?))),
+            Type::Enumerate => Iterable::Enumerate(0, Box::new(self.as_enumerate_ref().inner.as_iter()?)),
 
             _ => TypeErrorArgMustBeIterable(self.clone()).err(),
         }
@@ -523,23 +645,24 @@ impl Value {
 
     /// Unwraps the value as an `iterable`, or if it is not, yields an iterable of the single element
     /// Note that this takes a `str` to be a non-iterable primitive type, unlike `is_iter()` and `as_iter()`
-    pub fn as_iter_or_unit(&self) -> Iterable {
-        match self {
-            List(it) => Iterable::Collection(0, CollectionIterable::List(it.clone())),
-            Set(it) => Iterable::Collection(0, CollectionIterable::Set(it.clone())),
-            Dict(it) => Iterable::Collection(0, CollectionIterable::Dict(it.clone())),
-            Vector(it) => Iterable::Collection(0, CollectionIterable::Vector(it.clone())),
+    pub fn as_iter_or_unit(self) -> Iterable {
+        match self.ty() {
+            Type::List | Type::Set | Type::Dict | Type::Vector => Iterable::Collection(0, self),
 
-            Heap(it) => {
-                // Heaps completely unbox themselves to be iterated over
-                let vec = it.unbox().heap.iter().cloned().map(|u| u.0).collect::<Vec<Value>>();
-                Iterable::Collection(0, CollectionIterable::RawVector(vec))
+            // Heaps completely unbox themselves to be iterated over
+            Type::Heap => Iterable::RawVector(0, self.as_heap().borrow().heap
+                .iter()
+                .cloned()
+                .map(|u| u.0)
+                .collect::<Vec<ValuePtr>>()),
+
+            Type::Range => {
+                let it = self.as_range();
+                Iterable::Range(it.value.start, it.value)
             },
+            Type::Enumerate => Iterable::Enumerate(0, Box::new(self.as_enumerate().value.inner.as_iter_or_unit())),
 
-            Range(it) => Iterable::Range(it.start, (**it).clone()),
-            Enumerate(it) => Iterable::Enumerate(0, Box::new((**it).as_iter_or_unit())),
-
-            it => Iterable::Unit(Some(it.clone())),
+            _ => Iterable::Unit(ValueOption::some(self)),
         }
     }
 
@@ -554,7 +677,7 @@ impl Value {
     }
 
     /// Converts this `Value` to a `ValueAsSlice`, which is a builder for slice-like structures, supported for `List` and `Str`
-    pub fn as_slice(&self) -> Result<Sliceable, Box<RuntimeError>> {
+    pub fn to_slice(&self) -> Result<Sliceable, Box<RuntimeError>> {
         match self {
             Str(it) => Ok(Sliceable::Str(it, String::new())),
             List(it) => Ok(Sliceable::List(it.unbox(), VecDeque::new())),
@@ -575,16 +698,6 @@ impl Value {
         }
     }
 
-    /// Returns the internal `FunctionImpl` of this value.
-    /// Must only be called on a `Function` or `Closure`, will panic otherwise.
-    pub fn as_function(&self) -> &Rc<FunctionImpl> {
-        match self {
-            Function(f) => f,
-            Closure(c) => &c.func,
-            _ => panic!("Tried to unwrap a {:?} as a function", self),
-        }
-    }
-
     /// Returns `None` if this value is not function evaluable.
     /// Returns `Some(nargs)` if this value is a function with the given number of minimum arguments
     pub fn min_nargs(&self) -> Option<u32> {
@@ -602,100 +715,150 @@ impl Value {
 
     /// Returns the length of this `Value`. Equivalent to the native function `len`. Raises a type error if the value does not have a lenth.
     pub fn len(&self) -> Result<usize, Box<RuntimeError>> {
-        match &self {
-            Str(it) => Ok(it.chars().count()),
-            List(it) => Ok(it.unbox().len()),
-            Set(it) => Ok(it.unbox().set.len()),
-            Dict(it) => Ok(it.unbox().dict.len()),
-            Heap(it) => Ok(it.unbox().heap.len()),
-            Vector(it) => Ok(it.unbox().len()),
-            Range(it) => Ok(it.len()),
-            Enumerate(it) => it.len(),
+        match self.ty() {
+            Type::Str => Ok(self.as_str().as_ref().chars().count()),
+            Type::List => Ok(self.as_list().borrow().list.len()),
+            Type::Set => Ok(self.as_set().borrow().set.len()),
+            Type::Dict => Ok(self.as_dict().borrow().dict.len()),
+            Type::Heap => Ok(self.as_heap().borrow().heap.len()),
+            Type::Vector => Ok(self.as_vector().borrow().vector.len()),
+            Type::Range => Ok(self.as_range_ref().len()),
+            Type::Enumerate => self.as_enumerate_ref().len(),
             _ => TypeErrorArgMustBeIterable(self.clone()).err()
         }
     }
 
     pub fn get_field(self, fields: &Fields, field_index: u32) -> ValueResult {
-        match self {
-            Struct(it) => {
-                let mut it = it.unbox_mut();
+        match self.ty() {
+            Type::Struct => {
+                let mut it = self.as_struct().borrow_mut();
                 match fields.get_field_offset(it.type_index, field_index) {
-                    Some(field_offset) => Ok(it.get_field(field_offset)),
-                    None => TypeErrorFieldNotPresentOnValue(StructType(it.type_impl.clone()), fields.get_field_name(field_index), true).err()
+                    Some(field_offset) => ValueResult::ok(it.get_field(field_offset)),
+                    None => ValueResult::err(TypeErrorFieldNotPresentOnValue(it.type_impl.ptr.clone(), fields.get_field_name(field_index), true))
                 }
             },
-            _ => TypeErrorFieldNotPresentOnValue(self, fields.get_field_name(field_index), false).err()
+            _ => ValueResult::err(TypeErrorFieldNotPresentOnValue(self, fields.get_field_name(field_index), false))
         }
     }
 
-    pub fn set_field(self, fields: &Fields, field_index: u32, value: Value) -> ValueResult {
-        match self {
-            Struct(it) => {
-                let mut it = it.unbox_mut();
+    pub fn set_field(self, fields: &Fields, field_index: u32, value: ValuePtr) -> ValueResult {
+        match self.ty() {
+            Type::Struct => {
+                let mut it = self.as_struct().borrow_mut();
                 match fields.get_field_offset(it.type_index, field_index) {
                     Some(field_offset) => {
                         it.set_field(field_offset, value.clone());
-                        Ok(value)
+                        ValueResult::ok(value)
                     },
-                    None => TypeErrorFieldNotPresentOnValue(StructType(it.type_impl.clone()), fields.get_field_name(field_index), true).err()
+                    None => ValueResult::err(TypeErrorFieldNotPresentOnValue(it.type_impl.ptr.clone(), fields.get_field_name(field_index), true))
                 }
             },
-            _ => TypeErrorFieldNotPresentOnValue(self, fields.get_field_name(field_index), false).err()
+            _ => ValueResult::err(TypeErrorFieldNotPresentOnValue(self, fields.get_field_name(field_index), false))
         }
     }
 
-    pub fn is_bool(&self) -> bool { matches!(self, Bool(_)) }
-    pub fn is_int(&self) -> bool { matches!(self, Bool(_) | Int(_)) }
-    pub fn is_complex(&self) -> bool { matches!(self, Bool(_) | Int(_) | Complex(_)) }
-    pub fn is_str(&self) -> bool { matches!(self, Str(_)) }
+    /// Returns if the value is iterable.
+    pub fn is_iter(&self) -> bool {
+        matches!(self.ty(), Type::Str | Type::List | Type::Set | Type::Dict | Type::Heap | Type::Vector | Type::Range | Type::Enumerate)
+    }
 
-    pub fn is_list(&self) -> bool { matches!(self, List(_)) }
-    pub fn is_set(&self) -> bool { matches!(self, Set(_)) }
-    pub fn is_dict(&self) -> bool { matches!(self, Dict(_)) }
-    pub fn is_vector(&self) -> bool { matches!(self, Vector(_)) }
-
-    pub fn is_iter(&self) -> bool { matches!(self, Str(_) | List(_) | Set(_) | Dict(_) | Heap(_) | Vector(_) | Range(_) | Enumerate(_)) }
-
-    /// Returns if the `Value` is function-evaluable.
-    /// Note that single-element lists are not considered functions here.
-    pub fn is_function(&self) -> bool { matches!(self, Function(_) | PartialFunction(_) | NativeFunction(_) | PartialNativeFunction(_, _) | Closure(_) | StructType(_) | Slice(_)) }
-}
-
-/// Implement Ord and PartialOrd explicitly, to derive implementations for each individual type.
-/// All types are explicitly ordered because we need it in order to call `sort()` and I don't see why not otherwise.
-impl PartialOrd<Self> for Value {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
+    /// Returns if the value is function-evaluable. Note that single-element lists are not considered functions here.
+    pub fn is_evaluable(&self) -> bool {
+        matches!(self.ty(), Type::Function | Type::PartialFunction | Type::Native | Type::PartialNativeFunction | Type::Closure | Type::StructType | Type::Slice)
     }
 }
 
-impl Ord for Value {
-    fn cmp(&self, other: &Self) -> Ordering {
-        match (self, other) {
-            (Bool(l), Bool(r)) => (*l as i32).cmp(&(*r as i32)),
-            (Int(l), Int(r)) => l.cmp(r),
-            (Str(l), Str(r)) => l.cmp(r),
-            (List(l), List(r)) => {
-                let ls = (*l).unbox();
-                let rs = (*r).unbox();
-                ls.cmp(&rs)
-            },
-            (Vector(l), Vector(r)) => {
-                let ls = (*l).unbox();
-                let rs = (*r).unbox();
-                ls.cmp(&rs)
+/// A type used to prevent recursive `repr()` and `str()` calls.
+struct RecursionGuard(Vec<ValueRef>);
+
+impl RecursionGuard {
+    pub fn new() -> RecursionGuard { RecursionGuard(Vec::new()) }
+
+    /// Returns `true` if the value has been seen before, triggering an early exit
+    pub fn enter(&mut self, value: &ValuePtr) -> bool {
+        let boxed = value.as_value_ref();
+        let ret = self.0.contains(&boxed);
+        self.0.push(boxed);
+        ret
+    }
+
+    pub fn leave(&mut self) {
+        self.0.pop().unwrap(); // `.unwrap()` is safe as we should always call `enter()` before `leave()`
+    }
+}
+
+
+macro_rules! impl_owned_value {
+    ($ty:expr, $inner:ident, $as_T:ident, $as_T_ref:ident, $is_T:ident) => {
+        impl OwnedValue for $inner {}
+
+        impl IntoValue for $inner {
+            fn to_value(self) -> ValuePtr {
+                ValuePtr::owned(Prefix::prefix($ty, self))
             }
-            (Heap(l), Heap(r)) => {
-                let ls = (*l).unbox();
-                let rs = (*r).unbox();
-                ls.heap.iter().cmp(&rs.heap)
-            }
-            // Un-order-able things are defined as equal ordering
-            (_, _) => Ordering::Equal,
         }
-    }
+
+        impl ValuePtr {
+            pub fn $as_T(self) -> Box<Prefix<$inner>> {
+                debug_assert!(self.ty() == $ty);
+                self.as_box()
+            }
+            pub fn $as_T_ref(&self) -> &$inner {
+                debug_assert!(self.ty() == $ty);
+                self.as_ref()
+            }
+            pub fn $is_T(&self) -> bool {
+                self.ty() == $ty
+            }
+        }
+    };
 }
 
+macro_rules! impl_shared_value {
+    ($ty:expr, $inner:ident, $const_or_mut:ty, $as_T:ident, $is_T:ident) => {
+        impl SharedValue for $inner {}
+        impl $const_or_mut for $inner {}
+
+        impl IntoValue for $inner {
+            fn to_value(self) -> ValuePtr {
+                ValuePtr::shared(SharedPrefix::prefix($ty, self))
+            }
+        }
+
+        impl ValuePtr {
+            pub fn $as_T(&self) -> &SharedPrefix<$inner> {
+                debug_assert!(self.ty() == $ty);
+                self.as_shared_ref()
+            }
+            pub fn $is_T(&self) -> bool {
+                self.ty() == $ty
+            }
+        }
+    };
+}
+
+impl OwnedValue for () {}
+impl SharedValue for () {}
+
+// Cannot implement for `ComplexImpl` because we need a specialized to_value() which may convert to int
+impl_owned_value!(Type::Range, RangeImpl, as_range, as_range_ref, is_range);
+impl_owned_value!(Type::Enumerate, EnumerateImpl, as_enumerate, as_enumerate_ref, is_enumerate);
+impl_owned_value!(Type::PartialNativeFunction, PartialNativeFunctionImpl, as_partial_native, as_partial_native_ref, is_partial_native);
+impl_owned_value!(Type::Slice, SliceImpl, as_slice, as_slice_ref, is_slice);
+impl_owned_value!(Type::Iter, Iterable, as_iterable, as_iterable_ref, is_iterable);
+
+impl_shared_value!(Type::Str, String, ConstValue, as_str, is_str);
+impl_shared_value!(Type::List, ListImpl, MutValue, as_list, is_list);
+impl_shared_value!(Type::Set, SetImpl, MutValue, as_set, is_set);
+impl_shared_value!(Type::Dict, DictImpl, MutValue, as_dict, is_dict);
+impl_shared_value!(Type::Heap, HeapImpl, MutValue, as_heap, is_heap);
+impl_shared_value!(Type::Vector, VectorImpl, MutValue, as_vector, is_vector);
+impl_shared_value!(Type::Function, FunctionImpl, ConstValue, as_function, is_function);
+impl_shared_value!(Type::PartialFunction, PartialFunctionImpl, ConstValue, as_partial_function, is_partial_function);
+impl_shared_value!(Type::Closure, ClosureImpl, ConstValue, as_closure, is_closure);
+impl_shared_value!(Type::Memoized, MemoizedImpl, MutValue, as_memoized, is_memoized);
+impl_shared_value!(Type::Struct, StructImpl, MutValue, as_struct, is_struct);
+impl_shared_value!(Type::StructType, StructTypeImpl, ConstValue, as_struct_type, is_struct_type);
 
 
 /// A trait which is responsible for converting native types into a `Value`.
@@ -705,41 +868,36 @@ pub trait IntoValue {
 }
 
 macro_rules! impl_into {
-    ($ty:ty, $ret:expr) => {
+    ($ty:ty, $self:ident, $ret:expr) => {
         impl IntoValue for $ty {
-            fn to_value(self) -> ValuePtr {
+            fn to_value($self) -> ValuePtr {
                 $ret
             }
         }
     };
 }
 
-impl_into!(ValuePtr, self);
-impl_into!(usize, self as i64);
-impl_into!(i64, ValuePtr::of_int(self));
-impl_into!(Complex<i64>, ComplexImpl { value: self }.to_value());
-impl_into!(C64, if self.value.im == 0 {
-    ValuePtr::of_int(self.value.re)
+impl_into!(ValuePtr, self, self);
+impl_into!(usize, self, self as i64);
+impl_into!(i64, self, ValuePtr::of_int(self));
+impl_into!(num_complex::Complex<i64>, self, ComplexImpl { inner: self }.to_value());
+impl_into!(ComplexImpl, self, if self.inner.im == 0 {
+    ValuePtr::of_int(self.inner.re)
 } else {
     ValuePtr::owned(Prefix::prefix(Type::Complex, self))
 });
-impl_into!(bool, ValuePtr::of_bool(self));
-impl_into!(char, String::from(self));
-impl_into!(&str, String::from(self));
-impl_into!(NativeFunction, ValuePtr::of_native(self));
-impl_into!(String, ValuePtr::shared(SharedPrefix::prefix(Type::Str, self)));
-impl_into!(VecDeque<ValuePtr>, ListImpl { list: self }.to_value());
-impl_into!(ListImpl, ValuePtr::shared(SharedPrefix::prefix(Type::List, self)));
-impl_into!(Vec<ValuePtr>, VectorImpl { vector: self }.to_value());
-impl_into!(VectorImpl, ValuePtr::shared(SharedPrefix::prefix(Type::Vector, self)));
-impl_into!(IndexSet<ValuePtr, FxBuildHasher>, SetImpl { set: self }.to_value());
-impl_into!(SetImpl, ValuePtr::shared(SharedPrefix::prefix(Type::Set, self)));
-impl_into!(IndexMap<ValuePtr, ValuePtr, FxBuildHasher>, DictImpl { dict: self, default: None }.to_value());
-impl_into!(DictImpl, ValuePtr::shared(SharedPrefix::prefix(Type::Dict, self)));
-impl_into!(BinaryHeap<Reverse<ValuePtr>>, HeapImpl { heap: self }.to_value());
-impl_into!(HeapImpl, ValuePtr::shared(SharedPrefix::prefix(Type::Heap, self)));
-impl_into!(RuntimeError, ValuePtr::error(self));
-impl_into!(Sliceable, match self {
+impl_into!(bool, self, ValuePtr::of_bool(self));
+impl_into!(char, self, String::from(self));
+impl_into!(&str, self, String::from(self));
+impl_into!(NativeFunction, self, ValuePtr::of_native(self));
+impl_into!(VecDeque<ValuePtr>, self, ListImpl { list: self }.to_value());
+impl_into!(Vec<ValuePtr>, self, VectorImpl { vector: self }.to_value());
+impl_into!((ValuePtr, ValuePtr), self, vec![self.0, self.1].to_value());
+impl_into!(IndexSet<ValuePtr, FxBuildHasher>, self, SetImpl { set: self }.to_value());
+impl_into!(IndexMap<ValuePtr, ValuePtr, FxBuildHasher>, self, DictImpl { dict: self, default: None }.to_value());
+impl_into!(BinaryHeap<Reverse<ValuePtr>>, self, HeapImpl { heap: self }.to_value());
+impl_into!(RuntimeError, self, ValuePtr::error(self));
+impl_into!(Sliceable<'_>, self, match self {
     Sliceable::Str(_, it) => it.to_value(),
     Sliceable::List(_, it) => it.to_value(),
     Sliceable::Vector(_, it) => it.to_value(),
@@ -780,6 +938,38 @@ pub trait IntoDictValue {
 impl<I> IntoDictValue for I where I : Iterator<Item=(ValuePtr, ValuePtr)> {
     fn to_dict(self) -> ValuePtr {
         self.collect::<IndexMap<ValuePtr, ValuePtr, FxBuildHasher>>().to_value()
+    }
+}
+
+
+#[derive(Debug, Eq, PartialEq, Hash)]
+pub struct ComplexImpl {
+    pub inner: num_complex::Complex<i64>,
+}
+
+impl OwnedValue for ComplexImpl {}
+
+impl ValuePtr {
+    pub fn as_complex(self) -> Box<Prefix<ComplexImpl>> {
+        debug_assert!(self.ty() == Type::Complex);
+        self.as_box()
+    }
+
+    pub fn as_complex_ref(&self) -> &ComplexImpl {
+        debug_assert!(self.ty() == Type::Complex);
+        self.as_ref()
+    }
+
+    pub fn is_complex(&self) -> bool {
+        self.ty() == Type::Complex
+    }
+}
+
+impl_partial_ord!(ComplexImpl);
+impl Ord for ComplexImpl {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.inner.re.cmp(&other.inner.re)
+            .then(self.inner.im.cmp(&other.inner.im))
     }
 }
 
@@ -837,7 +1027,7 @@ impl FunctionImpl {
         }
     }
 
-    pub fn as_str(&self) -> String {
+    pub fn repr(&self) -> String {
         format!("fn {}({})", self.name, self.args.join(", "))
     }
 }
@@ -851,9 +1041,8 @@ impl Hash for FunctionImpl {
 
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub struct PartialFunctionImpl {
-    /// The `Value` must be either a `Function` or `Closure`
-    pub func: Value,
-    pub args: Vec<Value>,
+    pub func: ValueFunction,
+    pub args: Vec<ValuePtr>,
 }
 
 impl Hash for PartialFunctionImpl {
@@ -863,21 +1052,28 @@ impl Hash for PartialFunctionImpl {
 }
 
 
+#[derive(Eq, PartialEq, Debug, Clone)]
+pub struct PartialNativeFunctionImpl {
+    pub func: NativeFunction,
+    pub partial: PartialArgument,
+}
+
+
 /// A closure is a combination of a function, and a set of `environment` variables.
 /// These variables are references either to locals in the enclosing function, or captured variables from the enclosing function itself.
 ///
 /// A closure also provides *interior mutability* for it's captured upvalues, allowing them to be modified even from the surrounding function.
-/// Unlike with other mutable `Value` types, this does so using `Rc<Cell<Value>>`. The reason being:
+/// Unlike with other mutable `ValuePtr` types, this does so using `Rc<Cell<ValuePtr>>`. The reason being:
 ///
 /// - A `Mut` cannot be unboxed without creating a borrow, which introduces lifetime restrictions. It also cannot be mutably unboxed without creating a write lock. With a closure, we need to be free to unbox the environment straight onto the stack, so this is off the table.
-/// - The closure's inner value can be thought of as immutable. As `Value` is immutable, and clone-able, so can the contents of `Cell`. We can then unbox this completely - take a reference to the `Rc`, and call `get()` to unbox the current value of the cell, onto the stack.
+/// - The closure's inner value can be thought of as immutable. As `ValuePtr` is immutable, and clone-able, so can the contents of `Cell`. We can then unbox this completely - take a reference to the `Rc`, and call `get()` to unbox the current value of the cell, onto the stack.
 ///
-/// This has one problem, which is we can't call `.get()` unless the cell is `Copy`, which `Value` isn't, and can't be, because `Mut` can't be copy due to the presence of `Rc`... Fortunately, this is just an API limitation, and we can unbox the cell in other ways.
+/// This has one problem, which is we can't call `.get()` unless the cell is `Copy`, which `ValuePtr` isn't, and can't be, because `Mut` can't be copy due to the presence of `Rc`... Fortunately, this is just an API limitation, and we can unbox the cell in other ways.
 ///
-/// Note we cannot derive most functions, as that also requires `Cell<Value>` to be `Copy`, due to convoluted trait requirements.
+/// Note we cannot derive most functions, as that also requires `Cell<ValuePtr>` to be `Copy`, due to convoluted trait requirements.
 #[derive(Clone)]
 pub struct ClosureImpl {
-    func: Rc<FunctionImpl>,
+    func: ValueFunction,
     environment: Vec<Rc<Cell<UpValue>>>,
 }
 
@@ -1001,10 +1197,9 @@ pub fn guard_recursive_hash<T, F : FnOnce() -> T>(f: F) -> Result<(), ()> {
 }
 
 
-/// Boxes a `IndexMap<Value, Value>`, along with an optional default value
 #[derive(Debug, Clone)]
 pub struct DictImpl {
-    pub dict: IndexMap<Value, Value, FxBuildHasher>,
+    pub dict: IndexMap<ValuePtr, ValuePtr, FxBuildHasher>,
     pub default: Option<InvokeArg0>
 }
 
@@ -1025,7 +1220,7 @@ impl Ord for DictImpl {
 }
 
 /// See justification for the unique `Hash` implementation on `SetImpl`
-impl Hash for Mut<DictImpl> {
+impl Hash for SharedPrefix<DictImpl> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         match self.try_unbox() {
             Some(it) => {
@@ -1067,16 +1262,16 @@ impl Hash for HeapImpl {
 #[derive(Debug, Clone)]
 pub struct StructImpl {
     pub type_index: u32,
-    pub type_impl: Rc<StructTypeImpl>,
-    values: Vec<Value>,
+    pub type_impl: ValueStructType,
+    values: Vec<ValuePtr>,
 }
 
 impl StructImpl {
-    fn get_field(&mut self, field_offset: usize) -> Value {
+    fn get_field(&mut self, field_offset: usize) -> ValuePtr {
         self.values[field_offset].clone()
     }
 
-    fn set_field(&mut self, field_offset: usize, value: Value) {
+    fn set_field(&mut self, field_offset: usize, value: ValuePtr) {
         self.values[field_offset] = value;
     }
 }
@@ -1193,15 +1388,22 @@ impl RangeImpl {
 }
 
 
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+struct EnumerateImpl {
+    pub inner: ValuePtr
+}
+
+
+/// All arguments must either be `nil` (which will be treated as `None`), or an int-like type.
 #[derive(Eq, PartialEq, Ord, PartialOrd, Debug, Hash, Clone)]
 pub struct SliceImpl {
-    arg1: Option<i64>,
-    arg2: Option<i64>,
-    arg3: Option<i64>
+    arg1: ValuePtr,
+    arg2: ValuePtr,
+    arg3: ValuePtr,
 }
 
 impl SliceImpl {
-    pub fn apply(self, arg: Value) -> ValueResult {
+    pub fn apply(self, arg: ValuePtr) -> ValueResult {
         core::literal_slice(arg, self.arg1, self.arg2, self.arg3)
     }
 }
@@ -1248,8 +1450,9 @@ impl SliceImpl {
 #[derive(Debug, Clone)]
 pub enum Iterable {
     Str(String, Chars<'static>),
-    Unit(Option<Value>),
-    Collection(usize, CollectionIterable),
+    Unit(ValueOption),
+    Collection(usize, ValuePtr),
+    RawVector(usize, Vec<ValuePtr>),
     Range(i64, RangeImpl),
     Enumerate(usize, Box<Iterable>),
 }
@@ -1262,6 +1465,7 @@ impl Iterable {
             Iterable::Str(it, _) => it.chars().count(),
             Iterable::Unit(it) => it.is_some() as usize,
             Iterable::Collection(_, it) => it.len(),
+            Iterable::RawVector(_, it) => it.len(),
             Iterable::Range(_, it) => it.len(),
             Iterable::Enumerate(_, it) => it.len(),
         }
@@ -1273,6 +1477,8 @@ impl Iterable {
                 let range = it.reverse();
                 IterableRev(Iterable::Range(range.start, range))
             },
+            Iterable::Collection(_, it) => IterableRev(Iterable::Collection(self.len(), it)),
+            Iterable::RawVector(_, it) => IterableRev(Iterable::RawVector(self.len(), it)),
             Iterable::Enumerate(_, it) => IterableRev(Iterable::Enumerate(0, Box::new(it.reverse().0))),
             it => IterableRev(it)
         }
@@ -1291,22 +1497,40 @@ impl IterableRev {
     }
 }
 
+impl Iterable {
+    /// Returns the next element from a collection-like `ValuePtr` acting as an iterable
+    fn get(ptr: & mut ValuePtr, index: usize) -> Option<ValuePtr> {
+        match ptr.ty() {
+            Type::List => ptr.as_list().borrow().list.get(index).cloned(),
+            Type::Set => ptr.as_set().borrow().set.get_index(index).cloned(),
+            Type::Dict => ptr.as_dict().borrow().dict.get_index(index).map(|(l, r)| (l.clone(), r.clone()).to_value()),
+            Type::Vector => ptr.as_vector().borrow().vector.get(index).cloned(),
+            _ => unreachable!(),
+        }
+    }
+}
+
 
 impl Iterator for Iterable {
-    type Item = Value;
+    type Item = ValuePtr;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self {
             Iterable::Str(_, chars) => chars.next().map(|u| u.to_value()),
-            Iterable::Unit(it) => it.take(),
+            Iterable::Unit(it) => it.take().as_option(),
             Iterable::Collection(index, it) => {
-                let ret = it.current(*index);
+                let ret = Iterable::get(it, *index);
                 *index += 1;
                 ret
-            }
+            },
+            Iterable::RawVector(index, it) => {
+                let ret = it.get(*index).cloned();
+                *index += 1;
+                ret
+            },
             Iterable::Range(it, range) => range.next(it),
             Iterable::Enumerate(index, it) => {
-                let ret = (*it).next().map(|u| vec![Int(*index as i64), u].to_value());
+                let ret = (*it).next().map(|u| (u, index.to_value()).to_value());
                 *index += 1;
                 ret
             },
@@ -1315,27 +1539,31 @@ impl Iterator for Iterable {
 }
 
 impl Iterator for IterableRev {
-    type Item = Value;
+    type Item = ValuePtr;
 
     fn next(&mut self) -> Option<Self::Item> {
         match &mut self.0 {
             Iterable::Str(_, chars) => chars.next_back().map(|u| u.to_value()),
             Iterable::Unit(it) => it.take(),
             Iterable::Collection(index, it) => {
-                if *index < it.len() {
-                    let ret = it.current(it.len() - 1 - *index);
-                    *index += 1;
-                    ret
-                } else {
-                    None
+                if index == 0 {
+                    return None
                 }
+                let ret = Iterable::get(it, *index);
+                *index -= 1;
+                ret
+            }
+            Iterable::RawVector(index, it) => {
+                if index == 0 {
+                    return None
+                }
+                let ret = it.get(*index);
+                *index -= 1;
+                ret
             }
             Iterable::Range(it, range) => range.next(it),
             Iterable::Enumerate(index, it) => {
-                let ret = (*it).next().map(|u| {
-                    let vec = vec![Int(*index as i64), u];
-                    vec.to_value()
-                });
+                let ret = (*it).next().map(|u| (u, index.to_value()).to_value());
                 *index += 1;
                 ret
             },
@@ -1346,60 +1574,11 @@ impl Iterator for IterableRev {
 impl FusedIterator for Iterable {}
 impl FusedIterator for IterableRev {}
 
-// Instead of deriving these, assert that they panic because it should never happen.
-impl PartialEq for Iterable { fn eq(&self, _: &Self) -> bool { panic!("Iter() is a synthetic type and should not be =='d"); } }
-impl Eq for Iterable {}
-impl PartialOrd for Iterable { fn partial_cmp(&self, _: &Self) -> Option<Ordering> { panic!("Iter() is a synthetic type and should not be compared"); } }
-impl Ord for Iterable { fn cmp(&self, _: &Self) -> Ordering { panic!("Iter() is a synthetic type and should not be compared"); } }
-impl Hash for Iterable { fn hash<H: Hasher>(&self, _: &mut H) { panic!("Iter() is a synthetic type and should not be hashed"); } }
-
-
-/// A single type for all collection iterators that are indexable by `usize`. Exposes a single common method `current()` which returns the value at the current index, or `None` if the index is longer than the length of the collection.
-#[derive(Debug, Clone)]
-pub enum CollectionIterable {
-    List(Mut<VecDeque<Value>>),
-    Set(Mut<SetImpl>),
-    Dict(Mut<DictImpl>),
-    Vector(Mut<Vec<Value>>),
-    RawVector(Vec<Value>),
-}
-
-impl CollectionIterable {
-
-    fn len(&self) -> usize {
-        match self {
-            CollectionIterable::List(it) => it.unbox().len(),
-            CollectionIterable::Set(it) => it.unbox().set.len(),
-            CollectionIterable::Dict(it) => it.unbox().dict.len(),
-            CollectionIterable::Vector(it) => it.unbox().len(),
-            CollectionIterable::RawVector(it) => it.len(),
-        }
-    }
-
-    fn current(&self, index: usize) -> Option<Value> {
-        match self {
-            CollectionIterable::List(it) => it.unbox().get(index).cloned(),
-            CollectionIterable::Set(it) => it.unbox().set.get_index(index).cloned(),
-            CollectionIterable::Dict(it) => it.unbox().dict.get_index(index).map(|(l, r)| {
-                let vec = vec![l.clone(), r.clone()];
-                vec.to_value()
-            }),
-            CollectionIterable::Vector(it) => it.unbox().get(index).cloned(),
-            CollectionIterable::RawVector(it) => it.get(index).cloned(),
-        }
-    }
-}
 
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub struct MemoizedImpl {
-    pub func: Value,
-    pub cache: Mut<HashMap<Vec<Value>, Value, FxBuildHasher>>
-}
-
-impl MemoizedImpl {
-    pub fn new(func: Value) -> MemoizedImpl {
-        MemoizedImpl { func, cache: Mut::new(HashMap::with_hasher(FxBuildHasher::default())) }
-    }
+    pub func: ValuePtr,
+    pub cache: HashMap<Vec<ValuePtr>, ValuePtr, FxBuildHasher>
 }
 
 impl Hash for MemoizedImpl {
@@ -1411,8 +1590,8 @@ impl Hash for MemoizedImpl {
 
 pub enum Indexable<'a> {
     Str(&'a Rc<String>),
-    List(RefMut<'a, VecDeque<Value>>),
-    Vector(RefMut<'a, Vec<Value>>),
+    List(RefMut<'a, VecDeque<ValuePtr>>),
+    Vector(RefMut<'a, Vec<ValuePtr>>),
 }
 
 impl<'a> Indexable<'a> {
@@ -1437,7 +1616,7 @@ impl<'a> Indexable<'a> {
         }
     }
 
-    pub fn get_index(&self, index: usize) -> Value {
+    pub fn get_index(&self, index: usize) -> ValuePtr {
         match self {
             Indexable::Str(it) => it.chars().nth(index).unwrap().to_value(),
             Indexable::List(it) => it[index].clone(),
@@ -1446,9 +1625,9 @@ impl<'a> Indexable<'a> {
     }
 
     /// Setting indexes only works for immutable collections - so not strings
-    pub fn set_index(&mut self, index: usize, value: Value) -> Result<(), Box<RuntimeError>> {
+    pub fn set_index(&mut self, index: usize, value: ValuePtr) -> ValueResult {
         match self {
-            Indexable::Str(it) => TypeErrorArgMustBeIndexable(Str((*it).clone())).err(),
+            Indexable::Str(it) => TypeErrorArgMustBeIndexable((*it).clone().to_value()).err(),
             Indexable::List(it) => { it[index] = value; Ok(()) },
             Indexable::Vector(it) => { it[index] = value; Ok(()) },
         }
@@ -1553,6 +1732,7 @@ mod test {
     use crate::core::{NativeFunction, PartialArgument};
     use crate::vm::error::RuntimeError;
     use crate::vm::value::{FunctionImpl, IntoIterableValue, IntoValue, Value};
+    use crate::vm::{ValueOption, ValuePtr, ValueResult};
 
     #[test]
     fn test_layout() {
@@ -1563,9 +1743,9 @@ mod test {
 
     #[test]
     fn test_value_ref_is_ref_equality() {
-        let ptr1 = ValuePtr::from(vec![1, 2, 3]);
-        let ptr2 = ValuePtr::from(vec![123]);
-        let ptr3 = ValuePtr::from(vec![1, 2, 3]);
+        let ptr1 = vec![1, 2, 3].into_iter().to_list();
+        let ptr2 = vec![123].into_iter().to_list();
+        let ptr3 = vec![1, 2, 3].into_iter().to_list();
         let ptr4 = ptr1.clone(); // [1, 2, 3]
 
         assert_eq!(ptr1, ptr1);
@@ -1606,47 +1786,12 @@ mod test {
         assert!(err.is_err());
 
         assert_eq!(ok.as_result(), Ok(ValuePtr::nil()));
-        assert_eq!(err.as_result(), Err(RuntimeError::RuntimeExit))
+        assert_eq!(err.as_result(), Err(Box::new(RuntimeError::RuntimeExit)))
     }
 
     #[test]
     #[should_panic]
     fn test_value_result_ok_of_err() {
-        let _ = ValueResult::ok(ValuePtr::from(RuntimeError::RuntimeExit));
-    }
-
-    #[test]
-    fn test_consistency() {
-        for v in all_values() {
-            assert_eq!(v.is_iter(), v.as_iter().is_ok(), "is_iter() and as_iter() not consistent for {}", v.as_type_str());
-            assert_eq!(v.is_iter(), v.len().is_ok(), "is_iter() and len() not consistent for {}", v.as_type_str());
-            assert_eq!(v.is_function(), v.min_nargs().is_some(), "is_function() and min_nargs() not consistent for {}", v.as_type_str());
-
-            if v.as_index().is_ok() {
-                assert!(v.len().is_ok(), "as_index() and len() not consistent for {}", v.as_type_str());
-            }
-        }
-    }
-
-    fn all_values() -> Vec<Value> {
-        let function = Rc::new(FunctionImpl::new(0, 0, String::new(), vec![], vec![], false));
-        vec![
-            Value::Nil,
-            Value::Bool(true),
-            Value::Int(1),
-            VecDeque::new().to_value(),
-            IndexSet::with_hasher(FxBuildHasher::default()).to_value(),
-            IndexMap::with_hasher(FxBuildHasher::default()).to_value(),
-            std::iter::empty().to_heap(),
-            vec![].to_value(),
-            Value::range(0, 1, 1).unwrap(),
-            Value::Enumerate(Box::new(vec![].to_value())),
-            Value::slice(Value::Nil, Value::Int(3), None).unwrap(),
-            Value::Function(function.clone()),
-            Value::partial(Value::Function(function.clone()), vec![]),
-            Value::NativeFunction(NativeFunction::Print),
-            Value::PartialNativeFunction(NativeFunction::Map, Box::new(PartialArgument::Arg2Par1(Value::Nil))),
-            Value::closure(function.clone())
-        ]
+        let _ = ValueResult::ok(RuntimeError::RuntimeExit.to_value());
     }
 }

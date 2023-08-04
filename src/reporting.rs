@@ -329,7 +329,7 @@ impl AsError for Value {
 
 impl AsError for FunctionImpl {
     fn as_error(&self) -> String {
-        self.as_str()
+        self.repr()
     }
 }
 
