@@ -14,12 +14,14 @@ use crate::reporting::{Location, SourceView};
 
 pub use crate::vm::error::{DetailRuntimeError, RuntimeError};
 pub use crate::vm::opcode::Opcode;
-pub use crate::vm::value::{FunctionImpl, guard_recursive_hash, IntoDictValue, IntoIterableValue, IntoValue, IntoValueResult, Iterable, LiteralType, StructTypeImpl, Value, C64};
+pub use crate::vm::value::{FunctionImpl, ValuePtr, ValueResult, ValueOption, IntoDictValue, IntoIterableValue, IntoValue, Iterable, LiteralType, StructTypeImpl, C64, guard_recursive_hash, checks, Type};
+
+
+pub type Value = ValuePtr;
 
 use Opcode::{*};
 use RuntimeError::{*};
 
-pub type ValueResult = Result<Value, Box<RuntimeError>>;
 pub type AnyResult = Result<(), Box<RuntimeError>>;
 
 pub mod operator;

@@ -4,7 +4,7 @@ use crate::core;
 use crate::core::NativeFunction;
 use crate::vm::ValueResult;
 use crate::vm::error::RuntimeError;
-use crate::vm::value::{C64, IntoIterableValue, IntoValue, IntoValueResult, Mut, Value};
+use crate::vm::value::{C64, IntoIterableValue, IntoValue, Value};
 
 use RuntimeError::{*};
 use Value::{*};

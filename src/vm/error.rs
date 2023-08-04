@@ -1,9 +1,9 @@
 use crate::reporting::{AsError, AsErrorWithContext, Location, SourceView};
 
 use crate::core::NativeFunction;
-use crate::vm::{CallFrame, StructTypeImpl};
+use crate::vm::{CallFrame, StructTypeImpl, ValueResult};
 use crate::vm::operator::{BinaryOp, UnaryOp};
-use crate::vm::value::{FunctionImpl, Value};
+use crate::vm::value::{FunctionImpl, Type, Value, ValuePtr};
 
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -13,7 +13,7 @@ pub enum RuntimeError {
     RuntimeAssertFailed(String),
     RuntimeCompilationError(Vec<String>),
 
-    ValueIsNotFunctionEvaluable(Value),
+    ValueIsNotFunctionEvaluable(ValuePtr),
 
     IncorrectArgumentsUserFunction(FunctionImpl, u32),
     IncorrectArgumentsNativeFunction(NativeFunction, u32),
@@ -27,40 +27,40 @@ pub enum RuntimeError {
     ValueErrorValueMustBePositive(i64),
     ValueErrorValueMustBeNonZero,
     ValueErrorValueMustBeNonEmpty,
-    ValueErrorCannotUnpackLengthMustBeGreaterThan(u32, usize, Value), // expected, actual
-    ValueErrorCannotUnpackLengthMustBeEqual(u32, usize, Value), // expected, actual
-    ValueErrorCannotCollectIntoDict(Value),
-    ValueErrorKeyNotPresent(Value),
+    ValueErrorCannotUnpackLengthMustBeGreaterThan(u32, usize, ValuePtr), // expected, actual
+    ValueErrorCannotUnpackLengthMustBeEqual(u32, usize, ValuePtr), // expected, actual
+    ValueErrorCannotCollectIntoDict(ValuePtr),
+    ValueErrorKeyNotPresent(ValuePtr),
     ValueErrorInvalidCharacterOrdinal(i64),
     ValueErrorInvalidFormatCharacter(Option<char>),
-    ValueErrorNotAllArgumentsUsedInStringFormatting(Value),
+    ValueErrorNotAllArgumentsUsedInStringFormatting(ValuePtr),
     ValueErrorMissingRequiredArgumentInStringFormatting,
     ValueErrorEvalListMustHaveUnitLength(usize),
     ValueErrorCannotCompileRegex(String, String),
-    ValueErrorRecursiveHash(Value),
+    ValueErrorRecursiveHash(ValuePtr),
 
-    TypeErrorUnaryOp(UnaryOp, Value),
-    TypeErrorBinaryOp(BinaryOp, Value, Value),
-    TypeErrorBinaryIs(Value, Value),
-    TypeErrorCannotConvertToInt(Value),
-    TypeErrorFieldNotPresentOnValue(Value, String, bool), // value, field name, is the value to be printed with to_repr_str()?
+    TypeErrorUnaryOp(UnaryOp, ValuePtr),
+    TypeErrorBinaryOp(BinaryOp, ValuePtr, ValuePtr),
+    TypeErrorBinaryIs(ValuePtr, ValuePtr),
+    TypeErrorCannotConvertToInt(ValuePtr),
+    TypeErrorFieldNotPresentOnValue(ValuePtr, String, bool), // value, field name, is the value to be printed with to_repr_str()?
 
-    TypeErrorArgMustBeInt(Value),
-    TypeErrorArgMustBeStr(Value),
-    TypeErrorArgMustBeChar(Value),
-    TypeErrorArgMustBeIterable(Value),
-    TypeErrorArgMustBeIndexable(Value),
-    TypeErrorArgMustBeSliceable(Value),
-    TypeErrorArgMustBeDict(Value),
-    TypeErrorArgMustBeFunction(Value),
-    TypeErrorArgMustBeCmpOrKeyFunction(Value),
-    TypeErrorArgMustBeReplaceFunction(Value),
+    TypeErrorArgMustBeInt(ValuePtr),
+    TypeErrorArgMustBeStr(ValuePtr),
+    TypeErrorArgMustBeChar(ValuePtr),
+    TypeErrorArgMustBeIterable(ValuePtr),
+    TypeErrorArgMustBeIndexable(ValuePtr),
+    TypeErrorArgMustBeSliceable(ValuePtr),
+    TypeErrorArgMustBeDict(ValuePtr),
+    TypeErrorArgMustBeFunction(ValuePtr),
+    TypeErrorArgMustBeCmpOrKeyFunction(ValuePtr),
+    TypeErrorArgMustBeReplaceFunction(ValuePtr),
 }
 
 impl RuntimeError {
     #[cold]
-    pub fn err<T>(self) -> Result<T, Box<RuntimeError>> {
-        Err(Box::new(self))
+    pub fn err(self) -> ValueResult {
+        ValueResult::err(self)
     }
 
     pub fn with_stacktrace(self, ip: usize, call_stack: &[CallFrame], functions: &[Value], locations: &[Location]) -> DetailRuntimeError {
@@ -150,6 +150,6 @@ fn find_owning_function(ip: usize, functions: &[Value]) -> String {
         .filter_map(|f| match f { Value::Function(f) => Some(f), _ => None})
         .filter(|f| f.head <= ip && ip <= f.tail)
         .min_by_key(|f| f.tail - f.head)
-        .map(|f| f.as_str())
+        .map(|f| f.repr())
         .unwrap_or_else(|| String::from("<script>"))
 }

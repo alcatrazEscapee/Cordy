@@ -148,7 +148,7 @@ impl Opcode {
                 match constant {
                     Value::Nil => String::from("Nil"),
                     Value::Bool(it) => String::from(if *it { "True" } else { "False" }),
-                    Value::Function(it) => format!("Function({} -> L[{}, {}])", it.as_str(), it.head, it.tail),
+                    Value::Function(it) => format!("Function({} -> L[{}, {}])", it.repr(), it.head, it.tail),
                     Value::StructType(it) => format!("StructType({})", it.as_str()),
                     _ => format!("{}({})", match constant {
                         Value::Int(_) => "Int",
