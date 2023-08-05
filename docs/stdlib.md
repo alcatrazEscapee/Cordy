@@ -322,7 +322,7 @@ Possible signatures:
 
 With one argument, returns the minimum of each value in the iterable. With more than one argument, returns the minimum of all the arguments. Raises an error when invoked with no arguments.
 
-Note that the special case `min(int)` or `int.min` will return the lowest possible signed 64-bit integer representable.
+Note that the special case `min(int)` or `int.min` will return the lowest possible signed 63-bit integer representable.
 
 ### Min By `min_by(...) -> int`
 
@@ -342,7 +342,7 @@ Possible signatures:
 
 With one argument, returns the maximum of each value in the iterable. With more than one argument, returns the maximum of all the arguments. Raises an error when invoked with no arguments.
 
-Note that the special case `max(int)` or `int.max` will return the highest possible signed 64-bit integer representable.
+Note that the special case `max(int)` or `int.max` will return the highest possible signed 63-bit integer representable.
 
 ### Max By `max_by(...) -> int`
 
@@ -640,11 +640,11 @@ Returns the positive integer square root of `x`, or the largest `y` such that `y
 
 ### (Int) Count Ones `count_ones(x: int) -> int`
 
-Returns the number of ones in the 64-bit, signed, binary representation of `x`
+Returns the number of ones in the 63-bit, signed, binary representation of `x`
 
 ### (Int) Count Zeros `count_zeros(x: int) -> int`
 
-Returns the number of zeros in the 64-bit, signed, binary representation of `x`
+Returns the number of zeros in the 63-bit, signed, binary representation of `x`
 
 ### Lcm `lcm(...) -> int`
 

@@ -41,7 +41,7 @@ This language is inspired by parts from Python, Rust, Haskell, Java, and JavaScr
 - A few basic types:
     - `nil`: The absence of a value, and the default value for all declared uninitialized variables
     - `bool`: A boolean, which can be either `true` or `false
-    - `int`: A 64-bit signed integer
+    - `int`: A 63-bit signed integer
     - `complex`: A 64-bit signed integral complex number. Declared with the `i` or `j` suffix, i.e. `1 + 3i`
     - `str`: A UTF-8 string
     - `function`: The type of all functions
