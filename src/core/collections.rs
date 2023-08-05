@@ -368,7 +368,7 @@ pub fn filter<VM: VirtualInterface>(vm: &mut VM, f: ValuePtr, args: ValuePtr) ->
     let f: InvokeArg1 = InvokeArg1::from(f)?;
     for r in args.to_iter()? {
         let ret = f.invoke(r.clone(), vm)?;
-        if ret.as_bool() {
+        if ret.to_bool() {
             acc.push_back(r);
         }
     }
@@ -573,7 +573,7 @@ pub fn collect_into_dict(iter: impl Iterator<Item=ValuePtr>) -> ValueResult {
 
 pub fn dict_set_default(def: ValuePtr, target: ValuePtr) -> ValueResult {
     let target = target.check_dict()?;
-    target.as_dict().borrow_mut().default = Some(if def.is_function() {
+    target.as_dict().borrow_mut().default = Some(if def.is_evaluable() {
         InvokeArg0::from(def)?
     } else {
         InvokeArg0::Noop(def) // Treat single argument defaults still as a function, which is optimized to just copy its value
@@ -607,11 +607,11 @@ pub fn left_find<VM: VirtualInterface>(vm: &mut VM, finder: ValuePtr, args: Valu
     // For index with value, we use `.position()`
     // For value with value, we just use `.find()`
     let mut iter = args.to_iter()?;
-    if finder.is_function() {
+    if finder.is_evaluable() {
         let finder: InvokeArg1 = InvokeArg1::from(finder)?;
         for (i, v) in iter.enumerate() {
             let ret = finder.invoke(v.clone(), vm)?;
-            if ret.as_bool() {
+            if ret.to_bool() {
                 return if return_index { (i as i64).to_value() } else { v }.ok()
             }
         }
@@ -630,11 +630,12 @@ pub fn right_find<VM: VirtualInterface>(vm: &mut VM, finder: ValuePtr, args: Val
     // Identical to the above except we use `.reverse()`, and subtract the index from `len`
     let mut iter = args.to_iter()?.reverse();
     let len = iter.len();
-    if finder.is_function() {
+    dbg!(len, &iter);
+    if finder.is_evaluable() {
         let finder: InvokeArg1 = InvokeArg1::from(finder)?;
         for (i, v) in iter.enumerate() {
             let ret = finder.invoke(v.clone(), vm)?;
-            if ret.as_bool() {
+            if ret.to_bool() {
                 return if return_index { ((len - 1 - i) as i64).to_value() } else { v }.ok()
             }
         }
