@@ -1,8 +1,9 @@
 use crate::compiler::parser::semantic::{LValue, LValueReference};
-use crate::reporting::Location;
 use crate::core::NativeFunction;
+use crate::reporting::Location;
 use crate::vm::{C64, LiteralType, Opcode, RuntimeError, Type, ValuePtr, ValueResult};
 use crate::vm::operator::{BinaryOp, UnaryOp};
+
 
 #[derive(Debug, Clone)]
 pub struct Expr(pub Location, pub ExprType);

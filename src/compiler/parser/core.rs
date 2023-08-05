@@ -4,15 +4,16 @@
 
 use crate::compiler::parser::{Parser, ParserError};
 use crate::compiler::parser::ParserErrorType;
-use crate::compiler::scanner::ScanToken;
 use crate::compiler::parser::semantic::{LValueReference, Reference};
+use crate::compiler::scanner::ScanToken;
 use crate::reporting::Location;
 use crate::trace;
 use crate::vm::{Opcode, RuntimeError};
 
+use Opcode::{*};
 use ParserErrorType::{*};
 use ScanToken::{*};
-use Opcode::{*};
+
 
 /// A state to restore to while backtracking.
 /// Only stores enough state to be necessary, as we don't need to backtrack through output tokens.

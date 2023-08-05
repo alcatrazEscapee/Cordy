@@ -4,21 +4,19 @@ use std::io::{BufRead, Write};
 use std::rc::Rc;
 use fxhash::FxBuildHasher;
 
-use crate::{compiler, util, core, trace};
+use crate::{compiler, core, trace, util};
 use crate::compiler::{CompileParameters, CompileResult, Fields, IncrementalCompileResult, Locals};
-use crate::vm::value::{Literal, UpValue, ValueStructType};
-use crate::util::OffsetAdd;
 use crate::reporting::{Location, SourceView};
+use crate::util::OffsetAdd;
+use crate::vm::value::{Literal, UpValue, ValueStructType};
 
 pub use crate::vm::error::{DetailRuntimeError, RuntimeError};
 pub use crate::vm::opcode::Opcode;
-pub use crate::vm::value::{FunctionImpl, ValuePtr, ValueResult, ValueOption, IntoDictValue, IntoIterableValue, IntoValue, Iterable, LiteralType, StructTypeImpl, C64, Type, guard_recursive_hash, MIN_INT, MAX_INT};
-
-
-pub type Value = ValuePtr;
+pub use crate::vm::value::{C64, FunctionImpl, guard_recursive_hash, IntoDictValue, IntoIterableValue, IntoValue, Iterable, LiteralType, MAX_INT, MIN_INT, StructTypeImpl, Type, ValueOption, ValuePtr, ValueResult};
 
 use Opcode::{*};
 use RuntimeError::{*};
+
 
 pub type AnyResult = Result<(), Box<RuntimeError>>;
 

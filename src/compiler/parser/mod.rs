@@ -6,10 +6,10 @@ use crate::compiler::parser::expr::{Expr, ExprType};
 use crate::compiler::parser::semantic::{LateBoundGlobal, LValue, LValueReference, ParserFunctionImpl, Reference};
 use crate::compiler::scanner::{ScanResult, ScanToken};
 use crate::core::NativeFunction;
-use crate::vm::{Opcode, StructTypeImpl, Value};
-use crate::vm::operator::{BinaryOp, UnaryOp};
-use crate::trace;
 use crate::reporting::Location;
+use crate::trace;
+use crate::vm::{Opcode, StructTypeImpl};
+use crate::vm::operator::{BinaryOp, UnaryOp};
 
 pub use crate::compiler::parser::errors::{ParserError, ParserErrorType};
 pub use crate::compiler::parser::semantic::{Fields, Locals};
@@ -18,6 +18,7 @@ use NativeFunction::{*};
 use Opcode::{*};
 use ParserErrorType::{*};
 use ScanToken::{*};
+
 
 pub(super) type ParseRule = fn(&mut Parser) -> ();
 
@@ -1904,9 +1905,8 @@ impl Parser<'_> {
 
 #[cfg(test)]
 mod tests {
-    use crate::reporting::SourceView;
     use crate::{compiler, test_util};
-
+    use crate::reporting::SourceView;
 
     #[test] fn test_nil() { run_expr("nil", "Nil") }
     #[test] fn test_true() { run_expr("true", "True") }

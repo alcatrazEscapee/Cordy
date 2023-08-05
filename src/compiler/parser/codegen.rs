@@ -1,9 +1,9 @@
 use crate::compiler::parser::expr::{Expr, ExprType};
+use crate::compiler::parser::optimizer::Optimize;
 use crate::compiler::parser::Parser;
+use crate::reporting::Location;
 use crate::vm::Opcode;
 use crate::vm::operator::BinaryOp;
-use crate::compiler::parser::optimizer::Optimize;
-use crate::reporting::Location;
 
 use Opcode::{*};
 

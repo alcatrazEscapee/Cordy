@@ -1,6 +1,5 @@
-use crate::reporting::{AsError, AsErrorWithContext, Location, SourceView};
-
 use crate::core::NativeFunction;
+use crate::reporting::{AsError, AsErrorWithContext, Location, SourceView};
 use crate::vm::{CallFrame, StructTypeImpl, ValueResult};
 use crate::vm::operator::{BinaryOp, UnaryOp};
 use crate::vm::value::{FunctionImpl, ValuePtr};

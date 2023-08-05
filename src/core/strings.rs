@@ -4,8 +4,8 @@ use fancy_regex::{Captures, Matches, Regex};
 use itertools::Itertools;
 
 use crate::core::InvokeArg1;
-use crate::vm::{IntoIterableValue, IntoValue, Iterable, RuntimeError, VirtualInterface, ValueResult, ValuePtr};
 use crate::util;
+use crate::vm::{IntoIterableValue, IntoValue, Iterable, RuntimeError, ValuePtr, ValueResult, VirtualInterface};
 
 use RuntimeError::{*};
 

@@ -4,9 +4,9 @@ use itertools::Itertools;
 use crate::compiler::parser::ParseRule;
 use crate::compiler::scanner::ScanResult;
 use crate::reporting::{Location, SourceView};
-use crate::vm::{Opcode, RuntimeError, Value};
+use crate::vm::{Opcode, RuntimeError, ValuePtr};
 
-pub use crate::compiler::parser::{Locals, Fields, ParserError, ParserErrorType, default};
+pub use crate::compiler::parser::{default, Fields, Locals, ParserError, ParserErrorType};
 pub use crate::compiler::scanner::{ScanError, ScanErrorType, ScanToken};
 
 mod scanner;
@@ -102,7 +102,7 @@ pub struct CompileParameters<'a> {
 
     code: &'a mut Vec<Opcode>,
 
-    constants: &'a mut Vec<Value>,
+    constants: &'a mut Vec<ValuePtr>,
     globals: &'a mut Vec<String>,
     locations: &'a mut Vec<Location>,
     fields: &'a mut Fields,
@@ -132,7 +132,7 @@ impl<'a> CompileParameters<'a> {
     pub fn new(
         enable_optimization: bool,
         code: &'a mut Vec<Opcode>,
-        constants: &'a mut Vec<Value>,
+        constants: &'a mut Vec<ValuePtr>,
         globals: &'a mut Vec<String>,
         locations: &'a mut Vec<Location>,
         fields: &'a mut Fields,
@@ -173,7 +173,7 @@ pub struct CompileResult {
     /// Incremental compiles will return a `Vec<ParserError>` instead as they don't own the structures to create a `CompileResult`.
     errors: Vec<ParserError>,
 
-    pub constants: Vec<Value>,
+    pub constants: Vec<ValuePtr>,
     pub globals: Vec<String>,
     pub locations: Vec<Location>,
     pub fields: Fields,
