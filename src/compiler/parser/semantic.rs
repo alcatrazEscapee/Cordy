@@ -11,7 +11,7 @@ use itertools::Itertools;
 
 use crate::compiler::parser::{Parser, ParserError, ParserErrorType};
 use crate::core;
-use crate::vm::{FunctionImpl, IntoValue, Opcode, Value};
+use crate::vm::{FunctionImpl, IntoValue, Opcode, Value, ValuePtr};
 use crate::reporting::Location;
 
 use ParserErrorType::{*};
@@ -554,7 +554,7 @@ impl<'a> Parser<'a> {
     pub fn declare_function(&mut self, name: String, args: &[LValue], var_arg: bool) -> u32 {
         let constant_id: u32 = self.constants.len() as u32;
 
-        self.constants.push(Value::Nil);
+        self.constants.push(ValuePtr::nil());
         self.functions.push(ParserFunctionImpl {
             name,
             args: args.iter().map(|u| u.to_code_str()).collect(),

@@ -4,17 +4,16 @@ use std::io::{BufRead, Write};
 use std::rc::Rc;
 use fxhash::FxBuildHasher;
 
-
 use crate::{compiler, util, core, trace};
 use crate::compiler::{CompileParameters, CompileResult, Fields, IncrementalCompileResult, Locals};
 use crate::core::{NativeFunction, PartialArgument};
-use crate::vm::value::{Literal, PartialFunctionImpl, UpValue};
+use crate::vm::value::{Literal, UpValue};
 use crate::util::OffsetAdd;
 use crate::reporting::{Location, SourceView};
 
 pub use crate::vm::error::{DetailRuntimeError, RuntimeError};
 pub use crate::vm::opcode::Opcode;
-pub use crate::vm::value::{FunctionImpl, ValuePtr, ValueResult, ValueOption, IntoDictValue, IntoIterableValue, IntoValue, Iterable, LiteralType, StructTypeImpl, C64, guard_recursive_hash, checks, Type};
+pub use crate::vm::value::{FunctionImpl, ValuePtr, ValueResult, ValueOption, IntoDictValue, IntoIterableValue, IntoValue, Iterable, LiteralType, StructTypeImpl, C64, guard_recursive_hash, Type};
 
 
 pub type Value = ValuePtr;
@@ -39,14 +38,14 @@ const TEST_EXECUTION_LIMIT: usize = 1000;
 pub struct VirtualMachine<R, W> {
     ip: usize,
     code: Vec<Opcode>,
-    stack: Vec<Value>,
+    stack: Vec<ValuePtr>,
     call_stack: Vec<CallFrame>,
     literal_stack: Vec<Literal>,
     global_count: usize,
     open_upvalues: HashMap<usize, Rc<Cell<UpValue>>, FxBuildHasher>,
     unroll_stack: Vec<i32>,
 
-    constants: Vec<Value>,
+    constants: Vec<ValuePtr>,
     globals: Vec<String>,
     locations: Vec<Location>,
     fields: Fields,
@@ -54,7 +53,7 @@ pub struct VirtualMachine<R, W> {
     view: SourceView,
     read: R,
     write: W,
-    args: Value,
+    args: ValuePtr,
 }
 
 #[derive(Eq, PartialEq, Debug, Copy, Clone)]
@@ -86,10 +85,10 @@ impl ExitType {
 pub trait VirtualInterface {
     // Invoking Functions
 
-    fn invoke_func0(&mut self, f: Value) -> ValueResult;
-    fn invoke_func1(&mut self, f: Value, a1: Value) -> ValueResult;
-    fn invoke_func2(&mut self, f: Value, a1: Value, a2: Value) -> ValueResult;
-    fn invoke_func(&mut self, f: Value, args: &Vec<Value>) -> ValueResult;
+    fn invoke_func0(&mut self, f: ValuePtr) -> ValueResult;
+    fn invoke_func1(&mut self, f: ValuePtr, a1: ValuePtr) -> ValueResult;
+    fn invoke_func2(&mut self, f: ValuePtr, a1: ValuePtr, a2: ValuePtr) -> ValueResult;
+    fn invoke_func(&mut self, f: ValuePtr, args: &Vec<ValuePtr>) -> ValueResult;
 
     fn invoke_eval(&mut self, s: &String) -> ValueResult;
 
@@ -101,15 +100,15 @@ pub trait VirtualInterface {
     fn read_line(&mut self) -> String;
     fn read(&mut self) -> String;
 
-    fn get_envs(&self) -> Value;
-    fn get_env(&self, name: &String) -> Value;
-    fn get_args(&self) -> Value;
+    fn get_envs(&self) -> ValuePtr;
+    fn get_env(&self, name: &String) -> ValuePtr;
+    fn get_args(&self) -> ValuePtr;
 
     // Stack Manipulation
-    fn peek(&self, offset: usize) -> &Value;
-    fn pop(&mut self) -> Value;
-    fn popn(&mut self, n: u32) -> Vec<Value>;
-    fn push(&mut self, value: Value);
+    fn peek(&self, offset: usize) -> &ValuePtr;
+    fn pop(&mut self) -> ValuePtr;
+    fn popn(&mut self, n: u32) -> Vec<ValuePtr>;
+    fn push(&mut self, value: ValuePtr);
 }
 
 
@@ -220,28 +219,28 @@ impl<R, W> VirtualMachine<R, W> where
             // Flow Control
             JumpIfFalse(ip) => {
                 let jump: usize = self.ip.add_offset(ip);
-                let a1: &Value = self.peek(0);
+                let a1: &ValuePtr = self.peek(0);
                 if !a1.as_bool() {
                     self.ip = jump;
                 }
             },
             JumpIfFalsePop(ip) => {
                 let jump: usize = self.ip.add_offset(ip);
-                let a1: Value = self.pop();
+                let a1: ValuePtr = self.pop();
                 if !a1.as_bool() {
                     self.ip = jump;
                 }
             },
             JumpIfTrue(ip) => {
                 let jump: usize = self.ip.add_offset(ip);
-                let a1: &Value = self.peek(0);
+                let a1: &ValuePtr = self.peek(0);
                 if a1.as_bool() {
                     self.ip = jump;
                 }
             },
             JumpIfTruePop(ip) => {
                 let jump: usize = self.ip.add_offset(ip);
-                let a1: Value = self.pop();
+                let a1: ValuePtr = self.pop();
                 if a1.as_bool() {
                     self.ip = jump;
                 }
@@ -302,7 +301,7 @@ impl<R, W> VirtualMachine<R, W> where
                 if local < self.global_count {
                     self.push(self.stack[local].clone());
                 } else {
-                    return ValueErrorVariableNotDeclaredYet(self.globals[local].clone()).err()
+                    return Err(Box::new(ValueErrorVariableNotDeclaredYet(self.globals[local].clone())))
                 }
             },
             StoreGlobal(local, pop) => {
@@ -311,20 +310,17 @@ impl<R, W> VirtualMachine<R, W> where
                 if local < self.global_count {
                     self.stack[local] = if pop { self.pop() } else { self.peek(0).clone() };
                 } else {
-                    return ValueErrorVariableNotDeclaredYet(self.globals[local].clone()).err()
+                    return Err(Box::new(ValueErrorVariableNotDeclaredYet(self.globals[local].clone())))
                 }
             },
             PushUpValue(index) => {
                 let fp = self.frame_pointer() - 1;
-                let upvalue: Rc<Cell<UpValue>> = match &mut self.stack[fp] {
-                    Value::Closure(c) => c.get(index as usize),
-                    _ => panic!("Malformed bytecode"),
-                };
+                let upvalue: Rc<Cell<UpValue>> = self.stack[fp].as_closure().borrow_const().get(index as usize);
 
                 let interior = (*upvalue).take();
                 upvalue.set(interior.clone()); // Replace back the original value
 
-                let value: Value = match interior {
+                let value: ValuePtr = match interior {
                     UpValue::Open(index) => self.stack[index].clone(),
                     UpValue::Closed(value) => value,
                 };
@@ -335,13 +331,10 @@ impl<R, W> VirtualMachine<R, W> where
                 trace::trace_interpreter!("vm::run StoreUpValue index={}, value={}, prev={}", index, self.stack.last().unwrap().as_debug_str(), self.stack[index as usize].as_debug_str());
                 let fp = self.frame_pointer() - 1;
                 let value = self.peek(0).clone();
-                let upvalue: Rc<Cell<UpValue>> = match &mut self.stack[fp] {
-                    Value::Closure(c) => c.get(index as usize),
-                    _ => panic!("Malformed bytecode"),
-                };
+                let upvalue: Rc<Cell<UpValue>> = self.stack[fp].as_closure().borrow_const().get(index as usize);
 
                 // Reasons why this is convoluted:
-                // - We cannot use `.get()` (as it requires `Value` to be `Copy`)
+                // - We cannot use `.get()` (as it requires `ValuePtr` to be `Copy`)
                 // - We cannot use `get_mut()` (as even if we have `&mut ClosureImpl`, unboxing the `Rc<>` only gives us `&Cell`)
                 let unboxed: UpValue = (*upvalue).take();
                 let modified: UpValue = match unboxed {
@@ -357,9 +350,9 @@ impl<R, W> VirtualMachine<R, W> where
 
             StoreArray => {
                 trace::trace_interpreter!("vm::run StoreArray array={}, index={}, value={}", self.stack[self.stack.len() - 3].as_debug_str(), self.stack[self.stack.len() - 2].as_debug_str(), self.stack.last().unwrap().as_debug_str());
-                let a3: Value = self.pop();
-                let a2: Value = self.pop();
-                let a1: &Value = self.peek(0); // Leave this on the stack when done
+                let a3: ValuePtr = self.pop();
+                let a2: ValuePtr = self.pop();
+                let a1: &ValuePtr = self.peek(0); // Leave this on the stack when done
                 core::set_index(a1, a2, a3)?;
             },
 
@@ -368,10 +361,8 @@ impl<R, W> VirtualMachine<R, W> where
             }
 
             Closure => {
-                match self.pop() {
-                    Value::Function(f) => self.push(Value::closure(f)),
-                    _ => panic!("Malformed bytecode"),
-                }
+                let f = self.pop();
+                self.push(ValuePtr::closure(f));
             },
 
             CloseLocal(index) => {
@@ -380,57 +371,53 @@ impl<R, W> VirtualMachine<R, W> where
                 let upvalue: Rc<Cell<UpValue>> = self.open_upvalues.entry(local)
                     .or_insert_with(|| Rc::new(Cell::new(UpValue::Open(local))))
                     .clone();
-                match self.stack.last_mut().unwrap() {
-                    Value::Closure(c) => c.push(upvalue),
-                    _ => panic!("Malformed bytecode"),
-                }
+                self.stack.last_mut()
+                    .unwrap()
+                    .as_closure()
+                    .borrow_const()
+                    .push(upvalue);
             },
             CloseUpValue(index) => {
                 trace::trace_interpreter!("vm::run CloseUpValue index={}, value={}, closure={}", index, self.stack.last().unwrap().as_debug_str(), &self.stack[self.frame_pointer() - 1].as_debug_str());
                 let fp = self.frame_pointer() - 1;
                 let index: usize = index as usize;
-                let upvalue: Rc<Cell<UpValue>> = match &mut self.stack[fp] {
-                    Value::Closure(c) => c.get(index),
-                    _ => panic!("Malformed bytecode"),
-                };
+                let upvalue: Rc<Cell<UpValue>> = self.stack[fp].as_closure().borrow_const().get(index);
 
-                match self.stack.last_mut().unwrap() {
-                    Value::Closure(c) => c.push(upvalue.clone()),
-                    _ => panic!("Malformed bytecode"),
-                }
+                self.stack.last_mut()
+                    .unwrap()
+                    .as_closure()
+                    .borrow_const()
+                    .push(upvalue.clone());
             },
 
             LiftUpValue(index) => {
                 let index = self.frame_pointer() + index as usize;
                 if let Some(upvalue) = self.open_upvalues.remove(&index) {
-                    let value: Value = self.stack[index].clone();
+                    let value: ValuePtr = self.stack[index].clone();
                     let unboxed: UpValue = (*upvalue).replace(UpValue::Open(0));
                     let closed: UpValue = match unboxed {
                         UpValue::Open(_) => UpValue::Closed(value),
-                        UpValue::Closed(_) => panic!("Tried to life an already closed upvalue"),
+                        UpValue::Closed(_) => panic!("Tried to lift an already closed upvalue"),
                     };
                     (*upvalue).replace(closed);
                 }
             },
 
             InitIterable => {
-                let iter = self.pop().as_iter()?;
-                self.push(Value::Iter(Box::new(iter)));
+                let iter = self.pop().to_iter()?;
+                self.push(iter.to_value());
             },
             TestIterable(ip) => {
                 let top: usize = self.stack.len() - 1;
-                let iter = &mut self.stack[top];
-                match iter {
-                    Value::Iter(it) => match it.next() {
-                        Some(value) => self.push(value),
-                        None => self.ip = self.ip.add_offset(ip),
-                    },
-                    _ => panic!("Malformed bytecode"),
+                let iter = &mut self.stack[top].as_iterable().value;
+                match iter.next() {
+                    Some(value) => self.push(value),
+                    None => self.ip = self.ip.add_offset(ip),
                 }
             },
 
             // Push Operations
-            Nil => self.push(Value::Nil),
+            Nil => self.push(ValuePtr::nil()),
             True => self.push(true.to_value()),
             False => self.push(false.to_value()),
             NativeFunction(native) => self.push(native.to_value()),
@@ -448,7 +435,7 @@ impl<R, W> VirtualMachine<R, W> where
             LiteralUnroll => {
                 let arg = self.pop();
                 let top = self.literal_stack.last_mut().unwrap();
-                top.unroll(arg.as_iter()?)?;
+                top.unroll(arg.to_iter()?)?;
             },
             LiteralEnd => {
                 let top = self.literal_stack.pop().unwrap();
@@ -459,9 +446,9 @@ impl<R, W> VirtualMachine<R, W> where
                 if first {
                     self.unroll_stack.push(0);
                 }
-                let arg: Value = self.pop();
+                let arg: ValuePtr = self.pop();
                 let mut len: i32 = -1; // An empty unrolled argument contributes an offset of -1 + <number of elements unrolled>
-                for e in arg.as_iter()? {
+                for e in arg.to_iter()? {
                     self.push(e);
                     len += 1;
                 }
@@ -477,107 +464,107 @@ impl<R, W> VirtualMachine<R, W> where
             },
 
             CheckLengthGreaterThan(len) => {
-                let a1: &Value = self.peek(0);
+                let a1: &ValuePtr = self.peek(0);
                 let actual = match a1.len() {
                     Ok(len) => len,
                     Err(e) => return Err(e),
                 };
                 if len as usize > actual {
-                    return ValueErrorCannotUnpackLengthMustBeGreaterThan(len, actual, a1.clone()).err()
+                    return Err(Box::new(ValueErrorCannotUnpackLengthMustBeGreaterThan(len, actual, a1.clone())))
                 }
             },
             CheckLengthEqualTo(len) => {
-                let a1: &Value = self.peek(0);
+                let a1: &ValuePtr = self.peek(0);
                 let actual = match a1.len() {
                     Ok(len) => len,
                     Err(e) => return Err(e),
                 };
                 if len as usize != actual {
-                    return ValueErrorCannotUnpackLengthMustBeEqual(len, actual, a1.clone()).err()
+                    return Err(Box::new(ValueErrorCannotUnpackLengthMustBeEqual(len, actual, a1.clone())))
                 }
             },
 
             OpIndex => {
-                let a2: Value = self.pop();
-                let a1: Value = self.pop();
+                let a2: ValuePtr = self.pop();
+                let a1: ValuePtr = self.pop();
                 let ret = core::get_index(self, a1, a2)?;
                 self.push(ret);
             },
             OpIndexPeek => {
-                let a2: Value = self.peek(0).clone();
-                let a1: Value = self.peek(1).clone();
+                let a2: ValuePtr = self.peek(0).clone();
+                let a1: ValuePtr = self.peek(1).clone();
                 let ret = core::get_index(self, a1, a2)?;
                 self.push(ret);
             },
             OpSlice => {
-                let a3: Value = self.pop();
-                let a2: Value = self.pop();
-                let a1: Value = self.pop();
-                let ret = core::list_slice(a1, a2, a3, Value::Int(1))?;
+                let a3: ValuePtr = self.pop();
+                let a2: ValuePtr = self.pop();
+                let a1: ValuePtr = self.pop();
+                let ret = core::get_slice(a1, a2, a3, 1i64.to_value())?;
                 self.push(ret);
             },
             OpSliceWithStep => {
-                let a4: Value = self.pop();
-                let a3: Value = self.pop();
-                let a2: Value = self.pop();
-                let a1: Value = self.pop();
-                let ret = core::list_slice(a1, a2, a3, a4)?;
+                let a4: ValuePtr = self.pop();
+                let a3: ValuePtr = self.pop();
+                let a2: ValuePtr = self.pop();
+                let a1: ValuePtr = self.pop();
+                let ret = core::get_slice(a1, a2, a3, a4)?;
                 self.push(ret);
             },
 
             GetField(field_index) => {
-                let a1: Value = self.pop();
-                let ret: Value = a1.get_field(&self.fields, field_index)?;
+                let a1: ValuePtr = self.pop();
+                let ret: ValuePtr = a1.get_field(&self.fields, field_index)?;
                 self.push(ret);
             },
             GetFieldPeek(field_index) => {
-                let a1: Value = self.peek(0).clone();
-                let ret: Value = a1.get_field(&self.fields, field_index)?;
+                let a1: ValuePtr = self.peek(0).clone();
+                let ret: ValuePtr = a1.get_field(&self.fields, field_index)?;
                 self.push(ret);
             },
             GetFieldFunction(field_index) => {
-                self.push(Value::GetField(field_index));
+                self.push(ValuePtr::of_field(field_index));
             },
             SetField(field_index) => {
-                let a2: Value = self.pop();
-                let a1: Value = self.pop();
-                let ret: Value = a1.set_field(&self.fields, field_index, a2)?;
+                let a2: ValuePtr = self.pop();
+                let a1: ValuePtr = self.pop();
+                let ret: ValuePtr = a1.set_field(&self.fields, field_index, a2)?;
                 self.push(ret);
             },
 
             Unary(op) => {
-                let a1: Value = self.pop();
-                let ret: Value = op.apply(a1)?;
+                let a1: ValuePtr = self.pop();
+                let ret: ValuePtr = op.apply(a1)?;
                 self.push(ret);
             },
             Binary(op) => {
-                let a2: Value = self.pop();
-                let a1: Value = self.pop();
-                let ret: Value = op.apply(a1, a2)?;
+                let a2: ValuePtr = self.pop();
+                let a1: ValuePtr = self.pop();
+                let ret: ValuePtr = op.apply(a1, a2)?;
                 self.push(ret);
             },
 
             Slice => {
-                let arg2: Value = self.pop();
-                let arg1: Value = self.pop();
-                self.push(Value::slice(arg1, arg2, None)?);
+                let arg2: ValuePtr = self.pop();
+                let arg1: ValuePtr = self.pop();
+                self.push(ValuePtr::slice(arg1, arg2, ValuePtr::nil())?);
             },
             SliceWithStep => {
-                let arg3: Value = self.pop();
-                let arg2: Value = self.pop();
-                let arg1: Value = self.pop();
-                self.push(Value::slice(arg1, arg2, Some(arg3))?);
+                let arg3: ValuePtr = self.pop();
+                let arg2: ValuePtr = self.pop();
+                let arg1: ValuePtr = self.pop();
+                self.push(ValuePtr::slice(arg1, arg2, arg3)?);
             }
 
-            Exit => return RuntimeExit.err(),
+            Exit => return Err(Box::new(RuntimeExit)),
             Yield => {
                 // First, jump to the end of current code, so when we startup again, we are in the right location
                 self.ip = self.code.len();
-                return RuntimeYield.err()
+                return Err(Box::new(RuntimeYield))
             },
             AssertFailed => {
-                let ret: Value = self.pop();
-                return RuntimeAssertFailed(ret.to_str()).err()
+                let ret: ValuePtr = self.pop();
+                return Err(Box::new(RuntimeAssertFailed(ret.to_str())))
             },
         }
         Ok(())
@@ -603,7 +590,7 @@ impl<R, W> VirtualMachine<R, W> where
             FunctionType::Native => {},
             FunctionType::User => self.run()?
         }
-        Ok(self.pop())
+        self.pop().ok()
     }
 
     /// Invokes the action of an `OpFuncEval(nargs)` opcode.
@@ -613,11 +600,11 @@ impl<R, W> VirtualMachine<R, W> where
     ///
     /// Returns a `Result` which may contain an error which occurred during function evaluation.
     fn invoke(&mut self, nargs: u32) -> Result<FunctionType, Box<RuntimeError>> {
-        let f: &Value = self.peek(nargs as usize);
+        let f: &ValuePtr = self.peek(nargs as usize);
         trace::trace_interpreter!("vm::invoke func={:?}, nargs={}", f, nargs);
-        match f {
-            f @ (Value::Function(_) | Value::Closure(_)) => {
-                let func = f.as_function();
+        match f.ty() {
+            Type::Function | Type::Closure => {
+                let func = f.get_function().borrow_const();
                 if func.in_range(nargs) {
                     // Evaluate directly
                     self.call_function(func.jump_offset(nargs), nargs, func.num_var_args(nargs));
@@ -626,9 +613,9 @@ impl<R, W> VirtualMachine<R, W> where
                     // Evaluate as a partial function
                     // Special case if nargs == 0, we can avoid creating a partial wrapper and doing any stack manipulations
                     if nargs > 0 {
-                        let arg: Vec<Value> = self.popn(nargs);
-                        let func: Value = self.pop();
-                        let partial: Value = Value::partial(func, arg);
+                        let arg: Vec<ValuePtr> = self.popn(nargs);
+                        let func: ValuePtr = self.pop();
+                        let partial: ValuePtr = ValuePtr::partial(func, arg);
                         self.push(partial);
                     }
                     // Partial functions are already evaluated, so we return native, since we don't need to spin
@@ -637,14 +624,13 @@ impl<R, W> VirtualMachine<R, W> where
                     IncorrectArgumentsUserFunction((**func).clone(), nargs).err()
                 }
             },
-            Value::PartialFunction(_) => {
+            Type::PartialFunction => {
                 // Surgically extract the partial binding from the stack
                 let i: usize = self.stack.len() - nargs as usize - 1;
-                let mut partial: PartialFunctionImpl = match std::mem::replace(&mut self.stack[i], Value::Nil) {
-                    Value::PartialFunction(x) => *x,
-                    _ => panic!("Stack corruption")
-                };
-                let func = partial.func.as_function();
+                let mut partial = std::mem::replace(&mut self.stack[i], ValuePtr::nil())
+                    .as_partial_function()
+                    .borrow_mut();
+                let func = partial.func.get();
                 let total_nargs: u32 = partial.args.len() as u32 + nargs;
                 if func.min_args() > total_nargs {
                     // Not enough arguments, so pop the argument and push a new partial function
@@ -652,7 +638,7 @@ impl<R, W> VirtualMachine<R, W> where
                         partial.args.push(arg);
                     }
                     self.pop(); // Should pop the `Nil` we swapped earlier
-                    self.push(Value::PartialFunction(Box::new(partial)));
+                    self.push(ValuePtr::PartialFunction(Box::new(partial)));
                     // Partial functions are already evaluated, so we return native, since we don't need to spin
                     Ok(FunctionType::Native)
                 } else if func.in_range(total_nargs) {
@@ -668,7 +654,7 @@ impl<R, W> VirtualMachine<R, W> where
                     IncorrectArgumentsUserFunction((**func).clone(), total_nargs).err()
                 }
             },
-            Value::NativeFunction(f) => {
+            ValuePtr::NativeFunction(f) => {
                 match core::invoke_stack(*f, nargs, self) {
                     Ok(v) => {
                         self.pop();
@@ -678,13 +664,13 @@ impl<R, W> VirtualMachine<R, W> where
                 }
                 Ok(FunctionType::Native)
             }
-            Value::PartialNativeFunction(native, _) => {
+            Type::PartialNativeFunction => {
                 // Need to consume the arguments and set up the stack for calling as if all partial arguments were just pushed
                 // Surgically extract the binding via std::mem::replace
-                let f: NativeFunction = *native;
+                let f: NativeFunction = *f.as_partial_native_ref().func;
                 let i: usize = self.stack.len() - 1 - nargs as usize;
-                let partial: PartialArgument = match std::mem::replace(&mut self.stack[i], Value::Nil) {
-                    Value::PartialNativeFunction(_, x) => *x,
+                let partial: PartialArgument = match std::mem::replace(&mut self.stack[i], ValuePtr::Nil) {
+                    ValuePtr::PartialNativeFunction(_, x) => *x,
                     _ => panic!("Stack corruption")
                 };
 
@@ -697,70 +683,63 @@ impl<R, W> VirtualMachine<R, W> where
                     Err(e) => Err(e),
                 }
             }
-            ls @ Value::List(_) => {
+            Type::List => {
                 // This is somewhat horrifying, but it could be optimized in constant cases later, in all cases where this syntax is actually used
                 // As a result this code should almost never enter as it should be optimized away.
                 if nargs != 1 {
-                    return ValueIsNotFunctionEvaluable(ls.clone()).err();
+                    return Err(Box::new(ValueIsNotFunctionEvaluable(f.clone())));
                 }
                 let arg = self.pop();
-                let list = match self.pop() {
-                    Value::List(it) => it,
-                    _ => panic!("Stack corruption"),
-                };
-                let list = list.unbox();
+                let list = self.pop().as_list().borrow();
                 if list.len() != 1 {
-                    return ValueErrorEvalListMustHaveUnitLength(list.len()).err()
+                    return Err(Box::new(ValueErrorEvalListMustHaveUnitLength(list.len())))
                 }
                 let index = list[0].clone();
                 let result = core::get_index(self, arg, index)?;
                 self.push(result);
                 Ok(FunctionType::Native)
             },
-            ls @ Value::Slice(_) => {
+            Type::Slice => {
                 if nargs != 1 {
-                    return ValueIsNotFunctionEvaluable(ls.clone()).err();
+                    return Err(Box::new(ValueIsNotFunctionEvaluable(f.clone())));
                 }
                 let arg = self.pop();
-                let slice = match self.pop() {
-                    Value::Slice(it) => it,
-                    _ => panic!("Stack corruption"),
-                };
+                let slice = self.pop().as_slice().borrow_const();
                 self.push(slice.apply(arg)?);
                 Ok(FunctionType::Native)
             }
-            Value::StructType(type_impl) => {
+            ValuePtr::StructType(type_impl) => {
                 let type_impl = type_impl.clone();
                 let expected_args = type_impl.field_names.len() as u32;
                 if nargs != expected_args {
                     return IncorrectArgumentsStruct((*type_impl).clone(), nargs).err()
                 }
 
-                let args: Vec<Value> = self.popn(nargs);
-                let instance: Value = Value::instance(type_impl, args);
+                let args: Vec<ValuePtr> = self.popn(nargs);
+                let instance: ValuePtr = ValuePtr::instance(type_impl, args);
 
                 self.pop(); // The struct type
                 self.push(instance);
 
                 Ok(FunctionType::Native)
             },
-            Value::GetField(field_index) => {
+            ValuePtr::GetField(field_index) => {
                 let field_index = *field_index;
                 if nargs != 1 {
                     return IncorrectArgumentsGetField(self.fields.get_field_name(field_index), nargs).err()
                 }
 
-                let arg: Value = self.pop();
-                let ret: Value = arg.get_field(&self.fields, field_index)?;
+                let arg: ValuePtr = self.pop();
+                let ret: ValuePtr = arg.get_field(&self.fields, field_index)?;
 
                 self.pop(); // The get field
                 self.push(ret);
 
                 Ok(FunctionType::Native)
             },
-            Value::Memoized(_) => {
+            ValuePtr::Memoized(_) => {
                 // Bounce directly to `core::invoke_memoized`
-                let ret: Value = core::invoke_memoized(self, nargs)?;
+                let ret: ValuePtr = core::invoke_memoized(self, nargs)?;
                 self.push(ret);
                 Ok(FunctionType::Native)
             },
@@ -802,25 +781,25 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
 {
     // ===== Calling Functions External Interface ===== //
 
-    fn invoke_func0(&mut self, f: Value) -> ValueResult {
+    fn invoke_func0(&mut self, f: ValuePtr) -> ValueResult {
         self.push(f);
         self.invoke_and_spin(0)
     }
 
-    fn invoke_func1(&mut self, f: Value, a1: Value) -> ValueResult {
+    fn invoke_func1(&mut self, f: ValuePtr, a1: ValuePtr) -> ValueResult {
         self.push(f);
         self.push(a1);
         self.invoke_and_spin(1)
     }
 
-    fn invoke_func2(&mut self, f: Value, a1: Value, a2: Value) -> ValueResult {
+    fn invoke_func2(&mut self, f: ValuePtr, a1: ValuePtr, a2: ValuePtr) -> ValueResult {
         self.push(f);
         self.push(a1);
         self.push(a2);
         self.invoke_and_spin(2)
     }
 
-    fn invoke_func(&mut self, f: Value, args: &Vec<Value>) -> ValueResult {
+    fn invoke_func(&mut self, f: ValuePtr, args: &Vec<ValuePtr>) -> ValueResult {
         self.push(f);
         for arg in args {
             self.push(arg.clone());
@@ -835,7 +814,7 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
         self.call_function(eval_head, 0, None);
         self.run()?;
         let ret = self.pop();
-        self.push(Value::Nil); // `eval` executes as a user function but is called like a native function, this prevents stack fuckery
+        self.push(ValuePtr::Nil); // `eval` executes as a user function but is called like a native function, this prevents stack fuckery
         Ok(ret)
     }
 
@@ -858,15 +837,15 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
         buf
     }
 
-    fn get_envs(&self) -> Value {
+    fn get_envs(&self) -> ValuePtr {
         std::env::vars().map(|(k, v)| (k.to_value(), v.to_value())).to_dict()
     }
 
-    fn get_env(&self, name: &String) -> Value {
-        std::env::var(name).map_or(Value::Nil, |u| u.to_value())
+    fn get_env(&self, name: &String) -> ValuePtr {
+        std::env::var(name).map_or(ValuePtr::Nil, |u| u.to_value())
     }
 
-    fn get_args(&self) -> Value {
+    fn get_args(&self) -> ValuePtr {
         self.args.clone()
     }
 
@@ -874,7 +853,7 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
     // ===== Stack Manipulations ===== //
 
     /// Peeks at the top element of the stack, or an element `offset` down from the top
-    fn peek(&self, offset: usize) -> &Value {
+    fn peek(&self, offset: usize) -> &ValuePtr {
         trace::trace_interpreter_stack!("peek({}) -> {}", offset, self.stack[self.stack.len() - 1 - offset].as_debug_str());
         let ret = self.stack.get(self.stack.len() - 1 - offset).unwrap();
         trace::trace_interpreter_stack!("{}", self.debug_stack());
@@ -882,7 +861,7 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
     }
 
     /// Pops the top of the stack
-    fn pop(&mut self) -> Value {
+    fn pop(&mut self) -> ValuePtr {
         trace::trace_interpreter_stack!("pop() -> {}", self.stack.last().unwrap().as_debug_str());
         let ret = self.stack.pop().unwrap();
         trace::trace_interpreter_stack!("{}", self.debug_stack());
@@ -890,14 +869,14 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
     }
 
     /// Pops the top N values off the stack, in order
-    fn popn(&mut self, n: u32) -> Vec<Value> {
+    fn popn(&mut self, n: u32) -> Vec<ValuePtr> {
         let ret = splice(&mut self.stack, n).collect();
         trace::trace_interpreter_stack!("{}", self.debug_stack());
         ret
     }
 
     /// Push a value onto the stack
-    fn push(&mut self, value: Value) {
+    fn push(&mut self, value: ValuePtr) {
         trace::trace_interpreter_stack!("push({})", value.as_debug_str());
         self.stack.push(value);
         trace::trace_interpreter_stack!("{}", self.debug_stack());
@@ -909,7 +888,7 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
 /// **N.B.** This is not implemented as a method on `VirtualMachine` as we want to take a partial borrow only of
 /// `&mut self.stack` when called, and which means we can interact with other methods on the VM (e.g. the literal stack).
 #[inline]
-fn splice(stack: &mut Vec<Value>, n: u32) -> impl Iterator<Item=Value> + '_ {
+fn splice(stack: &mut Vec<ValuePtr>, n: u32) -> impl Iterator<Item=ValuePtr> + '_ {
     let start: usize = stack.len() - n as usize;
     let end: usize = stack.len();
     stack.splice(start..end, std::iter::empty())
@@ -922,7 +901,7 @@ fn splice(stack: &mut Vec<Value>, n: u32) -> impl Iterator<Item=Value> + '_ {
 /// <br>Before : `stack = [..., a0, a1, ... aN]`
 /// <br>After : `stack = [..., b0, b1, ... bM, a0, a1, ... aN]`
 #[inline]
-fn insert<I : Iterator<Item=Value>>(stack: &mut Vec<Value>, args: I, n: u32) {
+fn insert<I : Iterator<Item=ValuePtr>>(stack: &mut Vec<ValuePtr>, args: I, n: u32) {
     let at: usize = stack.len() - n as usize;
     stack.splice(at..at, args);
 }

@@ -6,11 +6,11 @@ use std::hash::{Hash, Hasher};
 use fxhash::FxBuildHasher;
 use indexmap::{IndexMap, IndexSet};
 
-use crate::vm::{operator, IntoIterableValue, IntoValue, IntoValueResult, Value, VirtualInterface, RuntimeError, ValueResult};
+use crate::vm::{operator, IntoIterableValue, IntoValue, Value, VirtualInterface, RuntimeError, ValueResult};
 use crate::vm::operator::BinaryOp;
 use crate::trace;
 
-pub use crate::core::collections::{get_index, set_index, list_slice, literal_slice, to_index};
+pub use crate::core::collections::{get_index, set_index, get_slice, to_index};
 pub use crate::core::strings::format_string;
 
 use NativeFunction::{*};
@@ -148,15 +148,17 @@ pub enum NativeFunction {
     Lcm,
     CountOnes,
     CountZeros,
-
-    // N.B. If adding new functions at the end, must also update `N_NATIVE_FUNCTIONS`
-    // Could be replaced with `std::mem::variant_count::<NativeFunction>()` but that is unstable.
 }
-
-const N_NATIVE_FUNCTIONS: usize = CountZeros as usize + 1;
 
 
 impl NativeFunction {
+
+    /// Return the total number of `NativeFunction`s
+    ///
+    /// Uses unsafe rust to use `variant_count`, and if that ever breaks, we can always replace with a constant.
+    pub const fn total() -> usize {
+        std::mem::variant_count::<NativeFunction>()
+    }
 
     /// Find a native function with the given name, that is not hidden.
     pub fn find(name: &str) -> Option<NativeFunction> {
@@ -263,10 +265,10 @@ impl NativeFunctionInfo {
     }
 }
 
-static NATIVE_FUNCTIONS: [NativeFunctionInfo; N_NATIVE_FUNCTIONS] = load_native_functions();
+static NATIVE_FUNCTIONS: [NativeFunctionInfo; NativeFunction::total()] = load_native_functions();
 
 
-const fn load_native_functions() -> [NativeFunctionInfo; N_NATIVE_FUNCTIONS] {
+const fn load_native_functions() -> [NativeFunctionInfo; NativeFunction::total()] {
 
     const fn op1(f: NativeFunction, name: &'static str, args: &'static str, arg: Argument) -> NativeFunctionInfo { NativeFunctionInfo::new(f, name, args, arg, true) }
     const fn op2(f: NativeFunction, name: &'static str) -> NativeFunctionInfo { NativeFunctionInfo::new(f, name, "lhs, rhs", Arg2, true) }
@@ -581,7 +583,7 @@ impl InvokeArg1 {
             InvokeArg1::Native(f) => invoke_arg1(*f, arg, vm),
             InvokeArg1::NativePar1(f, a1) => invoke_arg2(*f, a1.clone(), arg, vm),
             InvokeArg1::NativePar2(f, a1, a2) => invoke_arg3(*f, a1.clone(), a2.clone(), arg, vm),
-            InvokeArg1::NativeVar(f) => invoke_var(*f, arg.as_iter()?, vm),
+            InvokeArg1::NativeVar(f) => invoke_var(*f, arg.to_iter()?, vm),
             InvokeArg1::Arg2Par1(f) => PartialArgument::Arg2Par1(arg).to_value(*f),
             InvokeArg1::Arg3Par1(f) => PartialArgument::Arg3Par1(arg).to_value(*f),
             InvokeArg1::Arg3Par2(f, a1) => PartialArgument::Arg3Par2(a1.clone(), arg).to_value(*f),
@@ -724,7 +726,7 @@ pub fn invoke_stack<VM : VirtualInterface>(f: NativeFunction, nargs: u32, vm: &m
             0 => invoke_arg0(f, vm),
             1 => {
                 let a1: Value = vm.pop();
-                invoke_var(f, a1.as_iter()?, vm)
+                invoke_var(f, a1.to_iter()?, vm)
             },
             _ => {
                 let args = vm.popn(nargs).into_iter();
@@ -735,7 +737,7 @@ pub fn invoke_stack<VM : VirtualInterface>(f: NativeFunction, nargs: u32, vm: &m
             0 => IncorrectArgumentsNativeFunction(f, nargs).err(),
             1 => {
                 let a1: Value = vm.pop();
-                invoke_var(f, a1.as_iter()?, vm)
+                invoke_var(f, a1.to_iter()?, vm)
             },
             _ => {
                 let args = vm.popn(nargs).into_iter();
@@ -783,7 +785,7 @@ pub fn invoke_partial<VM : VirtualInterface>(f: NativeFunction, partial: Partial
     }
 }
 
-const NIL: ValueResult = Ok(Value::Nil);
+const NIL: ValueResult = Value::nil().ok();
 
 
 fn invoke_arg0<VM : VirtualInterface>(f: NativeFunction, vm: &mut VM) -> ValueResult {
@@ -816,7 +818,7 @@ fn invoke_arg1<VM : VirtualInterface>(f: NativeFunction, a1: Value, vm: &mut VM)
         Vector => if let Value::Complex(it) = a1 {  // Handle `a + bi . vector` as a special case here
             Ok(vec![Value::Int(it.re), Value::Int(it.im)].to_value())
         } else {
-            Ok(a1.as_iter()?.to_vector())
+            Ok(a1.to_iter()?.to_vector())
         },
         Repr => Ok(a1.to_repr_str().to_value()),
         Eval => vm.invoke_eval(a1.as_str()?),
@@ -838,11 +840,11 @@ fn invoke_arg1<VM : VirtualInterface>(f: NativeFunction, a1: Value, vm: &mut VM)
         Enumerate => Ok(Value::Enumerate(Box::new(a1))),
         Min => match a1 {
             Value::NativeFunction(Int) => Ok(Value::Int(i64::MIN)),
-            an => collections::min(an.as_iter()?),
+            an => collections::min(an.to_iter()?),
         },
         Max => match a1 {
             Value::NativeFunction(Int) => Ok(Value::Int(i64::MAX)),
-            an => collections::max(an.as_iter()?),
+            an => collections::max(an.to_iter()?),
         },
         Concat => collections::flat_map(vm, None, a1),
         Memoize => collections::create_memoized(a1),
@@ -877,14 +879,14 @@ fn invoke_arg2<VM : VirtualInterface>(f: NativeFunction, a1: Value, a2: Value, v
         OperatorPowSwap => operator::binary_pow(a2, a1),
         OperatorMod => operator::binary_mod(a1, a2),
         OperatorModSwap => operator::binary_mod(a2, a1),
-        OperatorIs => operator::binary_is(a1, a2).to_value(),
-        OperatorIsSwap => operator::binary_is(a2, a1).to_value(),
-        OperatorIsNot => operator::binary_is(a1, a2).map(|u| !u).to_value(),
-        OperatorIsNotSwap => operator::binary_is(a2, a1).map(|u| !u).to_value(),
-        OperatorIn => operator::binary_in(a1, a2).to_value(),
-        OperatorInSwap => operator::binary_in(a2, a1).to_value(),
-        OperatorNotIn => operator::binary_in(a1, a2).map(|u| !u).to_value(),
-        OperatorNotInSwap => operator::binary_in(a2, a1).map(|u| !u).to_value(),
+        OperatorIs => operator::binary_is(a1, a2, false),
+        OperatorIsSwap => operator::binary_is(a2, a1, false),
+        OperatorIsNot => operator::binary_is(a1, a2, true),
+        OperatorIsNotSwap => operator::binary_is(a2, a1, true),
+        OperatorIn => operator::binary_in(a1, a2, false),
+        OperatorInSwap => operator::binary_in(a2, a1, false),
+        OperatorNotIn => operator::binary_in(a1, a2, true),
+        OperatorNotInSwap => operator::binary_in(a2, a1, true),
         OperatorAdd => operator::binary_add(a1, a2),
         OperatorAddSwap => operator::binary_add(a2, a1),
         OperatorLeftShift => operator::binary_left_shift(a1, a2),
@@ -967,8 +969,8 @@ fn invoke_var<VM : VirtualInterface, I : Iterator<Item=Value>>(f: NativeFunction
         Min => collections::min(an),
         Max => collections::max(an),
         Zip => collections::zip(an),
-        Sort => collections::sort(an),
-        Reverse => collections::reverse(an),
+        Sort => collections::sort(an).ok(),
+        Reverse => collections::reverse(an).ok(),
 
         Gcd => math::gcd(an),
         Lcm => math::lcm(an),

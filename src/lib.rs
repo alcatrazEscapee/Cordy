@@ -1,3 +1,6 @@
+#![feature(variant_count)]
+#![feature(try_trait_v2)]
+
 use mimalloc::MiMalloc;
 
 pub use crate::reporting::{AsError, SourceView};

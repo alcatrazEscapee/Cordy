@@ -4,47 +4,70 @@ use fancy_regex::{Captures, Matches, Regex};
 use itertools::Itertools;
 
 use crate::core::InvokeArg1;
-use crate::vm::{IntoIterableValue, IntoValue, Iterable, Value, RuntimeError, VirtualInterface, ValueResult};
+use crate::vm::{IntoIterableValue, IntoValue, Iterable, RuntimeError, VirtualInterface, ValueResult, ValuePtr};
 use crate::util;
 
-use Value::{*};
 use RuntimeError::{*};
 
 
-pub fn to_lower(value: Value) -> ValueResult {
-    Ok(value.as_str()?.to_lowercase().to_value())
+pub fn to_lower(value: ValuePtr) -> ValueResult {
+    value.check_str()?
+        .as_str()
+        .borrow_const()
+        .to_lowercase()
+        .to_value()
+        .ok()
 }
 
-pub fn to_upper(value: Value) -> ValueResult {
-    Ok(value.as_str()?.to_uppercase().to_value())
+pub fn to_upper(value: ValuePtr) -> ValueResult {
+    value.check_str()?
+        .as_str()
+        .borrow_const()
+        .to_uppercase()
+        .to_value()
+        .ok()
 }
 
-pub fn trim(value: Value) -> ValueResult {
-    Ok(value.as_str()?.trim().to_value())
+pub fn trim(value: ValuePtr) -> ValueResult {
+    value.check_str()?
+        .as_str()
+        .borrow_const()
+        .trim()
+        .to_value()
+        .ok()
 }
 
-pub fn replace<VM: VirtualInterface>(vm: &mut VM, pattern: Value, replacer: Value, target: Value) -> ValueResult {
+pub fn replace<VM: VirtualInterface>(vm: &mut VM, pattern: ValuePtr, replacer: ValuePtr, target: ValuePtr) -> ValueResult {
     let regex: Regex = compile_regex(pattern)?;
-    let text = target.as_str()?;
+    let text = target.check_str()?.as_str().borrow_const().as_str();
     if replacer.is_function() {
         let replacer: InvokeArg1 = InvokeArg1::from(replacer)?;
-        let mut err = None;
-        let replaced: Value = regex.replace_all(text, |captures: &Captures| {
-            let arg: Value = as_result(captures);
-            util::yield_result(&mut err, || replacer.invoke(arg, vm)?.as_str().cloned(), String::new())
+        let mut err: Option<Box<RuntimeError>> = None;
+        let replaced: ValuePtr = regex.replace_all(text, |captures: &Captures| {
+            let arg: ValuePtr = as_result(captures);
+            let ret: String = util::catch::<String>(&mut err, || {
+                Ok(replacer.invoke(arg, vm)?
+                    .check_str()?
+                    .as_str()
+                    .borrow_const()
+                    .to_string())
+            }, String::new());
+            ret
         }).to_value();
-        util::join_result(replaced, err)
+        util::join::<ValuePtr, Box<RuntimeError>, ValueResult>(replaced, err)
     } else {
-        Ok(regex.replace_all(text, replacer.as_str()?).to_value())
+        regex.replace_all(text, replacer.check_str()?.as_str().borrow_const().as_str())
+            .to_value()
+            .ok()
     }
 }
 
-pub fn search(pattern: Value, target: Value) -> ValueResult {
+pub fn search(pattern: ValuePtr, target: ValuePtr) -> ValueResult {
     let regex: Regex = compile_regex(pattern)?;
-    let text: &String = target.as_str()?;
+    let text: &String = target.check_str()?.as_str().borrow_const();
 
     let mut start: usize = 0;
-    Ok(std::iter::from_fn(move || {
+    std::iter::from_fn(move || {
         match regex.captures_from_pos(text, start).unwrap() {
             Some(captures) => {
                 start = captures.get(0).unwrap().end();
@@ -52,32 +75,38 @@ pub fn search(pattern: Value, target: Value) -> ValueResult {
             },
             None => None
         }
-    }).to_list())
+    }).to_list().ok()
 }
 
-pub fn split(pattern: Value, target: Value) -> ValueResult {
-    if pattern.as_str()?.is_empty() {
-        // Special case for empty string
-        return Ok(target.as_str()?.chars().map(|u| u.to_value()).to_list());
+pub fn split(pattern: ValuePtr, target: ValuePtr) -> ValueResult {
+    let target = target.check_str()?.as_str().borrow_const();
+
+    if pattern.check_str()?.as_str().borrow_const().is_empty() { // Special case for empty string
+        return target.chars()
+            .map(|u| u.to_value())
+            .to_list()
+            .ok();
     }
+
     let regex: Regex = compile_regex(pattern)?;
-    let text: &String = target.as_str()?;
-    Ok(fancy_split(&regex, text.as_str())
+
+    fancy_split(&regex, target.as_str())
         .map(|u| u.to_value())
-        .to_list())
+        .to_list()
+        .ok()
 }
 
-fn as_result(captures: &Captures) -> Value {
+fn as_result(captures: &Captures) -> ValuePtr {
     captures.iter()
         .map(|group| group.unwrap().as_str().to_value())
         .to_vector()
 }
 
-fn compile_regex(a1: Value) -> Result<Regex, Box<RuntimeError>> {
-    let raw = escape_regex(a1.as_str()?);
+fn compile_regex(a1: ValuePtr) -> Result<Regex, Box<RuntimeError>> {
+    let raw = escape_regex(a1.check_str()?.as_str().borrow_const());
     match Regex::new(&raw) {
         Ok(regex) => Ok(regex),
-        Err(e) => ValueErrorCannotCompileRegex(raw, e.to_string()).err()
+        Err(e) => Err(Box::new(ValueErrorCannotCompileRegex(raw, e.to_string())))
     }
 }
 
@@ -138,41 +167,45 @@ impl<'r, 't> Iterator for FancySplit<'r, 't> {
 impl<'r, 't> FusedIterator for FancySplit<'r, 't> {}
 
 
-pub fn join(joiner: Value, it: Value) -> ValueResult {
-    Ok(it.as_iter()?
+pub fn join(joiner: ValuePtr, it: ValuePtr) -> ValueResult {
+    it.to_iter()?
         .map(|u| u.to_str())
-        .join(joiner.as_str()?)
-        .to_value())
+        .join(joiner.check_str()?.as_str().borrow_const())
+        .to_value()
+        .ok()
 }
 
 
-pub fn to_char(value: Value) -> ValueResult {
-    match &value {
-        Int(i) if i > &0 => match char::from_u32(*i as u32) {
-            Some(c) => Ok(c.to_value()),
-            None => ValueErrorInvalidCharacterOrdinal(*i).err()
-        },
-        Int(i) => ValueErrorInvalidCharacterOrdinal(*i).err(),
-        _ => TypeErrorArgMustBeInt(value).err()
+pub fn to_char(value: ValuePtr) -> ValueResult {
+    let i = value.check_int()?.as_int();
+    if i <= 0 {
+        return ValueErrorInvalidCharacterOrdinal(i).err()
+    }
+    match char::from_u32(i as u32) {
+        Some(c) => c.to_value().ok(),
+        None => ValueErrorInvalidCharacterOrdinal(i).err()
     }
 }
 
-pub fn to_ord(value: Value) -> ValueResult {
-    match &value {
-        Str(s) if s.len() == 1 => Ok(Int(s.chars().next().unwrap() as u32 as i64)),
-        _ => TypeErrorArgMustBeChar(value).err()
+pub fn to_ord(value: ValuePtr) -> ValueResult {
+    let s = value.check_str()?.as_str().borrow_const();
+    match s.len() {
+        1 => (s.chars().next().unwrap() as u32 as i64)
+            .to_value()
+            .ok(),
+        _ => TypeErrorArgMustBeChar(s.to_value()).err(),
     }
 }
 
-pub fn to_hex(value: Value) -> ValueResult {
-    Ok(format!("{:x}", value.as_int()?).to_value())
+pub fn to_hex(value: ValuePtr) -> ValueResult {
+    format!("{:x}", value.check_int()?.as_int()).to_value().ok()
 }
 
-pub fn to_bin(value: Value) -> ValueResult {
-    Ok(format!("{:b}", value.as_int()?).to_value())
+pub fn to_bin(value: ValuePtr) -> ValueResult {
+    format!("{:b}", value.check_int()?.as_int()).to_value().ok()
 }
 
-pub fn format_string(literal: &String, args: Value) -> ValueResult {
+pub fn format_string(literal: &String, args: ValuePtr) -> ValueResult {
     StringFormatter::format(literal, args)
 }
 
@@ -185,7 +218,7 @@ struct StringFormatter<'a> {
 
 impl<'a> StringFormatter<'a> {
 
-    fn format(literal: &String, args: Value) -> ValueResult {
+    fn format(literal: &String, args: ValuePtr) -> ValueResult {
         let args = args.as_iter_or_unit();
         let len = literal.len();
 
@@ -237,14 +270,14 @@ impl<'a> StringFormatter<'a> {
                     let padding: usize = if buffer.is_empty() { 0 } else { buffer.parse::<usize>().unwrap() };
 
                     let text = match (self.peek(), is_zero_padded) {
-                        (Some('d'), false) => format!("{:width$}", self.arg()?.as_int()?, width = padding),
-                        (Some('d'), true) => format!("{:0width$}", self.arg()?.as_int()?, width = padding),
-                        (Some('x'), false) => format!("{:width$x}", self.arg()?.as_int()?, width = padding),
-                        (Some('x'), true) => format!("{:0width$x}", self.arg()?.as_int()?, width = padding),
-                        (Some('b'), false) => format!("{:width$b}", self.arg()?.as_int()?, width = padding),
-                        (Some('b'), true) => format!("{:0width$b}", self.arg()?.as_int()?, width = padding),
-                        (Some('s'), true) => format!("{:width$}", self.arg()?.to_str(), width = padding),
-                        (Some('s'), false) => format!("{:0width$}", self.arg()?.to_str(), width = padding),
+                        (Some('d'), false) => format!("{:width$}", self.arg()?.check_int()?.as_int(), width = padding),
+                        (Some('d'), true) => format!("{:0width$}", self.arg()?.check_int()?.as_int(), width = padding),
+                        (Some('x'), false) => format!("{:width$x}", self.arg()?.check_int()?.as_int(), width = padding),
+                        (Some('x'), true) => format!("{:0width$x}", self.arg()?.check_int()?.as_int(), width = padding),
+                        (Some('b'), false) => format!("{:width$b}", self.arg()?.check_int()?.as_int(), width = padding),
+                        (Some('b'), true) => format!("{:0width$b}", self.arg()?.check_int()?.as_int(), width = padding),
+                        (Some('s'), true) => format!("{:width$}", self.arg()?.check_str()?.as_str().borrow_const(), width = padding),
+                        (Some('s'), false) => format!("{:0width$}", self.arg()?.check_str()?.as_str().borrow_const(), width = padding),
                         (c, _) => return ValueErrorInvalidFormatCharacter(c.cloned()).err(),
                     };
 
@@ -257,16 +290,16 @@ impl<'a> StringFormatter<'a> {
         }
         match self.args.next() {
             Some(e) => ValueErrorNotAllArgumentsUsedInStringFormatting(e.clone()).err(),
-            None => Ok(self.output.to_value()),
+            None => self.output.to_value().ok(),
         }
     }
 
     fn next(&mut self) -> Option<char> { self.chars.next() }
     fn peek(&mut self) -> Option<&char> { self.chars.peek() }
     fn push(&mut self, c: char) { self.output.push(c); }
-    fn arg(&mut self) -> Result<Value, Box<RuntimeError>> {
+    fn arg(&mut self) -> ValueResult {
         match self.args.next() {
-            Some(v) => Ok(v),
+            Some(v) => v.ok(),
             None => ValueErrorMissingRequiredArgumentInStringFormatting.err(),
         }
     }

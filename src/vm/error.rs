@@ -3,7 +3,7 @@ use crate::reporting::{AsError, AsErrorWithContext, Location, SourceView};
 use crate::core::NativeFunction;
 use crate::vm::{CallFrame, StructTypeImpl, ValueResult};
 use crate::vm::operator::{BinaryOp, UnaryOp};
-use crate::vm::value::{FunctionImpl, Type, Value, ValuePtr};
+use crate::vm::value::{FunctionImpl, ValuePtr};
 
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,6 +51,7 @@ pub enum RuntimeError {
     TypeErrorArgMustBeIterable(ValuePtr),
     TypeErrorArgMustBeIndexable(ValuePtr),
     TypeErrorArgMustBeSliceable(ValuePtr),
+    TypeErrorArgMustBeList(ValuePtr),
     TypeErrorArgMustBeDict(ValuePtr),
     TypeErrorArgMustBeFunction(ValuePtr),
     TypeErrorArgMustBeCmpOrKeyFunction(ValuePtr),
@@ -63,7 +64,7 @@ impl RuntimeError {
         ValueResult::err(self)
     }
 
-    pub fn with_stacktrace(self, ip: usize, call_stack: &[CallFrame], functions: &[Value], locations: &[Location]) -> DetailRuntimeError {
+    pub fn with_stacktrace(self, ip: usize, call_stack: &[CallFrame], functions: &[ValuePtr], locations: &[Location]) -> DetailRuntimeError {
         const REPEAT_LIMIT: usize = 3;
 
         // Top level stack frame refers to the code being executed
@@ -145,9 +146,10 @@ impl AsErrorWithContext for DetailRuntimeError {
 
 /// The owning function for a given IP can be defined as the closest function which encloses the desired instruction
 /// We annotate both head and tail of `FunctionImpl` to make this search easy
-fn find_owning_function(ip: usize, functions: &[Value]) -> String {
+fn find_owning_function(ip: usize, functions: &[ValuePtr]) -> String {
     functions.iter()
-        .filter_map(|f| match f { Value::Function(f) => Some(f), _ => None})
+        .filter(|f| f.is_function())
+        .map(|f| f.as_function().borrow_const())
         .filter(|f| f.head <= ip && ip <= f.tail)
         .min_by_key(|f| f.tail - f.head)
         .map(|f| f.repr())

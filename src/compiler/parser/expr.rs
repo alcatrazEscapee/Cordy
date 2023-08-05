@@ -1,7 +1,7 @@
 use crate::compiler::parser::semantic::{LValue, LValueReference};
 use crate::reporting::Location;
 use crate::core::NativeFunction;
-use crate::vm::{C64, LiteralType, Opcode, RuntimeError, Value, ValueResult};
+use crate::vm::{C64, LiteralType, Opcode, RuntimeError, Type, ValuePtr, ValueResult};
 use crate::vm::operator::{BinaryOp, UnaryOp};
 
 #[derive(Debug, Clone)]
@@ -122,13 +122,13 @@ impl Expr {
         }
     }
 
-    pub fn value(value: Value) -> Expr {
-        match value {
-            Value::Nil => Expr::nil(),
-            Value::Bool(it) => Expr::bool(it),
-            Value::Int(it) => Expr::int(it),
-            Value::Complex(it) => Expr::c64(*it),
-            Value::Str(it) => Expr::str((*it).clone()),
+    pub fn value(value: ValuePtr) -> Expr {
+        match value.ty() {
+            Type::Nil => Expr::nil(),
+            Type::Bool => Expr::bool(value.as_bool()),
+            Type::Int => Expr::int(value.as_int()),
+            Type::Complex => Expr::c64(value.as_precise_complex().value.inner),
+            Type::Str => Expr::str(value.as_str().borrow_const().clone()),
             _ => panic!("Not a constant value type"),
         }
     }
@@ -138,7 +138,7 @@ impl Expr {
     }
 
     pub fn value_result(loc: Location, value: ValueResult) -> Expr {
-        match value {
+        match value.as_result() {
             Ok(value) => Expr::value(value),
             Err(e) => Expr::error(loc, e),
         }

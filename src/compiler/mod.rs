@@ -238,7 +238,7 @@ impl IncrementalCompileResult {
     fn ok_or_runtime_error(self) -> Result<(), Box<RuntimeError>> {
         match self {
             IncrementalCompileResult::Success => Ok(()),
-            IncrementalCompileResult::Errors(e) => RuntimeError::RuntimeCompilationError(e).err(),
+            IncrementalCompileResult::Errors(e) => Err(Box::new(RuntimeError::RuntimeCompilationError(e))),
             _ => panic!("{:?} should not be unboxed as a Result<(), Box<RuntimeError>>", self),
         }
     }
