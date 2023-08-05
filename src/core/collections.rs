@@ -344,7 +344,7 @@ pub fn all<VM: VirtualInterface>(vm: &mut VM, f: ValuePtr, args: ValuePtr) -> Va
 fn predicate<VM : VirtualInterface>(vm: &mut VM, f: ValuePtr, args: ValuePtr, is_any: bool) -> ValueResult {
     let f: InvokeArg1 = InvokeArg1::from(f)?;
     for r in args.to_iter()? {
-        if f.invoke(r, vm)?.as_bool() == is_any {
+        if f.invoke(r, vm)?.to_bool() == is_any {
             return is_any.to_value().ok()
         }
     }
