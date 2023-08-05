@@ -11,7 +11,7 @@ use crate::vm::{IntoDictValue, IntoIterableValue, IntoValue, Iterable, RuntimeEr
 use RuntimeError::{*};
 
 
-pub fn get_index<VM : VirtualInterface>(vm: &mut VM, target: ValuePtr, index: ValuePtr) -> ValueResult {
+pub fn get_index<VM : VirtualInterface>(vm: &mut VM, target: &ValuePtr, index: ValuePtr) -> ValueResult {
     if target.is_dict() {
         return get_dict_index(vm, target, index);
     }
@@ -22,7 +22,7 @@ pub fn get_index<VM : VirtualInterface>(vm: &mut VM, target: ValuePtr, index: Va
     indexable.get_index(index).ok()
 }
 
-fn get_dict_index<VM : VirtualInterface>(vm: &mut VM, dict: ValuePtr, key: ValuePtr) -> ValueResult {
+fn get_dict_index<VM : VirtualInterface>(vm: &mut VM, dict: &ValuePtr, key: ValuePtr) -> ValueResult {
     // Dict objects have their own overload of indexing to mean key-value lookups, that doesn't fit with ValueAsIndex (as it doesn't take integer keys, always)
     // The handling for this is a bit convoluted due to `clone()` issues, and possible cases of default / no default / functional default
 
@@ -77,7 +77,7 @@ pub fn set_index(target: &ValuePtr, index: ValuePtr, value: ValuePtr) -> Result<
 /// Performs a slice operation on `target`, given the operands `[low:high:step]`
 ///
 /// Note that each operand can be interpreted as either an `int` type or `nil`
-pub fn get_slice(target: ValuePtr, low: ValuePtr, high: ValuePtr, step: ValuePtr) -> ValueResult {
+pub fn get_slice(target: &ValuePtr, low: ValuePtr, high: ValuePtr, step: ValuePtr) -> ValueResult {
 
     #[inline]
     fn unwrap_or(ptr: ValuePtr, default: i64) -> Result<i64, Box<RuntimeError>> {

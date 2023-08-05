@@ -5,16 +5,18 @@
 
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::rc::Rc;
 use fxhash::FxBuildHasher;
 use itertools::Itertools;
 
 use crate::compiler::parser::{Parser, ParserError, ParserErrorType};
 use crate::core;
 use crate::reporting::Location;
-use crate::vm::{FunctionImpl, IntoValue, Opcode, ValuePtr};
+use crate::vm::{FunctionImpl, IntoValue, Opcode, StoreOp, ValuePtr};
 
 use Opcode::{*};
 use ParserErrorType::{*};
+use crate::core::Pattern;
 
 
 #[derive(Eq, PartialEq, Debug, Clone)]
@@ -379,17 +381,22 @@ impl LValue {
                     }
                 }
             }
-            LValue::Terms(_) => self.emit_terms_destructuring(parser, in_expression),
+            LValue::Terms(_) => {
+                let pattern = self.build_pattern(parser);
+                parser.declare_pattern(pattern);
+                if !in_expression {
+                    parser.push(Pop); // Push the final pop
+                }
+            },
         }
     }
 
-    fn emit_terms_destructuring(self, parser: &mut Parser, in_expression: bool) {
+    fn build_pattern(self, parser: &mut Parser) -> Pattern {
         let terms = self.into_terms();
-
         let is_variadic = terms.iter().any(|t| t.is_variadic_term());
-        let len: u32 = if is_variadic { terms.len() - 1 } else { terms.len() } as u32;
+        let len = if is_variadic { terms.len() - 1 } else { terms.len() };
 
-        parser.push(if is_variadic { CheckLengthGreaterThan(len) } else { CheckLengthEqualTo(len) });
+        let mut pattern: Pattern = Pattern::new(len, is_variadic);
 
         let mut index: i64 = 0;
         for term in terms {
@@ -403,47 +410,23 @@ impl LValue {
                     index = -(len as i64 - index);
                 },
                 LValue::Named(lvalue) => {
-                    let constant_index = parser.declare_const(index);
-
-                    parser.push(Constant(constant_index));
-                    parser.push(OpIndexPeek); // [ it[index], index, it, ...]
-                    parser.push_store_lvalue(lvalue); // stores it[index]
-                    parser.push(PopN(2)); // [it, ...]
-
+                    pattern.push_index(index, lvalue.as_store_op());
                     index += 1;
                 },
                 LValue::VarNamed(lvalue) => {
-                    // index = the next index in the iterable to take = the number of elements already accessed
-                    // therefor, len - index = the number of elements left we need to access exactly, which must be indices -1, -2, ... -(len - index)
-                    // so our slice excludes these, so the 'high' value must be -(len - index)
-                    // this is then also exactly what we set our index to next
-                    let constant_low = parser.declare_const(index);
+                    let low = index;
                     index = -(len as i64 - index);
-                    let constant_high = parser.declare_const(index);
+                    let high = index;
 
-                    parser.push(Dup); // [it, it, ...]
-                    parser.push(Constant(constant_low)); // [low, it, it, ...]
-                    parser.push(if index == 0 { Nil } else { Constant(constant_high) }); // [high, low, it, it, ...]
-                    parser.push(OpSlice); // [it[low:high], it, ...]
-                    parser.push_store_lvalue(lvalue); // stores it[low:high]
-                    parser.push(Pop); // [it, ...]
-                }
+                    pattern.push_slice(low, high, lvalue.as_store_op());
+                },
                 terms @ LValue::Terms(_) => {
-                    // Index as if this was a `Term`, but then invoke the emit recursively, with the value still on the stack, treating it as the iterable.
-                    let constant_index = parser.declare_const(index);
-
-                    parser.push(Constant(constant_index));
-                    parser.push(OpIndexPeek); // [ it[index], index, it, ...]
-                    terms.emit_destructuring(parser, false, false); // [ index, it, ...]
-                    parser.push(Pop); // [it, ...]
-
+                    pattern.push_pattern(index, terms.build_pattern(parser));
                     index += 1;
                 },
             }
         }
-        if !in_expression {
-            parser.push(Pop); // Pop the iterable
-        }
+        pattern
     }
 }
 
@@ -453,6 +436,19 @@ impl LValueReference {
         match std::mem::take(self) {
             LValueReference::Named(it) => it,
             _ => panic!("Expected LValueReference::Named"),
+        }
+    }
+
+    fn as_store_op(self) -> StoreOp {
+        match self {
+            LValueReference::Local(index) => StoreOp::Local(index),
+            LValueReference::Global(index) => StoreOp::Global(index),
+            LValueReference::LateBoundGlobal(_global) => {
+                // todo: support this
+                panic!("can't support late bound globals in pattern destructuring yet");
+            },
+            LValueReference::UpValue(index) => StoreOp::UpValue(index),
+            _ => panic!("Invalid store: {:?}", self),
         }
     }
 }
@@ -564,6 +560,14 @@ impl<'a> Parser<'a> {
             constant_id,
         });
         constant_id
+    }
+
+    /// Declares a `Pattern`, stores the pattern, and then emits a `ExecPattern` opcode for it
+    fn declare_pattern(&mut self, pattern: Pattern) {
+        let pattern_id: u32 = self.patterns.len() as u32;
+
+        self.patterns.push(Rc::new(pattern));
+        self.push(ExecPattern(pattern_id));
     }
 
     /// After a `let <name>`, `fn <name>`, or `struct <name>` declaration, tries to declare this as a local variable in the current scope.

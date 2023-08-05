@@ -31,7 +31,6 @@ pub enum Opcode {
     // Stack Operations
     Pop,
     PopN(u32),
-    Dup,
     Swap,
 
     PushLocal(u32),
@@ -68,6 +67,9 @@ pub enum Opcode {
     /// If no, it will push the next value in the iterable.
     TestIterable(i32),
 
+    /// Executes a pattern, similar to a native or builtin function, against the top of the stack.
+    ExecPattern(u32),
+
     /// Pushes constant values `Nil`, `True` and `False
     Nil,
     True,
@@ -95,11 +97,6 @@ pub enum Opcode {
     /// Creates a `slice` object, which is used to perform slice operations
     Slice,
     SliceWithStep,
-
-    /// Checks that the top of the stack is an iterable with length > the provided value
-    CheckLengthGreaterThan(u32),
-    /// Checks that the top of the stack is an iterable with length = the provided value
-    CheckLengthEqualTo(u32),
 
     /// Opcode for function evaluation (either with `()` or with `.`).
     ///
@@ -139,6 +136,15 @@ pub enum Opcode {
     Yield,
     AssertFailed,
 }
+
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum StoreOp {
+    Local(u32),
+    Global(u32),
+    UpValue(u32)
+}
+
 
 impl Opcode {
 

@@ -1424,7 +1424,7 @@ pub struct SliceImpl {
 }
 
 impl SliceImpl {
-    pub fn apply(self, arg: ValuePtr) -> ValueResult {
+    pub fn apply(self, arg: &ValuePtr) -> ValueResult {
         core::get_slice(arg, self.arg1, self.arg2, self.arg3)
     }
 }

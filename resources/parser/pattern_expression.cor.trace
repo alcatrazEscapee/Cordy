@@ -10,19 +10,7 @@ L2: 0006 LiteralBegin(List, 3)
     0009 Int(3)
     0010 LiteralAcc(3)
     0011 LiteralEnd
-    0012 CheckLengthEqualTo(3)
-    0013 Int(0)
-    0014 OpIndexPeek
-    0015 StoreGlobal(0) -> x
-    0016 PopN(2)
-    0017 Int(1)
-    0018 OpIndexPeek
-    0019 StoreGlobal(1) -> y
-    0020 PopN(2)
-    0021 Int(2)
-    0022 OpIndexPeek
-    0023 StoreGlobal(2) -> z
-    0024 PopN(2)
-    0025 Pop
-    0026 PopN(3)
-    0027 Exit
+    0012 ExecPattern(0)
+    0013 Pop
+    0014 PopN(3)
+    0015 Exit
