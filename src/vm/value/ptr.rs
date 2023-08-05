@@ -107,7 +107,7 @@ impl ValuePtr {
         ValuePtr { tag: TAG_NATIVE | ((value as usize) << 6) }
     }
 
-    pub(super) fn of_field(field: u32) -> ValuePtr {
+    pub fn of_field(field: u32) -> ValuePtr {
         ValuePtr { tag: TAG_FIELD | ((field as usize) << 6) }
     }
 
@@ -127,25 +127,27 @@ impl ValuePtr {
 
     pub fn as_int(&self) -> i64 {
         debug_assert!(self.is_int());
-        (unsafe { self.int }) >> 1
-    }
-
-    pub fn as_int_like(&self) -> i64 {
-        debug_assert!(self.is_int_like());
-        if self.is_int() {
-            self.as_int()
+        if self.is_precise_int() {
+            self.as_precise_int()
         } else {
             self.is_true() as i64
         }
     }
 
+    pub fn as_precise_int(&self) -> i64 {
+        debug_assert!(self.is_precise_int());
+        unsafe {
+            self.int >> 1
+        }
+    }
+
     /// If the current type is int-like, then automatically converts it to a complex number.
-    pub fn as_complex_like(self) -> Complex<i64> {
+    pub fn as_complex(self) -> Complex<i64> {
         debug_assert!(self.ty() == Type::Bool || self.ty() == Type::Int || self.ty() == Type::Complex);
         match self.ty() {
             Type::Bool => Complex::new(self.is_true() as i64, 0),
             Type::Int => Complex::new(self.as_int(), 0),
-            Type::Complex => self.as_complex().value.inner(),
+            Type::Complex => self.as_precise_complex().value.inner,
             _ => unreachable!(),
         }
     }
@@ -202,9 +204,8 @@ impl ValuePtr {
     pub fn is_nil(&self) -> bool { (unsafe { self.tag } & MASK_NIL) == TAG_NIL }
     pub fn is_bool(&self) -> bool { (unsafe { self.tag } & MASK_BOOL) == TAG_BOOL }
     pub fn is_true(&self) -> bool { (unsafe { self.tag }) == TAG_TRUE }
-    pub fn is_int(&self) -> bool { (unsafe { self.tag } & MASK_INT) == TAG_INT }
-    pub fn is_int_like(&self) -> bool { self.is_int() || self.is_bool() }
-    pub fn is_int_like_or_nil(&self) -> bool { self.is_nil() || self.is_int_like() }
+    pub fn is_int(&self) -> bool { self.is_precise_int() || self.is_bool() }
+    pub fn is_precise_int(&self) -> bool { (unsafe { self.tag } & MASK_INT) == TAG_INT }
     pub fn is_native(&self) -> bool { (unsafe { self.tag } & MASK_NATIVE) == TAG_NATIVE }
     pub fn is_field(&self) -> bool { (unsafe { self.tag } & MASK_FIELD) == TAG_FIELD }
     pub fn is_none(&self) -> bool { (unsafe { self.tag } & MASK_NONE) == TAG_NONE }
@@ -332,6 +333,7 @@ impl PartialEq for ValuePtr {
             Type::Complex => self.as_ref::<ComplexImpl>() == other.as_ref::<ComplexImpl>(),
             Type::Range => self.as_ref::<RangeImpl>() == other.as_ref::<RangeImpl>(),
             Type::Enumerate => self.as_ref::<EnumerateImpl>() == other.as_ref::<EnumerateImpl>(),
+            Type::PartialFunction => self.as_ref::<PartialFunctionImpl>() == other.as_ref::<PartialFunctionImpl>(),
             Type::PartialNativeFunction => self.as_ref::<PartialNativeFunctionImpl>() == other.as_ref::<PartialNativeFunctionImpl>(),
             Type::Slice => self.as_ref::<SliceImpl>() == other.as_ref::<SliceImpl>(),
             // Shared types check equality based on the shared ref
@@ -345,7 +347,6 @@ impl PartialEq for ValuePtr {
             Type::StructType => self.as_shared_ref::<StructTypeImpl>() == other.as_shared_ref::<StructTypeImpl>(),
             Type::Memoized => self.as_shared_ref::<MemoizedImpl>() == other.as_shared_ref::<MemoizedImpl>(),
             Type::Function => self.as_shared_ref::<FunctionImpl>() == other.as_shared_ref::<FunctionImpl>(),
-            Type::PartialFunction => self.as_shared_ref::<PartialFunctionImpl>() == other.as_shared_ref::<PartialFunctionImpl>(),
             Type::Closure => self.as_shared_ref::<ClosureImpl>() == other.as_shared_ref::<ClosureImpl>(),
             // Special types that are not checked for equality
             Type::Iter | Type::Error | Type::None | Type::Never => false,
@@ -374,8 +375,6 @@ impl Ord for ValuePtr {
             Type::Complex => self.as_ref::<ComplexImpl>().cmp(other.as_ref::<ComplexImpl>()),
             Type::Range => self.as_ref::<RangeImpl>().cmp(&other.as_ref::<RangeImpl>()),
             Type::Enumerate => self.as_ref::<EnumerateImpl>().cmp(other.as_ref::<EnumerateImpl>()),
-            Type::PartialNativeFunction => self.as_ref::<PartialNativeFunctionImpl>().cmp(&other.as_ref::<PartialNativeFunctionImpl>()),
-            Type::Slice => self.as_ref::<SliceImpl>().cmp(other.as_ref::<SliceImpl>()),
             // Shared types check equality based on the shared ref
             Type::Str => self.as_shared_ref::<String>().cmp(&other.as_shared_ref::<String>()),
             Type::List => self.as_shared_ref::<ListImpl>().cmp(&other.as_shared_ref::<ListImpl>()),
@@ -384,13 +383,16 @@ impl Ord for ValuePtr {
             Type::Heap => self.as_shared_ref::<HeapImpl>().cmp(&other.as_shared_ref::<HeapImpl>()),
             Type::Vector => self.as_shared_ref::<VectorImpl>().cmp(&other.as_shared_ref::<VectorImpl>()),
             Type::Struct => self.as_shared_ref::<StructImpl>().cmp(&other.as_shared_ref::<StructImpl>()),
-            Type::StructType => self.as_shared_ref::<StructTypeImpl>().cmp(&other.as_shared_ref::<StructTypeImpl>()),
-            Type::Memoized => self.as_shared_ref::<MemoizedImpl>().cmp(&other.as_shared_ref::<MemoizedImpl>()),
-            Type::Function => self.as_shared_ref::<FunctionImpl>().cmp(&other.as_shared_ref::<FunctionImpl>()),
-            Type::PartialFunction => self.as_shared_ref::<PartialFunctionImpl>().cmp(&other.as_shared_ref::<PartialFunctionImpl>()),
-            Type::Closure => self.as_shared_ref::<ClosureImpl>().cmp(&other.as_shared_ref::<ClosureImpl>()),
+            // Function-like types are not checked for ordering
+            Type::StructType |
+            Type::Memoized |
+            Type::Function |
+            Type::PartialFunction |
+            Type::Closure |
+            Type::PartialNativeFunction |
+            Type::Slice => Ordering::Equal,
             // Special types that are not checked for ordering
-            Type::Iter | Type::Error | Type::None | Type::Never => false,
+            Type::Iter | Type::Error | Type::None | Type::Never => Ordering::Equal,
         }
     }
 }
@@ -416,6 +418,7 @@ impl Clone for ValuePtr {
                 Type::Complex => self.clone_owned::<ComplexImpl>(),
                 Type::Range => self.clone_owned::<RangeImpl>(),
                 Type::Enumerate => self.clone_owned::<EnumerateImpl>(),
+                Type::PartialFunction => self.clone_owned::<PartialFunctionImpl>(),
                 Type::PartialNativeFunction => self.clone_owned::<PartialNativeFunctionImpl>(),
                 Type::Slice => self.clone_owned::<SliceImpl>(),
                 Type::Iter => self.clone_owned::<Iterable>(),
@@ -430,7 +433,6 @@ impl Clone for ValuePtr {
                 Type::StructType => self.clone_shared::<StructTypeImpl>(),
                 Type::Memoized => self.clone_shared::<MemoizedImpl>(),
                 Type::Function => self.clone_shared::<FunctionImpl>(),
-                Type::PartialFunction => self.clone_shared::<PartialFunctionImpl>(),
                 Type::Closure => self.clone_shared::<ClosureImpl>(),
                 // Special types
                 Type::Error => {
@@ -464,9 +466,10 @@ impl Drop for ValuePtr {
                 Type::Complex => self.drop_owned::<ComplexImpl>(),
                 Type::Range => self.drop_owned::<RangeImpl>(),
                 Type::Enumerate => self.drop_owned::<EnumerateImpl>(),
+                Type::PartialFunction => self.drop_owned::<PartialFunctionImpl>(),
                 Type::PartialNativeFunction => self.drop_owned::<PartialNativeFunctionImpl>(),
                 Type::Slice => self.drop_owned::<SliceImpl>(),
-                Type::Iter => self.clone_owned::<Iterable>(),
+                Type::Iter => self.drop_owned::<Iterable>(),
                 // Shared types
                 Type::Str => self.drop_shared::<String>(),
                 Type::List => self.drop_shared::<ListImpl>(),
@@ -478,7 +481,6 @@ impl Drop for ValuePtr {
                 Type::StructType => self.drop_shared::<StructTypeImpl>(),
                 Type::Memoized => self.drop_shared::<MemoizedImpl>(),
                 Type::Function => self.drop_shared::<FunctionImpl>(),
-                Type::PartialFunction => self.drop_shared::<PartialFunctionImpl>(),
                 Type::Closure => self.drop_shared::<ClosureImpl>(),
                 // Special types
                 Type::Error => {
@@ -509,6 +511,7 @@ impl Hash for ValuePtr {
             Type::Complex => self.as_ref::<ComplexImpl>().hash(state),
             Type::Range => self.as_ref::<RangeImpl>().hash(state),
             Type::Enumerate => self.as_ref::<EnumerateImpl>().hash(state),
+            Type::PartialFunction => self.as_ref::<PartialFunctionImpl>().hash(state),
             Type::PartialNativeFunction => self.as_ref::<PartialNativeFunctionImpl>().hash(state),
             Type::Slice => self.as_ref::<SliceImpl>().hash(state),
             // Shared types
@@ -522,7 +525,6 @@ impl Hash for ValuePtr {
             Type::StructType => self.as_shared_ref::<StructTypeImpl>().hash(state),
             Type::Memoized => self.as_shared_ref::<MemoizedImpl>().hash(state),
             Type::Function => self.as_shared_ref::<FunctionImpl>().hash(state),
-            Type::PartialFunction => self.as_shared_ref::<PartialFunctionImpl>().hash(state),
             Type::Closure => self.as_shared_ref::<ClosureImpl>().hash(state),
             // Special types with no hash behavior
             Type::Iter | Type::Error | Type::None | Type::Never => {},
@@ -544,6 +546,7 @@ impl Debug for ValuePtr {
             Type::Complex => Debug::fmt(self.as_ref::<ComplexImpl>(), f),
             Type::Range => Debug::fmt(self.as_ref::<RangeImpl>(), f),
             Type::Enumerate => Debug::fmt(self.as_ref::<EnumerateImpl>(), f),
+            Type::PartialFunction => Debug::fmt(self.as_ref::<PartialFunctionImpl>(), f),
             Type::PartialNativeFunction => Debug::fmt(self.as_ref::<PartialNativeFunctionImpl>(), f),
             Type::Slice => Debug::fmt(self.as_ref::<SliceImpl>(), f),
             // Shared types
@@ -557,7 +560,6 @@ impl Debug for ValuePtr {
             Type::StructType => Debug::fmt(self.as_shared_ref::<StructTypeImpl>(), f),
             Type::Memoized => Debug::fmt(self.as_shared_ref::<MemoizedImpl>(), f),
             Type::Function => Debug::fmt(self.as_shared_ref::<FunctionImpl>(), f),
-            Type::PartialFunction => Debug::fmt(self.as_shared_ref::<PartialFunctionImpl>(), f),
             Type::Closure => Debug::fmt(self.as_shared_ref::<ClosureImpl>(), f),
             // Special types with no hash behavior
             Type::Iter => write!(f, "Iter"),
@@ -653,10 +655,7 @@ pub struct SharedPrefix<T : SharedValue> {
     value: UnsafeCell<T>,
 }
 
-const BORROW_MUT: u16 = 0;
-const BORROW_NONE: u16 = 1;
-
-
+/// Implementation for all (`ConstValue` and `MutValue`) `SharedPrefix<T>` types
 impl<T : SharedValue> SharedPrefix<T> {
     pub fn prefix(ty: Type, value: T) -> SharedPrefix<T> {
         SharedPrefix {
@@ -667,38 +666,7 @@ impl<T : SharedValue> SharedPrefix<T> {
         }
     }
 
-    /// Copied from the implementation of `Rc`. Minus the core intrinsics, as they aren't stable.
-    fn inc_strong(&self) {
-        let strong: u32 = self.refs.get() + 1;
-        self.refs.set(strong);
-    }
-
-    fn dec_strong(&self) {
-        self.refs.set(self.refs.get() - 1);
-    }
-}
-
-impl<T : ConstValue> SharedPrefix<T> {
-    /// For const values, we know the underlying value is never mutable, and thus a mutable borrow is never taken.
-    pub fn as_ref(&self) -> &T {
-        unsafe {
-            NonNull::new_unchecked(self.value.get()).as_ref()
-        }
-    }
-}
-
-impl<T: ConstValue> Deref for SharedPrefix<T> {
-    type Target = T;
-
-    #[inline]
-    fn deref(&self) -> &T {
-        self.as_ref()
-    }
-}
-
-
-impl<T : MutValue> SharedPrefix<T> {
-    /// Copied from the implementation in `RefCell`
+    /// Copied from the implementation in `RefCell`. Must be implemented on `SharedPrefix<T : SharedValue>` for builtin trait implementations to reference.
     pub fn borrow(&self) -> Ref<'_, T> {
         self.try_borrow().expect("already borrowed")
     }
@@ -715,6 +683,73 @@ impl<T : MutValue> SharedPrefix<T> {
         }
     }
 
+    /// Copied from the implementation of `Rc`. Minus the core intrinsics, as they aren't stable.
+    fn inc_strong(&self) {
+        let strong: u32 = self.refs.get() + 1;
+        self.refs.set(strong);
+    }
+
+    fn dec_strong(&self) {
+        self.refs.set(self.refs.get() - 1);
+    }
+}
+
+
+/// `ConstValue` implementations
+impl<T : ConstValue> SharedPrefix<T> {
+    /// For const values, we know the underlying value is never mutable, and thus a mutable borrow is never taken.
+    /// Thus, we can hand out unchecked references to the underlying value, which avoids the overhead of useless borrow checking.
+    pub fn borrow_const(&self) -> &T {
+        unsafe {
+            NonNull::new_unchecked(self.value.get()).as_ref()
+        }
+    }
+}
+
+
+/// In order to properly implement these traits, we need to only specialize them on `T : SharedValue`. However, we don't know a priori if these are const, or mutable types, which creates a problem for access.
+/// If we had negative trait bounds, we could make `ConstValue` and `MutValue` incompatible traits, and then implement individually.
+///
+/// The result, is we _need_ to use runtime borrow checking for the implementation of standard library traits, since it gets declared on `SharedPrefix<T : SharedValue>`
+///
+/// Note that other implementations that _can_ specialize on `SharedPrefix<T : ConstValue>` can use the `borrow_const()` which does no checking. This is still safe, because we are still sure that for const types, no mutable borrows will be taken. It just represents extra work being done.
+impl<T : Eq + SharedValue> Eq for SharedPrefix<T> {}
+impl<T : Eq + SharedValue> PartialEq for SharedPrefix<T> {
+    fn eq(&self, other: &Self) -> bool {
+        *self.borrow() == *other.borrow()
+    }
+}
+
+impl<T : Eq + Ord + SharedValue> Ord for SharedPrefix<T> {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.borrow().cmp(&other.borrow())
+    }
+}
+
+impl<T : Eq + Ord + SharedValue> PartialOrd for SharedPrefix<T> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl<T : Hash + SharedValue> Hash for SharedPrefix<T> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.borrow().hash(state);
+    }
+}
+
+impl<T : Debug + SharedValue> Debug for SharedPrefix<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        Debug::fmt(&*self.borrow(), f)
+    }
+}
+
+const BORROW_MUT: u16 = 0;
+const BORROW_NONE: u16 = 1;
+
+/// `MutValue` implementations. This prevents any `ConstValue` from accessing mutable borrows.
+impl<T : MutValue> SharedPrefix<T> {
+
     pub fn borrow_mut(&self) -> RefMut<'_, T> {
         self.try_borrow_mut().expect("already borrowed")
     }
@@ -728,38 +763,6 @@ impl<T : MutValue> SharedPrefix<T> {
             }
             _ => None, // Already borrowed,
         }
-    }
-}
-
-
-impl<T : Eq + SharedValue> Eq for SharedPrefix<T> {}
-impl<T : Eq + SharedValue> PartialEq for SharedPrefix<T> {
-    fn eq(&self, other: &Self) -> bool {
-        *self.as_ref() == *other.as_ref()
-    }
-}
-
-impl<T : Eq + Ord + SharedValue> Ord for SharedPrefix<T> {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.as_ref().cmp(&other.as_ref())
-    }
-}
-
-impl<T : Eq + Ord + SharedValue> PartialOrd for SharedPrefix<T> {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl<T : Hash + SharedValue> Hash for SharedPrefix<T> {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.as_ref().hash(state);
-    }
-}
-
-impl<T : Debug + SharedValue> Debug for SharedPrefix<T> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        Debug::fmt(&*self.as_ref(), f)
     }
 }
 
@@ -824,8 +827,9 @@ impl<T: ?Sized> DerefMut for RefMut<'_, T> {
 
 #[cfg(test)]
 mod tests {
+    use num_complex::Complex;
     use crate::core::NativeFunction;
-    use crate::vm::{C64, IntoValue};
+    use crate::vm::IntoValue;
     use crate::vm::value::ptr::{MAX_INT, MIN_INT, Prefix, SharedPrefix, ValuePtr};
     use crate::vm::value::Type;
 
@@ -856,7 +860,8 @@ mod tests {
         let ptr = true.to_value();
         assert!(!ptr.is_nil());
         assert!(ptr.is_bool());
-        assert!(!ptr.is_int());
+        assert!(ptr.is_int());
+        assert!(!ptr.is_precise_int());
         assert!(!ptr.is_native());
         assert!(!ptr.is_none());
         assert!(!ptr.is_err());
@@ -864,7 +869,7 @@ mod tests {
         assert!(!ptr.is_shared());
         assert_eq!(ptr.ty(), Type::Bool);
         assert!(ptr.clone().as_bool());
-        assert_eq!(ptr.clone().as_int_like(), 1);
+        assert_eq!(ptr.clone().as_int(), 1);
         assert_eq!(format!("{:?}", ptr), "true");
     }
 
@@ -873,7 +878,8 @@ mod tests {
         let ptr = false.to_value();
         assert!(!ptr.is_nil());
         assert!(ptr.is_bool());
-        assert!(!ptr.is_int());
+        assert!(ptr.is_int());
+        assert!(!ptr.is_precise_int());
         assert!(!ptr.is_native());
         assert!(!ptr.is_none());
         assert!(!ptr.is_err());
@@ -881,7 +887,7 @@ mod tests {
         assert!(!ptr.is_shared());
         assert_eq!(ptr.ty(), Type::Bool);
         assert!(!ptr.clone().as_bool());
-        assert_eq!(ptr.clone().as_int_like(), 0);
+        assert_eq!(ptr.clone().as_int(), 0);
         assert_eq!(format!("{:?}", ptr), "false");
     }
 
@@ -899,7 +905,7 @@ mod tests {
             assert!(!ptr.is_shared());
             assert_eq!(ptr.ty(), Type::Int);
             assert_eq!(ptr.clone().as_int(), int);
-            assert_eq!(ptr.clone().as_int_like(), int);
+            assert_eq!(ptr.clone().as_precise_int(), int);
             assert_eq!(format!("{:?}", ptr), format!("{}", int));
         }
 
@@ -915,7 +921,7 @@ mod tests {
             assert!(!ptr.is_shared());
             assert_eq!(ptr.ty(), Type::Int);
             assert_eq!(ptr.clone().as_int(), int);
-            assert_eq!(ptr.clone().as_int_like(), int);
+            assert_eq!(ptr.clone().as_precise_int(), int);
             assert_eq!(format!("{:?}", ptr), format!("{}", int));
         }
     }
@@ -968,7 +974,7 @@ mod tests {
 
     #[test]
     fn test_owned_complex() {
-        let ptr = C64::new(1, 2).to_value();
+        let ptr = Complex::<i64>::new(1, 2).to_value();
 
         assert!(!ptr.is_nil());
         assert!(!ptr.is_bool());
@@ -979,14 +985,14 @@ mod tests {
         assert!(ptr.is_ptr());
         assert!(!ptr.is_shared());
         assert_eq!(ptr.ty(), Type::Complex);
-        assert_eq!(format!("{:?}", ptr), format!("{:?}", C64::new(1, 2)));
+        assert_eq!(format!("{:?}", ptr), format!("{:?}", Complex::<i64>::new(1, 2)));
     }
 
     #[test]
     fn test_owned_complex_clone_eq() {
         let c0 = ValuePtr::nil();
-        let c1 = C64::new(1, 2).to_value();
-        let c2 = C64::new(1, 3).to_value();
+        let c1 = Complex::<i64>::new(1, 2).to_value();
+        let c2 = Complex::<i64>::new(1, 3).to_value();
 
         assert_ne!(c2, c0);
         assert_ne!(c2, c1);
@@ -1012,17 +1018,17 @@ mod tests {
     }
 
     #[test]
-    fn test_shared_str_eq() {
-        let ptr1 = "".to_value();
-        let ptr2 = "".to_value();
+    fn test_shared_mut_vec_eq() {
+        let ptr1 = vec![].to_value();
+        let ptr2 = vec![].to_value();
 
         assert_eq!(ptr1, ptr2);
         assert_eq!(ptr1, ptr1);
     }
 
     #[test]
-    fn test_shared_str_clone() {
-        let ptr = "".to_value();
+    fn test_shared_mut_vec_clone() {
+        let ptr = vec![].to_value();
 
         assert_eq!(ptr, ptr.clone());
         assert_eq!(ptr.clone(), ptr.clone());
@@ -1030,27 +1036,35 @@ mod tests {
 
     #[test]
     #[should_panic]
-    fn test_shared_str_two_mutable_borrow_panic() {
-        let ptr = "".to_value();
+    fn test_shared_mut_vec_two_mutable_borrow_panic() {
+        let ptr = vec![].to_value();
 
-        let _r1 = ptr.as_str().borrow_mut();
-        let _r2 = ptr.as_str().borrow_mut();
+        let _r1 = ptr.as_vector().borrow_mut();
+        let _r2 = ptr.as_vector().borrow_mut();
     }
 
     #[test]
     #[should_panic]
-    fn test_shared_str_mutable_and_normal_borrow_panic() {
-        let ptr = "".to_value();
+    fn test_shared_mut_vec_mutable_and_normal_borrow_panic() {
+        let ptr = vec![].to_value();
 
-        let _r1 = ptr.as_str().as_ref();
-        let _r2 = ptr.as_str().borrow_mut();
+        let _r1 = ptr.as_vector().borrow();
+        let _r2 = ptr.as_vector().borrow_mut();
     }
 
     #[test]
-    fn test_shared_str_multiple_borrow_no_panic() {
+    fn test_shared_mut_vec_multiple_borrow_no_panic() {
+        let ptr = vec![].to_value();
+
+        let _r1 = ptr.as_vector().borrow();
+        let _r2 = ptr.as_vector().borrow();
+    }
+
+    #[test]
+    fn test_shared_const_str_can_borrow_const() {
         let ptr = "".to_value();
 
-        let _r1 = ptr.as_str().as_ref();
-        let _r2 = ptr.as_str().as_ref();
+        let _r1 = ptr.as_str().borrow_const();
+        let _r2 = ptr.as_str().borrow();
     }
 }

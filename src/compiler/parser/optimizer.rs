@@ -1,6 +1,6 @@
 use crate::compiler::parser::expr::{Expr, ExprType};
 use crate::core::NativeFunction;
-use crate::vm::{IntoValue, LiteralType, RuntimeError, Value};
+use crate::vm::{IntoValue, LiteralType, RuntimeError, ValuePtr};
 use crate::vm::operator::BinaryOp;
 
 /// A trait for objects which are able to be optimized via a recursive self-transformation
@@ -192,9 +192,9 @@ impl Expr {
     ///
     /// **N.B.** This can only be supported for immutable types. If we attempt to const-expr evaluate a non-constant `Value`, like a list, we would have to
     /// un-const-expr it to emit the code - otherwise in `VM.constants` we would have a single instance that gets copied and re-used. This is **very bad**.
-    fn into_const(self) -> Result<Value, Expr> {
+    fn into_const(self) -> Result<ValuePtr, Expr> {
         match self {
-            Expr(_, ExprType::Nil) => Ok(Value::Nil),
+            Expr(_, ExprType::Nil) => Ok(ValuePtr::nil()),
             Expr(_, ExprType::Bool(it)) => Ok(it.to_value()),
             Expr(_, ExprType::Int(it)) => Ok(it.to_value()),
             Expr(_, ExprType::Complex(it)) => Ok(it.to_value()),

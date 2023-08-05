@@ -2,10 +2,10 @@ use crate::core::NativeFunction;
 use crate::vm::operator::{BinaryOp, UnaryOp};
 use crate::vm::value::LiteralType;
 use crate::util::OffsetAdd;
+use crate::compiler::Fields;
+use crate::vm::{Type, ValuePtr};
 
 use Opcode::{*};
-use crate::compiler::Fields;
-use crate::vm::Value;
 
 #[derive(Eq, PartialEq, Debug, Clone, Copy)]
 pub enum Opcode {
@@ -141,19 +141,22 @@ pub enum Opcode {
 
 impl Opcode {
 
-    pub fn disassembly<I : Iterator<Item=String>>(self: &Opcode, ip: usize, locals: &mut I, fields: &Fields, constants: &[Value]) -> String {
+    pub fn disassembly<I : Iterator<Item=String>>(self: &Opcode, ip: usize, locals: &mut I, fields: &Fields, constants: &[ValuePtr]) -> String {
         match self {
             Constant(id) => {
                 let constant = &constants[*id as usize];
-                match constant {
-                    Value::Nil => String::from("Nil"),
-                    Value::Bool(it) => String::from(if *it { "True" } else { "False" }),
-                    Value::Function(it) => format!("Function({} -> L[{}, {}])", it.repr(), it.head, it.tail),
-                    Value::StructType(it) => format!("StructType({})", it.as_str()),
-                    _ => format!("{}({})", match constant {
-                        Value::Int(_) => "Int",
-                        Value::Str(_) => "Str",
-                        Value::Complex(_) => "Complex",
+                match constant.ty() {
+                    Type::Nil => String::from("Nil"),
+                    Type::Bool => String::from(if constant.is_true() { "True" } else { "False" }),
+                    Type::Function => {
+                        let it = constant.as_function().borrow_const();
+                        format!("Function({} -> L[{}, {}])", it.repr(), it.head, it.tail)
+                    },
+                    Type::StructType => format!("StructType({})", constant.as_struct_type().borrow_const().as_str()),
+                    ty => format!("{}({})", match ty {
+                        Type::Int => "Int",
+                        Type::Str => "Str",
+                        Type::Complex => "Complex",
                         _ => panic!("Not a constant: {:?}", constant),
                     }, constant.to_repr_str())
                 }

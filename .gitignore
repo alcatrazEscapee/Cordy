@@ -7,6 +7,7 @@
 
 !/Cargo.toml
 !/Cargo.lock
+!/rust-toolchain.toml
 
 !/resources/**/*.cor
 !/resources/**/*.cor.trace

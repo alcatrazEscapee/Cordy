@@ -1,4 +1,6 @@
-use crate::vm::Value;
+use std::ops::{ControlFlow, Try};
+
+use crate::vm::RuntimeError;
 
 pub fn strip_line_ending(buffer: &mut String) {
     if buffer.ends_with('\n') {
@@ -32,6 +34,31 @@ pub fn yield_result<T, E>(err: &mut Option<E>, f: impl FnOnce() -> Result<T, E>,
         }
     }
 }
+
+/// Used to wrap a function that might normally error, with one that passes the error up (i.e. outside of a closure), and returns a default to the inner function.
+///
+/// N.B. This did not work without specifying the types `Box<RuntimeError>` exactly. I do not know why.
+#[inline(always)]
+pub fn catch<T>(err: &mut Option<Box<RuntimeError>>, f: impl FnOnce() -> Result<T, Box<RuntimeError>>, default: T) -> T {
+    match f().branch() {
+        ControlFlow::Continue(e) => e,
+        ControlFlow::Break(Err(e)) => {
+            *err = Some(e);
+            default
+        },
+        _ => unreachable!(),
+    }
+}
+
+/// Joins an `Option<Box<RuntimeError>>` error with a result, using fully generic `Try` trait implementation.
+#[inline(always)]
+pub fn join<T, E, R : Try<Output=T, Residual=E>>(result: T, err: Option<E>) -> R {
+    match err {
+        Some(e) => R::from_residual(e),
+        None => R::from_output(result)
+    }
+}
+
 
 /// Used with `yield_result` to escape a convoluted Rust pattern, and use the stdlib more thoroughly.
 ///
