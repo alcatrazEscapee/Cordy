@@ -137,7 +137,7 @@ impl ValueOption {
     /// Takes the value out of the option, leaving `None` in its place.
     #[inline]
     pub fn take(&mut self) -> ValueOption {
-        std::mem::replace(&mut self, ValueOption::none())
+        std::mem::replace(self, ValueOption::none())
     }
 }
 
@@ -157,7 +157,7 @@ pub struct ValueResult {
 }
 
 impl ValueResult {
-    pub fn ok(ptr: ValuePtr) -> ValueResult {
+    pub const fn ok(ptr: ValuePtr) -> ValueResult {
         debug_assert!(!ptr.is_err()); // Should never have an error-type in `ok()`
         ValueResult { ptr }
     }
@@ -242,7 +242,7 @@ impl FromResidual for ValueResult {
 
 impl FromIterator<ValueResult> for Result<Vec<ValuePtr>, Box<RuntimeError>> {
     fn from_iter<T: IntoIterator<Item=ValueResult>>(iter: T) -> Self {
-        let mut iter = iter.into_iter();
+        let iter = iter.into_iter();
         let mut vec: Vec<ValuePtr> = Vec::with_capacity(iter.size_hint().0);
         for ptr in iter {
             match ptr.as_result() {
@@ -268,8 +268,12 @@ impl ValueFunction {
     }
 
     /// Returns a reference to the function of this pointer.
-    pub fn get(&self) -> &SharedPrefix<FunctionImpl> {
+    pub fn get(&self) -> &FunctionImpl {
         self.ptr.get_function()
+    }
+
+    pub fn inner(self) -> ValuePtr {
+        self.ptr
     }
 }
 
@@ -301,6 +305,10 @@ impl ValuePtr {
         PartialFunctionImpl { func: ValueFunction::new(func), args }.to_value()
     }
 
+    pub fn partial_native(func: NativeFunction, partial: PartialArgument) -> ValuePtr {
+        PartialNativeFunctionImpl { func, partial }.to_value()
+    }
+
     pub fn closure(func: ValuePtr) -> ValuePtr {
         func.to_closure()
     }
@@ -318,6 +326,10 @@ impl ValuePtr {
             func,
             cache: HashMap::with_hasher(FxBuildHasher::default()),
         }.to_value()
+    }
+
+    pub fn enumerate(ptr: ValuePtr) -> ValuePtr {
+        EnumerateImpl { inner: ptr }.to_value()
     }
 
     /// Creates a new `Range()` value from a given set of integer parameters.
@@ -349,10 +361,10 @@ impl ValuePtr {
         match self.ty() {
             Type::Str => self.as_str().borrow_const().to_owned(),
             Type::Function => self.as_function().borrow_const().name.clone(),
-            Type::PartialFunction => self.as_partial_function().value.func.ptr.safe_to_str(rc),
+            Type::PartialFunction => self.as_partial_function_ref().func.ptr.safe_to_str(rc),
             Type::NativeFunction => self.as_native().name().to_string(),
             Type::PartialNativeFunction => self.as_partial_native_ref().func.name().to_string(),
-            Type::Closure => self.as_closure().borrow_const().func.get().borrow_const().name.to_owned(),
+            Type::Closure => self.as_closure().borrow().func.get().name.to_owned(),
             _ => self.safe_to_repr_str(rc),
         }
     }
@@ -443,7 +455,7 @@ impl ValuePtr {
             Type::Enumerate => format!("enumerate({})", self.as_enumerate_ref().inner.safe_to_repr_str(rc)),
             Type::Slice => {
                 #[inline]
-                fn to_str(i: ValuePtr) -> String {
+                fn to_str(i: &ValuePtr) -> String {
                     if i.is_nil() {
                         String::new()
                     } else {
@@ -453,8 +465,8 @@ impl ValuePtr {
 
                 let it = self.as_slice_ref();
                 match it.arg3.is_nil() {
-                    false => format!("[{}:{}:{}]", to_str(it.arg1), to_str(it.arg2), it.arg3.as_int()),
-                    true => format!("[{}:{}]", to_str(it.arg1), to_str(it.arg2)),
+                    false => format!("[{}:{}:{}]", to_str(&it.arg1), to_str(&it.arg2), it.arg3.as_int()),
+                    true => format!("[{}:{}]", to_str(&it.arg1), to_str(&it.arg2)),
                 }
             },
 
@@ -464,20 +476,20 @@ impl ValuePtr {
             Type::GetField => String::from("(->)"),
 
             Type::Function => self.as_function().borrow_const().repr(),
-            Type::PartialFunction => self.as_partial_function().value.func.ptr.safe_to_repr_str(rc),
+            Type::PartialFunction => self.as_partial_function_ref().func.ptr.safe_to_repr_str(rc),
             Type::NativeFunction => self.as_native().repr(),
             Type::PartialNativeFunction => self.as_partial_native_ref().func.repr(),
-            Type::Closure => self.as_closure().borrow_const().func.get().borrow_const().repr(),
+            Type::Closure => self.as_closure().borrow().func.get().repr(),
 
             Type::Error | Type::None | Type::Never => unreachable!(),
         }
     }
 
     /// Returns the inner user function, either from a `Function` or `Closure` type
-    pub fn get_function(&self) -> &SharedPrefix<FunctionImpl> {
+    pub fn get_function(&self) -> &FunctionImpl {
         match self.is_function() {
-            true => self.as_function(),
-            false => self.as_closure().borrow_const().func.get(),
+            true => self.as_function().borrow_const(),
+            false => self.as_closure().borrow_func(),
         }
     }
 
@@ -567,7 +579,7 @@ impl ValuePtr {
                 let it = self.as_range();
                 Ok(Iterable::Range(it.value.start, it.value))
             },
-            Type::Enumerate => Ok(Iterable::Enumerate(0, Box::new(self.as_enumerate_ref().inner.to_iter()?))),
+            Type::Enumerate => Ok(Iterable::Enumerate(0, Box::new(self.as_enumerate().value.inner.to_iter()?))),
 
             _ => Err(Box::new(TypeErrorArgMustBeIterable(self.clone()))),
         }
@@ -635,11 +647,11 @@ impl ValuePtr {
             Type::Function => Some(self.as_function().borrow_const().min_args()),
             Type::PartialFunction => {
                 let it = self.as_partial_function_ref();
-                Some(it.func.get().borrow_const().min_args() - it.args.len() as u32)
+                Some(it.func.get().min_args() - it.args.len() as u32)
             },
             Type::NativeFunction => Some(self.as_native().min_nargs()),
             Type::PartialNativeFunction => Some(self.as_partial_native_ref().partial.min_nargs()),
-            Type::Closure => Some(self.as_closure().borrow_const().func.get().borrow_const().min_args()),
+            Type::Closure => Some(self.as_closure().borrow().func.get().min_args()),
             Type::StructType => Some(self.as_struct_type().borrow_const().field_names.len() as u32),
             Type::Slice => Some(1),
             _ => None,
@@ -700,7 +712,12 @@ impl ValuePtr {
         matches!(self.ty(), Type::Function | Type::PartialFunction | Type::NativeFunction | Type::PartialNativeFunction | Type::Closure | Type::StructType | Type::Slice)
     }
 
-    pub fn ok(self) -> ValueResult {
+    pub fn as_iterable_mut(&mut self) -> &mut Iterable {
+        debug_assert!(self.is_iterable());
+        self.as_mut_ref()
+    }
+
+    pub const fn ok(self) -> ValueResult {
         ValueResult::ok(self)
     }
 
@@ -827,7 +844,7 @@ impl_shared_value!(Type::Dict, DictImpl, MutValue, as_dict, is_dict);
 impl_shared_value!(Type::Heap, HeapImpl, MutValue, as_heap, is_heap);
 impl_shared_value!(Type::Vector, VectorImpl, MutValue, as_vector, is_vector);
 impl_shared_value!(Type::Function, FunctionImpl, ConstValue, as_function, is_function);
-impl_shared_value!(Type::Closure, ClosureImpl, ConstValue, as_closure, is_closure);
+impl_shared_value!(Type::Closure, ClosureImpl, MutValue, as_closure, is_closure);
 impl_shared_value!(Type::Memoized, MemoizedImpl, MutValue, as_memoized, is_memoized);
 impl_shared_value!(Type::Struct, StructImpl, MutValue, as_struct, is_struct);
 impl_shared_value!(Type::StructType, StructTypeImpl, ConstValue, as_struct_type, is_struct_type);
@@ -932,8 +949,12 @@ impl ValuePtr {
         self.as_ref()
     }
 
-    pub fn is_complex(&self) -> bool {
+    pub fn is_precise_complex(&self) -> bool {
         self.ty() == Type::Complex
+    }
+
+    pub fn is_complex(&self) -> bool {
+        self.is_int() || self.is_precise_complex()
     }
 }
 
@@ -1058,6 +1079,7 @@ impl Hash for PartialNativeFunctionImpl {
 /// Note we cannot derive most functions, as that also requires `Cell<ValuePtr>` to be `Copy`, due to convoluted trait requirements.
 #[derive(Clone)]
 pub struct ClosureImpl {
+    /// This function must be **never modified**, as we hand out special, non-counted immutable references via `borrow_func()`
     func: ValueFunction,
     environment: Vec<Rc<Cell<UpValue>>>,
 }
@@ -1389,7 +1411,7 @@ impl RangeImpl {
 
 
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
-struct EnumerateImpl {
+pub struct EnumerateImpl {
     pub inner: ValuePtr
 }
 
@@ -1472,13 +1494,14 @@ impl Iterable {
     }
 
     pub fn reverse(self) -> IterableRev {
+        let len: usize = self.len();
         match self {
             Iterable::Range(_, it) => {
                 let range = it.reverse();
                 IterableRev(Iterable::Range(range.start, range))
             },
-            Iterable::Collection(_, it) => IterableRev(Iterable::Collection(self.len(), it)),
-            Iterable::RawVector(_, it) => IterableRev(Iterable::RawVector(self.len(), it)),
+            Iterable::Collection(_, it) => IterableRev(Iterable::Collection(len, it)),
+            Iterable::RawVector(_, it) => IterableRev(Iterable::RawVector(len, it)),
             Iterable::Enumerate(_, it) => IterableRev(Iterable::Enumerate(0, Box::new(it.reverse().0))),
             it => IterableRev(it)
         }
@@ -1627,7 +1650,7 @@ impl<'a> Indexable<'a> {
     /// Setting indexes only works for immutable collections - so not strings
     pub fn set_index(&mut self, index: usize, value: ValuePtr) -> Result<(), Box<RuntimeError>> {
         match self {
-            Indexable::Str(it) => Err(Box::new(TypeErrorArgMustBeIndexable(it.borrow_const().to_value()))),
+            Indexable::Str(it) => TypeErrorArgMustBeIndexable(it.borrow_const().clone().to_value()).err(),
             Indexable::List(it) => {
                 it.list[index] = value;
                 Ok(())

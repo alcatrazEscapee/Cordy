@@ -77,7 +77,6 @@ const MASK_ERR: usize      = 0b______111;
 const MASK_PTR: usize      = 0b______111;
 const MASK_SHARED: usize   = 0b______111;
 
-const TY_MASK: usize   = 0b111;
 const PTR_MASK: usize = 0xffff_ffff_ffff_fff8;
 
 const MAX_INT: i64 = 0x3fff_ffff_ffff_ffffu64 as i64;
@@ -86,7 +85,7 @@ const MIN_INT: i64 = 0xc000_0000_0000_0000u64 as i64;
 
 impl ValuePtr {
 
-    pub fn nil() -> ValuePtr {
+    pub const fn nil() -> ValuePtr {
         ValuePtr { tag: TAG_NIL }
     }
 
@@ -201,15 +200,15 @@ impl ValuePtr {
 
     // Utility, and efficient, functions for checking the type of inline or pointer values.
 
-    pub fn is_nil(&self) -> bool { (unsafe { self.tag } & MASK_NIL) == TAG_NIL }
-    pub fn is_bool(&self) -> bool { (unsafe { self.tag } & MASK_BOOL) == TAG_BOOL }
-    pub fn is_true(&self) -> bool { (unsafe { self.tag }) == TAG_TRUE }
-    pub fn is_int(&self) -> bool { self.is_precise_int() || self.is_bool() }
-    pub fn is_precise_int(&self) -> bool { (unsafe { self.tag } & MASK_INT) == TAG_INT }
-    pub fn is_native(&self) -> bool { (unsafe { self.tag } & MASK_NATIVE) == TAG_NATIVE }
-    pub fn is_field(&self) -> bool { (unsafe { self.tag } & MASK_FIELD) == TAG_FIELD }
-    pub fn is_none(&self) -> bool { (unsafe { self.tag } & MASK_NONE) == TAG_NONE }
-    pub fn is_err(&self) -> bool { (unsafe { self.tag } & MASK_ERR) == TAG_ERR }
+    pub const fn is_nil(&self) -> bool { (unsafe { self.tag } & MASK_NIL) == TAG_NIL }
+    pub const fn is_bool(&self) -> bool { (unsafe { self.tag } & MASK_BOOL) == TAG_BOOL }
+    pub const fn is_true(&self) -> bool { (unsafe { self.tag }) == TAG_TRUE }
+    pub const fn is_int(&self) -> bool { self.is_precise_int() || self.is_bool() }
+    pub const fn is_precise_int(&self) -> bool { (unsafe { self.tag } & MASK_INT) == TAG_INT }
+    pub const fn is_native(&self) -> bool { (unsafe { self.tag } & MASK_NATIVE) == TAG_NATIVE }
+    pub const fn is_field(&self) -> bool { (unsafe { self.tag } & MASK_FIELD) == TAG_FIELD }
+    pub const fn is_none(&self) -> bool { (unsafe { self.tag } & MASK_NONE) == TAG_NONE }
+    pub const fn is_err(&self) -> bool { (unsafe { self.tag } & MASK_ERR) == TAG_ERR }
 
     fn is_ptr(&self) -> bool { (unsafe { self.tag } & MASK_PTR) == TAG_PTR }
     fn is_shared(&self) -> bool { (unsafe { self.tag } & MASK_SHARED) == TAG_SHARED }
@@ -257,9 +256,16 @@ impl ValuePtr {
     /// This is akin to `as_box()`, but taking in a reference, and handing one back. In that sense, it's the same safety guarantee as `.as_box()`
     /// The pointer has to be non-null, so `new_unchecked()`, and `as_mut_ptr()` are both valid.
     pub(crate) fn as_ref<T: OwnedValue>(&self) -> &T {
-        debug_assert!(self.is_ptr() || self.is_shared()); // Any pointer type (owned or shared), can be converted to a reference on a 1-1 basis.
+        debug_assert!(self.is_ptr());
         unsafe {
             &(&*(self.as_ptr() as *const Prefix<T>)).value
+        }
+    }
+
+    pub fn as_mut_ref<T : OwnedValue>(&mut self) -> &mut T {
+        debug_assert!(self.is_ptr());
+        unsafe {
+            &mut (&mut*(self.as_ptr() as *mut Prefix<T>)).value
         }
     }
 
@@ -413,7 +419,7 @@ impl Clone for ValuePtr {
                 Type::Bool |
                 Type::Int |
                 Type::NativeFunction |
-                Type::GetField => unsafe { ValuePtr { tag: self.tag } },
+                Type::GetField => ValuePtr { tag: self.tag },
                 // Owned types
                 Type::Complex => self.clone_owned::<ComplexImpl>(),
                 Type::Range => self.clone_owned::<RangeImpl>(),
@@ -436,7 +442,7 @@ impl Clone for ValuePtr {
                 Type::Closure => self.clone_shared::<ClosureImpl>(),
                 // Special types
                 Type::Error => {
-                    let err = self.as_err();
+                    let err = ValuePtr { tag: self.tag }.as_err();
                     let copy = err.clone().to_value();
                     std::mem::forget(err);
                     copy
@@ -484,10 +490,8 @@ impl Drop for ValuePtr {
                 Type::Closure => self.drop_shared::<ClosureImpl>(),
                 // Special types
                 Type::Error => {
-                    unsafe {
-                        // Can't call .as_err() and drop that since we only have a &self
-                        drop(Box::from_raw(self.as_ptr() as *mut RuntimeError));
-                    }
+                    // Can't call .as_err() and drop that since we only have a &self
+                    drop(Box::from_raw(self.as_ptr() as *mut RuntimeError));
                 },
                 Type::None | Type::Never => {}, // No drop behavior
             }
@@ -702,6 +706,14 @@ impl<T : ConstValue> SharedPrefix<T> {
     pub fn borrow_const(&self) -> &T {
         unsafe {
             NonNull::new_unchecked(self.value.get()).as_ref()
+        }
+    }
+}
+
+impl SharedPrefix<ClosureImpl> {
+    pub fn borrow_func(&self) -> &FunctionImpl {
+        unsafe {
+            NonNull::new_unchecked(self.value.get()).as_ref().func.ptr.as_function().borrow_const()
         }
     }
 }

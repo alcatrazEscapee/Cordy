@@ -6,8 +6,7 @@ use fxhash::FxBuildHasher;
 
 use crate::{compiler, util, core, trace};
 use crate::compiler::{CompileParameters, CompileResult, Fields, IncrementalCompileResult, Locals};
-use crate::core::{NativeFunction, PartialArgument};
-use crate::vm::value::{Literal, UpValue};
+use crate::vm::value::{Literal, UpValue, ValueStructType};
 use crate::util::OffsetAdd;
 use crate::reporting::{Location, SourceView};
 
@@ -315,7 +314,7 @@ impl<R, W> VirtualMachine<R, W> where
             },
             PushUpValue(index) => {
                 let fp = self.frame_pointer() - 1;
-                let upvalue: Rc<Cell<UpValue>> = self.stack[fp].as_closure().borrow_const().get(index as usize);
+                let upvalue: Rc<Cell<UpValue>> = self.stack[fp].as_closure().borrow().get(index as usize);
 
                 let interior = (*upvalue).take();
                 upvalue.set(interior.clone()); // Replace back the original value
@@ -331,7 +330,7 @@ impl<R, W> VirtualMachine<R, W> where
                 trace::trace_interpreter!("vm::run StoreUpValue index={}, value={}, prev={}", index, self.stack.last().unwrap().as_debug_str(), self.stack[index as usize].as_debug_str());
                 let fp = self.frame_pointer() - 1;
                 let value = self.peek(0).clone();
-                let upvalue: Rc<Cell<UpValue>> = self.stack[fp].as_closure().borrow_const().get(index as usize);
+                let upvalue: Rc<Cell<UpValue>> = self.stack[fp].as_closure().borrow().get(index as usize);
 
                 // Reasons why this is convoluted:
                 // - We cannot use `.get()` (as it requires `ValuePtr` to be `Copy`)
@@ -371,22 +370,22 @@ impl<R, W> VirtualMachine<R, W> where
                 let upvalue: Rc<Cell<UpValue>> = self.open_upvalues.entry(local)
                     .or_insert_with(|| Rc::new(Cell::new(UpValue::Open(local))))
                     .clone();
-                self.stack.last_mut()
+                self.stack.last()
                     .unwrap()
                     .as_closure()
-                    .borrow_const()
+                    .borrow_mut()
                     .push(upvalue);
             },
             CloseUpValue(index) => {
                 trace::trace_interpreter!("vm::run CloseUpValue index={}, value={}, closure={}", index, self.stack.last().unwrap().as_debug_str(), &self.stack[self.frame_pointer() - 1].as_debug_str());
                 let fp = self.frame_pointer() - 1;
                 let index: usize = index as usize;
-                let upvalue: Rc<Cell<UpValue>> = self.stack[fp].as_closure().borrow_const().get(index);
+                let upvalue: Rc<Cell<UpValue>> = self.stack[fp].as_closure().borrow().get(index);
 
-                self.stack.last_mut()
+                self.stack.last()
                     .unwrap()
                     .as_closure()
-                    .borrow_const()
+                    .borrow_mut()
                     .push(upvalue.clone());
             },
 
@@ -409,7 +408,7 @@ impl<R, W> VirtualMachine<R, W> where
             },
             TestIterable(ip) => {
                 let top: usize = self.stack.len() - 1;
-                let iter = &mut self.stack[top].as_iterable().value;
+                let iter = self.stack[top].as_iterable_mut();
                 match iter.next() {
                     Some(value) => self.push(value),
                     None => self.ip = self.ip.add_offset(ip),
@@ -604,7 +603,7 @@ impl<R, W> VirtualMachine<R, W> where
         trace::trace_interpreter!("vm::invoke func={:?}, nargs={}", f, nargs);
         match f.ty() {
             Type::Function | Type::Closure => {
-                let func = f.get_function().borrow_const();
+                let func = f.get_function();
                 if func.in_range(nargs) {
                     // Evaluate directly
                     self.call_function(func.jump_offset(nargs), nargs, func.num_var_args(nargs));
@@ -621,15 +620,13 @@ impl<R, W> VirtualMachine<R, W> where
                     // Partial functions are already evaluated, so we return native, since we don't need to spin
                     Ok(FunctionType::Native)
                 } else {
-                    IncorrectArgumentsUserFunction((**func).clone(), nargs).err()
+                    IncorrectArgumentsUserFunction(func.clone(), nargs).err()
                 }
             },
             Type::PartialFunction => {
                 // Surgically extract the partial binding from the stack
                 let i: usize = self.stack.len() - nargs as usize - 1;
-                let mut partial = std::mem::replace(&mut self.stack[i], ValuePtr::nil())
-                    .as_partial_function()
-                    .borrow_mut();
+                let mut partial = std::mem::replace(&mut self.stack[i], ValuePtr::nil()).as_partial_function().value;
                 let func = partial.func.get();
                 let total_nargs: u32 = partial.args.len() as u32 + nargs;
                 if func.min_args() > total_nargs {
@@ -638,7 +635,7 @@ impl<R, W> VirtualMachine<R, W> where
                         partial.args.push(arg);
                     }
                     self.pop(); // Should pop the `Nil` we swapped earlier
-                    self.push(ValuePtr::PartialFunction(Box::new(partial)));
+                    self.push(partial.to_value());
                     // Partial functions are already evaluated, so we return native, since we don't need to spin
                     Ok(FunctionType::Native)
                 } else if func.in_range(total_nargs) {
@@ -646,85 +643,78 @@ impl<R, W> VirtualMachine<R, W> where
                     // Before we call, we need to pop-push to reorder the arguments and setup partial arguments, so we have the correct calling convention
                     let head: usize = func.jump_offset(total_nargs);
                     let num_var_args: Option<u32> = func.num_var_args(nargs);
-                    self.stack[i] = partial.func; // Replace the `Nil` from earlier
+                    self.stack[i] = partial.func.inner(); // Replace the `Nil` from earlier
                     insert(&mut self.stack, partial.args.into_iter(), nargs);
                     self.call_function(head, total_nargs, num_var_args);
                     Ok(FunctionType::User)
                 } else {
-                    IncorrectArgumentsUserFunction((**func).clone(), total_nargs).err()
+                    IncorrectArgumentsUserFunction(func.clone(), total_nargs).err()
                 }
             },
-            ValuePtr::NativeFunction(f) => {
-                match core::invoke_stack(*f, nargs, self) {
-                    Ok(v) => {
-                        self.pop();
-                        self.push(v)
-                    },
-                    Err(e) => return Err(e),
-                }
+            Type::NativeFunction => {
+                let ret = core::invoke_stack(f.as_native(), nargs, self)?;
+
+                self.pop();
+                self.push(ret);
+
                 Ok(FunctionType::Native)
-            }
+            },
             Type::PartialNativeFunction => {
                 // Need to consume the arguments and set up the stack for calling as if all partial arguments were just pushed
                 // Surgically extract the binding via std::mem::replace
-                let f: NativeFunction = *f.as_partial_native_ref().func;
                 let i: usize = self.stack.len() - 1 - nargs as usize;
-                let partial: PartialArgument = match std::mem::replace(&mut self.stack[i], ValuePtr::Nil) {
-                    ValuePtr::PartialNativeFunction(_, x) => *x,
-                    _ => panic!("Stack corruption")
-                };
+                let partial = std::mem::replace(&mut self.stack[i], ValuePtr::nil()).as_partial_native().value;
 
-                match core::invoke_partial(f, partial, nargs, self) {
-                    Ok(v) => {
-                        self.pop();
-                        self.push(v);
-                        Ok(FunctionType::Native)
-                    },
-                    Err(e) => Err(e),
-                }
+                let ret = core::invoke_partial(partial.func, partial.partial, nargs, self)?;
+
+                self.pop();
+                self.push(ret);
+
+                Ok(FunctionType::Native)
             }
             Type::List => {
                 // This is somewhat horrifying, but it could be optimized in constant cases later, in all cases where this syntax is actually used
                 // As a result this code should almost never enter as it should be optimized away.
                 if nargs != 1 {
-                    return Err(Box::new(ValueIsNotFunctionEvaluable(f.clone())));
+                    return ValueIsNotFunctionEvaluable(f.clone()).err();
                 }
                 let arg = self.pop();
-                let list = self.pop().as_list().borrow();
-                if list.len() != 1 {
-                    return Err(Box::new(ValueErrorEvalListMustHaveUnitLength(list.len())))
+                let func = self.pop();
+                let list = func.as_list().borrow();
+                if list.list.len() != 1 {
+                    return ValueErrorEvalListMustHaveUnitLength(list.list.len()).err()
                 }
-                let index = list[0].clone();
+                let index = list.list[0].clone();
                 let result = core::get_index(self, arg, index)?;
                 self.push(result);
                 Ok(FunctionType::Native)
             },
             Type::Slice => {
                 if nargs != 1 {
-                    return Err(Box::new(ValueIsNotFunctionEvaluable(f.clone())));
+                    return ValueIsNotFunctionEvaluable(f.clone()).err();
                 }
                 let arg = self.pop();
-                let slice = self.pop().as_slice().borrow_const();
+                let slice = self.pop().as_slice().value;
                 self.push(slice.apply(arg)?);
                 Ok(FunctionType::Native)
             }
-            ValuePtr::StructType(type_impl) => {
-                let type_impl = type_impl.clone();
+            Type::StructType => {
+                let type_impl = f.as_struct_type().borrow_const();
                 let expected_args = type_impl.field_names.len() as u32;
                 if nargs != expected_args {
-                    return IncorrectArgumentsStruct((*type_impl).clone(), nargs).err()
+                    return IncorrectArgumentsStruct(type_impl.clone(), nargs).err()
                 }
 
                 let args: Vec<ValuePtr> = self.popn(nargs);
-                let instance: ValuePtr = ValuePtr::instance(type_impl, args);
+                let struct_type = self.pop();
+                let instance: ValuePtr = ValuePtr::instance(ValueStructType::new(struct_type), args);
 
-                self.pop(); // The struct type
                 self.push(instance);
 
                 Ok(FunctionType::Native)
             },
-            ValuePtr::GetField(field_index) => {
-                let field_index = *field_index;
+            Type::GetField => {
+                let field_index = f.as_field();
                 if nargs != 1 {
                     return IncorrectArgumentsGetField(self.fields.get_field_name(field_index), nargs).err()
                 }
@@ -737,7 +727,7 @@ impl<R, W> VirtualMachine<R, W> where
 
                 Ok(FunctionType::Native)
             },
-            ValuePtr::Memoized(_) => {
+            Type::Memoized => {
                 // Bounce directly to `core::invoke_memoized`
                 let ret: ValuePtr = core::invoke_memoized(self, nargs)?;
                 self.push(ret);
@@ -814,8 +804,8 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
         self.call_function(eval_head, 0, None);
         self.run()?;
         let ret = self.pop();
-        self.push(ValuePtr::Nil); // `eval` executes as a user function but is called like a native function, this prevents stack fuckery
-        Ok(ret)
+        self.push(ValuePtr::nil()); // `eval` executes as a user function but is called like a native function, this prevents stack fuckery
+        ret.ok()
     }
 
     // ===== IO Methods ===== //
@@ -842,7 +832,7 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
     }
 
     fn get_env(&self, name: &String) -> ValuePtr {
-        std::env::var(name).map_or(ValuePtr::Nil, |u| u.to_value())
+        std::env::var(name).map_or(ValuePtr::nil(), |u| u.to_value())
     }
 
     fn get_args(&self) -> ValuePtr {

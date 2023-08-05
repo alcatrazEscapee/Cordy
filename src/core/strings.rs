@@ -39,7 +39,8 @@ pub fn trim(value: ValuePtr) -> ValueResult {
 
 pub fn replace<VM: VirtualInterface>(vm: &mut VM, pattern: ValuePtr, replacer: ValuePtr, target: ValuePtr) -> ValueResult {
     let regex: Regex = compile_regex(pattern)?;
-    let text = target.check_str()?.as_str().borrow_const().as_str();
+    let target = target.check_str()?;
+    let text = target.as_str().borrow_const().as_str();
     if replacer.is_function() {
         let replacer: InvokeArg1 = InvokeArg1::from(replacer)?;
         let mut err: Option<Box<RuntimeError>> = None;
@@ -64,7 +65,8 @@ pub fn replace<VM: VirtualInterface>(vm: &mut VM, pattern: ValuePtr, replacer: V
 
 pub fn search(pattern: ValuePtr, target: ValuePtr) -> ValueResult {
     let regex: Regex = compile_regex(pattern)?;
-    let text: &String = target.check_str()?.as_str().borrow_const();
+    let target = target.check_str()?;
+    let text: &String = target.as_str().borrow_const();
 
     let mut start: usize = 0;
     std::iter::from_fn(move || {
@@ -79,10 +81,12 @@ pub fn search(pattern: ValuePtr, target: ValuePtr) -> ValueResult {
 }
 
 pub fn split(pattern: ValuePtr, target: ValuePtr) -> ValueResult {
-    let target = target.check_str()?.as_str().borrow_const();
+    let pattern = pattern.check_str()?;
+    let target = target.check_str()?;
 
-    if pattern.check_str()?.as_str().borrow_const().is_empty() { // Special case for empty string
-        return target.chars()
+    if pattern.as_str().borrow_const().is_empty() { // Special case for empty string
+        return target.as_str().borrow_const()
+            .chars()
             .map(|u| u.to_value())
             .to_list()
             .ok();
@@ -90,7 +94,7 @@ pub fn split(pattern: ValuePtr, target: ValuePtr) -> ValueResult {
 
     let regex: Regex = compile_regex(pattern)?;
 
-    fancy_split(&regex, target.as_str())
+    fancy_split(&regex, target.as_str().borrow_const())
         .map(|u| u.to_value())
         .to_list()
         .ok()
@@ -188,12 +192,13 @@ pub fn to_char(value: ValuePtr) -> ValueResult {
 }
 
 pub fn to_ord(value: ValuePtr) -> ValueResult {
-    let s = value.check_str()?.as_str().borrow_const();
+    let value = value.check_str()?;
+    let s = value.as_str().borrow_const();
     match s.len() {
         1 => (s.chars().next().unwrap() as u32 as i64)
             .to_value()
             .ok(),
-        _ => TypeErrorArgMustBeChar(s.to_value()).err(),
+        _ => TypeErrorArgMustBeChar(s.clone().to_value()).err(),
     }
 }
 
