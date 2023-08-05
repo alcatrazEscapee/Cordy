@@ -852,6 +852,7 @@ impl<T: ?Sized> DerefMut for RefMut<'_, T> {
 mod tests {
     use std::cmp::Ordering;
     use num_complex::Complex;
+
     use crate::core::NativeFunction;
     use crate::vm::IntoValue;
     use crate::vm::value::ptr::{MAX_INT, MIN_INT, Prefix, SharedPrefix, ValuePtr};

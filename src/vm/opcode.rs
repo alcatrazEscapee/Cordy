@@ -1,11 +1,12 @@
+use crate::compiler::Fields;
 use crate::core::NativeFunction;
+use crate::util::OffsetAdd;
+use crate::vm::{Type, ValuePtr};
 use crate::vm::operator::{BinaryOp, UnaryOp};
 use crate::vm::value::LiteralType;
-use crate::util::OffsetAdd;
-use crate::compiler::Fields;
-use crate::vm::{Type, ValuePtr};
 
 use Opcode::{*};
+
 
 #[derive(Eq, PartialEq, Debug, Clone, Copy)]
 pub enum Opcode {

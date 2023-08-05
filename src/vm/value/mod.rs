@@ -15,14 +15,13 @@ use itertools::Itertools;
 use crate::compiler::Fields;
 use crate::core;
 use crate::core::{InvokeArg0, NativeFunction, PartialArgument};
+use crate::util::impl_partial_ord;
 use crate::vm::error::RuntimeError;
 use crate::vm::value::ptr::{Prefix, Ref, RefMut, SharedPrefix};
-use crate::util::impl_partial_ord;
 
-pub use crate::vm::value::ptr::{ValuePtr, MIN_INT, MAX_INT};
+pub use crate::vm::value::ptr::{MAX_INT, MIN_INT, ValuePtr};
 
 use RuntimeError::{*};
-
 
 mod ptr;
 
@@ -1753,9 +1752,9 @@ impl IntoValue for Literal {
 
 #[cfg(test)]
 mod test {
+    use crate::vm::{ValueOption, ValuePtr, ValueResult};
     use crate::vm::error::RuntimeError;
     use crate::vm::value::{IntoIterableValue, IntoValue};
-    use crate::vm::{ValueOption, ValuePtr, ValueResult};
 
     #[test]
     fn test_layout() {

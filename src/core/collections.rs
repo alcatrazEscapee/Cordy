@@ -2,7 +2,6 @@ use std::cmp::{Ordering, Reverse};
 use std::collections::VecDeque;
 use fxhash::FxBuildHasher;
 use indexmap::IndexMap;
-
 use itertools::Itertools;
 
 use crate::{util, vm};

@@ -1,6 +1,6 @@
 use num_integer::Roots;
 
-use crate::vm::{ValuePtr, RuntimeError, ValueResult, ValueOption, Type, IntoValue};
+use crate::vm::{IntoValue, RuntimeError, Type, ValueOption, ValuePtr, ValueResult};
 
 use RuntimeError::{*};
 

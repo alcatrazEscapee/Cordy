@@ -6,21 +6,22 @@ use std::hash::{Hash, Hasher};
 use fxhash::FxBuildHasher;
 use indexmap::{IndexMap, IndexSet};
 
-use crate::vm::{operator, IntoIterableValue, IntoValue, VirtualInterface, RuntimeError, ValueResult, ValuePtr, Type, ValueOption, MIN_INT, MAX_INT};
-use crate::vm::operator::BinaryOp;
 use crate::trace;
 use crate::util::impl_partial_ord;
+use crate::vm::{IntoIterableValue, IntoValue, MAX_INT, MIN_INT, operator, RuntimeError, Type, ValueOption, ValuePtr, ValueResult, VirtualInterface};
+use crate::vm::operator::BinaryOp;
 
-pub use crate::core::collections::{get_index, set_index, get_slice, to_index};
+pub use crate::core::collections::{get_index, get_slice, set_index, to_index};
 pub use crate::core::strings::format_string;
 
+use Argument::{*};
 use NativeFunction::{*};
 use RuntimeError::{*};
-use Argument::{*};
 
+
+mod math;
 mod strings;
 mod collections;
-mod math;
 
 
 /// An enum representing all possible native functions implemented in Cordy
@@ -1056,7 +1057,7 @@ fn type_of(value: ValuePtr) -> ValuePtr {
 
 #[cfg(test)]
 mod tests {
-    use crate::{compiler, SourceView, core};
+    use crate::{compiler, core, SourceView};
     use crate::core::{Argument, NativeFunction};
     use crate::vm::{IntoValue, ValuePtr, VirtualInterface, VirtualMachine};
 

@@ -6,16 +6,15 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
 use fxhash::FxBuildHasher;
-
 use itertools::Itertools;
 
 use crate::compiler::parser::{Parser, ParserError, ParserErrorType};
 use crate::core;
-use crate::vm::{FunctionImpl, IntoValue, Opcode, Value, ValuePtr};
 use crate::reporting::Location;
+use crate::vm::{FunctionImpl, IntoValue, Opcode, ValuePtr};
 
-use ParserErrorType::{*};
 use Opcode::{*};
+use ParserErrorType::{*};
 
 
 #[derive(Eq, PartialEq, Debug, Clone)]
@@ -508,7 +507,7 @@ impl ParserFunctionImpl {
 
     /// Bakes this parser function into an immutable `FunctionImpl`.
     /// The `head` and `tail` pointers are computed based on the surrounding code.
-    pub(super) fn bake(self, constants: &mut [Value], head: usize, tail: usize) {
+    pub(super) fn bake(self, constants: &mut [ValuePtr], head: usize, tail: usize) {
         constants[self.constant_id as usize] = FunctionImpl::new(head, tail, self.name, self.args, self.default_args, self.var_arg).to_value();
     }
 

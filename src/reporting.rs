@@ -3,7 +3,7 @@ use std::ops::{BitOr, BitOrAssign};
 
 use crate::compiler::{ParserError, ParserErrorType, ScanError, ScanErrorType, ScanToken};
 use crate::core::NativeFunction;
-use crate::vm::{FunctionImpl, RuntimeError, StructTypeImpl, Value};
+use crate::vm::{FunctionImpl, RuntimeError, StructTypeImpl, ValuePtr};
 use crate::vm::operator::{BinaryOp, UnaryOp};
 
 
@@ -322,7 +322,7 @@ impl AsError for Option<char> {
     }
 }
 
-impl AsError for Value {
+impl AsError for ValuePtr {
     fn as_error(&self) -> String {
         format!("'{}' of type '{}'", self.to_str(), self.as_type_str())
     }
