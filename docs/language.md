@@ -11,7 +11,7 @@ The primitive types in Cordy are:
 
 - `nil` (The absence of a value)
 - A boolean (`bool`), which can take the values `true` and `false`.
-- `int`, which is a 64-bit integer. It can be expressed as decimal numbers (`5`), binary (`0b101`), or hexadecimal (`0x5`).
+- `int`, which is a 63-bit integer. It can be expressed as decimal numbers (`5`), binary (`0b101`), or hexadecimal (`0x5`).
 - `complex`, which is a pair of 64-bit integers, with a real and imaginary part. Imaginary int literals can be expressed as any integer literal followed by an `i` or `j`.
 - `str`, which is a UTF-8 string. Like Python, there is no separate `char` data type, instead a string is a sequence of single element strings.
 
