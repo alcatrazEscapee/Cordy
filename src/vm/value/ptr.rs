@@ -79,8 +79,8 @@ const MASK_SHARED: usize   = 0b______111;
 
 const PTR_MASK: usize = 0xffff_ffff_ffff_fff8;
 
-const MAX_INT: i64 = 0x3fff_ffff_ffff_ffffu64 as i64;
-const MIN_INT: i64 = 0xc000_0000_0000_0000u64 as i64;
+pub const MAX_INT: i64 = 0x3fff_ffff_ffff_ffffu64 as i64;
+pub const MIN_INT: i64 = 0xc000_0000_0000_0000u64 as i64;
 
 
 impl ValuePtr {
@@ -226,6 +226,14 @@ impl ValuePtr {
         }
     }
 
+    /// Like `as_ref` but for the error type
+    pub fn as_err_ref(&self) -> &RuntimeError {
+        debug_assert!(self.is_err());
+        unsafe {
+            &*(self.as_ptr() as *const RuntimeError)
+        }
+    }
+
     pub fn as_value_ref(&self) -> ValueRef {
         ValueRef::new(unsafe { self.tag })
     }
@@ -279,7 +287,7 @@ impl ValuePtr {
 
     /// Strips away the tag bits, and converts this value into a `* mut` pointer to an arbitrary `Prefix`
     unsafe fn as_ptr(&self) -> *mut Prefix<()> {
-        debug_assert!(self.is_ptr() || self.is_shared());
+        debug_assert!(self.is_ptr() || self.is_shared() || self.is_err());
         unsafe {
             (self.tag & PTR_MASK) as *mut Prefix<()>
         }
@@ -354,8 +362,10 @@ impl PartialEq for ValuePtr {
             Type::Memoized => self.as_shared_ref::<MemoizedImpl>() == other.as_shared_ref::<MemoizedImpl>(),
             Type::Function => self.as_shared_ref::<FunctionImpl>() == other.as_shared_ref::<FunctionImpl>(),
             Type::Closure => self.as_shared_ref::<ClosureImpl>() == other.as_shared_ref::<ClosureImpl>(),
+            // Error types are equal based on the error ref, this is mostly used for testing purposes
+            Type::Error => self.as_err_ref() == other.as_err_ref(),
             // Special types that are not checked for equality
-            Type::Iter | Type::Error | Type::None | Type::Never => false,
+            Type::Iter | Type::None | Type::Never => false,
         }
     }
 }
@@ -371,12 +381,13 @@ impl Ord for ValuePtr {
             return Ordering::Equal
         }
         match ty {
-            // Inline types can directly compare the tag value. This works even for nil, bool, native function, etc.
+            // Inline types can directly compare the tag value. This works for all except ints
             Type::Nil |
             Type::Bool |
-            Type::Int |
             Type::NativeFunction |
             Type::GetField => unsafe { self.tag.cmp(&other.tag) },
+            Type::Int => self.as_precise_int().cmp(&other.as_precise_int()),
+
             // Owned types check equality based on their ref
             Type::Complex => self.as_ref::<ComplexImpl>().cmp(other.as_ref::<ComplexImpl>()),
             Type::Range => self.as_ref::<RangeImpl>().cmp(&other.as_ref::<RangeImpl>()),
@@ -567,7 +578,7 @@ impl Debug for ValuePtr {
             Type::Closure => Debug::fmt(self.as_shared_ref::<ClosureImpl>(), f),
             // Special types with no hash behavior
             Type::Iter => write!(f, "Iter"),
-            Type::Error => write!(f, "Error"),
+            Type::Error => Debug::fmt(self.as_err_ref(), f),
             Type::None => write!(f, "None"),
             Type::Never => write!(f, "Never"),
         }
@@ -839,6 +850,7 @@ impl<T: ?Sized> DerefMut for RefMut<'_, T> {
 
 #[cfg(test)]
 mod tests {
+    use std::cmp::Ordering;
     use num_complex::Complex;
     use crate::core::NativeFunction;
     use crate::vm::IntoValue;
@@ -939,6 +951,25 @@ mod tests {
     }
 
     #[test]
+    fn test_inline_int_compare() {
+        let neg1 = (-1i64).to_value();
+        let one = 1i64.to_value();
+        let two = 2i64.to_value();
+        let three = 3i64.to_value();
+
+        assert_eq!(neg1.cmp(&one), Ordering::Less);
+        assert_eq!(one.cmp(&neg1), Ordering::Greater);
+        assert_eq!(neg1.cmp(&neg1), Ordering::Equal);
+
+        assert_eq!(one.cmp(&one), Ordering::Equal);
+        assert_eq!(one.cmp(&two), Ordering::Less);
+        assert_eq!(one.cmp(&three), Ordering::Less);
+        assert_eq!(two.cmp(&one), Ordering::Greater);
+        assert_eq!(two.cmp(&two), Ordering::Equal);
+        assert_eq!(two.cmp(&three), Ordering::Less);
+    }
+
+    #[test]
     #[should_panic]
     fn test_inline_int_too_small() {
         let _ = (MIN_INT - 1).to_value();
@@ -997,7 +1028,7 @@ mod tests {
         assert!(ptr.is_ptr());
         assert!(!ptr.is_shared());
         assert_eq!(ptr.ty(), Type::Complex);
-        assert_eq!(format!("{:?}", ptr), format!("{:?}", Complex::<i64>::new(1, 2)));
+        assert_eq!(format!("{:?}", ptr), "ComplexImpl { inner: Complex { re: 1, im: 2 } }");
     }
 
     #[test]
