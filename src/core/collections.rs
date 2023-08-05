@@ -461,10 +461,11 @@ pub fn pop(target: ValuePtr) -> ValueResult {
 
 pub fn pop_front(target: ValuePtr) -> ValueResult {
     let target = target.check_list()?;
-    match target.as_list().borrow_mut().list.pop_front() {
+    let ret = match target.as_list().borrow_mut().list.pop_front() {
         Some(v) => v.ok(),
         None => ValueErrorValueMustBeNonEmpty.err()
-    }
+    };
+    ret
 }
 
 pub fn push(value: ValuePtr, target: ValuePtr) -> ValueResult {
@@ -497,18 +498,19 @@ pub fn push_front(value: ValuePtr, target: ValuePtr) -> ValueResult {
 pub fn insert(index: ValuePtr, value: ValuePtr, target: ValuePtr) -> ValueResult {
     match target.ty() {
         Type::List => {
-            let it = target.as_list().borrow_mut();
-            let index = index.check_int()?.as_int();
-            let len = it.list.len();
-            if 0 <= index && index < len as i64 {
-                it.list.insert(index as usize, value);
-                target.ok()
-            } else if index == len as i64 {
-                it.list.push_back(value);
-                target.ok()
-            } else {
-                ValueErrorIndexOutOfBounds(index, len).err()
+            {
+                let mut it = target.as_list().borrow_mut();
+                let index = index.check_int()?.as_int();
+                let len = it.list.len();
+                if 0 <= index && index < len as i64 {
+                    it.list.insert(index as usize, value);
+                } else if index == len as i64 {
+                    it.list.push_back(value);
+                } else {
+                    return ValueErrorIndexOutOfBounds(index, len).err()
+                }
             }
+            target.ok()
         },
         Type::Dict => match vm::guard_recursive_hash(|| target.as_dict().borrow_mut().dict.insert(index, value)) {
             Err(_) => ValueErrorRecursiveHash(target).err(),
@@ -521,7 +523,7 @@ pub fn insert(index: ValuePtr, value: ValuePtr, target: ValuePtr) -> ValueResult
 pub fn remove(needle: ValuePtr, target: ValuePtr) -> ValueResult {
     match target.ty() {
         Type::List => {
-            let it = target.as_list().borrow_mut();
+            let mut it = target.as_list().borrow_mut();
             let index = needle.check_int()?.as_int();
             let len = it.list.len();
             if 0 <= index && index < len as i64 {

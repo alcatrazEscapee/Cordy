@@ -58,11 +58,25 @@ pub enum RuntimeError {
     TypeErrorArgMustBeReplaceFunction(ValuePtr),
 }
 
+impl<T> From<RuntimeError> for Result<T, Box<RuntimeError>> {
+    fn from(value: RuntimeError) -> Self {
+        Err(Box::new(value))
+    }
+}
+
+impl From<RuntimeError> for ValueResult {
+    fn from(value: RuntimeError) -> Self {
+        ValueResult::err(value)
+    }
+}
+
 impl RuntimeError {
     #[cold]
-    pub fn err(self) -> ValueResult {
-        ValueResult::err(self)
+    pub fn err<E : From<RuntimeError>>(self) -> E {
+        E::from(self)
     }
+
+
 
     pub fn with_stacktrace(self, ip: usize, call_stack: &[CallFrame], functions: &[ValuePtr], locations: &[Location]) -> DetailRuntimeError {
         const REPEAT_LIMIT: usize = 3;

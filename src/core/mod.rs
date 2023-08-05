@@ -6,7 +6,7 @@ use std::hash::{Hash, Hasher};
 use fxhash::FxBuildHasher;
 use indexmap::{IndexMap, IndexSet};
 
-use crate::vm::{operator, IntoIterableValue, IntoValue, Value, VirtualInterface, RuntimeError, ValueResult};
+use crate::vm::{operator, IntoIterableValue, IntoValue, VirtualInterface, RuntimeError, ValueResult, ValuePtr, Type, ValueOption};
 use crate::vm::operator::BinaryOp;
 use crate::trace;
 
@@ -456,9 +456,9 @@ impl Argument {
 /// We can also create partial argument types that have an explicit number of partial arguments
 #[derive(Debug, Clone, Eq)]
 pub enum PartialArgument {
-    Arg2Par1(Value),
-    Arg3Par1(Value),
-    Arg3Par2(Value, Value),
+    Arg2Par1(ValuePtr),
+    Arg3Par1(ValuePtr),
+    Arg3Par2(ValuePtr, ValuePtr),
 }
 
 // For Eq, Ord, since we don't want to compare on the values (just the function), we ignore this completely, just returning true
@@ -480,8 +480,8 @@ impl PartialArgument {
     }
 
     #[inline]
-    fn to_value(self: PartialArgument, f: NativeFunction) -> ValueResult {
-        Ok(Value::PartialNativeFunction(f, Box::new(self)))
+    fn to_value(self, f: NativeFunction) -> ValueResult {
+        ValuePtr::partial_native(f, self).ok()
     }
 }
 
@@ -506,50 +506,50 @@ impl PartialArgument {
 /// We do still have to handle that case, however, since it is technically legal code (if contrived).
 #[derive(Debug, Clone)]
 pub enum InvokeArg0 {
-    Noop(Value),
-    User(Value),
+    Noop(ValuePtr),
+    User(ValuePtr),
     Native(NativeFunction),
 }
 
 #[derive(Debug, Clone)]
 enum InvokeArg1 {
-    User(Value),
+    User(ValuePtr),
     Native(NativeFunction),
-    NativePar1(NativeFunction, Value),
-    NativePar2(NativeFunction, Value, Value),
+    NativePar1(NativeFunction, ValuePtr),
+    NativePar2(NativeFunction, ValuePtr, ValuePtr),
     NativeVar(NativeFunction),
     Arg2Par1(NativeFunction),
     Arg3Par1(NativeFunction),
-    Arg3Par2(NativeFunction, Value),
+    Arg3Par2(NativeFunction, ValuePtr),
 }
 
 #[derive(Debug, Clone)]
 enum InvokeArg2 {
-    User(Value),
+    User(ValuePtr),
     Native(NativeFunction),
-    NativePar1(NativeFunction, Value),
+    NativePar1(NativeFunction, ValuePtr),
     NativeVar(NativeFunction),
     Arg3Par1(NativeFunction),
 }
 
 impl InvokeArg0 {
-    fn from(f: Value) -> Result<InvokeArg0, Box<RuntimeError>> {
-        match f {
-            f @ (Value::Function(_) | Value::Closure(_) | Value::PartialFunction(_) | Value::StructType(_) | Value::Memoized(_)) => Ok(InvokeArg0::User(f)),
-            Value::NativeFunction(f) => match f.info().arg {
-                Arg0 | Arg0To1 | Unique | Iter => Ok(InvokeArg0::Native(f)),
-                Arg1 | Arg1To2 | Arg1To3 | Arg2 | Arg3 => Ok(InvokeArg0::Noop(Value::NativeFunction(f))), // Partial with zero arg = no-op
-                IterNonEmpty => IncorrectArgumentsNativeFunction(f, 0).err(),
-                Invalid => ValueIsNotFunctionEvaluable(Value::NativeFunction(f)).err(),
+    fn from(f: ValuePtr) -> Result<InvokeArg0, Box<RuntimeError>> {
+        match f.ty() {
+            Type::Function | Type::Closure | Type::PartialFunction | Type::StructType | Type::Memoized => Ok(InvokeArg0::User(f)),
+            Type::NativeFunction => match f.as_native().info().arg {
+                Arg0 | Arg0To1 | Unique | Iter => Ok(InvokeArg0::Native(f.as_native())),
+                Arg1 | Arg1To2 | Arg1To3 | Arg2 | Arg3 => Ok(InvokeArg0::Noop(f)), // Partial with zero arg = no-op
+                IterNonEmpty => IncorrectArgumentsNativeFunction(f.as_native(), 0).err(),
+                Invalid => ValueIsNotFunctionEvaluable(f).err(),
             },
-            f @ Value::PartialNativeFunction(_, _) => Ok(InvokeArg0::Noop(f)),
+            Type::PartialNativeFunction => Ok(InvokeArg0::Noop(f)),
             _ => ValueIsNotFunctionEvaluable(f).err()
         }
     }
 
     fn invoke<VM : VirtualInterface>(self, vm: &mut VM) -> ValueResult {
         match self {
-            InvokeArg0::Noop(f) => Ok(f),
+            InvokeArg0::Noop(f) => f.ok(),
             InvokeArg0::User(f) => vm.invoke_func0(f),
             InvokeArg0::Native(f) => invoke_arg0(f, vm),
         }
@@ -557,27 +557,30 @@ impl InvokeArg0 {
 }
 
 impl InvokeArg1 {
-    fn from(f: Value) -> Result<InvokeArg1, Box<RuntimeError>> {
-        match f {
-            f @ (Value::Function(_) | Value::Closure(_) | Value::PartialFunction(_) | Value::List(_) | Value::Slice(_) | Value::StructType(_) | Value::GetField(_) | Value::Memoized(_)) => Ok(InvokeArg1::User(f)),
-            Value::NativeFunction(f) => match f.info().arg {
-                Arg0To1 | Arg1 | Arg1To2 | Arg1To3 | Unique => Ok(InvokeArg1::Native(f)),
-                Iter | IterNonEmpty => Ok(InvokeArg1::NativeVar(f)),
-                Arg2 => Ok(InvokeArg1::Arg2Par1(f)),
-                Arg3 => Ok(InvokeArg1::Arg3Par1(f)),
-                Arg0 => IncorrectArgumentsNativeFunction(f, 1).err(),
-                Invalid => ValueIsNotFunctionEvaluable(Value::NativeFunction(f)).err(),
+    fn from(f: ValuePtr) -> Result<InvokeArg1, Box<RuntimeError>> {
+        match f.ty() {
+            Type::Function | Type::Closure | Type::PartialFunction | Type::List | Type::Slice | Type::StructType | Type::GetField | Type::Memoized => Ok(InvokeArg1::User(f)),
+            Type::NativeFunction => match f.as_native().info().arg {
+                Arg0To1 | Arg1 | Arg1To2 | Arg1To3 | Unique => Ok(InvokeArg1::Native(f.as_native())),
+                Iter | IterNonEmpty => Ok(InvokeArg1::NativeVar(f.as_native())),
+                Arg2 => Ok(InvokeArg1::Arg2Par1(f.as_native())),
+                Arg3 => Ok(InvokeArg1::Arg3Par1(f.as_native())),
+                Arg0 => IncorrectArgumentsNativeFunction(f.as_native(), 1).err(),
+                Invalid => ValueIsNotFunctionEvaluable(f).err(),
             },
-            Value::PartialNativeFunction(f, partial) => match *partial {
-                PartialArgument::Arg2Par1(arg) => Ok(InvokeArg1::NativePar1(f, arg)),
-                PartialArgument::Arg3Par1(arg) => Ok(InvokeArg1::Arg3Par2(f, arg)),
-                PartialArgument::Arg3Par2(arg1, arg2) => Ok(InvokeArg1::NativePar2(f, arg1, arg2)),
+            Type::PartialNativeFunction => {
+                let it = f.as_partial_native().value;
+                match it.partial {
+                    PartialArgument::Arg2Par1(arg) => Ok(InvokeArg1::NativePar1(it.func, arg)),
+                    PartialArgument::Arg3Par1(arg) => Ok(InvokeArg1::Arg3Par2(it.func, arg)),
+                    PartialArgument::Arg3Par2(arg1, arg2) => Ok(InvokeArg1::NativePar2(it.func, arg1, arg2)),
+                }
             },
             _ => ValueIsNotFunctionEvaluable(f).err()
         }
     }
 
-    fn invoke<VM: VirtualInterface>(&self, arg: Value, vm: &mut VM) -> ValueResult {
+    fn invoke<VM: VirtualInterface>(&self, arg: ValuePtr, vm: &mut VM) -> ValueResult {
         match self {
             InvokeArg1::User(f) => vm.invoke_func1(f.clone(), arg),
             InvokeArg1::Native(f) => invoke_arg1(*f, arg, vm),
@@ -592,25 +595,29 @@ impl InvokeArg1 {
 }
 
 impl InvokeArg2 {
-    fn from(f: Value) -> Result<InvokeArg2, Box<RuntimeError>> {
-        match f {
-            f @ (Value::Function(_) | Value::Closure(_) | Value::PartialFunction(_) | Value::List(_) | Value::Slice(_) | Value::StructType(_) | Value::GetField(_) | Value::Memoized(_)) => Ok(InvokeArg2::User(f)),
-            Value::NativeFunction(f) => match f.info().arg {
-                Arg1To2 | Arg1To3 | Arg2 | Unique => Ok(InvokeArg2::Native(f)),
-                Iter | IterNonEmpty => Ok(InvokeArg2::NativeVar(f)),
-                Arg3 => Ok(InvokeArg2::Arg3Par1(f)),
-                Arg0 | Arg0To1 | Arg1 => IncorrectArgumentsNativeFunction(f, 2).err(),
-                Invalid => ValueIsNotFunctionEvaluable(Value::NativeFunction(f)).err(),
+    fn from(f: ValuePtr) -> Result<InvokeArg2, Box<RuntimeError>> {
+        match f.ty() {
+            Type::Function | Type::Closure | Type::PartialFunction | Type::List | Type::Slice | Type::StructType | Type::GetField | Type::Memoized => Ok(InvokeArg2::User(f)),
+            Type::NativeFunction => match f.as_native().info().arg {
+                Arg1To2 | Arg1To3 | Arg2 | Unique => Ok(InvokeArg2::Native(f.as_native())),
+                Iter | IterNonEmpty => Ok(InvokeArg2::NativeVar(f.as_native())),
+                Arg3 => Ok(InvokeArg2::Arg3Par1(f.as_native())),
+                Arg0 | Arg0To1 | Arg1 => IncorrectArgumentsNativeFunction(f.as_native(), 2).err(),
+                Invalid => ValueIsNotFunctionEvaluable(f).err(),
             },
-            Value::PartialNativeFunction(f, partial) => match *partial {
-                PartialArgument::Arg2Par1(_) | PartialArgument::Arg3Par2(_, _) => IncorrectArgumentsNativeFunction(f, 3).err(),
-                PartialArgument::Arg3Par1(arg) => Ok(InvokeArg2::NativePar1(f, arg)),
+            Type::PartialNativeFunction => {
+                let it = f.as_partial_native().value;
+                match it.partial {
+                    PartialArgument::Arg2Par1(_) |
+                    PartialArgument::Arg3Par2(_, _) => IncorrectArgumentsNativeFunction(it.func, 3).err(),
+                    PartialArgument::Arg3Par1(arg) => Ok(InvokeArg2::NativePar1(it.func, arg)),
+                }
             },
             _ => ValueIsNotFunctionEvaluable(f).err()
         }
     }
 
-    fn invoke<VM : VirtualInterface>(&self, arg1: Value, arg2: Value, vm: &mut VM) -> ValueResult {
+    fn invoke<VM : VirtualInterface>(&self, arg1: ValuePtr, arg2: ValuePtr, vm: &mut VM) -> ValueResult {
         match self {
             InvokeArg2::User(f) => vm.invoke_func2(f.clone(), arg1, arg2),
             InvokeArg2::Native(f) => invoke_arg2(*f, arg1, arg2, vm),
@@ -634,79 +641,79 @@ pub fn invoke_stack<VM : VirtualInterface>(f: NativeFunction, nargs: u32, vm: &m
         Arg0To1 => match nargs {
             0 => invoke_arg0(f, vm),
             1 => {
-                let a1: Value = vm.pop();
+                let a1: ValuePtr = vm.pop();
                 invoke_arg1(f, a1, vm)
             },
             _ => IncorrectArgumentsNativeFunction(f, nargs).err()
         },
         Arg1 => match nargs {
-            0 => Ok(f.to_value()),
+            0 => f.to_value().ok(),
             1 => {
-                let a1: Value = vm.pop();
+                let a1: ValuePtr = vm.pop();
                 invoke_arg1(f, a1, vm)
             },
             _ => IncorrectArgumentsNativeFunction(f, nargs).err()
         },
         Arg1To2 => match nargs {
-            0 => Ok(f.to_value()),
+            0 => f.to_value().ok(),
             1 => {
-                let a1: Value = vm.pop();
+                let a1: ValuePtr = vm.pop();
                 invoke_arg1(f, a1, vm)
             },
             2 => {
-                let a2: Value = vm.pop();
-                let a1: Value = vm.pop();
+                let a2: ValuePtr = vm.pop();
+                let a1: ValuePtr = vm.pop();
                 invoke_arg2(f, a1, a2, vm)
             },
             _ => IncorrectArgumentsNativeFunction(f, nargs).err()
         },
         Arg1To3 => match nargs {
-            0 => Ok(f.to_value()),
+            0 => f.to_value().ok(),
             1 => {
-                let a1: Value = vm.pop();
+                let a1: ValuePtr = vm.pop();
                 invoke_arg1(f, a1, vm)
             },
             2 => {
-                let a2: Value = vm.pop();
-                let a1: Value = vm.pop();
+                let a2: ValuePtr = vm.pop();
+                let a1: ValuePtr = vm.pop();
                 invoke_arg2(f, a1, a2, vm)
             },
             3 => {
-                let a3: Value = vm.pop();
-                let a2: Value = vm.pop();
-                let a1: Value = vm.pop();
+                let a3: ValuePtr = vm.pop();
+                let a2: ValuePtr = vm.pop();
+                let a1: ValuePtr = vm.pop();
                 invoke_arg3(f, a1, a2, a3, vm)
             }
             _ => IncorrectArgumentsNativeFunction(f, nargs).err()
         },
         Arg2 => match nargs {
-            0 => Ok(f.to_value()),
+            0 => f.to_value().ok(),
             1 => {
-                let a1: Value = vm.pop();
+                let a1: ValuePtr = vm.pop();
                 PartialArgument::Arg2Par1(a1).to_value(f)
             }
             2 => {
-                let a2: Value = vm.pop();
-                let a1: Value = vm.pop();
+                let a2: ValuePtr = vm.pop();
+                let a1: ValuePtr = vm.pop();
                 invoke_arg2(f, a1, a2, vm)
             },
             _ => IncorrectArgumentsNativeFunction(f, nargs).err()
         },
         Arg3 => match nargs {
-            0 => Ok(f.to_value()),
+            0 => f.to_value().ok(),
             1 => {
-                let a1: Value = vm.pop();
+                let a1: ValuePtr = vm.pop();
                 PartialArgument::Arg3Par1(a1).to_value(f)
             },
             2 => {
-                let a2: Value = vm.pop();
-                let a1: Value = vm.pop();
+                let a2: ValuePtr = vm.pop();
+                let a1: ValuePtr = vm.pop();
                 PartialArgument::Arg3Par2(a1, a2).to_value(f)
             },
             3 => {
-                let a3: Value = vm.pop();
-                let a2: Value = vm.pop();
-                let a1: Value = vm.pop();
+                let a3: ValuePtr = vm.pop();
+                let a2: ValuePtr = vm.pop();
+                let a1: ValuePtr = vm.pop();
                 invoke_arg3(f, a1, a2, a3, vm)
             },
             _ => IncorrectArgumentsNativeFunction(f, nargs).err()
@@ -714,7 +721,7 @@ pub fn invoke_stack<VM : VirtualInterface>(f: NativeFunction, nargs: u32, vm: &m
         Unique => match nargs {
             0 => invoke_arg0(f, vm),
             1 => {
-                let a1: Value = vm.pop();
+                let a1: ValuePtr = vm.pop();
                 invoke_arg1(f, a1, vm)
             },
             _ => {
@@ -725,7 +732,7 @@ pub fn invoke_stack<VM : VirtualInterface>(f: NativeFunction, nargs: u32, vm: &m
         Iter => match nargs {
             0 => invoke_arg0(f, vm),
             1 => {
-                let a1: Value = vm.pop();
+                let a1: ValuePtr = vm.pop();
                 invoke_var(f, a1.to_iter()?, vm)
             },
             _ => {
@@ -736,7 +743,7 @@ pub fn invoke_stack<VM : VirtualInterface>(f: NativeFunction, nargs: u32, vm: &m
         IterNonEmpty => match nargs {
             0 => IncorrectArgumentsNativeFunction(f, nargs).err(),
             1 => {
-                let a1: Value = vm.pop();
+                let a1: ValuePtr = vm.pop();
                 invoke_var(f, a1.to_iter()?, vm)
             },
             _ => {
@@ -744,7 +751,7 @@ pub fn invoke_stack<VM : VirtualInterface>(f: NativeFunction, nargs: u32, vm: &m
                 invoke_var(f, args, vm)
             }
         },
-        Invalid => ValueIsNotFunctionEvaluable(Value::NativeFunction(f)).err(),
+        Invalid => ValueIsNotFunctionEvaluable(f.to_value()).err(),
     }
 }
 
@@ -756,7 +763,7 @@ pub fn invoke_partial<VM : VirtualInterface>(f: NativeFunction, partial: Partial
         PartialArgument::Arg2Par1(a1) => match nargs {
             0 => PartialArgument::Arg2Par1(a1).to_value(f),
             1 => {
-                let a2: Value = vm.pop();
+                let a2: ValuePtr = vm.pop();
                 invoke_arg2(f, a1, a2, vm)
             },
             _ => IncorrectArgumentsNativeFunction(f, 1 + nargs).err(),
@@ -764,12 +771,12 @@ pub fn invoke_partial<VM : VirtualInterface>(f: NativeFunction, partial: Partial
         PartialArgument::Arg3Par1(a1) => match nargs {
             0 => PartialArgument::Arg3Par1(a1).to_value(f),
             1 => {
-                let a2: Value = vm.pop();
+                let a2: ValuePtr = vm.pop();
                 PartialArgument::Arg3Par2(a1, a2).to_value(f)
             },
             2 => {
-                let a3: Value = vm.pop();
-                let a2: Value = vm.pop();
+                let a3: ValuePtr = vm.pop();
+                let a2: ValuePtr = vm.pop();
                 invoke_arg3(f, a1, a2, a3, vm)
             },
             _ => IncorrectArgumentsNativeFunction(f, 1 + nargs).err(),
@@ -777,7 +784,7 @@ pub fn invoke_partial<VM : VirtualInterface>(f: NativeFunction, partial: Partial
         PartialArgument::Arg3Par2(a1, a2) => match nargs {
             0 => PartialArgument::Arg3Par2(a1, a2).to_value(f),
             1 => {
-                let a3: Value = vm.pop();
+                let a3: ValuePtr = vm.pop();
                 invoke_arg3(f, a1, a2, a3, vm)
             },
             _ => IncorrectArgumentsNativeFunction(f, 2 + nargs).err(),
@@ -785,44 +792,51 @@ pub fn invoke_partial<VM : VirtualInterface>(f: NativeFunction, partial: Partial
     }
 }
 
-const NIL: ValueResult = Value::nil().ok();
+const NIL: ValueResult = ValuePtr::nil().ok();
 
 
 fn invoke_arg0<VM : VirtualInterface>(f: NativeFunction, vm: &mut VM) -> ValueResult {
     match f {
-        Read => Ok(vm.read().to_value()),
-        ReadLine => Ok(vm.read_line().to_value()),
-        Print => { vm.println0(); NIL },
-        Env => Ok(vm.get_envs()),
-        Argv => Ok(vm.get_args()),
+        Read => vm.read().to_value().ok(),
+        ReadLine => vm.read_line().to_value().ok(),
+        Print => {
+            vm.println0();
+            NIL
+        },
+        Env => vm.get_envs().ok(),
+        Argv => vm.get_args().ok(),
 
-        List => Ok(VecDeque::new().to_value()),
-        Set => Ok(IndexSet::with_hasher(FxBuildHasher::default()).to_value()),
-        Dict => Ok(IndexMap::with_hasher(FxBuildHasher::default()).to_value()),
-        Heap => Ok(BinaryHeap::new().to_value()),
-        Vector => Ok(Vec::new().to_value()),
+        List => VecDeque::new().to_value().ok(),
+        Set => IndexSet::with_hasher(FxBuildHasher::default()).to_value().ok(),
+        Dict => IndexMap::with_hasher(FxBuildHasher::default()).to_value().ok(),
+        Heap => BinaryHeap::new().to_value().ok(),
+        Vector => Vec::new().to_value().ok(),
 
         _ => panic!("core::invoke_arg0() not supported for {:?}", f),
     }
 }
 
-fn invoke_arg1<VM : VirtualInterface>(f: NativeFunction, a1: Value, vm: &mut VM) -> ValueResult {
+fn invoke_arg1<VM : VirtualInterface>(f: NativeFunction, a1: ValuePtr, vm: &mut VM) -> ValueResult {
     match f {
-        Print => { vm.println(a1.to_str()); NIL },
-        ReadText => Ok(fs::read_to_string::<&str>(a1.as_str()?.as_ref()).unwrap().replace('\r', "").to_value()),
-        Env => Ok(vm.get_env(a1.as_str()?)),
-
-        Bool => Ok(a1.as_bool().to_value()),
-        Int => math::convert_to_int(a1, None),
-        Str => Ok(a1.to_str().to_value()),
-        Vector => if let Value::Complex(it) = a1 {  // Handle `a + bi . vector` as a special case here
-            Ok(vec![Value::Int(it.re), Value::Int(it.im)].to_value())
-        } else {
-            Ok(a1.to_iter()?.to_vector())
+        Print => {
+            vm.println(a1.to_str());
+            NIL
         },
-        Repr => Ok(a1.to_repr_str().to_value()),
-        Eval => vm.invoke_eval(a1.as_str()?),
-        TypeOf => Ok(type_of(a1)),
+        ReadText => fs::read_to_string::<&str>(a1.check_str()?.as_str().borrow_const().as_ref()).unwrap().replace('\r', "").to_value().ok(),
+        Env => vm.get_env(a1.check_str()?.as_str().borrow_const()).ok(),
+
+        Bool => a1.to_bool().to_value().ok(),
+        Int => math::convert_to_int(a1, ValueOption::none()),
+        Str => a1.to_str().to_value().ok(),
+        Vector => if a1.is_precise_complex() {  // Handle `a + bi . vector` as a special case here
+            let it = a1.as_precise_complex().value.inner;
+            (it.re.to_value(), it.im.to_value()).to_value().ok()
+        } else {
+            a1.to_iter()?.to_vector().ok()
+        },
+        Repr => a1.to_repr_str().to_value().ok(),
+        Eval => vm.invoke_eval(a1.check_str()?.as_str().borrow_const()),
+        TypeOf => type_of(a1).ok(),
 
         OperatorSub => operator::unary_sub(a1),
         OperatorUnaryNot => operator::unary_not(a1),
@@ -835,16 +849,16 @@ fn invoke_arg1<VM : VirtualInterface>(f: NativeFunction, a1: Value, vm: &mut VM)
         Hex => strings::to_hex(a1),
         Bin => strings::to_bin(a1),
 
-        Len => a1.len().map(usize::to_value),
-        Range => Value::range(0, a1.as_int()?, 1),
-        Enumerate => Ok(Value::Enumerate(Box::new(a1))),
-        Min => match a1 {
-            Value::NativeFunction(Int) => Ok(Value::Int(i64::MIN)),
-            an => collections::min(an.to_iter()?),
+        Len => a1.len()?.to_value().ok(),
+        Range => ValuePtr::range(0, a1.check_int()?.as_int(), 1),
+        Enumerate => ValuePtr::enumerate(a1).ok(),
+        Min => match a1.is_native() {
+            true if a1.as_native() == Int => i64::MIN.to_value().ok(),
+            _ => collections::min(a1.to_iter()?),
         },
-        Max => match a1 {
-            Value::NativeFunction(Int) => Ok(Value::Int(i64::MAX)),
-            an => collections::max(an.to_iter()?),
+        Max => match a1.is_native() {
+            true if a1.as_native() == Int => i64::MAX.to_value().ok(),
+            _ => collections::max(a1.to_iter()?),
         },
         Concat => collections::flat_map(vm, None, a1),
         Memoize => collections::create_memoized(a1),
@@ -866,10 +880,13 @@ fn invoke_arg1<VM : VirtualInterface>(f: NativeFunction, a1: Value, vm: &mut VM)
     }
 }
 
-fn invoke_arg2<VM : VirtualInterface>(f: NativeFunction, a1: Value, a2: Value, vm: &mut VM) -> ValueResult {
+fn invoke_arg2<VM : VirtualInterface>(f: NativeFunction, a1: ValuePtr, a2: ValuePtr, vm: &mut VM) -> ValueResult {
     match f {
-        WriteText => { fs::write(a1.as_str()?, a2.as_str()?).unwrap(); NIL },
-        Int => math::convert_to_int(a1, Some(a2)),
+        WriteText => {
+            fs::write(a1.check_str()?.as_str().borrow_const(), a2.check_str()?.as_str().borrow_const()).unwrap();
+            NIL
+        },
+        Int => math::convert_to_int(a1, ValueOption::some(a2)),
 
         OperatorSub => operator::binary_sub(a1, a2),
         OperatorMul => operator::binary_mul(a1, a2),
@@ -896,22 +913,22 @@ fn invoke_arg2<VM : VirtualInterface>(f: NativeFunction, a1: Value, a2: Value, v
         OperatorBitwiseAnd => operator::binary_bitwise_and(a1, a2),
         OperatorBitwiseOr => operator::binary_bitwise_or(a1, a2),
         OperatorBitwiseXor => operator::binary_bitwise_xor(a1, a2),
-        OperatorLessThan => Ok((a1 < a2).to_value()),
-        OperatorLessThanSwap => Ok((a2 < a1).to_value()),
-        OperatorLessThanEqual => Ok((a1 <= a2).to_value()),
-        OperatorLessThanEqualSwap => Ok((a2 <= a1).to_value()),
-        OperatorGreaterThan => Ok((a1 > a2).to_value()),
-        OperatorGreaterThanSwap => Ok((a2 > a1).to_value()),
-        OperatorGreaterThanEqual => Ok((a1 >= a2).to_value()),
-        OperatorGreaterThanEqualSwap => Ok((a2 >= a1).to_value()),
-        OperatorEqual => Ok((a1 == a2).to_value()),
-        OperatorNotEqual => Ok((a1 != a2).to_value()),
+        OperatorLessThan => (a1 < a2).to_value().ok(),
+        OperatorLessThanSwap => (a2 < a1).to_value().ok(),
+        OperatorLessThanEqual => (a1 <= a2).to_value().ok(),
+        OperatorLessThanEqualSwap => (a2 <= a1).to_value().ok(),
+        OperatorGreaterThan => (a1 > a2).to_value().ok(),
+        OperatorGreaterThanSwap => (a2 > a1).to_value().ok(),
+        OperatorGreaterThanEqual => (a1 >= a2).to_value().ok(),
+        OperatorGreaterThanEqualSwap => (a2 >= a1).to_value().ok(),
+        OperatorEqual => (a1 == a2).to_value().ok(),
+        OperatorNotEqual => (a1 != a2).to_value().ok(),
 
         Search => strings::search(a1, a2),
         Split => strings::split(a1, a2),
         Join => strings::join(a1, a2),
 
-        Range => Value::range(a1.as_int()?, a2.as_int()?, 1),
+        Range => ValuePtr::range(a1.check_int()?.as_int(), a2.check_int()?.as_int(), 1),
         MinBy => collections::min_by(vm, a1, a2),
         MaxBy => collections::max_by(vm, a1, a2),
         Map => collections::map(vm, a1, a2),
@@ -938,17 +955,17 @@ fn invoke_arg2<VM : VirtualInterface>(f: NativeFunction, a1: Value, a2: Value, v
     }
 }
 
-fn invoke_arg3<VM : VirtualInterface>(f: NativeFunction, a1: Value, a2: Value, a3: Value, vm: &mut VM) -> ValueResult {
+fn invoke_arg3<VM : VirtualInterface>(f: NativeFunction, a1: ValuePtr, a2: ValuePtr, a3: ValuePtr, vm: &mut VM) -> ValueResult {
     match f {
         Replace => strings::replace(vm, a1, a2, a3),
-        Range => Value::range(a1.as_int()?, a2.as_int()?, a3.as_int()?),
+        Range => ValuePtr::range(a1.check_int()?.as_int(), a2.check_int()?.as_int(), a3.check_int()?.as_int()),
         Insert => collections::insert(a1, a2, a3),
 
         _ => panic!("core::invoke_arg3() not supported for {:?}", f),
     }
 }
 
-fn invoke_var<VM : VirtualInterface, I : Iterator<Item=Value>>(f: NativeFunction, mut an: I, vm: &mut VM) -> ValueResult {
+fn invoke_var<VM : VirtualInterface, I : Iterator<Item=ValuePtr>>(f: NativeFunction, mut an: I, vm: &mut VM) -> ValueResult {
     match f {
         Print => {
             vm.print(an.next().unwrap().to_str());
@@ -959,11 +976,11 @@ fn invoke_var<VM : VirtualInterface, I : Iterator<Item=Value>>(f: NativeFunction
             NIL
         },
 
-        List => Ok(an.to_list()),
-        Set => Ok(an.to_set()),
+        List => an.to_list().ok(),
+        Set => an.to_set().ok(),
         Dict => collections::collect_into_dict(an),
-        Heap => Ok(an.to_heap()),
-        Vector => Ok(an.to_vector()),
+        Heap => an.to_heap().ok(),
+        Vector => an.to_vector().ok(),
 
         Sum => collections::sum(an),
         Min => collections::min(an),
@@ -982,53 +999,51 @@ fn invoke_var<VM : VirtualInterface, I : Iterator<Item=Value>>(f: NativeFunction
 
 /// Invokes a `Memoized()` function wrapper from the stack. This assumes the stack is already setup a priori with the memoized wrapper, and arguments in place.
 pub fn invoke_memoized<VM : VirtualInterface>(vm: &mut VM, nargs: u32) -> ValueResult {
-    let args: Vec<Value> = vm.popn(nargs);
-    let memoized = match vm.pop() {
-        Value::Memoized(it) => it,
-        _ => panic!("Stack corruption")
-    };
+    let args: Vec<ValuePtr> = vm.popn(nargs);
+    let func: ValuePtr = vm.pop();
+    let memoized = func.as_memoized();
 
     // We cannot use the `.entry()` API, as that requires we mutably borrow the cache during the call to `vm.invoke_func()`
     // We only lookup by key once (in the cached case), and twice (in the uncached case)
-    if let Some(ret) = memoized.cache.unbox().get(&args) {
-        return Ok(ret.clone());
+    if let Some(ret) = memoized.borrow().cache.get(&args) {
+        return ret.clone().ok();
     }
 
-    let value: Value = vm.invoke_func(memoized.func.clone(), &args)?;
+    let value: ValuePtr = vm.invoke_func(memoized.borrow().func.clone(), &args)?;
 
     // The above computation might've entered a value into the cache - so we have to go through `.entry()` again
-    return Ok(memoized.cache.unbox_mut()
+    return memoized.borrow_mut().cache
         .entry(args)
         .or_insert(value)
-        .clone());
+        .clone()
+        .ok();
 }
 
 
-fn type_of(value: Value) -> Value {
-    // This function is here because we don't want `Value::{*}` to be imported, rather `NativeFunction::{*}` due to shadowing issues.
-    match value {
-        Value::Nil => Value::Nil,
-        Value::Bool(_) => Bool.to_value(),
-        Value::Int(_) => Int.to_value(),
-        Value::Complex(_) => Complex.to_value(),
-        Value::Str(_) => Str.to_value(),
+fn type_of(value: ValuePtr) -> ValuePtr {
+    match value.ty() {
+        Type::Nil => ValuePtr::nil(),
+        Type::Bool => Bool.to_value(),
+        Type::Int => Int.to_value(),
+        Type::Complex => Complex.to_value(),
+        Type::Str => Str.to_value(),
 
-        Value::List(_) => List.to_value(),
-        Value::Set(_) => Set.to_value(),
-        Value::Dict(_) => Dict.to_value(),
-        Value::Heap(_) => Heap.to_value(),
-        Value::Vector(_) => Vector.to_value(),
+        Type::List => List.to_value(),
+        Type::Set => Set.to_value(),
+        Type::Dict => Dict.to_value(),
+        Type::Heap => Heap.to_value(),
+        Type::Vector => Vector.to_value(),
 
-        Value::Struct(it) => Value::StructType(it.unbox().type_impl.clone()), // Structs return their type constructor
-        Value::StructType(_) => Function.to_value(), // And the type constructor returns `function`
+        Type::Struct => value.as_struct().borrow().type_impl.get().clone().to_value(), // Structs return their type constructor
+        Type::StructType => Function.to_value(), // And the type constructor returns `function`
 
-        Value::Range(_) => Range.to_value(),
-        Value::Enumerate(_) => Enumerate.to_value(),
-        Value::Slice(_) => Function.to_value(),
+        Type::Range => Range.to_value(),
+        Type::Enumerate => Enumerate.to_value(),
+        Type::Slice => Function.to_value(),
 
-        x @ (Value::Iter(_) | Value::Memoized(_)) => panic!("{:?} is synthetic and cannot have type_of() called on it", x),
+        Type::Iter | Type::Memoized | Type::Error | Type::None | Type::Never => panic!("{:?} is synthetic and cannot have type_of() called on it", value),
 
-        Value::Function(_) | Value::PartialFunction(_) | Value::NativeFunction(_) | Value::PartialNativeFunction(_, _) | Value::Closure(_) | Value::GetField(_) => Function.to_value(),
+        Type::Function | Type::PartialFunction | Type::NativeFunction | Type::PartialNativeFunction | Type::Closure | Type::GetField => Function.to_value(),
     }
 }
 
@@ -1037,7 +1052,7 @@ fn type_of(value: Value) -> Value {
 mod tests {
     use crate::{compiler, SourceView, core};
     use crate::core::{Argument, NativeFunction};
-    use crate::vm::{IntoValue, Value, VirtualInterface, VirtualMachine};
+    use crate::vm::{IntoValue, ValuePtr, VirtualInterface, VirtualMachine};
 
     #[test]
     fn test_native_functions_are_declared_in_order() {
@@ -1074,30 +1089,30 @@ mod tests {
                 },
                 Argument::Arg0To1 => {
                     let _ = core::invoke_arg0(info.native, &mut vm);
-                    let _ = core::invoke_arg1(info.native, Value::Nil, &mut vm);
+                    let _ = core::invoke_arg1(info.native, ValuePtr::nil(), &mut vm);
                 },
                 Argument::Arg1 => {
-                    let _ = core::invoke_arg1(info.native, Value::Nil, &mut vm);
+                    let _ = core::invoke_arg1(info.native, ValuePtr::nil(), &mut vm);
                 },
                 Argument::Arg1To2 => {
-                    let _ = core::invoke_arg1(info.native, Value::Nil, &mut vm);
-                    let _ = core::invoke_arg2(info.native, Value::Nil, Value::Nil, &mut vm);
+                    let _ = core::invoke_arg1(info.native, ValuePtr::nil(), &mut vm);
+                    let _ = core::invoke_arg2(info.native, ValuePtr::nil(), ValuePtr::nil(), &mut vm);
                 },
                 Argument::Arg1To3 => {
-                    let _ = core::invoke_arg1(info.native, Value::Nil, &mut vm);
-                    let _ = core::invoke_arg2(info.native, Value::Nil, Value::Nil, &mut vm);
-                    let _ = core::invoke_arg3(info.native, Value::Nil, Value::Nil, Value::Nil, &mut vm);
+                    let _ = core::invoke_arg1(info.native, ValuePtr::nil(), &mut vm);
+                    let _ = core::invoke_arg2(info.native, ValuePtr::nil(), ValuePtr::nil(), &mut vm);
+                    let _ = core::invoke_arg3(info.native, ValuePtr::nil(), ValuePtr::nil(), ValuePtr::nil(), &mut vm);
                 },
                 Argument::Arg2 => {
-                    let _ = core::invoke_arg2(info.native, Value::Nil, Value::Nil, &mut vm);
+                    let _ = core::invoke_arg2(info.native, ValuePtr::nil(), ValuePtr::nil(), &mut vm);
                 },
                 Argument::Arg3 => {
-                    let _ = core::invoke_arg3(info.native, Value::Nil, Value::Nil, Value::Nil, &mut vm);
+                    let _ = core::invoke_arg3(info.native, ValuePtr::nil(), ValuePtr::nil(), ValuePtr::nil(), &mut vm);
                 },
                 Argument::Unique => {
                     let _ = core::invoke_arg0(info.native, &mut vm);
-                    let _ = core::invoke_arg1(info.native, Value::Nil, &mut vm);
-                    let _ = core::invoke_var(info.native, vec![Value::Nil].into_iter(), &mut vm);
+                    let _ = core::invoke_arg1(info.native, ValuePtr::nil(), &mut vm);
+                    let _ = core::invoke_var(info.native, vec![ValuePtr::nil()].into_iter(), &mut vm);
                 },
                 Argument::Iter => {
                     let _ = core::invoke_arg0(info.native, &mut vm);
@@ -1116,8 +1131,8 @@ mod tests {
     fn test_consistency_condition() {
         let mut vm = VirtualMachine::new(compiler::default(), SourceView::empty(), &b""[..], vec![], vec![]);
 
-        fn is_partial(v: &Value, f: NativeFunction) -> bool {
-            match v { Value::PartialNativeFunction(f1, _) => f == *f1, _ => false }
+        fn is_partial(v: &ValuePtr, f: NativeFunction) -> bool {
+            v.is_partial_native() && v.as_partial_native_ref().func == f
         }
 
         for f in core::NATIVE_FUNCTIONS.iter() {
@@ -1125,13 +1140,13 @@ mod tests {
             if min_nargs > 1 {
                 for nargs in 1..min_nargs {
                     // Prepare stack arguments
-                    let args: Vec<Value> = (0..nargs).map(|arg| (arg as i64).to_value()).collect();
+                    let args: Vec<ValuePtr> = (0..nargs).map(|arg| (arg as i64).to_value()).collect();
                     vm.push( f.native.to_value());
                     for arg in args.iter().rev().cloned() {
                         vm.push(arg);
                     }
 
-                    let ret = core::invoke_stack(f.native, nargs, &mut vm).ok();
+                    let ret = core::invoke_stack(f.native, nargs, &mut vm).as_result().ok();
 
                     assert!(ret.is_some(), "Error invoking {:?}", f.native);
                     assert!(is_partial(ret.as_ref().unwrap(), f.native), "Return value of invoking {:?} with nargs={} is not partial: {:?}", f.native, nargs, ret.unwrap());
