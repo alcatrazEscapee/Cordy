@@ -6,7 +6,7 @@ use std::hash::{Hash, Hasher};
 use fxhash::FxBuildHasher;
 use indexmap::{IndexMap, IndexSet};
 
-use crate::vm::{operator, IntoIterableValue, IntoValue, VirtualInterface, RuntimeError, ValueResult, ValuePtr, Type, ValueOption};
+use crate::vm::{operator, IntoIterableValue, IntoValue, VirtualInterface, RuntimeError, ValueResult, ValuePtr, Type, ValueOption, MIN_INT, MAX_INT};
 use crate::vm::operator::BinaryOp;
 use crate::trace;
 
@@ -853,11 +853,11 @@ fn invoke_arg1<VM : VirtualInterface>(f: NativeFunction, a1: ValuePtr, vm: &mut 
         Range => ValuePtr::range(0, a1.check_int()?.as_int(), 1),
         Enumerate => ValuePtr::enumerate(a1).ok(),
         Min => match a1.is_native() {
-            true if a1.as_native() == Int => i64::MIN.to_value().ok(),
+            true if a1.as_native() == Int => MIN_INT.to_value().ok(),
             _ => collections::min(a1.to_iter()?),
         },
         Max => match a1.is_native() {
-            true if a1.as_native() == Int => i64::MAX.to_value().ok(),
+            true if a1.as_native() == Int => MAX_INT.to_value().ok(),
             _ => collections::max(a1.to_iter()?),
         },
         Concat => collections::flat_map(vm, None, a1),

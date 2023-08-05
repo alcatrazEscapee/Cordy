@@ -19,7 +19,7 @@ use crate::vm::error::RuntimeError;
 use crate::vm::value::ptr::{Prefix, Ref, RefMut, SharedPrefix};
 use crate::util::impl_partial_ord;
 
-pub use crate::vm::value::ptr::ValuePtr;
+pub use crate::vm::value::ptr::{ValuePtr, MIN_INT, MAX_INT};
 
 use RuntimeError::{*};
 
@@ -1553,7 +1553,7 @@ impl Iterator for Iterable {
             },
             Iterable::Range(it, range) => range.next(it),
             Iterable::Enumerate(index, it) => {
-                let ret = (*it).next().map(|u| (u, index.to_value()).to_value());
+                let ret = (*it).next().map(|u| (index.to_value(), u).to_value());
                 *index += 1;
                 ret
             },

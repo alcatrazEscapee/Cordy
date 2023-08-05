@@ -12,7 +12,7 @@ use crate::reporting::{Location, SourceView};
 
 pub use crate::vm::error::{DetailRuntimeError, RuntimeError};
 pub use crate::vm::opcode::Opcode;
-pub use crate::vm::value::{FunctionImpl, ValuePtr, ValueResult, ValueOption, IntoDictValue, IntoIterableValue, IntoValue, Iterable, LiteralType, StructTypeImpl, C64, guard_recursive_hash, Type};
+pub use crate::vm::value::{FunctionImpl, ValuePtr, ValueResult, ValueOption, IntoDictValue, IntoIterableValue, IntoValue, Iterable, LiteralType, StructTypeImpl, C64, Type, guard_recursive_hash, MIN_INT, MAX_INT};
 
 
 pub type Value = ValuePtr;
@@ -219,28 +219,28 @@ impl<R, W> VirtualMachine<R, W> where
             JumpIfFalse(ip) => {
                 let jump: usize = self.ip.add_offset(ip);
                 let a1: &ValuePtr = self.peek(0);
-                if !a1.as_bool() {
+                if !a1.to_bool() {
                     self.ip = jump;
                 }
             },
             JumpIfFalsePop(ip) => {
                 let jump: usize = self.ip.add_offset(ip);
                 let a1: ValuePtr = self.pop();
-                if !a1.as_bool() {
+                if !a1.to_bool() {
                     self.ip = jump;
                 }
             },
             JumpIfTrue(ip) => {
                 let jump: usize = self.ip.add_offset(ip);
                 let a1: &ValuePtr = self.peek(0);
-                if a1.as_bool() {
+                if a1.to_bool() {
                     self.ip = jump;
                 }
             },
             JumpIfTruePop(ip) => {
                 let jump: usize = self.ip.add_offset(ip);
                 let a1: ValuePtr = self.pop();
-                if a1.as_bool() {
+                if a1.to_bool() {
                     self.ip = jump;
                 }
             },
@@ -899,7 +899,7 @@ fn insert<I : Iterator<Item=ValuePtr>>(stack: &mut Vec<ValuePtr>, args: I, n: u3
 
 
 #[cfg(test)]
-mod test {
+mod tests {
     use crate::{compiler, test_util};
     use crate::reporting::SourceView;
     use crate::vm::{ExitType, VirtualMachine};
@@ -1536,7 +1536,7 @@ mod test {
     #[test] fn test_enumerate_2() { run_str("[1, 2, 3] . enumerate . list . print", "[(0, 1), (1, 2), (2, 3)]\n"); }
     #[test] fn test_enumerate_3() { run_str("'foobar' . enumerate . list . print", "[(0, 'f'), (1, 'o'), (2, 'o'), (3, 'b'), (4, 'a'), (5, 'r')]\n"); }
     #[test] fn test_sqrt() { run_str("[0, 1, 4, 9, 25, 3, 6, 8, 13] . map(sqrt) . print", "[0, 1, 2, 3, 5, 1, 2, 2, 3]\n"); }
-    #[test] fn test_sqrt_very_large() { run_str("[1 << 62, (1 << 62) + 1, (1 << 62) - 1] . map(sqrt) . print", "[2147483648, 2147483648, 2147483647]\n"); }
+    #[test] fn test_sqrt_very_large() { run_str("[1 << 61, (1 << 61) + 1, (1 << 61) - 1] . map(sqrt) . print", "[1518500249, 1518500249, 1518500249]\n"); }
     #[test] fn test_gcd() { run_str("gcd(12, 8) . print", "4\n"); }
     #[test] fn test_gcd_iter() { run_str("[12, 18, 16] . gcd . print", "2\n"); }
     #[test] fn test_lcm() { run_str("lcm(9, 7) . print", "63\n"); }

@@ -1,6 +1,6 @@
 use crate::compiler::parser::expr::{Expr, ExprType};
 use crate::core::NativeFunction;
-use crate::vm::{IntoValue, LiteralType, RuntimeError, ValuePtr};
+use crate::vm::{IntoValue, LiteralType, MAX_INT, MIN_INT, RuntimeError, ValuePtr};
 use crate::vm::operator::BinaryOp;
 
 /// A trait for objects which are able to be optimized via a recursive self-transformation
@@ -87,7 +87,7 @@ impl Optimize for Expr {
                     // This is a special case, for `min(int)` and `max(int)`, we can replace this with a compile time constant
                     Expr(_, ExprType::NativeFunction(native_f @ (NativeFunction::Min | NativeFunction::Max))) if nargs == Some(1) => {
                         if let Expr(_, ExprType::NativeFunction(NativeFunction::Int)) = args[0] {
-                            Expr::int(if native_f == NativeFunction::Min { i64::MIN } else { i64::MAX })
+                            Expr::int(if native_f == NativeFunction::Min { MIN_INT } else { MAX_INT })
                         } else {
                             f.eval(loc, args, any_unroll)
                         }
@@ -303,8 +303,8 @@ mod tests {
     #[test] fn test_operator_function_inlining_impure_4() { run_expr("do { let x, y ; (/x)(y = 2) }", "Nil Nil PushLocal(0)->x Int(2) StoreLocal(1)->y Swap Div PopN(3)") }
     #[test] fn test_operator_function_inlining_impure_5() { run_expr("do { let x, y ; (x/)(y = 2) }", "Nil Nil PushLocal(0)->x Int(2) StoreLocal(1)->y Div PopN(3)") }
     #[test] fn test_operator_function_inlining_with_unroll() { run_expr("(/)(...1, 2)", "OperatorDiv Int(1) Unroll Int(2) Call...(2) Pop") }
-    #[test] fn test_inline_int_min() { run_expr("min(int)", "Int(-9223372036854775808) Pop") }
-    #[test] fn test_inline_int_max() { run_expr("int.max", "Int(9223372036854775807) Pop") }
+    #[test] fn test_inline_int_min() { run_expr("min(int)", "Int(-4611686018427387904) Pop") }
+    #[test] fn test_inline_int_max() { run_expr("int.max", "Int(4611686018427387903) Pop") }
     #[test] fn test_partial_function_call_merge_no_args_1() { run_expr("vector()()", "Vector Call(0) Call(0) Pop"); }
     #[test] fn test_partial_function_call_merge_no_args_2() { run_expr("vector()(1)", "Vector Call(0) Int(1) Call(1) Pop"); }
     #[test] fn test_partial_function_call_merge_one_arg_1() { run_expr("int()()", "Int Call(0) Pop") }
