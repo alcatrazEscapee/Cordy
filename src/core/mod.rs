@@ -13,6 +13,7 @@ use crate::vm::operator::BinaryOp;
 
 pub use crate::core::collections::{get_index, get_slice, set_index, to_index};
 pub use crate::core::strings::format_string;
+pub use crate::core::pattern::Pattern;
 
 use Argument::{*};
 use NativeFunction::{*};
@@ -20,6 +21,7 @@ use RuntimeError::{*};
 
 
 mod math;
+mod pattern;
 mod strings;
 mod collections;
 

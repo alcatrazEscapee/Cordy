@@ -11,11 +11,12 @@ use crate::util::OffsetAdd;
 use crate::vm::value::{Literal, UpValue, ValueStructType};
 
 pub use crate::vm::error::{DetailRuntimeError, RuntimeError};
-pub use crate::vm::opcode::Opcode;
+pub use crate::vm::opcode::{Opcode, StoreOp};
 pub use crate::vm::value::{C64, FunctionImpl, guard_recursive_hash, IntoDictValue, IntoIterableValue, IntoValue, Iterable, LiteralType, MAX_INT, MIN_INT, StructTypeImpl, Type, ValueOption, ValuePtr, ValueResult};
 
 use Opcode::{*};
 use RuntimeError::{*};
+use crate::core::Pattern;
 
 
 pub type AnyResult = Result<(), Box<RuntimeError>>;
@@ -43,6 +44,7 @@ pub struct VirtualMachine<R, W> {
     unroll_stack: Vec<i32>,
 
     constants: Vec<ValuePtr>,
+    patterns: Vec<Rc<Pattern>>,
     globals: Vec<String>,
     locations: Vec<Location>,
     fields: Fields,
@@ -88,6 +90,9 @@ pub trait VirtualInterface {
     fn invoke_func(&mut self, f: ValuePtr, args: &Vec<ValuePtr>) -> ValueResult;
 
     fn invoke_eval(&mut self, s: &String) -> ValueResult;
+
+    /// Executes a `StoreOp`, storing the value `value`
+    fn store(&mut self, op: StoreOp, value: ValuePtr) -> AnyResult;
 
     // Wrapped IO
     fn println0(&mut self);
@@ -139,6 +144,7 @@ impl<R, W> VirtualMachine<R, W> where
             unroll_stack: Vec::new(),
 
             constants: result.constants,
+            patterns: result.patterns,
             globals: result.globals,
             locations: result.locations,
             fields: result.fields,
@@ -170,7 +176,7 @@ impl<R, W> VirtualMachine<R, W> where
     }
 
     fn as_compile_parameters<'a, 'b: 'a, 'c: 'a>(&'b mut self, enable_optimization: bool, locals: &'c mut Vec<Locals>) -> CompileParameters<'a> {
-        CompileParameters::new(enable_optimization, &mut self.code, &mut self.constants, &mut self.globals, &mut self.locations, &mut self.fields, locals, &mut self.view)
+        CompileParameters::new(enable_optimization, &mut self.code, &mut self.constants, &mut self.patterns, &mut self.globals, &mut self.locations, &mut self.fields, locals, &mut self.view)
     }
 
     pub fn run_until_completion(&mut self) -> ExitType {
@@ -271,9 +277,6 @@ impl<R, W> VirtualMachine<R, W> where
                 self.stack.truncate(len - n as usize);
                 trace::trace_interpreter_stack!("PopN {}", self.debug_stack());
             },
-            Dup => {
-                self.push(self.peek(0).clone());
-            },
             Swap => {
                 let len: usize = self.stack.len();
                 self.stack.swap(len - 1, len - 2);
@@ -287,9 +290,9 @@ impl<R, W> VirtualMachine<R, W> where
                 self.push(self.stack[local].clone());
             }
             StoreLocal(local, pop) => {
-                let local: usize = self.frame_pointer() + local as usize;
                 trace::trace_interpreter!("vm::run StoreLocal index={}, value={}, prev={}", local, self.stack.last().unwrap().as_debug_str(), self.stack[local].as_debug_str());
-                self.stack[local] = if pop { self.pop() } else { self.peek(0).clone() };
+                let value = if pop { self.pop() } else { self.peek(0).clone() };
+                self.store_local(local, value);
             },
             PushGlobal(local) => {
                 // Globals are absolute offsets, and allow late binding, which means we have to check the global count before referencing.
@@ -298,17 +301,13 @@ impl<R, W> VirtualMachine<R, W> where
                 if local < self.global_count {
                     self.push(self.stack[local].clone());
                 } else {
-                    return Err(Box::new(ValueErrorVariableNotDeclaredYet(self.globals[local].clone())))
+                    return ValueErrorVariableNotDeclaredYet(self.globals[local].clone()).err()
                 }
             },
             StoreGlobal(local, pop) => {
-                let local: usize = local as usize;
                 trace::trace_interpreter!("vm::run StoreGlobal index={}, value={}, prev={}", local, self.stack.last().unwrap().as_debug_str(), self.stack[local].as_debug_str());
-                if local < self.global_count {
-                    self.stack[local] = if pop { self.pop() } else { self.peek(0).clone() };
-                } else {
-                    return Err(Box::new(ValueErrorVariableNotDeclaredYet(self.globals[local].clone())))
-                }
+                let value = if pop { self.pop() } else { self.peek(0).clone() };
+                self.store_global(local, value)?;
             },
             PushUpValue(index) => {
                 let fp = self.frame_pointer() - 1;
@@ -326,23 +325,8 @@ impl<R, W> VirtualMachine<R, W> where
             },
             StoreUpValue(index) => {
                 trace::trace_interpreter!("vm::run StoreUpValue index={}, value={}, prev={}", index, self.stack.last().unwrap().as_debug_str(), self.stack[index as usize].as_debug_str());
-                let fp = self.frame_pointer() - 1;
                 let value = self.peek(0).clone();
-                let upvalue: Rc<Cell<UpValue>> = self.stack[fp].as_closure().borrow().get(index as usize);
-
-                // Reasons why this is convoluted:
-                // - We cannot use `.get()` (as it requires `ValuePtr` to be `Copy`)
-                // - We cannot use `get_mut()` (as even if we have `&mut ClosureImpl`, unboxing the `Rc<>` only gives us `&Cell`)
-                let unboxed: UpValue = (*upvalue).take();
-                let modified: UpValue = match unboxed {
-                    UpValue::Open(stack_index) => {
-                        let ret = UpValue::Open(stack_index); // And return the upvalue, unmodified
-                        self.stack[stack_index] = value; // Mutate on the stack
-                        ret
-                    },
-                    UpValue::Closed(_) => UpValue::Closed(value), // Mutate on the heap
-                };
-                (*upvalue).set(modified);
+                self.store_upvalue(index, value);
             },
 
             StoreArray => {
@@ -413,6 +397,13 @@ impl<R, W> VirtualMachine<R, W> where
                 }
             },
 
+            ExecPattern(index) => {
+                // I would do away with the `.clone()`s here, and the `Rc<>` on patterns, but we need no borrows to call `apply(&mut VM)`
+                let top = self.peek(0).clone();
+                let pattern = self.patterns[index as usize].clone();
+                pattern.apply(self, &top)?;
+            },
+
             // Push Operations
             Nil => self.push(ValuePtr::nil()),
             True => self.push(true.to_value()),
@@ -460,44 +451,23 @@ impl<R, W> VirtualMachine<R, W> where
                 self.invoke(nargs)?;
             },
 
-            CheckLengthGreaterThan(len) => {
-                let a1: &ValuePtr = self.peek(0);
-                let actual = match a1.len() {
-                    Ok(len) => len,
-                    Err(e) => return Err(e),
-                };
-                if len as usize > actual {
-                    return Err(Box::new(ValueErrorCannotUnpackLengthMustBeGreaterThan(len, actual, a1.clone())))
-                }
-            },
-            CheckLengthEqualTo(len) => {
-                let a1: &ValuePtr = self.peek(0);
-                let actual = match a1.len() {
-                    Ok(len) => len,
-                    Err(e) => return Err(e),
-                };
-                if len as usize != actual {
-                    return Err(Box::new(ValueErrorCannotUnpackLengthMustBeEqual(len, actual, a1.clone())))
-                }
-            },
-
             OpIndex => {
                 let a2: ValuePtr = self.pop();
                 let a1: ValuePtr = self.pop();
-                let ret = core::get_index(self, a1, a2)?;
+                let ret = core::get_index(self, &a1, a2)?;
                 self.push(ret);
             },
             OpIndexPeek => {
                 let a2: ValuePtr = self.peek(0).clone();
                 let a1: ValuePtr = self.peek(1).clone();
-                let ret = core::get_index(self, a1, a2)?;
+                let ret = core::get_index(self, &a1, a2)?;
                 self.push(ret);
             },
             OpSlice => {
                 let a3: ValuePtr = self.pop();
                 let a2: ValuePtr = self.pop();
                 let a1: ValuePtr = self.pop();
-                let ret = core::get_slice(a1, a2, a3, 1i64.to_value())?;
+                let ret = core::get_slice(&a1, a2, a3, 1i64.to_value())?;
                 self.push(ret);
             },
             OpSliceWithStep => {
@@ -505,7 +475,7 @@ impl<R, W> VirtualMachine<R, W> where
                 let a3: ValuePtr = self.pop();
                 let a2: ValuePtr = self.pop();
                 let a1: ValuePtr = self.pop();
-                let ret = core::get_slice(a1, a2, a3, a4)?;
+                let ret = core::get_slice(&a1, a2, a3, a4)?;
                 self.push(ret);
             },
 
@@ -565,6 +535,42 @@ impl<R, W> VirtualMachine<R, W> where
             },
         }
         Ok(())
+    }
+
+    // ===== Store Implementations ===== //
+
+    fn store_local(&mut self, index: u32, value: ValuePtr) {
+        let local: usize = self.frame_pointer() + index as usize;
+        self.stack[local] = value;
+    }
+
+    fn store_global(&mut self, index: u32, value: ValuePtr) -> AnyResult {
+        let local: usize = index as usize;
+        if local < self.global_count {
+            self.stack[local] = value;
+            Ok(())
+        } else {
+            ValueErrorVariableNotDeclaredYet(self.globals[local].clone()).err()
+        }
+    }
+
+    fn store_upvalue(&mut self, index: u32, value: ValuePtr) {
+        let fp = self.frame_pointer() - 1;
+        let upvalue: Rc<Cell<UpValue>> = self.stack[fp].as_closure().borrow().get(index as usize);
+
+        // Reasons why this is convoluted:
+        // - We cannot use `.get()` (as it requires `ValuePtr` to be `Copy`)
+        // - We cannot use `get_mut()` (as even if we have `&mut ClosureImpl`, unboxing the `Rc<>` only gives us `&Cell`)
+        let unboxed: UpValue = (*upvalue).take();
+        let modified: UpValue = match unboxed {
+            UpValue::Open(stack_index) => {
+                let ret = UpValue::Open(stack_index); // And return the upvalue, unmodified
+                self.stack[stack_index] = value; // Mutate on the stack
+                ret
+            },
+            UpValue::Closed(_) => UpValue::Closed(value), // Mutate on the heap
+        };
+        (*upvalue).set(modified);
     }
 
 
@@ -683,7 +689,7 @@ impl<R, W> VirtualMachine<R, W> where
                     return ValueErrorEvalListMustHaveUnitLength(list.list.len()).err()
                 }
                 let index = list.list[0].clone();
-                let result = core::get_index(self, arg, index)?;
+                let result = core::get_index(self, &arg, index)?;
                 self.push(result);
                 Ok(FunctionType::Native)
             },
@@ -693,7 +699,7 @@ impl<R, W> VirtualMachine<R, W> where
                 }
                 let arg = self.pop();
                 let slice = self.pop().as_slice().value;
-                self.push(slice.apply(arg)?);
+                self.push(slice.apply(&arg)?);
                 Ok(FunctionType::Native)
             }
             Type::StructType => {
@@ -804,6 +810,15 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
         let ret = self.pop();
         self.push(ValuePtr::nil()); // `eval` executes as a user function but is called like a native function, this prevents stack fuckery
         ret.ok()
+    }
+
+    fn store(&mut self, op: StoreOp, value: ValuePtr) -> AnyResult {
+        match op {
+            StoreOp::Local(index) => self.store_local(index, value),
+            StoreOp::Global(index) => self.store_global(index, value)?,
+            StoreOp::UpValue(index) => self.store_upvalue(index, value),
+        }
+        Ok(())
     }
 
     // ===== IO Methods ===== //

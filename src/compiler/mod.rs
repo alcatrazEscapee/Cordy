@@ -1,3 +1,4 @@
+use std::rc::Rc;
 #[cfg(test)]
 use itertools::Itertools;
 
@@ -8,6 +9,7 @@ use crate::vm::{Opcode, RuntimeError, ValuePtr};
 
 pub use crate::compiler::parser::{default, Fields, Locals, ParserError, ParserErrorType};
 pub use crate::compiler::scanner::{ScanError, ScanErrorType, ScanToken};
+use crate::core::Pattern;
 
 mod scanner;
 mod parser;
@@ -103,6 +105,7 @@ pub struct CompileParameters<'a> {
     code: &'a mut Vec<Opcode>,
 
     constants: &'a mut Vec<ValuePtr>,
+    patterns: &'a mut Vec<Rc<Pattern>>,
     globals: &'a mut Vec<String>,
     locations: &'a mut Vec<Location>,
     fields: &'a mut Fields,
@@ -115,11 +118,12 @@ pub struct CompileParameters<'a> {
 /// This save-restore is used during incremental compiles that get aborted.
 ///
 /// - `locals`, `fields` are mutable and require the full state to be saved.
-/// - `code`, `constants`, `locations`, `globals` are append-only, and thus we can optimize by only saving the length, and restoring by truncating.
+/// - `code`, `constants`, `patterns`, `locations`, `globals` are append-only, and thus we can optimize by only saving the length, and restoring by truncating.
 struct CompileState {
     code: usize,
 
     constants: usize,
+    patterns: usize,
     globals: usize,
     locations: usize,
     fields: Fields,
@@ -133,19 +137,21 @@ impl<'a> CompileParameters<'a> {
         enable_optimization: bool,
         code: &'a mut Vec<Opcode>,
         constants: &'a mut Vec<ValuePtr>,
+        patterns: &'a mut Vec<Rc<Pattern>>,
         globals: &'a mut Vec<String>,
         locations: &'a mut Vec<Location>,
         fields: &'a mut Fields,
         locals: &'a mut Vec<Locals>,
         view: &'a mut SourceView,
     ) -> CompileParameters<'a> {
-        CompileParameters { enable_optimization, code, constants, globals, locations, fields, locals, view }
+        CompileParameters { enable_optimization, code, constants, patterns, globals, locations, fields, locals, view }
     }
 
     fn save(&self) -> CompileState {
         CompileState {
             code: self.code.len(),
             constants: self.constants.len(),
+            patterns: self.patterns.len(),
             globals: self.globals.len(),
             locations: self.locations.len(),
             fields: self.fields.clone(),
@@ -156,6 +162,7 @@ impl<'a> CompileParameters<'a> {
     fn restore(&mut self, state: CompileState) {
         self.code.truncate(state.code);
         self.constants.truncate(state.constants);
+        self.patterns.truncate(state.patterns);
         self.globals.truncate(state.globals);
         self.locations.truncate(state.locations);
         *self.fields = state.fields;
@@ -174,6 +181,7 @@ pub struct CompileResult {
     errors: Vec<ParserError>,
 
     pub constants: Vec<ValuePtr>,
+    pub patterns: Vec<Rc<Pattern>>,
     pub globals: Vec<String>,
     pub locations: Vec<Location>,
     pub fields: Fields,

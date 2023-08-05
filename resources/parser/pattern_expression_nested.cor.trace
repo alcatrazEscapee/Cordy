@@ -9,16 +9,8 @@ L2: 0006 LiteralBegin(Vector, 2)
     0008 Int(2)
     0009 LiteralAcc(2)
     0010 LiteralEnd
-    0011 CheckLengthEqualTo(2)
-    0012 Int(0)
-    0013 OpIndexPeek
-    0014 StoreGlobal(1) -> y
-    0015 PopN(2)
-    0016 Int(1)
-    0017 OpIndexPeek
-    0018 StoreGlobal(2) -> z
-    0019 PopN(2)
-    0020 StoreGlobal(0) -> x
-    0021 Pop
-    0022 PopN(3)
-    0023 Exit
+    0011 ExecPattern(0)
+    0012 StoreGlobal(0) -> x
+    0013 Pop
+    0014 PopN(3)
+    0015 Exit

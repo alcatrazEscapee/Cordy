@@ -1,14 +1,15 @@
 use std::collections::VecDeque;
+use std::rc::Rc;
 
 use crate::compiler::{CompileParameters, CompileResult};
 use crate::compiler::parser::core::ParserState;
 use crate::compiler::parser::expr::{Expr, ExprType};
 use crate::compiler::parser::semantic::{LateBoundGlobal, LValue, LValueReference, ParserFunctionImpl, Reference};
 use crate::compiler::scanner::{ScanResult, ScanToken};
-use crate::core::NativeFunction;
+use crate::core::{NativeFunction, Pattern};
 use crate::reporting::Location;
 use crate::trace;
-use crate::vm::{Opcode, StructTypeImpl};
+use crate::vm::{Opcode, StructTypeImpl, ValuePtr};
 use crate::vm::operator::{BinaryOp, UnaryOp};
 
 pub use crate::compiler::parser::errors::{ParserError, ParserErrorType};
@@ -46,7 +47,7 @@ pub(super) fn parse(enable_optimization: bool, scan_result: ScanResult) -> Compi
 pub(super) fn parse_incremental(scan_result: ScanResult, params: &mut CompileParameters, rule: ParseRule) -> Vec<ParserError> {
     let mut errors: Vec<ParserError> = Vec::new();
 
-    rule(&mut Parser::new(params.enable_optimization, scan_result.tokens, params.code, &mut errors, params.constants, params.globals, params.locations, params.fields, params.locals, &mut Vec::new()));
+    rule(&mut Parser::new(params.enable_optimization, scan_result.tokens, params.code, &mut errors, params.constants, params.patterns, params.globals, params.locations, params.fields, params.locals, &mut Vec::new()));
 
     errors
 }
@@ -57,7 +58,8 @@ fn parse_rule(enable_optimization: bool, tokens: Vec<(Location, ScanToken)>, rul
         code: Vec::new(),
         errors: Vec::new(),
 
-        constants: vec![],
+        constants: Vec::new(),
+        patterns: Vec::new(),
         globals: Vec::new(),
         locations: Vec::new(),
         fields: Fields::new(),
@@ -65,7 +67,7 @@ fn parse_rule(enable_optimization: bool, tokens: Vec<(Location, ScanToken)>, rul
         locals: Vec::new(),
     };
 
-    rule(&mut Parser::new(enable_optimization, tokens, &mut result.code, &mut result.errors, &mut result.constants, &mut result.globals, &mut result.locations, &mut result.fields, &mut Locals::empty(), &mut result.locals));
+    rule(&mut Parser::new(enable_optimization, tokens, &mut result.code, &mut result.errors, &mut result.constants, &mut result.patterns, &mut result.globals, &mut result.locations, &mut result.fields, &mut Locals::empty(), &mut result.locals));
 
     result
 }
@@ -112,11 +114,13 @@ pub(super) struct Parser<'a> {
     scope_depth: u32, // Current scope depth
     function_depth: u32,
 
-    constants: &'a mut Vec<Value>,
+    constants: &'a mut Vec<ValuePtr>,
 
     /// List of all functions known to the parser, in their unbaked form.
     /// Note that this list is considered starting at the length of `baked_functions`
     functions: Vec<ParserFunctionImpl>,
+
+    patterns: &'a mut Vec<Rc<Pattern>>,
 }
 
 
@@ -129,7 +133,8 @@ impl Parser<'_> {
         output: &'b mut Vec<Opcode>,
         errors: &'b mut Vec<ParserError>,
 
-        constants: &'b mut Vec<Value>,
+        constants: &'b mut Vec<ValuePtr>,
+        patterns: &'b mut Vec<Rc<Pattern>>,
         globals_reference: &'b mut Vec<String>,
         locations: &'b mut Vec<Location>,
         fields: &'b mut Fields,
@@ -165,6 +170,7 @@ impl Parser<'_> {
 
             constants,
             functions: Vec::new(),
+            patterns,
         }
     }
 
