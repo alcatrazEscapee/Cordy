@@ -41,7 +41,7 @@ pub fn replace<VM: VirtualInterface>(vm: &mut VM, pattern: ValuePtr, replacer: V
     let regex: Regex = compile_regex(pattern)?;
     let target = target.check_str()?;
     let text = target.as_str().borrow_const().as_str();
-    if replacer.is_function() {
+    if replacer.is_evaluable() {
         let replacer: InvokeArg1 = InvokeArg1::from(replacer)?;
         let mut err: Option<Box<RuntimeError>> = None;
         let replaced: ValuePtr = regex.replace_all(text, |captures: &Captures| {
@@ -281,8 +281,8 @@ impl<'a> StringFormatter<'a> {
                         (Some('x'), true) => format!("{:0width$x}", self.arg()?.check_int()?.as_int(), width = padding),
                         (Some('b'), false) => format!("{:width$b}", self.arg()?.check_int()?.as_int(), width = padding),
                         (Some('b'), true) => format!("{:0width$b}", self.arg()?.check_int()?.as_int(), width = padding),
-                        (Some('s'), true) => format!("{:width$}", self.arg()?.check_str()?.as_str().borrow_const(), width = padding),
-                        (Some('s'), false) => format!("{:0width$}", self.arg()?.check_str()?.as_str().borrow_const(), width = padding),
+                        (Some('s'), true) => format!("{:width$}", self.arg()?.to_str(), width = padding),
+                        (Some('s'), false) => format!("{:0width$}", self.arg()?.to_str(), width = padding),
                         (c, _) => return ValueErrorInvalidFormatCharacter(c.cloned()).err(),
                     };
 

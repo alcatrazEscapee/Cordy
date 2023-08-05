@@ -70,7 +70,7 @@ impl ExitType {
         matches!(self, ExitType::Exit | ExitType::Error(_))
     }
 
-    fn of<R: BufRead, W: Write>(vm: &mut VirtualMachine<R, W>, result: AnyResult) -> ExitType {
+    fn of<R: BufRead, W: Write>(vm: &VirtualMachine<R, W>, result: AnyResult) -> ExitType {
         match result.map_err(|e| *e) {
             Ok(_) => ExitType::Return,
             Err(RuntimeExit) => ExitType::Exit,
@@ -1265,7 +1265,7 @@ mod tests {
     #[test] fn test_int_to_bin() { run_str("1234 . bin . print", "10011010010\n"); }
     #[test] fn test_int_default_value_yes() { run_str("int('123', 567) . print", "123\n"); }
     #[test] fn test_int_default_value_no() { run_str("int('yes', 567) . print", "567\n"); }
-    #[test] fn test_int_min_and_max() { run_str("[int.min, max(int)] . print", "[-9223372036854775808, 9223372036854775807]\n") }
+    #[test] fn test_int_min_and_max() { run_str("[int.min, max(int)] . print", "[-4611686018427387904, 4611686018427387903]\n") }
     #[test] fn test_complex_add() { run_str("(1 + 2i) + (3 + 4j) . print", "4 + 6i\n"); }
     #[test] fn test_complex_mul() { run_str("(1 + 2i) * (3 + 4j) . print", "-5 + 10i\n"); }
     #[test] fn test_complex_str() { run_str("1 + 1i . print", "1 + 1i\n"); }

@@ -783,7 +783,7 @@ macro_rules! impl_owned_value {
 
         impl IntoValue for $inner {
             fn to_value(self) -> ValuePtr {
-                ValuePtr::owned(Prefix::prefix($ty, self))
+                ValuePtr::owned(Prefix::new($ty, self))
             }
         }
 
@@ -873,7 +873,7 @@ impl_into!(num_complex::Complex<i64>, self, ComplexImpl { inner: self }.to_value
 impl_into!(ComplexImpl, self, if self.inner.im == 0 {
     ValuePtr::of_int(self.inner.re)
 } else {
-    ValuePtr::owned(Prefix::prefix(Type::Complex, self))
+    ValuePtr::owned(Prefix::new(Type::Complex, self))
 });
 impl_into!(bool, self, ValuePtr::of_bool(self));
 impl_into!(char, self, String::from(self).to_value());
@@ -1502,7 +1502,7 @@ impl Iterable {
             },
             Iterable::Collection(_, it) => IterableRev(Iterable::Collection(len, it)),
             Iterable::RawVector(_, it) => IterableRev(Iterable::RawVector(len, it)),
-            Iterable::Enumerate(_, it) => IterableRev(Iterable::Enumerate(0, Box::new(it.reverse().0))),
+            Iterable::Enumerate(_, it) => IterableRev(Iterable::Enumerate(len, Box::new(it.reverse().0))),
             it => IterableRev(it)
         }
     }
@@ -1512,6 +1512,7 @@ impl Iterable {
 /// A simple wrapper around reverse iteration
 /// As most of our iterators are weirdly stateful, we can't support simple reverse iteration via `next_back()`
 /// Instead, we wrap them in this type, by calling `Iterable.reverse()`. This then supports iteration in reverse.
+#[derive(Debug)]
 pub struct IterableRev(Iterable);
 
 impl IterableRev {
@@ -1522,7 +1523,7 @@ impl IterableRev {
 
 impl Iterable {
     /// Returns the next element from a collection-like `ValuePtr` acting as an iterable
-    fn get(ptr: & mut ValuePtr, index: usize) -> Option<ValuePtr> {
+    fn get(ptr: &ValuePtr, index: usize) -> Option<ValuePtr> {
         match ptr.ty() {
             Type::List => ptr.as_list().borrow().list.get(index).cloned(),
             Type::Set => ptr.as_set().borrow().set.get_index(index).cloned(),
@@ -1572,17 +1573,15 @@ impl Iterator for IterableRev {
                 if *index == 0 {
                     return None
                 }
-                let ret = Iterable::get(it, *index);
                 *index -= 1;
-                ret
+                Iterable::get(it, *index)
             }
             Iterable::RawVector(index, it) => {
                 if *index == 0 {
                     return None
                 }
-                let ret = it.get(*index).cloned();
                 *index -= 1;
-                ret
+                it.get(*index).cloned()
             }
             Iterable::Range(it, range) => range.next(it),
             Iterable::Enumerate(index, it) => {

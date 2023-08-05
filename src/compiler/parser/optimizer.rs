@@ -167,7 +167,7 @@ impl Optimize for Expr {
             Expr(loc, ExprType::IfThenElse(condition, if_true, if_false)) => {
                 let condition = condition.optimize();
                 match condition.into_const() {
-                    Ok(condition) => if condition.as_bool() { if_true.optimize() } else { if_false.optimize() },
+                    Ok(condition) => if condition.to_bool() { if_true.optimize() } else { if_false.optimize() },
                     Err(condition) => condition.if_then_else(loc, if_true.optimize(), if_false.optimize()),
                 }
             },

@@ -9,6 +9,7 @@ use indexmap::{IndexMap, IndexSet};
 use crate::vm::{operator, IntoIterableValue, IntoValue, VirtualInterface, RuntimeError, ValueResult, ValuePtr, Type, ValueOption, MIN_INT, MAX_INT};
 use crate::vm::operator::BinaryOp;
 use crate::trace;
+use crate::util::impl_partial_ord;
 
 pub use crate::core::collections::{get_index, set_index, get_slice, to_index};
 pub use crate::core::strings::format_string;
@@ -466,7 +467,7 @@ pub enum PartialArgument {
 // This is fine for now, maybe figure out how to fix that later
 // todo: fix issues with partial function + native function equality and other operators
 impl PartialEq for PartialArgument { fn eq(&self, _: &Self) -> bool { true } }
-impl PartialOrd for PartialArgument { fn partial_cmp(&self, _: &Self) -> Option<Ordering> { Some(Ordering::Equal) } }
+impl_partial_ord!(PartialArgument);
 impl std::cmp::Ord for PartialArgument { fn cmp(&self, _: &Self) -> Ordering { Ordering::Equal } }
 impl Hash for PartialArgument { fn hash<H: Hasher>(&self, _: &mut H) {} }
 
@@ -1003,18 +1004,23 @@ pub fn invoke_memoized<VM : VirtualInterface>(vm: &mut VM, nargs: u32) -> ValueR
     let func: ValuePtr = vm.pop();
     let memoized = func.as_memoized();
 
-    // We cannot use the `.entry()` API, as that requires we mutably borrow the cache during the call to `vm.invoke_func()`
-    // We only lookup by key once (in the cached case), and twice (in the uncached case)
-    if let Some(ret) = memoized.borrow().cache.get(&args) {
-        return ret.clone().ok();
-    }
+    let func: ValuePtr = {
+        // We cannot use the `.entry()` API, as that requires we mutably borrow the cache during the call to `vm.invoke_func()`
+        // We only lookup by key once (in the cached case), and twice (in the uncached case)
+        let borrow = memoized.borrow();
+        if let Some(ret) = borrow.cache.get(&args) {
+            return ret.clone().ok();
+        }
+        borrow.func.clone()
+        // `borrow` is dropped here
+    };
 
-    let value: ValuePtr = vm.invoke_func(memoized.borrow().func.clone(), &args)?;
+    let ret: ValuePtr = vm.invoke_func(func, &args)?;
 
     // The above computation might've entered a value into the cache - so we have to go through `.entry()` again
     return memoized.borrow_mut().cache
         .entry(args)
-        .or_insert(value)
+        .or_insert(ret)
         .clone()
         .ok();
 }

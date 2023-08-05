@@ -13,7 +13,6 @@ use crate::vm::{FunctionImpl, IntoValue, Iterable, RuntimeError, StructTypeImpl}
 use crate::vm::value::{*};
 
 
-
 /// `ValuePtr` holds an arbitrary object representable by Cordy.
 ///
 /// In order to minimize memory usage, improving cache efficiency, and reducing memory boxing, `ValuePtr` is structured as a **tagged pointer**.
@@ -189,6 +188,7 @@ impl ValuePtr {
                     TAG_BOOL => Type::Bool,
                     TAG_NATIVE => Type::NativeFunction,
                     TAG_NONE => Type::None,
+                    TAG_FIELD => Type::GetField,
                     _ => Type::Never,
                 },
                 TAG_ERR => Type::Error,
@@ -266,14 +266,14 @@ impl ValuePtr {
     pub(crate) fn as_ref<T: OwnedValue>(&self) -> &T {
         debug_assert!(self.is_ptr());
         unsafe {
-            &(&*(self.as_ptr() as *const Prefix<T>)).value
+            &(*(self.as_ptr() as *const Prefix<T>)).value
         }
     }
 
     pub fn as_mut_ref<T : OwnedValue>(&mut self) -> &mut T {
         debug_assert!(self.is_ptr());
         unsafe {
-            &mut (&mut*(self.as_ptr() as *mut Prefix<T>)).value
+            &mut (*(self.as_ptr() as *mut Prefix<T>)).value
         }
     }
 
@@ -390,16 +390,16 @@ impl Ord for ValuePtr {
 
             // Owned types check equality based on their ref
             Type::Complex => self.as_ref::<ComplexImpl>().cmp(other.as_ref::<ComplexImpl>()),
-            Type::Range => self.as_ref::<RangeImpl>().cmp(&other.as_ref::<RangeImpl>()),
+            Type::Range => self.as_ref::<RangeImpl>().cmp(other.as_ref::<RangeImpl>()),
             Type::Enumerate => self.as_ref::<EnumerateImpl>().cmp(other.as_ref::<EnumerateImpl>()),
             // Shared types check equality based on the shared ref
-            Type::Str => self.as_shared_ref::<String>().cmp(&other.as_shared_ref::<String>()),
-            Type::List => self.as_shared_ref::<ListImpl>().cmp(&other.as_shared_ref::<ListImpl>()),
-            Type::Set => self.as_shared_ref::<SetImpl>().cmp(&other.as_shared_ref::<SetImpl>()),
-            Type::Dict => self.as_shared_ref::<DictImpl>().cmp(&other.as_shared_ref::<DictImpl>()),
-            Type::Heap => self.as_shared_ref::<HeapImpl>().cmp(&other.as_shared_ref::<HeapImpl>()),
-            Type::Vector => self.as_shared_ref::<VectorImpl>().cmp(&other.as_shared_ref::<VectorImpl>()),
-            Type::Struct => self.as_shared_ref::<StructImpl>().cmp(&other.as_shared_ref::<StructImpl>()),
+            Type::Str => self.as_shared_ref::<String>().cmp(other.as_shared_ref::<String>()),
+            Type::List => self.as_shared_ref::<ListImpl>().cmp(other.as_shared_ref::<ListImpl>()),
+            Type::Set => self.as_shared_ref::<SetImpl>().cmp(other.as_shared_ref::<SetImpl>()),
+            Type::Dict => self.as_shared_ref::<DictImpl>().cmp(other.as_shared_ref::<DictImpl>()),
+            Type::Heap => self.as_shared_ref::<HeapImpl>().cmp(other.as_shared_ref::<HeapImpl>()),
+            Type::Vector => self.as_shared_ref::<VectorImpl>().cmp(other.as_shared_ref::<VectorImpl>()),
+            Type::Struct => self.as_shared_ref::<StructImpl>().cmp(other.as_shared_ref::<StructImpl>()),
             // Function-like types are not checked for ordering
             Type::StructType |
             Type::Memoized |
@@ -556,7 +556,7 @@ impl Debug for ValuePtr {
             Type::Bool => Debug::fmt(&self.as_bool(), f),
             Type::Int => Debug::fmt(&self.as_int(), f),
             Type::NativeFunction => Debug::fmt(&self.as_native(), f),
-            Type::GetField => Debug::fmt(&self.as_field(), f),
+            Type::GetField => f.debug_struct("GetField").field("field_index", &self.as_field()).finish(),
             // Owned types
             Type::Complex => Debug::fmt(self.as_ref::<ComplexImpl>(), f),
             Type::Range => Debug::fmt(self.as_ref::<RangeImpl>(), f),
@@ -594,14 +594,14 @@ pub struct Prefix<T : OwnedValue> {
 }
 
 impl<T : OwnedValue> Prefix<T> {
-    pub(crate) fn prefix(ty: Type, value: T) -> Prefix<T> {
+    pub fn new(ty: Type, value: T) -> Prefix<T> {
         Prefix { ty, value }
     }
 }
 
 impl<T : Clone + OwnedValue> Clone for Prefix<T> {
     fn clone(&self) -> Self {
-        Prefix::prefix(self.ty, self.value.clone())
+        Prefix::new(self.ty, self.value.clone())
     }
 }
 
