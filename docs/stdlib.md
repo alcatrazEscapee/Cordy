@@ -291,7 +291,7 @@ Returns a range of `int`, from `start` inclusive, to `stop` exclusive, counting 
 
 **Note**: this function is lazy, and will produce elements when iterated through, i.e. by calling `list`.
 
-### Enumerate `<T> enumerate(x: iterable<A>) -> list<vector<int, A>>`
+### Enumerate `<A> enumerate(x: iterable<A>) -> list<vector<int, A>>`
 
 Returns a `list` of pairs, of index and value of each element in the iterable `x`.
 
@@ -758,7 +758,7 @@ When called with a string containing exactly one character (unicode scalar value
 65
 ```
 
-### `Char(x: int) -> str`
+### Char `char(x: int) -> str`
 
 Converts an integer to its unicode character representation, as a single-character string. If the integer represents an invalid character, an error will be raised instead.
 
