@@ -745,6 +745,32 @@ Note, for simple substring searching, it is sufficient to test for truthiness, a
 [('bob', 'b', 'b'), ('and', 'a', 'd'), ('alice', 'a', 'e')]
 ```
 
+### Ord `ord(x: str) -> int`
+
+When called with a string containing exactly one character (unicode scalar value), returns the integer representing the unicode character.
+
+**Examples**
+
+```
+>>> ord('a')
+97
+>>> ord('A')
+65
+```
+
+### `Char(x: int) -> str`
+
+Converts an integer to its unicode character representation, as a single-character string. If the integer represents an invalid character, an error will be raised instead.
+
+**Examples**
+
+```
+>>> char(97)
+'a'
+>>> char(65)
+'A'
+```
+
 ### (Dict) Default `<K, V> default(x: V, it: dict<K, V>) -> dict<K, V>`
 
 Sets the default value of `it` to `x`, and then returns `it`. This means that any future queries into `it` via the index syntax, if the key is not in the dictionary, will return `x`.
