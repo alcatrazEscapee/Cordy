@@ -208,6 +208,7 @@ pub fn binary_is(lhs: ValuePtr, rhs: ValuePtr, invert: bool) -> ValueResult {
             NativeFunction::Dict => lhs.is_dict(),
             NativeFunction::Vector => lhs.is_vector(),
             NativeFunction::Iterable => lhs.is_iter(),
+            NativeFunction::Heap => lhs.is_heap(),
             NativeFunction::Any => true,
             _ => return TypeErrorBinaryIs(lhs, rhs).err()
         },
