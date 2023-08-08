@@ -60,6 +60,7 @@ pub fn scan(input: String) -> String {
             ScanTokenType::Keyword => "[[b;#b5f;]",
             ScanTokenType::Constant => "[[b;#27f;]",
             ScanTokenType::Native => "[[;#b80;]",
+            ScanTokenType::Type => "[[;#2aa;]",
             ScanTokenType::Number => "[[;#385;]",
             ScanTokenType::String => "[[;#b10;]",
             ScanTokenType::Syntax => "",
