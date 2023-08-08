@@ -17,6 +17,7 @@ use crate::vm::value::{*};
 ///
 /// In order to minimize memory usage, improving cache efficiency, and reducing memory boxing, `ValuePtr` is structured as a **tagged pointer**.
 /// On 64-bit systems, pointers that point to 64-bit (8-byte) aligned objects naturally have the last three bits set to zero.
+/// On 32-bit systems (like web assembly), the last two bits are zero.
 /// This means we can store a little bit of type information in the low bits of a pointer.
 ///
 /// # Representation
@@ -24,10 +25,8 @@ use crate::vm::value::{*};
 /// A `ValuePtr` may be:
 ///
 /// - An inline, 63-bit signed integer, stored with the lowest bit equal to `0`
-/// - An inline constant `nil`, `true`, or `false`, `NativeFunction`, or `GetField`, all stored with the lowest three bits equal to `001`
-/// - An inline `Box<RuntimeError>` which is stored with the lowest three bits equal to `011`
-/// - A tagged pointer to a piece of **owned** memory, including additional type information, with the lowest three bits equal to `101`
-/// - A tagged pointer to a piece of **shared** memory, including additional type information, with the lowest three bits equal to `111`
+/// - An inline constant `nil`, `true`, or `false`, `NativeFunction`, or `GetField`, all stored with the lowest three bits equal to `01`
+/// - A tagged pointer, to a `Prefix<T>`, with the lowest three bits equal to `11`
 ///
 /// In order to fully determine the type of a given `ValuePtr`, we use a secondary characteristic, which is enabled by having strict, `#[repr(C)]` struct semantics:
 /// For every owned, and shared value, we can treat it as a `NonNull<Prefix>` This lets us check the `ty` field, which fully specifies the type of the value.
