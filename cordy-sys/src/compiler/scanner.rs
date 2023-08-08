@@ -66,6 +66,7 @@ pub enum ScanTokenType {
     Keyword,
     Constant,
     Native,
+    Type,
     Number,
     String,
     Syntax,
@@ -170,7 +171,11 @@ impl ScanToken {
             IntLiteral(_) | ComplexLiteral(_) => ScanTokenType::Number,
             KeywordTrue | KeywordFalse | KeywordNil => ScanTokenType::Constant,
             KeywordLet | KeywordFn | KeywordReturn | KeywordIf | KeywordElif | KeywordElse | KeywordThen | KeywordLoop | KeywordWhile | KeywordFor | KeywordIn | KeywordIs | KeywordNot | KeywordBreak | KeywordContinue | KeywordDo | KeywordStruct | KeywordExit | KeywordAssert => ScanTokenType::Keyword,
-            Identifier(it) if NativeFunction::find(it.as_str()).is_some() => ScanTokenType::Native,
+            Identifier(it)  => match NativeFunction::find(it.as_str()) {
+                Some(NativeFunction::Int | NativeFunction::Str | NativeFunction::Function | NativeFunction::List | NativeFunction::Heap | NativeFunction::Dict | NativeFunction::Set | NativeFunction::Vector | NativeFunction::Any | NativeFunction::Bool | NativeFunction::Iterable | NativeFunction::Complex) => ScanTokenType::Type,
+                Some(_) => ScanTokenType::Native,
+                _ => ScanTokenType::Syntax,
+            }
             _ => ScanTokenType::Syntax
         }
     }
