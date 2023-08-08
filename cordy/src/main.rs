@@ -5,7 +5,7 @@ use rustyline::error::ReadlineError;
 
 use cordy_sys::{compiler, repl};
 use cordy_sys::compiler::CompileResult;
-use cordy_sys::repl::Repl;
+use cordy_sys::repl::Reader;
 use cordy_sys::SourceView;
 use cordy_sys::vm::{ExitType, VirtualMachine};
 
@@ -97,7 +97,7 @@ struct EditorRepl {
     editor: DefaultEditor
 }
 
-impl Repl for EditorRepl {
+impl Reader for EditorRepl {
     fn read(&mut self, prompt: &'static str) -> Option<Result<String, String>> {
         io::stdout().flush().unwrap();
         match self.editor.readline(prompt) {

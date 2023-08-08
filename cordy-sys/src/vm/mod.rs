@@ -287,7 +287,7 @@ impl<R, W> VirtualMachine<R, W> where
                 self.push(self.stack[local].clone());
             }
             StoreLocal(local, pop) => {
-                trace::trace_interpreter!("vm::run StoreLocal index={}, value={}, prev={}", local, self.stack.last().unwrap().as_debug_str(), self.stack[local].as_debug_str());
+                trace::trace_interpreter!("vm::run StoreLocal index={}, value={}, prev={}", local, self.stack.last().unwrap().as_debug_str(), self.stack[local as usize].as_debug_str());
                 let value = if pop { self.pop() } else { self.peek(0).clone() };
                 self.store_local(local, value);
             },
@@ -302,7 +302,7 @@ impl<R, W> VirtualMachine<R, W> where
                 }
             },
             StoreGlobal(local, pop) => {
-                trace::trace_interpreter!("vm::run StoreGlobal index={}, value={}, prev={}", local, self.stack.last().unwrap().as_debug_str(), self.stack[local].as_debug_str());
+                trace::trace_interpreter!("vm::run StoreGlobal index={}, value={}, prev={}", local, self.stack.last().unwrap().as_debug_str(), self.stack[local as usize].as_debug_str());
                 let value = if pop { self.pop() } else { self.peek(0).clone() };
                 self.store_global(local, value)?;
             },

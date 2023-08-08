@@ -1,86 +1,151 @@
-use std::io::Write;
+use std::io;
+use std::io::{BufRead, Read, Write};
 
 use crate::{compiler, SourceView};
 use crate::compiler::{IncrementalCompileResult, Locals};
 use crate::vm::{ExitType, VirtualInterface, VirtualMachine};
 
 
-pub trait Repl {
-    /// Reads a line from input.
-    /// On the target implementation this also flushes any previous buffered output.
+/// A trait implementing a predictable, callback-based reader. This is the implementation used by the executable REPL
+pub trait Reader {
+
+    /// Returns the next line from the input.
     ///
-    /// - `Some(Ok(String))` indicates a string was read
-    /// - `Some(Err(String))` indicates an error was raised, and should be raised
-    /// - `None` indicates the interface was closed.
-    fn read(&mut self, prompt: &'static str) -> Option<Result<String, String>>;
+    /// - `ReadResult::Exit` indicates the input is closed
+    /// - `ReadResult::Error(e)` indicates an error occurred during reading, which should be propagated to the caller of `run()`
+    /// - `ReadResult::Ok(line)` returns the next line from the input.
+    fn read(&mut self, prompt: &'static str) -> ReadResult;
 }
 
-/// If `repeat_input` is true, everything written to input will be written directly back to output via the VM's `println` functions
-/// This is used for testing purposes, as the `writer` must be given solely to the VM for output purposes.
-pub fn run<R : Repl, W: Write>(mut reader: R, writer: W, repeat_input: bool) -> Result<(), String> {
-    let mut continuation: bool = false;
+pub struct Repl<W: Write> {
+    /// If `repeat_input` is true, everything written to input will be written directly back to output via the VM's `println` functions
+    /// This is used for testing purposes, as the `writer` must be given solely to the VM for output purposes.
+    repeat_input: bool,
+    continuation: bool,
+    locals: Vec<Locals>,
+    vm: VirtualMachine<Empty, W>
+}
 
-    // Retain local variables through the entire lifetime of the REPL
-    let view: SourceView = SourceView::new(String::from("<stdin>"), String::new());
-    let mut locals = Locals::empty();
-    let mut vm = VirtualMachine::new(compiler::default(), view, &b""[..], writer, vec![]);
+struct Empty;
 
+impl Read for Empty {
+    fn read(&mut self, _: &mut [u8]) -> io::Result<usize> {
+        Ok(0)
+    }
+}
+
+impl BufRead for Empty {
+    fn fill_buf(&mut self) -> io::Result<&[u8]> {
+        Ok(&[])
+    }
+
+    fn consume(&mut self, _: usize) {}
+}
+
+/// A result returned from a read line operation.
+pub enum ReadResult {
+    Exit,
+    Error(String),
+    Ok(String),
+}
+
+/// A result returned from a single invocation of `Repl::run`
+///
+/// - `Exit` indicates the VM has exited normally
+/// - `Error(e)` indicates the VM has encountered an unrecoverable error from input reading
+/// - `Ok` indicates the VM ran successfully and is ready for further reads
+pub enum RunResult {
+    Exit,
+    Error(String),
+    Ok,
+}
+
+/// Create a new REPL, and invoke it in a loop with the given `Reader` until it is exhausted.
+pub fn run<R : Reader, W: Write>(mut reader: R, writer: W, repeat_input: bool) -> Result<(), String> {
+    let mut repl: Repl<W> = Repl::new(writer, repeat_input);
     loop {
-        let prompt: &'static str = if continuation { "... " } else { ">>> " };
-        let line: String = match reader.read(prompt) {
-            Some(Ok(line)) => {
-                if repeat_input {
-                    vm.println(format!("{}{}", prompt, line))
+        let read = reader.read(repl.prompt());
+        match repl.run(read) {
+            RunResult::Exit => break Ok(()),
+            RunResult::Error(e) => break Err(e),
+            RunResult::Ok => {},
+        }
+    }
+}
+
+impl<W: Write> Repl<W> {
+
+    pub fn new(writer: W, repeat_input: bool) -> Repl<W> {
+        let compile = compiler::default();
+        let view = SourceView::new(String::from("<stdin>"), String::new());
+
+        Repl {
+            repeat_input,
+            continuation: false,
+            locals: Locals::empty(),
+            vm: VirtualMachine::new(compile, view, Empty, writer, vec![])
+        }
+    }
+
+    pub fn prompt(&self) -> &'static str {
+        if self.continuation { "... " } else { ">>> " }
+    }
+
+    pub fn run(&mut self, input: ReadResult) -> RunResult {
+        let line: String = match input {
+            ReadResult::Ok(line) => {
+                if self.repeat_input {
+                    self.vm.println(format!("{}{}", self.prompt(), line))
                 }
                 line
             },
-            Some(Err(e)) => return Err(e),
-            None => return Ok(()),
+            ReadResult::Error(e) => return RunResult::Error(e),
+            ReadResult::Exit => return RunResult::Exit,
         };
 
         match line.as_str() {
-            "" => continue,
+            "" => return RunResult::Ok,
             "#stack" => {
-                vm.println(vm.debug_stack());
-                continue
+                self.vm.println(self.vm.debug_stack());
+                return RunResult::Ok
             },
             "#call-stack" => {
-                vm.println(vm.debug_call_stack());
-                continue
+                self.vm.println(self.vm.debug_call_stack());
+                return RunResult::Ok
             },
             _ => {},
         }
 
-        let buffer = vm.view_mut().text_mut();
+        let buffer = self.vm.view_mut().text_mut();
 
         buffer.push_str(line.as_str());
         buffer.push('\n');
-        continuation = false;
+        self.continuation = false;
 
-
-        match vm.incremental_compile(&mut locals) {
+        match self.vm.incremental_compile(&mut self.locals) {
             IncrementalCompileResult::Success => {},
             IncrementalCompileResult::Errors(errors) => {
                 for e in errors {
-                    vm.println(e);
+                    self.vm.println(e);
                 }
-                vm.view_mut().push(String::from("<stdin>"), String::new());
-                continue
+                self.vm.view_mut().push(String::from("<stdin>"), String::new());
+                return RunResult::Ok
             },
             IncrementalCompileResult::Aborted => {
-                continuation = true;
-                continue
+                self.continuation = true;
+                return RunResult::Ok
             }
         }
 
-        match vm.run_until_completion() {
-            ExitType::Exit | ExitType::Return => return Ok(()),
+        match self.vm.run_until_completion() {
+            ExitType::Exit | ExitType::Return => return RunResult::Exit,
             ExitType::Yield => {},
-            ExitType::Error(error) => vm.println(vm.view().format(&error)),
+            ExitType::Error(error) => self.vm.println(self.vm.view().format(&error)),
         }
 
-        vm.view_mut().push(String::from("<stdin>"), String::new());
-        vm.run_recovery(locals[0].len());
+        self.vm.view_mut().push(String::from("<stdin>"), String::new());
+        self.vm.run_recovery(self.locals[0].len());
+        RunResult::Ok
     }
 }
 
@@ -88,11 +153,14 @@ pub fn run<R : Repl, W: Write>(mut reader: R, writer: W, repeat_input: bool) -> 
 #[cfg(test)]
 mod tests {
     use crate::repl;
-    use crate::repl::Repl;
+    use crate::repl::{Reader, ReadResult};
 
-    impl Repl for Vec<String> {
-        fn read(self: &mut Self, _: &'static str) -> Option<Result<String, String>> {
-            self.pop().map(|u| Ok(u))
+    impl Reader for Vec<String> {
+        fn read(self: &mut Self, _: &'static str) -> ReadResult {
+            match self.pop() {
+                None => ReadResult::Exit,
+                Some(line) => ReadResult::Ok(line)
+            }
         }
     }
 

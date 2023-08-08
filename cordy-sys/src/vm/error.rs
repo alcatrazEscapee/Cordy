@@ -19,6 +19,8 @@ pub enum RuntimeError {
     IncorrectArgumentsGetField(String, u32),
     IncorrectArgumentsStruct(StructTypeImpl, u32),
 
+    IOError(String),
+
     ValueErrorIndexOutOfBounds(i64, usize),
     ValueErrorStepCannotBeZero,
     ValueErrorVariableNotDeclaredYet(String),
