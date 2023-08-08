@@ -1,0 +1,19 @@
+fn add(a, b) {
+    print('adding', a, b)
+    a + b
+}
+
+let add_cached = add . memoize
+
+print(add_cached)
+print(repr(add_cached))
+
+add(3, 5) . print
+add(3, 5) . print
+add(6, 7) . print
+
+add_cached(3, 5) . print
+add_cached(3, 5) . print
+add_cached(6, 7) . print
+add_cached(1, 2) . print
+add_cached(6, 7) . print

@@ -1,0 +1,13 @@
+L1: 0000 InitGlobal
+    0001 Nil
+L3: 0002 Nil
+L4: 0003 True
+    0004 JumpIfFalsePop(9)
+L5: 0005 Nil
+L6: 0006 PopN(2)
+    0007 Jump(11)
+    0008 Pop
+L7: 0009 Pop
+L8: 0010 Jump(2)
+    0011 Pop
+    0012 Exit

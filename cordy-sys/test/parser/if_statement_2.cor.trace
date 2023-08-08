@@ -1,0 +1,14 @@
+L1: 0000 Int(5)
+    0001 Int(3)
+    0002 LessThan
+    0003 JumpIfFalsePop(9)
+L2: 0004 Print
+    0005 Str('yes')
+    0006 Call(1)
+L3: 0007 Pop
+    0008 Jump(13)
+L4: 0009 Print
+    0010 Str('no')
+    0011 Call(1)
+L5: 0012 Pop
+    0013 Exit

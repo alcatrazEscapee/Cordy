@@ -1,0 +1,16 @@
+L1: 0000 InitGlobal
+    0001 InitGlobal
+    0002 InitGlobal
+    0003 Nil
+    0004 Nil
+    0005 Nil
+L2: 0006 LiteralBegin(Vector, 2)
+    0007 Int(1)
+    0008 Int(2)
+    0009 LiteralAcc(2)
+    0010 LiteralEnd
+    0011 ExecPattern(0)
+    0012 StoreGlobal(0) -> x
+    0013 Pop
+    0014 PopN(3)
+    0015 Exit

@@ -1,0 +1,6 @@
+=== Scan Tokens ===
+
+Identifier("println")
+OpenParen
+StringLiteral("Hello World!")
+CloseParen

@@ -1,0 +1,5 @@
+do { let x = x }
+let y = 3
+do {
+    let y = y
+}

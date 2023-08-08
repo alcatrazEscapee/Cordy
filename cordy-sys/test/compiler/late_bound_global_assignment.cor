@@ -1,0 +1,9 @@
+fn foo() {
+    g = 'hello'
+}
+
+let g
+
+foo()
+
+g . print

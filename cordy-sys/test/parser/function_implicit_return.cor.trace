@@ -1,0 +1,19 @@
+L1: 0000 InitGlobal
+    0001 Function(fn foo(x) -> L[11, 18])
+L7: 0002 PushGlobal(0) -> foo
+    0003 Int(2)
+    0004 Call(1)
+    0005 Print
+    0006 Swap
+    0007 Call(1)
+    0008 Pop
+    0009 Pop
+    0010 Exit
+L2: 0011 PushLocal(0) -> x
+L4: 0012 Int(1)
+L2: 0013 GreaterThan
+    0014 JumpIfFalsePop(17)
+L4: 0015 True
+    0016 Jump(18)
+    0017 False
+L5: 0018 Return

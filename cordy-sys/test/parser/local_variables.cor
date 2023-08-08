@@ -1,0 +1,11 @@
+let x
+do {
+    let y
+    do {
+        let x
+        let y
+        do {
+            let z
+        }
+    }
+}

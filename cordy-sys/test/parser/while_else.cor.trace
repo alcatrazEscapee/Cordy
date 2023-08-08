@@ -1,0 +1,9 @@
+L1: 0000 True
+    0001 JumpIfFalsePop(6)
+L2: 0002 Str('hello')
+    0003 Pop
+L3: 0004 Jump(8)
+L4: 0005 Jump(0)
+L5: 0006 Str('world')
+L6: 0007 Pop
+    0008 Exit
