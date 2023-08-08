@@ -1,6 +1,6 @@
 use std::ops::{ControlFlow, Try};
 
-use crate::vm::RuntimeError;
+use crate::vm::{ErrorResult, Prefix, RuntimeError};
 
 pub fn strip_line_ending(buffer: &mut String) {
     if buffer.ends_with('\n') {
@@ -15,7 +15,7 @@ pub fn strip_line_ending(buffer: &mut String) {
 ///
 /// N.B. This did not work without specifying the types `Box<RuntimeError>` exactly. I do not know why.
 #[inline(always)]
-pub fn catch<T>(err: &mut Option<Box<RuntimeError>>, f: impl FnOnce() -> Result<T, Box<RuntimeError>>, default: T) -> T {
+pub fn catch<T>(err: &mut Option<Box<Prefix<RuntimeError>>>, f: impl FnOnce() -> ErrorResult<T>, default: T) -> T {
     match f().branch() {
         ControlFlow::Continue(e) => e,
         ControlFlow::Break(Err(e)) => {

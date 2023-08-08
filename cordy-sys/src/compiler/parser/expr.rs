@@ -141,7 +141,7 @@ impl Expr {
     pub fn value_result(loc: Location, value: ValueResult) -> Expr {
         match value.as_result() {
             Ok(value) => Expr::value(value),
-            Err(e) => Expr::error(loc, e),
+            Err(e) => Expr::error(loc, Box::new(e.value)),
         }
     }
 

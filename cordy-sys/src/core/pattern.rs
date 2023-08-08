@@ -1,5 +1,5 @@
 use crate::core;
-use crate::vm::{IntoValue, StoreOp, ValuePtr, VirtualInterface};
+use crate::vm::{AnyResult, IntoValue, StoreOp, ValuePtr, VirtualInterface};
 use crate::vm::RuntimeError;
 
 use RuntimeError::{*};
@@ -38,7 +38,7 @@ impl Pattern {
         self.terms.push(Term::Pattern(index, pattern))
     }
 
-    pub fn apply<VM : VirtualInterface>(&self, vm: &mut VM, ptr: &ValuePtr) -> Result<(), Box<RuntimeError>> {
+    pub fn apply<VM : VirtualInterface>(&self, vm: &mut VM, ptr: &ValuePtr) -> AnyResult {
         self.check_length(ptr)?;
 
         for term in &self.terms {
@@ -61,7 +61,7 @@ impl Pattern {
         Ok(())
     }
 
-    fn check_length(&self, ptr: &ValuePtr) -> Result<(), Box<RuntimeError>> {
+    fn check_length(&self, ptr: &ValuePtr) -> AnyResult {
         let len = ptr.len()?;
         match self.variadic {
             true if self.len > len => ValueErrorCannotUnpackLengthMustBeGreaterThan(self.len as u32, len, ptr.clone()).err(),

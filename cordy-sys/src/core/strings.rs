@@ -5,7 +5,7 @@ use itertools::Itertools;
 
 use crate::core::InvokeArg1;
 use crate::util;
-use crate::vm::{IntoIterableValue, IntoValue, Iterable, RuntimeError, ValuePtr, ValueResult, VirtualInterface};
+use crate::vm::{ErrorResult, IntoIterableValue, IntoValue, Iterable, Prefix, RuntimeError, ValuePtr, ValueResult, VirtualInterface};
 
 use RuntimeError::{*};
 
@@ -43,7 +43,7 @@ pub fn replace<VM: VirtualInterface>(vm: &mut VM, pattern: ValuePtr, replacer: V
     let text = target.as_str().borrow_const().as_str();
     if replacer.is_evaluable() {
         let replacer: InvokeArg1 = InvokeArg1::from(replacer)?;
-        let mut err: Option<Box<RuntimeError>> = None;
+        let mut err = None;
         let replaced: ValuePtr = regex.replace_all(text, |captures: &Captures| {
             let arg: ValuePtr = as_result(captures);
             let ret: String = util::catch::<String>(&mut err, || {
@@ -55,7 +55,7 @@ pub fn replace<VM: VirtualInterface>(vm: &mut VM, pattern: ValuePtr, replacer: V
             }, String::new());
             ret
         }).to_value();
-        util::join::<ValuePtr, Box<RuntimeError>, ValueResult>(replaced, err)
+        util::join::<ValuePtr, Box<Prefix<RuntimeError>>, ValueResult>(replaced, err)
     } else {
         regex.replace_all(text, replacer.check_str()?.as_str().borrow_const().as_str())
             .to_value()
@@ -106,11 +106,11 @@ fn as_result(captures: &Captures) -> ValuePtr {
         .to_vector()
 }
 
-fn compile_regex(a1: ValuePtr) -> Result<Regex, Box<RuntimeError>> {
+fn compile_regex(a1: ValuePtr) -> ErrorResult<Regex> {
     let raw = escape_regex(a1.check_str()?.as_str().borrow_const());
     match Regex::new(&raw) {
         Ok(regex) => Ok(regex),
-        Err(e) => Err(Box::new(ValueErrorCannotCompileRegex(raw, e.to_string())))
+        Err(e) => ValueErrorCannotCompileRegex(raw, e.to_string()).err()
     }
 }
 

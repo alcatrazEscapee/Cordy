@@ -54,32 +54,67 @@ pub union ValuePtr {
 }
 
 
-const TAG_INT: usize       = 0b______000;
-const TAG_NIL: usize       = 0b__000_001;
-const TAG_BOOL: usize      = 0b__001_001;
-const TAG_FALSE: usize     = 0b0_001_001;
-const TAG_TRUE: usize      = 0b1_001_001;
-const TAG_NATIVE: usize    = 0b__010_001;
-const TAG_NONE: usize      = 0b__011_001;
-const TAG_FIELD: usize     = 0b__100_001;
-const TAG_ERR: usize       = 0b______011;
-const TAG_PTR: usize       = 0b______101;
-const TAG_SHARED: usize    = 0b______111;
+const TAG_INT: usize       = 0b______00;
+const TAG_NIL: usize       = 0b__000_01;
+const TAG_BOOL: usize      = 0b__001_01;
+const TAG_FALSE: usize     = 0b0_001_01;
+const TAG_TRUE: usize      = 0b1_001_01;
+const TAG_NATIVE: usize    = 0b__010_01;
+const TAG_NONE: usize      = 0b__011_01;
+const TAG_FIELD: usize     = 0b__100_01;
+const TAG_PTR: usize       = 0b______11;
 
-const MASK_INT: usize      = 0b________1;
-const MASK_NIL: usize      = 0b__111_111;
-const MASK_BOOL: usize     = 0b__111_111;
-const MASK_NATIVE: usize   = 0b__111_111;
-const MASK_FIELD: usize    = 0b__111_111;
-const MASK_NONE: usize     = 0b__111_111;
-const MASK_ERR: usize      = 0b______111;
-const MASK_PTR: usize      = 0b______111;
-const MASK_SHARED: usize   = 0b______111;
+const MASK_INT: usize      = 0b_______1;
+const MASK_NIL: usize      = 0b__111_11;
+const MASK_BOOL: usize     = 0b__111_11;
+const MASK_NATIVE: usize   = 0b__111_11;
+const MASK_FIELD: usize    = 0b__111_11;
+const MASK_NONE: usize     = 0b__111_11;
+const MASK_PTR: usize      = 0b______11;
 
-const PTR_MASK: usize = 0xffff_ffff_ffff_fff8;
+const PTR_MASK: usize = !0b11;
 
 pub const MAX_INT: i64 = 0x3fff_ffff_ffff_ffffu64 as i64;
 pub const MIN_INT: i64 = 0xc000_0000_0000_0000u64 as i64;
+
+pub struct Field(pub u32);
+
+impl From<bool> for ValuePtr {
+    fn from(value: bool) -> Self {
+        ValuePtr { tag: if value { TAG_TRUE } else { TAG_FALSE } }
+    }
+}
+
+impl From<i64> for ValuePtr {
+    fn from(value: i64) -> Self {
+        debug_assert!(MIN_INT <= value && value <= MAX_INT);
+        ValuePtr { tag: TAG_INT | ((value << 1) as usize) }
+    }
+}
+
+impl From<NativeFunction> for ValuePtr {
+    fn from(value: NativeFunction) -> Self {
+        ValuePtr { tag: TAG_NATIVE | ((value as usize) << 6) }
+    }
+}
+
+impl From<Field> for ValuePtr {
+    fn from(value: Field) -> Self {
+        ValuePtr { tag: TAG_FIELD | ((value.0 as usize) << 6) }
+    }
+}
+
+impl<T : OwnedValue> From<Prefix<T>> for ValuePtr {
+    fn from(value: Prefix<T>) -> Self {
+        ValuePtr { tag: TAG_PTR | (Box::into_raw(Box::new(value)) as usize) }
+    }
+}
+
+impl<T : SharedValue> From<SharedPrefix<T>> for ValuePtr {
+    fn from(value: SharedPrefix<T>) -> Self {
+        ValuePtr { tag: TAG_PTR | (Box::into_raw(Box::new(value)) as usize) }
+    }
+}
 
 
 impl ValuePtr {
@@ -88,37 +123,8 @@ impl ValuePtr {
         ValuePtr { tag: TAG_NIL }
     }
 
-    pub fn none() -> ValuePtr {
+    pub const fn none() -> ValuePtr {
         ValuePtr { tag: TAG_NONE }
-    }
-
-    pub(super) fn of_bool(value: bool) -> ValuePtr {
-        ValuePtr { tag: if value { TAG_TRUE } else { TAG_FALSE } }
-    }
-
-    pub(super) fn of_int(value: i64) -> ValuePtr {
-        debug_assert!(MIN_INT <= value && value <= MAX_INT);
-        ValuePtr { tag: TAG_INT | ((value << 1) as usize) }
-    }
-
-    pub(super) fn of_native(value: NativeFunction) -> ValuePtr {
-        ValuePtr { tag: TAG_NATIVE | ((value as usize) << 6) }
-    }
-
-    pub fn of_field(field: u32) -> ValuePtr {
-        ValuePtr { tag: TAG_FIELD | ((field as usize) << 6) }
-    }
-
-    pub(super) fn owned<T : OwnedValue>(value: Prefix<T>) -> ValuePtr {
-        ValuePtr { tag: TAG_PTR | (Box::into_raw(Box::new(value)) as usize) }
-    }
-
-    pub(super) fn shared<T : SharedValue>(value: SharedPrefix<T>) -> ValuePtr {
-        ValuePtr { tag: TAG_SHARED | (Box::into_raw(Box::new(value)) as usize) }
-    }
-
-    pub(super) fn error(err: RuntimeError) -> ValuePtr {
-        ValuePtr { tag: TAG_ERR | (Box::into_raw(Box::new(err)) as usize) }
     }
 
     // `.as_T()` methods for inline types take a `&self` for convenience. Copying the value is the same as copying the reference.
@@ -191,8 +197,7 @@ impl ValuePtr {
                     TAG_FIELD => Type::GetField,
                     _ => Type::Never,
                 },
-                TAG_ERR => Type::Error,
-                TAG_PTR | TAG_SHARED => (*self.as_ptr()).ty, // Check the prefix for the type
+                TAG_PTR => (*self.as_ptr()).ty, // Check the prefix for the type
                 _ => Type::Int, // Includes all remaining bit patterns with a `0` LSB
             }
         }
@@ -208,13 +213,13 @@ impl ValuePtr {
     pub const fn is_native(&self) -> bool { (unsafe { self.tag } & MASK_NATIVE) == TAG_NATIVE }
     pub const fn is_field(&self) -> bool { (unsafe { self.tag } & MASK_FIELD) == TAG_FIELD }
     pub const fn is_none(&self) -> bool { (unsafe { self.tag } & MASK_NONE) == TAG_NONE }
-    pub const fn is_err(&self) -> bool { (unsafe { self.tag } & MASK_ERR) == TAG_ERR }
 
     fn is_ptr(&self) -> bool { (unsafe { self.tag } & MASK_PTR) == TAG_PTR }
-    fn is_shared(&self) -> bool { (unsafe { self.tag } & MASK_SHARED) == TAG_SHARED }
+    fn is_owned(&self) -> bool { self.ty().is_owned() }
+    fn is_shared(&self) -> bool { self.ty().is_shared() }
 
     /// Transmutes this `ValuePtr` into a `Box<RuntimeError>`
-    pub fn as_err(self) -> Box<RuntimeError> {
+    pub fn as_err_bad(self) -> Box<RuntimeError> {
         debug_assert!(self.is_err());
         unsafe {
             let ret = Box::from_raw(self.as_ptr() as *mut RuntimeError);
@@ -227,7 +232,7 @@ impl ValuePtr {
     }
 
     /// Like `as_ref` but for the error type
-    pub fn as_err_ref(&self) -> &RuntimeError {
+    pub fn as_err_ref_bad(&self) -> &RuntimeError {
         debug_assert!(self.is_err());
         unsafe {
             &*(self.as_ptr() as *const RuntimeError)
@@ -247,7 +252,7 @@ impl ValuePtr {
     /// This hides the unsafe operations underneath, even though everything happening here is _terribly_ unsafe. But, as a result,
     /// since we consume this `ValuePtr` and return a valid representation, this is a safe API.
     pub fn as_box<T : OwnedValue>(self) -> Box<Prefix<T>> {
-        debug_assert!(self.is_ptr()); // Must be owned memory, to make sense converting to `Box<T>`
+        debug_assert!(self.is_owned()); // Must be owned memory, to make sense converting to `Box<T>`
         unsafe {
             // Transmute self into a `Box` of the right prefix type.
             let ret = Box::from_raw(self.as_ptr() as *mut Prefix<T>);
@@ -263,15 +268,15 @@ impl ValuePtr {
     ///
     /// This is akin to `as_box()`, but taking in a reference, and handing one back. In that sense, it's the same safety guarantee as `.as_box()`
     /// The pointer has to be non-null, so `new_unchecked()`, and `as_mut_ptr()` are both valid.
-    pub(crate) fn as_ref<T: OwnedValue>(&self) -> &T {
-        debug_assert!(self.is_ptr());
+    pub fn as_ref<T: OwnedValue>(&self) -> &T {
+        debug_assert!(self.is_owned());
         unsafe {
             &(*(self.as_ptr() as *const Prefix<T>)).value
         }
     }
 
     pub fn as_mut_ref<T : OwnedValue>(&mut self) -> &mut T {
-        debug_assert!(self.is_ptr());
+        debug_assert!(self.is_owned());
         unsafe {
             &mut (*(self.as_ptr() as *mut Prefix<T>)).value
         }
@@ -287,7 +292,7 @@ impl ValuePtr {
 
     /// Strips away the tag bits, and converts this value into a `* mut` pointer to an arbitrary `Prefix`
     unsafe fn as_ptr(&self) -> *mut Prefix<()> {
-        debug_assert!(self.is_ptr() || self.is_shared() || self.is_err());
+        debug_assert!(self.is_ptr());
         unsafe {
             (self.tag & PTR_MASK) as *mut Prefix<()>
         }
@@ -311,7 +316,7 @@ impl ValuePtr {
     }
 
     unsafe fn drop_owned<T: OwnedValue>(&self) {
-        debug_assert!(self.is_ptr()); // Must be owned memory, to make sense converting to `Box<T>`
+        debug_assert!(self.is_owned()); // Must be owned memory, to make sense converting to `Box<T>`
         unsafe {
             drop(Box::from_raw(self.as_ptr() as *mut Prefix<T>));
         }
@@ -363,7 +368,7 @@ impl PartialEq for ValuePtr {
             Type::Function => self.as_shared_ref::<FunctionImpl>() == other.as_shared_ref::<FunctionImpl>(),
             Type::Closure => self.as_shared_ref::<ClosureImpl>() == other.as_shared_ref::<ClosureImpl>(),
             // Error types are equal based on the error ref, this is mostly used for testing purposes
-            Type::Error => self.as_err_ref() == other.as_err_ref(),
+            Type::Error => self.as_err_ref_bad() == other.as_err_ref_bad(),
             // Special types that are not checked for equality
             Type::Iter | Type::None | Type::Never => false,
         }
@@ -453,7 +458,7 @@ impl Clone for ValuePtr {
                 Type::Closure => self.clone_shared::<ClosureImpl>(),
                 // Special types
                 Type::Error => {
-                    let err = ValuePtr { tag: self.tag }.as_err();
+                    let err = ValuePtr { tag: self.tag }.as_err_bad();
                     let copy = err.clone().to_value();
                     std::mem::forget(err);
                     copy
@@ -578,7 +583,7 @@ impl Debug for ValuePtr {
             Type::Closure => Debug::fmt(self.as_shared_ref::<ClosureImpl>(), f),
             // Special types with no hash behavior
             Type::Iter => write!(f, "Iter"),
-            Type::Error => Debug::fmt(self.as_err_ref(), f),
+            Type::Error => Debug::fmt(self.as_err_ref_bad(), f),
             Type::None => write!(f, "None"),
             Type::Never => write!(f, "Never"),
         }
@@ -672,7 +677,7 @@ pub struct SharedPrefix<T : SharedValue> {
 
 /// Implementation for all (`ConstValue` and `MutValue`) `SharedPrefix<T>` types
 impl<T : SharedValue> SharedPrefix<T> {
-    pub fn prefix(ty: Type, value: T) -> SharedPrefix<T> {
+    pub fn new(ty: Type, value: T) -> SharedPrefix<T> {
         SharedPrefix {
             ty,
             lock: Cell::new(BORROW_NONE),
@@ -875,6 +880,7 @@ mod tests {
         assert!(!ptr.is_none());
         assert!(!ptr.is_err());
         assert!(!ptr.is_ptr());
+        assert!(!ptr.is_owned());
         assert!(!ptr.is_shared());
         assert_eq!(ptr.ty(), Type::Nil);
         assert_eq!(format!("{:?}", ptr), "Nil");
@@ -891,6 +897,7 @@ mod tests {
         assert!(!ptr.is_none());
         assert!(!ptr.is_err());
         assert!(!ptr.is_ptr());
+        assert!(!ptr.is_owned());
         assert!(!ptr.is_shared());
         assert_eq!(ptr.ty(), Type::Bool);
         assert!(ptr.clone().as_bool());
@@ -909,6 +916,7 @@ mod tests {
         assert!(!ptr.is_none());
         assert!(!ptr.is_err());
         assert!(!ptr.is_ptr());
+        assert!(!ptr.is_owned());
         assert!(!ptr.is_shared());
         assert_eq!(ptr.ty(), Type::Bool);
         assert!(!ptr.clone().as_bool());
@@ -927,6 +935,7 @@ mod tests {
             assert!(!ptr.is_none());
             assert!(!ptr.is_err());
             assert!(!ptr.is_ptr());
+            assert!(!ptr.is_owned());
             assert!(!ptr.is_shared());
             assert_eq!(ptr.ty(), Type::Int);
             assert_eq!(ptr.clone().as_int(), int);
@@ -943,6 +952,7 @@ mod tests {
             assert!(!ptr.is_none());
             assert!(!ptr.is_err());
             assert!(!ptr.is_ptr());
+            assert!(!ptr.is_owned());
             assert!(!ptr.is_shared());
             assert_eq!(ptr.ty(), Type::Int);
             assert_eq!(ptr.clone().as_int(), int);
@@ -994,6 +1004,7 @@ mod tests {
             assert!(!ptr.is_none());
             assert!(!ptr.is_err());
             assert!(!ptr.is_ptr());
+            assert!(!ptr.is_owned());
             assert!(!ptr.is_shared());
             assert_eq!(ptr.ty(), Type::NativeFunction);
             assert_eq!(ptr.as_native(), f);
@@ -1012,6 +1023,7 @@ mod tests {
         assert!(ptr.is_none());
         assert!(!ptr.is_err());
         assert!(!ptr.is_ptr());
+        assert!(!ptr.is_owned());
         assert!(!ptr.is_shared());
         assert_eq!(ptr.ty(), Type::None);
     }
@@ -1027,6 +1039,7 @@ mod tests {
         assert!(!ptr.is_none());
         assert!(!ptr.is_err());
         assert!(ptr.is_ptr());
+        assert!(ptr.is_owned());
         assert!(!ptr.is_shared());
         assert_eq!(ptr.ty(), Type::Complex);
         assert_eq!(format!("{:?}", ptr), "ComplexImpl { inner: Complex { re: 1, im: 2 } }");
@@ -1055,7 +1068,8 @@ mod tests {
         assert!(!ptr.is_native());
         assert!(!ptr.is_none());
         assert!(!ptr.is_err());
-        assert!(!ptr.is_ptr());
+        assert!(ptr.is_ptr());
+        assert!(!ptr.is_owned());
         assert!(ptr.is_shared());
         assert_eq!(ptr.ty(), Type::Str);
         assert_eq!(format!("{:?}", ptr), String::from("\"hello world\""));

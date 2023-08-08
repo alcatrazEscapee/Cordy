@@ -1,6 +1,6 @@
 use num_integer::Roots;
 
-use crate::vm::{IntoValue, RuntimeError, Type, ValueOption, ValuePtr, ValueResult};
+use crate::vm::{ErrorResult, IntoValue, RuntimeError, Type, ValueOption, ValuePtr, ValueResult};
 
 use RuntimeError::{*};
 
@@ -40,7 +40,7 @@ pub fn sqrt(value: ValuePtr) -> ValueResult {
 
 pub fn gcd(args: impl Iterator<Item=ValuePtr>) -> ValueResult {
     args.map(|v| v.check_int())
-        .collect::<Result<Vec<ValuePtr>, Box<RuntimeError>>>()?
+        .collect::<ErrorResult<Vec<ValuePtr>>>()?
         .into_iter()
         .map(|u| u.as_int())
         .reduce(num_integer::gcd)
@@ -49,7 +49,7 @@ pub fn gcd(args: impl Iterator<Item=ValuePtr>) -> ValueResult {
 
 pub fn lcm(args: impl Iterator<Item=ValuePtr>) -> ValueResult {
     args.map(|v| v.check_int())
-        .collect::<Result<Vec<ValuePtr>, Box<RuntimeError>>>()?
+        .collect::<ErrorResult<Vec<ValuePtr>>>()?
         .into_iter()
         .map(|u| u.as_int())
         .reduce(num_integer::lcm)

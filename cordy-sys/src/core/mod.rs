@@ -8,7 +8,7 @@ use indexmap::{IndexMap, IndexSet};
 
 use crate::trace;
 use crate::util::impl_partial_ord;
-use crate::vm::{IntoIterableValue, IntoValue, MAX_INT, MIN_INT, operator, RuntimeError, Type, ValueOption, ValuePtr, ValueResult, VirtualInterface};
+use crate::vm::{ErrorResult, IntoIterableValue, IntoValue, MAX_INT, MIN_INT, operator, RuntimeError, Type, ValueOption, ValuePtr, ValueResult, VirtualInterface};
 use crate::vm::operator::BinaryOp;
 
 pub use crate::core::collections::{get_index, get_slice, set_index, to_index};
@@ -537,7 +537,7 @@ enum InvokeArg2 {
 }
 
 impl InvokeArg0 {
-    fn from(f: ValuePtr) -> Result<InvokeArg0, Box<RuntimeError>> {
+    fn from(f: ValuePtr) -> ErrorResult<InvokeArg0> {
         match f.ty() {
             Type::Function | Type::Closure | Type::PartialFunction | Type::StructType | Type::Memoized => Ok(InvokeArg0::User(f)),
             Type::NativeFunction => match f.as_native().info().arg {
@@ -561,7 +561,7 @@ impl InvokeArg0 {
 }
 
 impl InvokeArg1 {
-    fn from(f: ValuePtr) -> Result<InvokeArg1, Box<RuntimeError>> {
+    fn from(f: ValuePtr) -> ErrorResult<InvokeArg1> {
         match f.ty() {
             Type::Function | Type::Closure | Type::PartialFunction | Type::List | Type::Slice | Type::StructType | Type::GetField | Type::Memoized => Ok(InvokeArg1::User(f)),
             Type::NativeFunction => match f.as_native().info().arg {
@@ -599,7 +599,7 @@ impl InvokeArg1 {
 }
 
 impl InvokeArg2 {
-    fn from(f: ValuePtr) -> Result<InvokeArg2, Box<RuntimeError>> {
+    fn from(f: ValuePtr) -> ErrorResult<InvokeArg2> {
         match f.ty() {
             Type::Function | Type::Closure | Type::PartialFunction | Type::List | Type::Slice | Type::StructType | Type::GetField | Type::Memoized => Ok(InvokeArg2::User(f)),
             Type::NativeFunction => match f.as_native().info().arg {
@@ -796,8 +796,6 @@ pub fn invoke_partial<VM : VirtualInterface>(f: NativeFunction, partial: Partial
     }
 }
 
-const NIL: ValueResult = ValuePtr::nil().ok();
-
 
 fn invoke_arg0<VM : VirtualInterface>(f: NativeFunction, vm: &mut VM) -> ValueResult {
     match f {
@@ -805,7 +803,7 @@ fn invoke_arg0<VM : VirtualInterface>(f: NativeFunction, vm: &mut VM) -> ValueRe
         ReadLine => vm.read_line().to_value().ok(),
         Print => {
             vm.println0();
-            NIL
+            ValuePtr::nil().ok()
         },
         Env => vm.get_envs().ok(),
         Argv => vm.get_args().ok(),
@@ -824,7 +822,7 @@ fn invoke_arg1<VM : VirtualInterface>(f: NativeFunction, a1: ValuePtr, vm: &mut 
     match f {
         Print => {
             vm.println(a1.to_str());
-            NIL
+            ValuePtr::nil().ok()
         },
         ReadText => fs::read_to_string::<&str>(a1.check_str()?.as_str().borrow_const().as_ref()).unwrap().replace('\r', "").to_value().ok(),
         Env => vm.get_env(a1.check_str()?.as_str().borrow_const()).ok(),
@@ -888,7 +886,7 @@ fn invoke_arg2<VM : VirtualInterface>(f: NativeFunction, a1: ValuePtr, a2: Value
     match f {
         WriteText => {
             fs::write(a1.check_str()?.as_str().borrow_const(), a2.check_str()?.as_str().borrow_const()).unwrap();
-            NIL
+            ValuePtr::nil().ok()
         },
         Int => math::convert_to_int(a1, ValueOption::some(a2)),
 
@@ -977,7 +975,7 @@ fn invoke_var<VM : VirtualInterface, I : Iterator<Item=ValuePtr>>(f: NativeFunct
                 vm.print(format!(" {}", ai.to_str()));
             }
             vm.println0();
-            NIL
+            ValuePtr::nil().ok()
         },
 
         List => an.to_list().ok(),
