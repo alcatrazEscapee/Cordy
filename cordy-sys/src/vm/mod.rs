@@ -8,18 +8,15 @@ use crate::{compiler, core, trace, util};
 use crate::compiler::{CompileParameters, CompileResult, Fields, IncrementalCompileResult, Locals};
 use crate::reporting::{Location, SourceView};
 use crate::util::OffsetAdd;
-use crate::vm::value::{Literal, UpValue, ValueStructType};
+use crate::vm::value::{Field, Literal, UpValue, ValueStructType};
+use crate::core::Pattern;
 
 pub use crate::vm::error::{DetailRuntimeError, RuntimeError};
 pub use crate::vm::opcode::{Opcode, StoreOp};
-pub use crate::vm::value::{C64, FunctionImpl, guard_recursive_hash, IntoDictValue, IntoIterableValue, IntoValue, Iterable, LiteralType, MAX_INT, MIN_INT, StructTypeImpl, Type, ValueOption, ValuePtr, ValueResult};
+pub use crate::vm::value::{C64, FunctionImpl, guard_recursive_hash, IntoDictValue, IntoIterableValue, IntoValue, Iterable, LiteralType, MAX_INT, MIN_INT, StructTypeImpl, Type, ValueOption, ValuePtr, ValueResult, ErrorResult, AnyResult, Prefix};
 
 use Opcode::{*};
 use RuntimeError::{*};
-use crate::core::Pattern;
-
-
-pub type AnyResult = Result<(), Box<RuntimeError>>;
 
 pub mod operator;
 
@@ -71,7 +68,7 @@ impl ExitType {
     }
 
     fn of<R: BufRead, W: Write>(vm: &VirtualMachine<R, W>, result: AnyResult) -> ExitType {
-        match result.map_err(|e| *e) {
+        match result.map_err(|e| e.value) {
             Ok(_) => ExitType::Return,
             Err(RuntimeExit) => ExitType::Exit,
             Err(RuntimeYield) => ExitType::Yield,
@@ -490,7 +487,7 @@ impl<R, W> VirtualMachine<R, W> where
                 self.push(ret);
             },
             GetFieldFunction(field_index) => {
-                self.push(ValuePtr::of_field(field_index));
+                self.push(ValuePtr::from(Field(field_index)));
             },
             SetField(field_index) => {
                 let a2: ValuePtr = self.pop();
@@ -523,15 +520,15 @@ impl<R, W> VirtualMachine<R, W> where
                 self.push(ValuePtr::slice(arg1, arg2, arg3)?);
             }
 
-            Exit => return Err(Box::new(RuntimeExit)),
+            Exit => return RuntimeExit.err(),
             Yield => {
                 // First, jump to the end of current code, so when we startup again, we are in the right location
                 self.ip = self.code.len();
-                return Err(Box::new(RuntimeYield))
+                return RuntimeYield.err()
             },
             AssertFailed => {
                 let ret: ValuePtr = self.pop();
-                return Err(Box::new(RuntimeAssertFailed(ret.to_str())))
+                return RuntimeAssertFailed(ret.to_str()).err()
             },
         }
         Ok(())
@@ -602,7 +599,7 @@ impl<R, W> VirtualMachine<R, W> where
     /// The arguments and function will be popped and the return value will be left on the top of the stack.
     ///
     /// Returns a `Result` which may contain an error which occurred during function evaluation.
-    fn invoke(&mut self, nargs: u32) -> Result<FunctionType, Box<RuntimeError>> {
+    fn invoke(&mut self, nargs: u32) -> ErrorResult<FunctionType> {
         let f: &ValuePtr = self.peek(nargs as usize);
         trace::trace_interpreter!("vm::invoke func={:?}, nargs={}", f, nargs);
         match f.ty() {

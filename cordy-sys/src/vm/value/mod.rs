@@ -17,11 +17,14 @@ use crate::core;
 use crate::core::{InvokeArg0, NativeFunction, PartialArgument};
 use crate::util::impl_partial_ord;
 use crate::vm::error::RuntimeError;
-use crate::vm::value::ptr::{Prefix, Ref, RefMut, SharedPrefix};
+use crate::vm::value::ptr::{Ref, RefMut, SharedPrefix};
 
-pub use crate::vm::value::ptr::{MAX_INT, MIN_INT, ValuePtr};
+pub use crate::vm::value::ptr::{MAX_INT, MIN_INT, ValuePtr, Field, Prefix};
 
 use RuntimeError::{*};
+
+pub type ErrorResult<T> = Result<T, Box<Prefix<RuntimeError>>>;
+pub type AnyResult = ErrorResult<()>;
 
 mod ptr;
 
@@ -57,6 +60,16 @@ pub enum Type {
     Error,
     None, // Useful when we would otherwise hold an `Option<ValuePtr>` - this compresses the `None` state
     Never, // Optimization for type-checking code, to avoid code paths containing `unreachable!()` or similar patterns.
+}
+
+impl Type {
+    fn is_owned(&self) -> bool {
+        matches!(self, Type::Complex | Type::Range | Type::Enumerate | Type::PartialFunction | Type::PartialNativeFunction | Type::Slice | Type::Iter | Type::Error)
+    }
+
+    fn is_shared(&self) -> bool {
+        matches!(self, Type::Str | Type::List | Type::Set | Type::Dict | Type::Heap | Type::Vector | Type::Function | Type::Closure | Type::Memoized | Type::Struct | Type::StructType)
+    }
 }
 
 
@@ -156,14 +169,15 @@ pub struct ValueResult {
 }
 
 impl ValueResult {
-    pub const fn ok(ptr: ValuePtr) -> ValueResult {
+    pub fn ok(ptr: ValuePtr) -> ValueResult {
         debug_assert!(!ptr.is_err()); // Should never have an error-type in `ok()`
         ValueResult { ptr }
     }
 
     #[cold]
-    pub fn err(err: RuntimeError) -> ValueResult {
-        ValueResult { ptr: err.to_value() }
+    pub fn err(ptr: ValuePtr) -> ValueResult {
+        debug_assert!(ptr.is_err());
+        ValueResult { ptr }
     }
 
     pub fn new(ptr: ValuePtr) -> ValueResult {
@@ -172,7 +186,7 @@ impl ValueResult {
 
     /// Boxes this `ValueResult` into a traditional Rust `Result<T, E>`. The left will be guaranteed to contain a non-error type, and the right will be guaranteed to contain an error.
     #[inline(always)]
-    pub fn as_result(self) -> Result<ValuePtr, Box<RuntimeError>> {
+    pub fn as_result(self) -> ErrorResult<ValuePtr> {
         match self.ptr.is_err() {
             true => Err(self.ptr.as_err()),
             false => Ok(self.ptr)
@@ -191,40 +205,40 @@ impl ValueResult {
 
     #[cold]
     pub fn to_err(self) -> RuntimeError {
-        *self.ptr.as_err()
+        *self.ptr.as_err_bad()
     }
 }
 
 
-/// Converts a `Result<T, Box<RuntimeError>>` returned from a `?` expression into a `ValueResult`
-impl FromResidual<Result<Infallible, Box<RuntimeError>>> for ValueResult {
-    fn from_residual(residual: Result<Infallible, Box<RuntimeError>>) -> Self {
+/// Converts a `ErrorResult<T>` returned from a `?` expression into a `ValueResult`
+impl FromResidual<ErrorResult<Infallible>> for ValueResult {
+    fn from_residual(residual: ErrorResult<Infallible>) -> Self {
         match residual {
-            Err(err) => ValueResult::err(*err),
+            Err(err) => ValueResult::from(err.value),
             _ => unreachable!(),
         }
     }
 }
 
-/// Converts a `Box<RuntimeError>` returned as the residual from a `ValueResult?` into a `Result<T, Box<RuntimeError>>`
-impl<T> FromResidual<Box<RuntimeError>> for Result<T, Box<RuntimeError>> {
-    fn from_residual(residual: Box<RuntimeError>) -> Self {
+/// Converts a `Box<Prefix<RuntimeError>>` returned as the residual from a `ValueResult?` into a `ErrorResult<T>`
+impl<T> FromResidual<Box<Prefix<RuntimeError>>> for ErrorResult<T> {
+    fn from_residual(residual: Box<Prefix<RuntimeError>>) -> Self {
         Err(residual)
     }
 }
 
 /// Allows us to use `?` operator on `check_<T>()?` expressions, which assert that the value is of a given type, and early return if not.
 /// This does, unfortunately, require nightly unstable rust, but the code clarity is worth having (and it allows us to seamlessly use `ValueResult`
-/// as a zero-cost (memory layout) wise abstraction for `Result<ValuePtr, Box<RuntimeError>>` (which would otherwise be twice the stack size.
+/// as a zero-cost (memory layout) wise abstraction for `Result<ValuePtr, Box<Prefix<RuntimeError>>>` (which would otherwise be twice the stack size.
 impl Try for ValueResult {
     type Output = ValuePtr;
-    type Residual = Box<RuntimeError>;
+    type Residual = Box<Prefix<RuntimeError>>;
 
     fn from_output(ptr: ValuePtr) -> ValueResult {
         ValueResult { ptr }
     }
 
-    fn branch(self) -> ControlFlow<Box<RuntimeError>, ValuePtr> {
+    fn branch(self) -> ControlFlow<Box<Prefix<RuntimeError>>, ValuePtr> {
         match self.ptr.is_err() {
             true => ControlFlow::Break(self.ptr.as_err()),
             false => ControlFlow::Continue(self.ptr),
@@ -234,12 +248,12 @@ impl Try for ValueResult {
 
 /// Associated type for `Try`
 impl FromResidual for ValueResult {
-    fn from_residual(residual: Box<RuntimeError>) -> ValueResult {
-        ValueResult { ptr: ValuePtr::error(*residual) }
+    fn from_residual(residual: Box<Prefix<RuntimeError>>) -> ValueResult {
+        ValueResult { ptr: ValuePtr::from(*residual) }
     }
 }
 
-impl FromIterator<ValueResult> for Result<Vec<ValuePtr>, Box<RuntimeError>> {
+impl FromIterator<ValueResult> for ErrorResult<Vec<ValuePtr>> {
     fn from_iter<T: IntoIterator<Item=ValueResult>>(iter: T) -> Self {
         let iter = iter.into_iter();
         let mut vec: Vec<ValuePtr> = Vec::with_capacity(iter.size_hint().0);
@@ -337,11 +351,11 @@ impl ValuePtr {
     /// Note: this implementation internally replaces all empty range values with the single `range(0, 0, 0)` instance. This means that `range(1, 2, -1) . str` will have to handle this case as it will not be representative.
     pub fn range(start: i64, stop: i64, step: i64) -> ValueResult {
         if step == 0 {
-            ValueResult::err(ValueErrorStepCannotBeZero)
+            ValueErrorStepCannotBeZero.err()
         } else if (stop > start && step > 0) || (stop < start && step < 0) { // Non-empty range
-            ValueResult::ok(RangeImpl { start, stop, step }.to_value())
+            RangeImpl { start, stop, step }.to_value().ok()
         } else { // Empty range
-            ValueResult::ok(RangeImpl { start: 0, stop: 0, step: 0 }.to_value())
+            RangeImpl { start: 0, stop: 0, step: 0 }.to_value().ok()
         }
     }
 
@@ -557,7 +571,7 @@ impl ValuePtr {
     /// For all value types except `Heap`, this is a O(1) and lazy operation. It also requires no persistent borrows of mutable types that outlast the call to `as_iter()`.
     ///
     /// Guaranteed to return either a `Error` or `Iter`
-    pub fn to_iter(self) -> Result<Iterable, Box<RuntimeError>> {
+    pub fn to_iter(self) -> ErrorResult<Iterable> {
         match self.ty() {
             Type::Str => {
                 let string: String = self.as_str().borrow_const().clone();
@@ -580,7 +594,7 @@ impl ValuePtr {
             },
             Type::Enumerate => Ok(Iterable::Enumerate(0, Box::new(self.as_enumerate().value.inner.to_iter()?))),
 
-            _ => Err(Box::new(TypeErrorArgMustBeIterable(self.clone()))),
+            _ => TypeErrorArgMustBeIterable(self.clone()).err(),
         }
     }
 
@@ -608,34 +622,34 @@ impl ValuePtr {
     }
 
     /// Converts this `Value` to a `ValueAsIndex`, which is a index-able object, supported for `List`, `Vector`, and `Str`
-    pub fn to_index(&self) -> Result<Indexable, Box<RuntimeError>> {
+    pub fn to_index(&self) -> ErrorResult<Indexable> {
         match self.ty() {
             Type::Str => Ok(Indexable::Str(self.as_str())),
             Type::List => Ok(Indexable::List(self.as_list().borrow_mut())),
             Type::Vector => Ok(Indexable::Vector(self.as_vector().borrow_mut())),
-            _ => Err(Box::new(TypeErrorArgMustBeIndexable(self.clone())))
+            _ => TypeErrorArgMustBeIndexable(self.clone()).err()
         }
     }
 
     /// Converts this `Value` to a `ValueAsSlice`, which is a builder for slice-like structures, supported for `List` and `Str`
-    pub fn to_slice(&self) -> Result<Sliceable, Box<RuntimeError>> {
+    pub fn to_slice(&self) -> ErrorResult<Sliceable> {
         match self.ty() {
             Type::Str => Ok(Sliceable::Str(self.as_str(), String::new())),
             Type::List => Ok(Sliceable::List(self.as_list().borrow(), VecDeque::new())),
             Type::Vector => Ok(Sliceable::Vector(self.as_vector().borrow(), Vec::new())),
-            _ => Err(Box::new(TypeErrorArgMustBeSliceable(self.clone())))
+            _ => TypeErrorArgMustBeSliceable(self.clone()).err()
         }
     }
 
     /// Converts this value into a `(ValuePTr, ValuePtr)` if possible, supported for two-element `List` and `Vector`s
-    pub fn to_pair(self) -> Result<(ValuePtr, ValuePtr), Box<RuntimeError>> {
+    pub fn to_pair(self) -> ErrorResult<(ValuePtr, ValuePtr)> {
         match match self.ty() {
             Type::List => self.as_list().borrow().list.iter().cloned().collect_tuple(),
             Type::Vector => self.as_vector().borrow().vector.iter().cloned().collect_tuple(),
             _ => None
         } {
             Some(it) => Ok(it),
-            None => Err(Box::new(ValueErrorCannotCollectIntoDict(self.clone())))
+            None => ValueErrorCannotCollectIntoDict(self.clone()).err()
         }
     }
 
@@ -658,7 +672,7 @@ impl ValuePtr {
     }
 
     /// Returns the length of this `Value`. Equivalent to the native function `len`. Raises a type error if the value does not have a lenth.
-    pub fn len(&self) -> Result<usize, Box<RuntimeError>> {
+    pub fn len(&self) -> ErrorResult<usize> {
         match self.ty() {
             Type::Str => Ok(self.as_str().borrow_const().chars().count()),
             Type::List => Ok(self.as_list().borrow().list.len()),
@@ -668,7 +682,7 @@ impl ValuePtr {
             Type::Vector => Ok(self.as_vector().borrow().vector.len()),
             Type::Range => Ok(self.as_range_ref().len()),
             Type::Enumerate => self.as_enumerate_ref().inner.len(),
-            _ => Err(Box::new(TypeErrorArgMustBeIterable(self.clone())))
+            _ => TypeErrorArgMustBeIterable(self.clone()).err()
         }
     }
 
@@ -677,11 +691,11 @@ impl ValuePtr {
             Type::Struct => {
                 let mut it = self.as_struct().borrow_mut();
                 match fields.get_field_offset(it.type_index, field_index) {
-                    Some(field_offset) => ValueResult::ok(it.get_field(field_offset)),
-                    None => ValueResult::err(TypeErrorFieldNotPresentOnValue(it.type_impl.ptr.clone(), fields.get_field_name(field_index), true))
+                    Some(field_offset) => it.get_field(field_offset).ok(),
+                    None => TypeErrorFieldNotPresentOnValue(it.type_impl.ptr.clone(), fields.get_field_name(field_index), true).err()
                 }
             },
-            _ => ValueResult::err(TypeErrorFieldNotPresentOnValue(self, fields.get_field_name(field_index), false))
+            _ => TypeErrorFieldNotPresentOnValue(self, fields.get_field_name(field_index), false).err()
         }
     }
 
@@ -692,12 +706,12 @@ impl ValuePtr {
                 match fields.get_field_offset(it.type_index, field_index) {
                     Some(field_offset) => {
                         it.set_field(field_offset, value.clone());
-                        ValueResult::ok(value)
+                        value.ok()
                     },
-                    None => ValueResult::err(TypeErrorFieldNotPresentOnValue(it.type_impl.ptr.clone(), fields.get_field_name(field_index), true))
+                    None => TypeErrorFieldNotPresentOnValue(it.type_impl.ptr.clone(), fields.get_field_name(field_index), true).err()
                 }
             },
-            _ => ValueResult::err(TypeErrorFieldNotPresentOnValue(self, fields.get_field_name(field_index), false))
+            _ => TypeErrorFieldNotPresentOnValue(self, fields.get_field_name(field_index), false).err()
         }
     }
 
@@ -716,7 +730,7 @@ impl ValuePtr {
         self.as_mut_ref()
     }
 
-    pub const fn ok(self) -> ValueResult {
+    pub fn ok(self) -> ValueResult {
         ValueResult::ok(self)
     }
 
@@ -782,7 +796,7 @@ macro_rules! impl_owned_value {
 
         impl IntoValue for $inner {
             fn to_value(self) -> ValuePtr {
-                ValuePtr::owned(Prefix::new($ty, self))
+                ValuePtr::from(Prefix::new($ty, self))
             }
         }
 
@@ -809,7 +823,7 @@ macro_rules! impl_shared_value {
 
         impl IntoValue for $inner {
             fn to_value(self) -> ValuePtr {
-                ValuePtr::shared(SharedPrefix::prefix($ty, self))
+                ValuePtr::from(SharedPrefix::new($ty, self))
             }
         }
 
@@ -835,6 +849,7 @@ impl_owned_value!(Type::PartialFunction, PartialFunctionImpl, as_partial_functio
 impl_owned_value!(Type::PartialNativeFunction, PartialNativeFunctionImpl, as_partial_native, as_partial_native_ref, is_partial_native);
 impl_owned_value!(Type::Slice, SliceImpl, as_slice, as_slice_ref, is_slice);
 impl_owned_value!(Type::Iter, Iterable, as_iterable, as_iterable_ref, is_iterable);
+impl_owned_value!(Type::Error, RuntimeError, as_err, as_err_ref, is_err);
 
 impl_shared_value!(Type::Str, String, ConstValue, as_str, is_str);
 impl_shared_value!(Type::List, ListImpl, MutValue, as_list, is_list);
@@ -866,25 +881,24 @@ macro_rules! impl_into {
 }
 
 impl_into!(ValuePtr, self, self);
-impl_into!(usize, self, ValuePtr::of_int(self as i64));
-impl_into!(i64, self, ValuePtr::of_int(self));
+impl_into!(usize, self, ValuePtr::from(self as i64));
+impl_into!(i64, self, ValuePtr::from(self));
 impl_into!(num_complex::Complex<i64>, self, ComplexImpl { inner: self }.to_value());
 impl_into!(ComplexImpl, self, if self.inner.im == 0 {
-    ValuePtr::of_int(self.inner.re)
+    ValuePtr::from(self.inner.re)
 } else {
-    ValuePtr::owned(Prefix::new(Type::Complex, self))
+    ValuePtr::from(Prefix::new(Type::Complex, self))
 });
-impl_into!(bool, self, ValuePtr::of_bool(self));
+impl_into!(bool, self, ValuePtr::from(self));
 impl_into!(char, self, String::from(self).to_value());
 impl_into!(&str, self, String::from(self).to_value());
-impl_into!(NativeFunction, self, ValuePtr::of_native(self));
+impl_into!(NativeFunction, self, ValuePtr::from(self));
 impl_into!(VecDeque<ValuePtr>, self, ListImpl { list: self }.to_value());
 impl_into!(Vec<ValuePtr>, self, VectorImpl { vector: self }.to_value());
 impl_into!((ValuePtr, ValuePtr), self, vec![self.0, self.1].to_value());
 impl_into!(IndexSet<ValuePtr, FxBuildHasher>, self, SetImpl { set: self }.to_value());
 impl_into!(IndexMap<ValuePtr, ValuePtr, FxBuildHasher>, self, DictImpl { dict: self, default: None }.to_value());
 impl_into!(BinaryHeap<Reverse<ValuePtr>>, self, HeapImpl { heap: self }.to_value());
-impl_into!(RuntimeError, self, ValuePtr::error(self));
 impl_into!(Sliceable<'_>, self, match self {
     Sliceable::Str(_, it) => it.to_value(),
     Sliceable::List(_, it) => it.to_value(),
@@ -1626,14 +1640,14 @@ impl<'a> Indexable<'a> {
     }
 
     /// Takes a convertable-to-int value, representing a bounded index in `[-len, len)`, and converts to a real index in `[0, len)`, or raises an error.
-    pub fn check_index(&self, value: ValuePtr) -> Result<usize, Box<RuntimeError>> {
+    pub fn check_index(&self, value: ValuePtr) -> ErrorResult<usize> {
         let index: i64 = value.check_int()?.as_int();
         let len: usize = self.len();
         let raw: usize = core::to_index(len as i64, index) as usize;
         if raw < len {
             Ok(raw)
         } else {
-            Err(Box::new(ValueErrorIndexOutOfBounds(index, len)))
+            ValueErrorIndexOutOfBounds(index, len).err()
         }
     }
 
@@ -1646,7 +1660,7 @@ impl<'a> Indexable<'a> {
     }
 
     /// Setting indexes only works for immutable collections - so not strings
-    pub fn set_index(&mut self, index: usize, value: ValuePtr) -> Result<(), Box<RuntimeError>> {
+    pub fn set_index(&mut self, index: usize, value: ValuePtr) -> AnyResult {
         match self {
             Indexable::Str(it) => TypeErrorArgMustBeIndexable(it.borrow_const().clone().to_value()).err(),
             Indexable::List(it) => {
@@ -1726,7 +1740,7 @@ impl Literal {
         };
     }
 
-    pub fn unroll<I : Iterator<Item=ValuePtr>>(&mut self, iter: I) -> Result<(), Box<RuntimeError>> {
+    pub fn unroll<I : Iterator<Item=ValuePtr>>(&mut self, iter: I) -> AnyResult {
         match self {
             Literal::Dict(it) => for value in iter {
                 let (key, value) = value.to_pair()?;
@@ -1806,14 +1820,14 @@ mod test {
 
     #[test]
     fn test_value_result() {
-        let ok = ValueResult::ok(ValuePtr::nil());
-        let err = ValueResult::err(RuntimeError::RuntimeExit);
+        let ok = ValuePtr::nil().ok();
+        let err = RuntimeError::RuntimeExit.err::<ValueResult>();
 
         assert!(ok.is_ok());
         assert!(err.is_err());
 
         assert_eq!(ok.as_result(), Ok(ValuePtr::nil()));
-        assert_eq!(err.as_result(), Err(Box::new(RuntimeError::RuntimeExit)))
+        assert_eq!(err.as_result(), RuntimeError::RuntimeExit.err())
     }
 
     #[test]

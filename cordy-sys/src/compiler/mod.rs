@@ -5,7 +5,7 @@ use itertools::Itertools;
 use crate::compiler::parser::ParseRule;
 use crate::compiler::scanner::ScanResult;
 use crate::reporting::{Location, SourceView};
-use crate::vm::{Opcode, RuntimeError, ValuePtr};
+use crate::vm::{AnyResult, Opcode, RuntimeError, ValuePtr};
 
 pub use crate::compiler::parser::{default, Fields, Locals, ParserError, ParserErrorType};
 pub use crate::compiler::scanner::{ScanError, ScanErrorType, ScanToken};
@@ -61,7 +61,7 @@ pub fn incremental_compile(mut params: CompileParameters) -> IncrementalCompileR
 /// Note that this does not insert a terminal `Pop` or `Exit`, and instead pushes a `Return` which exits `eval`'s special call frame.
 ///
 /// This is the API used to run an `eval()` statement.
-pub fn eval_compile(text: &String, mut params: CompileParameters) -> Result<(), Box<RuntimeError>> {
+pub fn eval_compile(text: &String, mut params: CompileParameters) -> AnyResult {
     params.view.push(String::from("<eval>"), text.to_owned());
     try_incremental_compile(&mut params, |parser| parser.parse_incremental_eval(), false)
         .ok_or_runtime_error()
@@ -243,11 +243,11 @@ pub enum IncrementalCompileResult {
 }
 
 impl IncrementalCompileResult {
-    fn ok_or_runtime_error(self) -> Result<(), Box<RuntimeError>> {
+    fn ok_or_runtime_error(self) -> AnyResult {
         match self {
             IncrementalCompileResult::Success => Ok(()),
-            IncrementalCompileResult::Errors(e) => Err(Box::new(RuntimeError::RuntimeCompilationError(e))),
-            _ => panic!("{:?} should not be unboxed as a Result<(), Box<RuntimeError>>", self),
+            IncrementalCompileResult::Errors(e) => RuntimeError::RuntimeCompilationError(e).err(),
+            _ => panic!("{:?} should not be unboxed", self),
         }
     }
 

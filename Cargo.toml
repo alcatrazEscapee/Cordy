@@ -1,5 +1,5 @@
 [workspace]
-    members = ["cordy", "cordy-sys"]
+    members = ["cordy", "cordy-sys", "cordy-web"]
     default-members = ["cordy"]
     resolver = "2"
 

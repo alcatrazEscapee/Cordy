@@ -2,9 +2,9 @@ use std::collections::VecDeque;
 
 use crate::core;
 use crate::core::NativeFunction;
-use crate::vm::{Type, ValuePtr, ValueResult};
+use crate::vm::{ErrorResult, Type, ValuePtr, ValueResult};
 use crate::vm::error::RuntimeError;
-use crate::vm::value::{C64, IntoIterableValue, IntoValue};
+use crate::vm::value::{C64, IntoIterableValue, IntoValue, Prefix};
 
 use RuntimeError::{*};
 use Type::{*};
@@ -356,7 +356,7 @@ type BinaryFn = fn(ValuePtr, ValuePtr) -> ValueResult;
 fn apply_vector_unary(vector: ValuePtr, unary_op: UnaryFn) -> ValueResult {
     vector.as_vector().borrow().vector.iter()
         .map(|v| unary_op(v.clone()))
-        .collect::<Result<Vec<ValuePtr>, Box<RuntimeError>>>()?
+        .collect::<Result<Vec<ValuePtr>, Box<Prefix<RuntimeError>>>>()?
         .to_value()
         .ok()
 }
@@ -365,7 +365,7 @@ fn apply_vector_binary(lhs: ValuePtr, rhs: ValuePtr, binary_op: BinaryFn) -> Val
     lhs.as_vector().borrow().vector.iter()
         .zip(rhs.as_vector().borrow().vector.iter())
         .map(|(l, r)| binary_op(l.clone(), r.clone()))
-        .collect::<Result<Vec<ValuePtr>, Box<RuntimeError>>>()?
+        .collect::<Result<Vec<ValuePtr>, Box<Prefix<RuntimeError>>>>()?
         .to_value()
         .ok()
 }
@@ -373,7 +373,7 @@ fn apply_vector_binary(lhs: ValuePtr, rhs: ValuePtr, binary_op: BinaryFn) -> Val
 fn apply_vector_binary_scalar_lhs(scalar_lhs: ValuePtr, rhs: ValuePtr, binary_op: BinaryFn) -> ValueResult {
     rhs.as_vector().borrow().vector.iter()
         .map(|r| binary_op(scalar_lhs.clone(), r.clone()))
-        .collect::<Result<Vec<ValuePtr>, Box<RuntimeError>>>()?
+        .collect::<ErrorResult<Vec<ValuePtr>>>()?
         .to_value()
         .ok()
 }
@@ -381,7 +381,7 @@ fn apply_vector_binary_scalar_lhs(scalar_lhs: ValuePtr, rhs: ValuePtr, binary_op
 fn apply_vector_binary_scalar_rhs(lhs: ValuePtr, scalar_rhs: ValuePtr, binary_op: BinaryFn) -> ValueResult {
     lhs.as_vector().borrow().vector.iter()
         .map(|l| binary_op(l.clone(), scalar_rhs.clone()))
-        .collect::<Result<Vec<ValuePtr>, Box<RuntimeError>>>()?
+        .collect::<ErrorResult<Vec<ValuePtr>>>()?
         .to_value()
         .ok()
 }

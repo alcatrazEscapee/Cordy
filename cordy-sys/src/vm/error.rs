@@ -1,8 +1,8 @@
 use crate::core::NativeFunction;
 use crate::reporting::{AsError, AsErrorWithContext, Location, SourceView};
-use crate::vm::{CallFrame, StructTypeImpl, ValueResult};
+use crate::vm::{CallFrame, IntoValue, StructTypeImpl, Type, ValueResult};
 use crate::vm::operator::{BinaryOp, UnaryOp};
-use crate::vm::value::{FunctionImpl, ValuePtr};
+use crate::vm::value::{FunctionImpl, Prefix, ValuePtr};
 
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,15 +57,15 @@ pub enum RuntimeError {
     TypeErrorArgMustBeReplaceFunction(ValuePtr),
 }
 
-impl<T> From<RuntimeError> for Result<T, Box<RuntimeError>> {
+impl<T> From<RuntimeError> for Result<T, Box<Prefix<RuntimeError>>> {
     fn from(value: RuntimeError) -> Self {
-        Err(Box::new(value))
+        Err(Box::new(Prefix::new(Type::Error, value)))
     }
 }
 
 impl From<RuntimeError> for ValueResult {
     fn from(value: RuntimeError) -> Self {
-        ValueResult::err(value)
+        ValueResult::err(value.to_value())
     }
 }
 
@@ -74,8 +74,6 @@ impl RuntimeError {
     pub fn err<E : From<RuntimeError>>(self) -> E {
         E::from(self)
     }
-
-
 
     pub fn with_stacktrace(self, ip: usize, call_stack: &[CallFrame], functions: &[ValuePtr], locations: &[Location]) -> DetailRuntimeError {
         const REPEAT_LIMIT: usize = 3;

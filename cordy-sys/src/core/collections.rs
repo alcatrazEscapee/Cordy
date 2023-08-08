@@ -6,7 +6,7 @@ use itertools::Itertools;
 
 use crate::{util, vm};
 use crate::core::{InvokeArg0, InvokeArg1, InvokeArg2};
-use crate::vm::{IntoDictValue, IntoIterableValue, IntoValue, Iterable, RuntimeError, Type, ValuePtr, ValueResult, VirtualInterface};
+use crate::vm::{AnyResult, ErrorResult, IntoDictValue, IntoIterableValue, IntoValue, Iterable, RuntimeError, Type, ValuePtr, ValueResult, VirtualInterface};
 
 use RuntimeError::{*};
 
@@ -59,10 +59,10 @@ fn get_dict_index<VM : VirtualInterface>(vm: &mut VM, dict: &ValuePtr, key: Valu
         .ok()
 }
 
-pub fn set_index(target: &ValuePtr, index: ValuePtr, value: ValuePtr) -> Result<(), Box<RuntimeError>> {
+pub fn set_index(target: &ValuePtr, index: ValuePtr, value: ValuePtr) -> AnyResult {
     if target.is_dict() {
         match vm::guard_recursive_hash(|| target.as_dict().borrow_mut().dict.insert(index, value)) {
-            Err(_) => Err(Box::new(ValueErrorRecursiveHash(target.clone()))),
+            Err(_) => ValueErrorRecursiveHash(target.clone()).err(),
             Ok(_) => Ok(())
         }
     } else {
@@ -80,13 +80,13 @@ pub fn set_index(target: &ValuePtr, index: ValuePtr, value: ValuePtr) -> Result<
 pub fn get_slice(target: &ValuePtr, low: ValuePtr, high: ValuePtr, step: ValuePtr) -> ValueResult {
 
     #[inline]
-    fn unwrap_or(ptr: ValuePtr, default: i64) -> Result<i64, Box<RuntimeError>> {
+    fn unwrap_or(ptr: ValuePtr, default: i64) -> ErrorResult<i64> {
         if ptr.is_int() {
             Ok(ptr.as_int())
         } else if ptr.is_nil() {
             Ok(default)
         } else {
-            Err(Box::new(TypeErrorArgMustBeInt(ptr)))
+            TypeErrorArgMustBeInt(ptr).err()
         }
     }
 
@@ -163,7 +163,7 @@ pub fn min_by<VM: VirtualInterface>(vm: &mut VM, by: ValuePtr, args: ValuePtr) -
     match by.min_nargs() {
         Some(2) => {
             let by: InvokeArg2 = InvokeArg2::from(by)?;
-            let mut err: Option<Box<RuntimeError>> = None;
+            let mut err = None;
             let ret = iter.min_by(|a, b|
                 util::catch(&mut err, ||
                     Ok(by.invoke((*a).clone(), (*b).clone(), vm)?.check_int()?.as_int().cmp(&0)), Ordering::Equal));
@@ -191,7 +191,7 @@ pub fn max_by<VM: VirtualInterface>(vm: &mut VM, by: ValuePtr, args: ValuePtr) -
     match by.min_nargs() {
         Some(2) => {
             let by: InvokeArg2 = InvokeArg2::from(by)?;
-            let mut err: Option<Box<RuntimeError>> = None;
+            let mut err = None;
             let ret = iter.max_by(|a, b|
                 util::catch(&mut err, ||
                     Ok(by.invoke((*a).clone(), (*b).clone(), vm)?.check_int()?.as_int().cmp(&0)), Ordering::Equal));
@@ -222,22 +222,22 @@ pub fn sort_by<VM : VirtualInterface>(vm: &mut VM, by: ValuePtr, args: ValuePtr)
     match by.min_nargs() {
         Some(2) => {
             let by: InvokeArg2 = InvokeArg2::from(by)?;
-            let mut err: Option<Box<RuntimeError>> = None;
+            let mut err = None;
             sorted.sort_unstable_by(|a, b|
                 util::catch(&mut err, ||
                     Ok(by.invoke(a.clone(), b.clone(), vm)?.check_int()?.as_int().cmp(&0)), Ordering::Equal));
             if let Some(err) = err {
-                return err.err();
+                return err.value.err();
             }
         },
         Some(1) => {
             let by: InvokeArg1 = InvokeArg1::from(by)?;
-            let mut err: Option<Box<RuntimeError>> = None;
+            let mut err = None;
             sorted.sort_unstable_by_key(|a|
                 util::catch(&mut err, ||
                     by.invoke(a.clone(), vm).as_result(), ValuePtr::nil()));
             if let Some(err) = err {
-                return err.err();
+                return err.value.err();
             }
         },
         Some(_) => return TypeErrorArgMustBeCmpOrKeyFunction(by).err(),
@@ -396,7 +396,7 @@ pub fn flat_map<VM>(vm: &mut VM, f: Option<ValuePtr>, args: ValuePtr) -> ValueRe
 pub fn zip(args: impl Iterator<Item=ValuePtr>) -> ValueResult {
     let mut iters = args
         .map(|v| v.to_iter())
-        .collect::<Result<Vec<Iterable>, Box<RuntimeError>>>()?;
+        .collect::<ErrorResult<Vec<Iterable>>>()?;
     if iters.is_empty() {
         return ValueErrorValueMustBeNonEmpty.err()
     }
@@ -564,7 +564,7 @@ pub fn clear(target: ValuePtr) -> ValueResult {
 
 pub fn collect_into_dict(iter: impl Iterator<Item=ValuePtr>) -> ValueResult {
     iter.map(|t| t.to_pair())
-        .collect::<Result<Vec<(ValuePtr, ValuePtr)>, Box<RuntimeError>>>()?
+        .collect::<ErrorResult<Vec<(ValuePtr, ValuePtr)>>>()?
         .into_iter()
         .to_dict()
         .ok()
