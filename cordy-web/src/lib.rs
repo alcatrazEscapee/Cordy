@@ -3,9 +3,9 @@ use std::io;
 use std::io::Write;
 use std::rc::Rc;
 use wasm_bindgen::prelude::*;
-use cordy_sys::{compiler, SourceView};
-use cordy_sys::compiler::ScanTokenType;
 
+use cordy_sys::{compiler, SourceView, SYS_VERSION};
+use cordy_sys::compiler::ScanTokenType;
 use cordy_sys::repl::{ReadResult, Repl, RunResult};
 
 
@@ -14,6 +14,11 @@ use cordy_sys::repl::{ReadResult, Repl, RunResult};
 pub struct RunResultJs {
     pub exit: bool,
     pub lines: String,
+}
+
+#[wasm_bindgen]
+pub fn version() -> String {
+    String::from(SYS_VERSION)
 }
 
 /// Initializes the console panic hook (the first time this is called), and initially creates the `Manager`

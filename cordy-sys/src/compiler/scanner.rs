@@ -2,8 +2,8 @@ use std::fmt::Debug;
 use std::iter::Peekable;
 use std::num::ParseIntError;
 use std::str::Chars;
-use crate::core::NativeFunction;
 
+use crate::core::NativeFunction;
 use crate::reporting::{AsErrorWithContext, Location};
 use crate::SourceView;
 
@@ -261,16 +261,20 @@ impl<'a> Scanner<'a> {
                            self.screen_int(buffer, 10);
                        },
 
-                       '\'' => {
+                       open @ ('\'' | '"') => {
                            let mut buffer: Vec<char> = Vec::new();
                            let mut escaped: bool = false;
                            let start: usize = self.cursor;
                            loop {
                                match self.advance() {
-                                   Some('\'') => { // Escaped single quote emits a single quote, un-escaped will terminate the string
+                                   // Escaped quote always emits the single character
+                                   // Un-escaped will emit if it's not the same as the open
+                                   Some(quote @ ('\'' | '"')) => {
                                        if escaped {
-                                           buffer.push('\'');
+                                           buffer.push(quote);
                                            escaped = false;
+                                       } else if open != quote {
+                                            buffer.push(quote);
                                        } else {
                                            break
                                        }
@@ -567,6 +571,7 @@ mod tests {
     #[test] fn test_keywords() { run_str("let fn return if elif else then loop while for in is not break continue do true false nil struct exit assert", vec![KeywordLet, KeywordFn, KeywordReturn, KeywordIf, KeywordElif, KeywordElse, KeywordThen, KeywordLoop, KeywordWhile, KeywordFor, KeywordIn, KeywordIs, KeywordNot, KeywordBreak, KeywordContinue, KeywordDo, KeywordTrue, KeywordFalse, KeywordNil, KeywordStruct, KeywordExit, KeywordAssert]); }
     #[test] fn test_identifiers() { run_str("foobar big_bad_wolf ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz", vec![Identifier(String::from("foobar")), Identifier(String::from("big_bad_wolf")), Identifier(String::from("ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz"))]); }
     #[test] fn test_str_literals() { run_str("'abc' 'a \n 3' '\\''", vec![StringLiteral(String::from("abc")), NewLine, StringLiteral(String::from("a \n 3")), StringLiteral(String::from("'"))]); }
+    #[test] fn test_double_quote_str_literals() { run_str("\"abc\" '\"' \"'\"", vec![StringLiteral(String::from("abc")), StringLiteral(String::from("\"")), StringLiteral(String::from("'"))]); }
     #[test] fn test_str_escaping() { run_str("'\\.' '\\\\.' '\\n' '\\\\n'", vec![StringLiteral(String::from("\\.")), StringLiteral(String::from("\\.")), StringLiteral(String::from("\n")), StringLiteral(String::from("\\n"))]); }
     #[test] fn test_ints() { run_str("1234 654 10_00_00 0 1", vec![IntLiteral(1234), IntLiteral(654), IntLiteral(100000), IntLiteral(0), IntLiteral(1)]); }
     #[test] fn test_binary_ints() { run_str("0b11011011 0b0 0b1 0b1_01", vec![IntLiteral(0b11011011), IntLiteral(0b0), IntLiteral(0b1), IntLiteral(0b101)]); }
