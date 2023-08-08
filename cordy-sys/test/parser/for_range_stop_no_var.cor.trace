@@ -1,0 +1,14 @@
+L1: 0000 Range
+    0001 Int(10)
+    0002 Call(1)
+    0003 InitIterable
+    0004 TestIterable(12)
+    0005 Pop
+L2: 0006 Str('hello')
+    0007 Print
+    0008 Swap
+    0009 Call(1)
+L3: 0010 Pop
+    0011 Jump(4)
+    0012 Pop
+    0013 Exit

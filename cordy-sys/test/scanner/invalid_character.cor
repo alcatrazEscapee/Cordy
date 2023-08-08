@@ -1,0 +1,7 @@
+// the following are illegal characters
+$
+#
+/* this one is fine $#@ */ # /* that one is not */
+
+$ // at the beginning of a line
+/* and as the last character of a line -> */ $

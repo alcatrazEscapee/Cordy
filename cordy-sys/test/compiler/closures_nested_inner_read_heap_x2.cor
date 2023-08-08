@@ -1,0 +1,11 @@
+fn foo() {
+    let x = 'hello'
+    fn bar() {
+        fn baz() {
+            x . print
+        }
+        baz
+    }
+    bar
+}
+foo()()()

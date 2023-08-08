@@ -1,0 +1,8 @@
+let x
+loop {
+    let x
+    if true {
+        let x
+        continue
+    }
+}

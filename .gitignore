@@ -10,8 +10,8 @@
 !/rust-toolchain.toml
 !/**/Makefile
 
-!/resources/**/*.cor
-!/resources/**/*.cor.trace
+!/cordy*/test/**/*.cor
+!/cordy*/test/**/*.cor.trace
 
 !/cordy*/src/**/*.rs
 !/cordy*/benches/**/*.rs

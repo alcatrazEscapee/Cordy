@@ -1,0 +1,9 @@
+L1: 0000 InitGlobal
+    0001 Function(fn foo(a, b, c) -> L[4, 8])
+L3: 0002 Pop
+    0003 Exit
+L2: 0004 Str('world')
+    0005 Print
+    0006 Swap
+    0007 Call(1)
+L3: 0008 Return

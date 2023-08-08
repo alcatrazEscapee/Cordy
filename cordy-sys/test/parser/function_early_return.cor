@@ -1,0 +1,12 @@
+fn foo() {
+    if true {
+        return
+    }
+    if false {
+        return
+    }
+    if nil {
+        return 123
+    }
+    return
+}

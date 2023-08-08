@@ -1,0 +1,6 @@
+ValueError: 'bar' was referenced but has not been declared yet
+  at: line 3 (late_bound_global_invalid.cor)
+  at: `fn foo()` (line 6)
+
+3 |     bar . print
+4 |     ^^^

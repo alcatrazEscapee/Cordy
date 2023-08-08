@@ -1,0 +1,7 @@
+let a = [1, 2, 3]
+a . map(fn(i) {
+    if len(a) < 4 {
+        a.push(4)
+    }
+    i
+}) . print

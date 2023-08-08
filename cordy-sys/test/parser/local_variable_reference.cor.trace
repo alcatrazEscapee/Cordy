@@ -1,0 +1,11 @@
+L1: 0000 InitGlobal
+    0001 Nil
+L3: 0002 InitGlobal
+    0003 Function(fn global1(x) -> L[9, 10])
+L5: 0004 PushGlobal(1) -> global1
+    0005 Call(0)
+    0006 Pop
+    0007 PopN(2)
+    0008 Exit
+L3: 0009 PushLocal(0) -> x
+    0010 Return

@@ -1,0 +1,8 @@
+L2: 0000 Int(1)
+    0001 Pop
+L3: 0002 LiteralBegin(List, 1)
+    0003 Int(2)
+    0004 LiteralAcc(1)
+    0005 LiteralEnd
+    0006 Pop
+    0007 Exit

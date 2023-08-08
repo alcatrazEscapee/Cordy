@@ -1,0 +1,10 @@
+fn main() {
+    let x = 'hello '
+    fn hello(a, b) -> x + a + ' and ' + b . print
+
+    let h1 = hello('bob')
+
+    h1('sally')
+}
+
+main()

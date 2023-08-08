@@ -1,0 +1,6 @@
+let x
+do { x = 1 + + 3 }
+do { x = - + 2 }
+do { x = print .. 3 }
+do { x = print (4 ,, 5) }
+do { x = .. 3 }

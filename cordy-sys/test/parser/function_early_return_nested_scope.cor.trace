@@ -1,0 +1,13 @@
+L01: 0000 InitGlobal
+     0001 Function(fn foo() -> L[4, 12])
+L10: 0002 Pop
+     0003 Exit
+L02: 0004 Nil
+L04: 0005 Nil
+L06: 0006 Nil
+L07: 0007 Nil
+     0008 Return
+     0009 Pop
+L08: 0010 Pop
+L09: 0011 Nil
+L10: 0012 Return

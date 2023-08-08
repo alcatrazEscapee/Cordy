@@ -1,0 +1,4 @@
+for i in range(5) {
+    i = 5
+    i . print
+}
