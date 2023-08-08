@@ -824,7 +824,13 @@ fn invoke_arg1<VM : VirtualInterface>(f: NativeFunction, a1: ValuePtr, vm: &mut 
             vm.println(a1.to_str());
             ValuePtr::nil().ok()
         },
-        ReadText => fs::read_to_string::<&str>(a1.check_str()?.as_str().borrow_const().as_ref()).unwrap().replace('\r', "").to_value().ok(),
+        ReadText => {
+            let path = a1.check_str()?;
+            match fs::read_to_string::<&str>(path.as_str().borrow_const().as_ref()) {
+                Ok(text) => text.replace('\r', "").to_value().ok(),
+                Err(err) => IOError(err.to_string()).err(),
+            }
+        },
         Env => vm.get_env(a1.check_str()?.as_str().borrow_const()).ok(),
 
         Bool => a1.to_bool().to_value().ok(),
@@ -885,8 +891,12 @@ fn invoke_arg1<VM : VirtualInterface>(f: NativeFunction, a1: ValuePtr, vm: &mut 
 fn invoke_arg2<VM : VirtualInterface>(f: NativeFunction, a1: ValuePtr, a2: ValuePtr, vm: &mut VM) -> ValueResult {
     match f {
         WriteText => {
-            fs::write(a1.check_str()?.as_str().borrow_const(), a2.check_str()?.as_str().borrow_const()).unwrap();
-            ValuePtr::nil().ok()
+            let path = a1.check_str()?;
+            let text = a2.check_str()?;
+            match fs::write(path.as_str().borrow_const(), text.as_str().borrow_const()) {
+                Ok(_) => ValuePtr::nil().ok(),
+                Err(err) => IOError(err.to_string()).err(),
+            }
         },
         Int => math::convert_to_int(a1, ValueOption::some(a2)),
 

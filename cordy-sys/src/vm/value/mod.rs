@@ -202,11 +202,6 @@ impl ValueResult {
     pub fn is_err(&self) -> bool {
         self.ptr.is_err()
     }
-
-    #[cold]
-    pub fn to_err(self) -> RuntimeError {
-        *self.ptr.as_err_bad()
-    }
 }
 
 

@@ -9,7 +9,7 @@ use num_complex::Complex;
 
 use crate::core::NativeFunction;
 use crate::util::impl_partial_ord;
-use crate::vm::{FunctionImpl, IntoValue, Iterable, RuntimeError, StructTypeImpl};
+use crate::vm::{FunctionImpl, Iterable, RuntimeError, StructTypeImpl};
 use crate::vm::value::{*};
 
 
@@ -50,6 +50,10 @@ pub union ValuePtr {
     /// Instead use `as_mut_ptr()`
     _ptr: NonNull<Prefix<()>>,
     tag: usize,
+    /// For `i64` types, we need to be able to interact with this value as if it was a `u64` - because we shift into the sign bit, etc.
+    /// However, on 32-bit platforms, `sizeof(usize) != sizeof(u64)`, which means if we treat `int` and `tag` representations interchangeably, we end up with
+    /// the topmost 32-bits being uninitialized memory. So whenever we store an int, we need to store it as a `long_tag` to properly set the high bits.
+    long_tag: u64,
     int: i64,
 }
 
@@ -88,7 +92,7 @@ impl From<bool> for ValuePtr {
 impl From<i64> for ValuePtr {
     fn from(value: i64) -> Self {
         debug_assert!(MIN_INT <= value && value <= MAX_INT);
-        ValuePtr { tag: TAG_INT | ((value << 1) as usize) }
+        ValuePtr { long_tag: TAG_INT as u64 | ((value << 1) as u64) }
     }
 }
 
@@ -100,7 +104,7 @@ impl From<NativeFunction> for ValuePtr {
 
 impl From<Field> for ValuePtr {
     fn from(value: Field) -> Self {
-        ValuePtr { tag: TAG_FIELD | ((value.0 as usize) << 6) }
+        ValuePtr { long_tag: TAG_FIELD as u64 | ((value.0 as u64) << 6) }
     }
 }
 
@@ -168,7 +172,7 @@ impl ValuePtr {
 
     pub fn as_field(&self) -> u32 {
         debug_assert!(self.is_field());
-        unsafe { (self.tag >> 6) as u32 }
+        unsafe { (self.long_tag >> 6) as u32 }
     }
 
     /// Returns the `Type` of this value.
@@ -217,27 +221,6 @@ impl ValuePtr {
     fn is_ptr(&self) -> bool { (unsafe { self.tag } & MASK_PTR) == TAG_PTR }
     fn is_owned(&self) -> bool { self.ty().is_owned() }
     fn is_shared(&self) -> bool { self.ty().is_shared() }
-
-    /// Transmutes this `ValuePtr` into a `Box<RuntimeError>`
-    pub fn as_err_bad(self) -> Box<RuntimeError> {
-        debug_assert!(self.is_err());
-        unsafe {
-            let ret = Box::from_raw(self.as_ptr() as *mut RuntimeError);
-
-            // Then forget the current `self`. This is a manual way of telling rust that we have fully transmuted ourselves into `ret`
-            // We can't drop this here, since we technically created a copy of the same resource by calling `as_mut_ptr()`
-            std::mem::forget(self);
-            ret
-        }
-    }
-
-    /// Like `as_ref` but for the error type
-    pub fn as_err_ref_bad(&self) -> &RuntimeError {
-        debug_assert!(self.is_err());
-        unsafe {
-            &*(self.as_ptr() as *const RuntimeError)
-        }
-    }
 
     pub fn as_value_ref(&self) -> ValueRef {
         ValueRef::new(unsafe { self.tag })
@@ -298,6 +281,12 @@ impl ValuePtr {
         }
     }
 
+    /// Creates a new copy of this `ValuePtr`, **pointing to the same memory!**. Whenever this is called, either the original,
+    /// or the new copy **MUST** be forgotten, before being dropped.
+    unsafe fn as_copy(&self) -> ValuePtr {
+        ValuePtr { long_tag: self.long_tag }
+    }
+
     /// Clones an owned `ValuePtr`, using `Box<T>` to clone the underlying memory.
     ///
     /// Create a new `Box<T>` pointing to this memory, clone it, and then forget the original.
@@ -312,7 +301,7 @@ impl ValuePtr {
     /// Just increment the strong reference count, and then return a direct copy of the `ValuePtr`
     unsafe fn clone_shared<T : SharedValue>(&self) -> ValuePtr {
         self.as_shared_ref::<T>().inc_strong();
-        ValuePtr { tag: self.tag }
+        self.as_copy()
     }
 
     unsafe fn drop_owned<T: OwnedValue>(&self) {
@@ -346,8 +335,8 @@ impl PartialEq for ValuePtr {
             Type::Nil |
             Type::Bool |
             Type::Int |
-            Type::NativeFunction |
-            Type::GetField => unsafe { self.tag == other.tag },
+            Type::NativeFunction => unsafe { self.tag == other.tag },
+            Type::GetField => unsafe { self.long_tag == other.long_tag },
             // Owned types check equality based on their ref
             Type::Complex => self.as_ref::<ComplexImpl>() == other.as_ref::<ComplexImpl>(),
             Type::Range => self.as_ref::<RangeImpl>() == other.as_ref::<RangeImpl>(),
@@ -355,6 +344,7 @@ impl PartialEq for ValuePtr {
             Type::PartialFunction => self.as_ref::<PartialFunctionImpl>() == other.as_ref::<PartialFunctionImpl>(),
             Type::PartialNativeFunction => self.as_ref::<PartialNativeFunctionImpl>() == other.as_ref::<PartialNativeFunctionImpl>(),
             Type::Slice => self.as_ref::<SliceImpl>() == other.as_ref::<SliceImpl>(),
+            Type::Error => self.as_ref::<RuntimeError>() == other.as_ref::<RuntimeError>(),
             // Shared types check equality based on the shared ref
             Type::Str => self.as_shared_ref::<String>() == other.as_shared_ref::<String>(),
             Type::List => self.as_shared_ref::<ListImpl>() == other.as_shared_ref::<ListImpl>(),
@@ -367,8 +357,6 @@ impl PartialEq for ValuePtr {
             Type::Memoized => self.as_shared_ref::<MemoizedImpl>() == other.as_shared_ref::<MemoizedImpl>(),
             Type::Function => self.as_shared_ref::<FunctionImpl>() == other.as_shared_ref::<FunctionImpl>(),
             Type::Closure => self.as_shared_ref::<ClosureImpl>() == other.as_shared_ref::<ClosureImpl>(),
-            // Error types are equal based on the error ref, this is mostly used for testing purposes
-            Type::Error => self.as_err_ref_bad() == other.as_err_ref_bad(),
             // Special types that are not checked for equality
             Type::Iter | Type::None | Type::Never => false,
         }
@@ -435,7 +423,7 @@ impl Clone for ValuePtr {
                 Type::Bool |
                 Type::Int |
                 Type::NativeFunction |
-                Type::GetField => ValuePtr { tag: self.tag },
+                Type::GetField => self.as_copy(),
                 // Owned types
                 Type::Complex => self.clone_owned::<ComplexImpl>(),
                 Type::Range => self.clone_owned::<RangeImpl>(),
@@ -444,6 +432,7 @@ impl Clone for ValuePtr {
                 Type::PartialNativeFunction => self.clone_owned::<PartialNativeFunctionImpl>(),
                 Type::Slice => self.clone_owned::<SliceImpl>(),
                 Type::Iter => self.clone_owned::<Iterable>(),
+                Type::Error => self.clone_owned::<RuntimeError>(),
                 // Shared types
                 Type::Str => self.clone_shared::<String>(),
                 Type::List => self.clone_shared::<ListImpl>(),
@@ -457,12 +446,6 @@ impl Clone for ValuePtr {
                 Type::Function => self.clone_shared::<FunctionImpl>(),
                 Type::Closure => self.clone_shared::<ClosureImpl>(),
                 // Special types
-                Type::Error => {
-                    let err = ValuePtr { tag: self.tag }.as_err_bad();
-                    let copy = err.clone().to_value();
-                    std::mem::forget(err);
-                    copy
-                },
                 Type::None | Type::Never => ValuePtr::none(),
             }
         }
@@ -492,6 +475,7 @@ impl Drop for ValuePtr {
                 Type::PartialNativeFunction => self.drop_owned::<PartialNativeFunctionImpl>(),
                 Type::Slice => self.drop_owned::<SliceImpl>(),
                 Type::Iter => self.drop_owned::<Iterable>(),
+                Type::Error => self.drop_owned::<RuntimeError>(),
                 // Shared types
                 Type::Str => self.drop_shared::<String>(),
                 Type::List => self.drop_shared::<ListImpl>(),
@@ -504,11 +488,6 @@ impl Drop for ValuePtr {
                 Type::Memoized => self.drop_shared::<MemoizedImpl>(),
                 Type::Function => self.drop_shared::<FunctionImpl>(),
                 Type::Closure => self.drop_shared::<ClosureImpl>(),
-                // Special types
-                Type::Error => {
-                    // Can't call .as_err() and drop that since we only have a &self
-                    drop(Box::from_raw(self.as_ptr() as *mut RuntimeError));
-                },
                 Type::None | Type::Never => {}, // No drop behavior
             }
         }
@@ -569,6 +548,7 @@ impl Debug for ValuePtr {
             Type::PartialFunction => Debug::fmt(self.as_ref::<PartialFunctionImpl>(), f),
             Type::PartialNativeFunction => Debug::fmt(self.as_ref::<PartialNativeFunctionImpl>(), f),
             Type::Slice => Debug::fmt(self.as_ref::<SliceImpl>(), f),
+            Type::Error => Debug::fmt(self.as_ref::<RuntimeError>(), f),
             // Shared types
             Type::Str => Debug::fmt(self.as_shared_ref::<String>(), f),
             Type::List => Debug::fmt(self.as_shared_ref::<ListImpl>(), f),
@@ -583,7 +563,6 @@ impl Debug for ValuePtr {
             Type::Closure => Debug::fmt(self.as_shared_ref::<ClosureImpl>(), f),
             // Special types with no hash behavior
             Type::Iter => write!(f, "Iter"),
-            Type::Error => Debug::fmt(self.as_err_ref_bad(), f),
             Type::None => write!(f, "None"),
             Type::Never => write!(f, "Never"),
         }

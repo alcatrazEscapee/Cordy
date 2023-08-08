@@ -1,19 +1,23 @@
 use std::rc::Rc;
-#[cfg(test)]
-use itertools::Itertools;
 
 use crate::compiler::parser::ParseRule;
 use crate::compiler::scanner::ScanResult;
 use crate::reporting::{Location, SourceView};
 use crate::vm::{AnyResult, Opcode, RuntimeError, ValuePtr};
+use crate::core::Pattern;
 
 pub use crate::compiler::parser::{default, Fields, Locals, ParserError, ParserErrorType};
-pub use crate::compiler::scanner::{ScanError, ScanErrorType, ScanToken};
-use crate::core::Pattern;
+pub use crate::compiler::scanner::{ScanError, ScanErrorType, ScanToken, ScanTokenType};
 
 mod scanner;
 mod parser;
 
+pub fn scan(view: &SourceView) -> Vec<(Location, ScanTokenType)> {
+    scanner::scan(view).tokens
+        .into_iter()
+        .map(|(loc, t)| (loc, t.ty()))
+        .collect()
+}
 
 pub fn compile(enable_optimization: bool, view: &SourceView) -> Result<CompileResult, Vec<String>> {
     let mut errors: Vec<String> = Vec::new();
@@ -224,6 +228,8 @@ impl CompileResult {
     /// This would emit a sequence of `\n` seperated opcodes, i.e. `Int(1)\nInt(2)\nAdd`
     #[cfg(test)]
     pub fn raw_disassembly(self: Self) -> String {
+        use itertools::Itertools;
+
         let mut locals = self.locals.iter().cloned();
         self.code
             .iter()

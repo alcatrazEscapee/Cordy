@@ -2,6 +2,7 @@ use std::fmt::Debug;
 use std::iter::Peekable;
 use std::num::ParseIntError;
 use std::str::Chars;
+use crate::core::NativeFunction;
 
 use crate::reporting::{AsErrorWithContext, Location};
 use crate::SourceView;
@@ -58,6 +59,16 @@ pub enum ScanErrorType {
     InvalidNumericValue(ParseIntError),
     InvalidCharacter(char),
     UnterminatedStringLiteral,
+}
+
+#[derive(Eq, PartialEq, Debug, Clone)]
+pub enum ScanTokenType {
+    Keyword,
+    Constant,
+    Native,
+    Number,
+    String,
+    Syntax,
 }
 
 
@@ -150,6 +161,19 @@ pub enum ScanToken {
     QuestionMark,
 
     NewLine,
+}
+
+impl ScanToken {
+    pub(super) fn ty(self) -> ScanTokenType {
+        match self {
+            StringLiteral(_) => ScanTokenType::String,
+            IntLiteral(_) | ComplexLiteral(_) => ScanTokenType::Number,
+            KeywordTrue | KeywordFalse | KeywordNil => ScanTokenType::Constant,
+            KeywordLet | KeywordFn | KeywordReturn | KeywordIf | KeywordElif | KeywordElse | KeywordThen | KeywordLoop | KeywordWhile | KeywordFor | KeywordIn | KeywordIs | KeywordNot | KeywordBreak | KeywordContinue | KeywordDo | KeywordStruct | KeywordExit | KeywordAssert => ScanTokenType::Keyword,
+            Identifier(it) if NativeFunction::find(it.as_str()).is_some() => ScanTokenType::Native,
+            _ => ScanTokenType::Syntax
+        }
+    }
 }
 
 
