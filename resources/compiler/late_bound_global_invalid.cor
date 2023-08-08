@@ -1,7 +1,0 @@
-// This should compile but fail at runtime, with a meaningful error
-fn foo() {
-    bar . print
-}
-
-foo()
-let bar = 'hello'

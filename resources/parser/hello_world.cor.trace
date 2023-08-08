@@ -1,5 +1,0 @@
-L1: 0000 Print
-    0001 Str('Hello World!')
-    0002 Call(1)
-    0003 Pop
-    0004 Exit

@@ -1,3 +1,0 @@
-for _ in range(4, 7) {
-    'hello' . print
-}

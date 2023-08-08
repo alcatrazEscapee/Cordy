@@ -1,8 +1,0 @@
-fn foo() {
-    let x = 'hello', y = 'the', z = 'world'
-    fn bar() {
-        (x, z) . print
-    }
-    bar()
-}
-foo()

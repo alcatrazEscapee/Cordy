@@ -1,4 +1,0 @@
-/* invalid prefix characters */ 0h1
-/* empty strings */ 0b 0x
-/* zero prefix */ 0123
-/* empty strings + complex */ 0bi 0xj

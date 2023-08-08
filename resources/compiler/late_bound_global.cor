@@ -1,7 +1,0 @@
-// This should compile and run, even though bar is referenced before it is defined
-fn foo() {
-    bar . print
-}
-
-let bar = 'hello'
-foo()

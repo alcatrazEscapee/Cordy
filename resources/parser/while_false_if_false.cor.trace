@@ -1,8 +1,0 @@
-L1: 0000 False
-    0001 JumpIfFalsePop(7)
-L2: 0002 False
-    0003 JumpIfFalsePop(6)
-L3: 0004 Str('hello')
-L4: 0005 Pop
-L5: 0006 Jump(0)
-    0007 Exit

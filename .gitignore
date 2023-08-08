@@ -5,14 +5,14 @@
 !/README.md
 !/LICENSE
 
-!/Cargo.toml
+!/**/Cargo.toml
 !/Cargo.lock
 !/rust-toolchain.toml
 
 !/resources/**/*.cor
 !/resources/**/*.cor.trace
 
-!/src/**/*.rs
-!/benches/**/*.rs
+!/cordy*/src/**/*.rs
+!/cordy*/benches/**/*.rs
 
 !/docs/**/*.md

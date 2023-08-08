@@ -1,7 +1,0 @@
-let r = range(4)
-for a in r {
-    a.print
-}
-for b in r {
-    b.print
-}

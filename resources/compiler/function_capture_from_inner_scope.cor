@@ -1,9 +1,0 @@
-let x = 'hello', y  = 'world'
-do {
-    let f
-    do {
-        f = fn() -> y
-        f() . repr . print
-    }
-    f() . repr . print
-}

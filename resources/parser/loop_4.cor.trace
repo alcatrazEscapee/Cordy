@@ -1,7 +1,0 @@
-L2: 0000 Jump(6)
-L4: 0001 Jump(1)
-L5: 0002 Jump(4)
-L6: 0003 Jump(1)
-L7: 0004 Jump(0)
-L8: 0005 Jump(0)
-    0006 Exit

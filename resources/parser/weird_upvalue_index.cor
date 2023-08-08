@@ -1,6 +1,0 @@
-fn problem() {
-    let bomb = nil
-    (fn() -> bomb)
-    (fn() -> bomb)()
-}
-problem()
