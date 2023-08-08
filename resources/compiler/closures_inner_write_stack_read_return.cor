@@ -1,9 +1,0 @@
-fn foo() {
-    let x = 'hello'
-    fn bar() {
-        x = 'goodbye'
-    }
-    bar()
-    x
-}
-foo() . print

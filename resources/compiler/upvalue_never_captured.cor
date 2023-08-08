@@ -1,7 +1,0 @@
-fn bomb(inp) {
-    if false {
-        (fn(i) -> inp)
-    }
-}
-
-bomb(nil)

@@ -1,3 +1,0 @@
-for letter in 'abcdef' {
-    letter . print
-}

@@ -1,24 +1,7 @@
-[package]
-    name = "cordy"
-    version = "0.1.0"
-    edition = "2018"
-
-[dependencies]
-    rustyline = "12.0.0"
-    num-integer = "0.1.45"
-    num-complex = "0.4.3"
-    itertools = "0.10.5"  # Criterion already depends on 0.10, and avoiding duplicate dependencies > bumping to >0.10
-    indexmap = "2.0.0"
-    fancy-regex = "0.11.0"
-    fxhash = "0.2.1"
-    mimalloc = { version = "0.1.37", default-features = false }
-
-[dev-dependencies]
-    criterion = "0.5.1"
+[workspace]
+    members = ["cordy", "cordy-sys"]
+    default-members = ["cordy"]
+    resolver = "2"
 
 [profile.release]
     lto = true
-
-[[bench]]
-    name = "vm"
-    harness = false

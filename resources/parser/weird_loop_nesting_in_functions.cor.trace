@@ -1,5 +1,0 @@
-Invalid 'break' statement outside of an enclosing loop
-  at: line 5 (weird_loop_nesting_in_functions.cor)
-
-5 |             (fn() { break })()
-6 |                     ^^^^^

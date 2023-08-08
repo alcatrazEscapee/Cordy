@@ -1,5 +1,0 @@
-let lambdas = []
-for i in range(10) {
-    lambdas.push(fn() -> i)
-}
-lambdas.map(fn(f) -> f() . print)
