@@ -1,7 +1,12 @@
 [package]
     name = "cordy-sys"
-    version = "0.1.0"
+    version = "0.1.1"
     edition = "2021"
+
+[features]
+    trace_parser = []
+    trace_interpreter = []
+    trace_interpreter_stack = []
 
 [dependencies]
     num-integer = "0.1.45"

@@ -15,3 +15,12 @@ mod util;
 
 #[cfg(test)]
 mod test_util;
+
+pub const SYS_VERSION: &'static str = version();
+
+const fn version() -> &'static str {
+    match option_env!("CARGO_PKG_VERSION") {
+        Some(v) => v,
+        None => "unknown"
+    }
+}

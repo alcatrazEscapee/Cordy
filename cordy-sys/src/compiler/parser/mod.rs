@@ -34,7 +34,7 @@ mod optimizer;
 
 /// Create a default empty `CompileResult`. This is semantically equivalent to parsing an empty program, but will output nothing.
 pub fn default() -> CompileResult {
-    parse_rule(false, vec![], |_| ())
+    parse_rule(true, vec![], |_| ())
 }
 
 
