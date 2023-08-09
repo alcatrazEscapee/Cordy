@@ -84,7 +84,7 @@ pub trait VirtualInterface {
     fn invoke_func0(&mut self, f: ValuePtr) -> ValueResult;
     fn invoke_func1(&mut self, f: ValuePtr, a1: ValuePtr) -> ValueResult;
     fn invoke_func2(&mut self, f: ValuePtr, a1: ValuePtr, a2: ValuePtr) -> ValueResult;
-    fn invoke_func(&mut self, f: ValuePtr, args: &Vec<ValuePtr>) -> ValueResult;
+    fn invoke_func(&mut self, f: ValuePtr, args: &[ValuePtr]) -> ValueResult;
 
     fn invoke_eval(&mut self, s: &String) -> ValueResult;
 
@@ -790,7 +790,7 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
         self.invoke_and_spin(2)
     }
 
-    fn invoke_func(&mut self, f: ValuePtr, args: &Vec<ValuePtr>) -> ValueResult {
+    fn invoke_func(&mut self, f: ValuePtr, args: &[ValuePtr]) -> ValueResult {
         self.push(f);
         for arg in args {
             self.push(arg.clone());

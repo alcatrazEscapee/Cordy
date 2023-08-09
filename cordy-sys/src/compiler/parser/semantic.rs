@@ -382,7 +382,7 @@ impl LValue {
                 }
             }
             LValue::Terms(_) => {
-                let pattern = self.build_pattern(parser);
+                let pattern = self.build_pattern();
                 parser.declare_pattern(pattern);
                 if !in_expression {
                     parser.push(Pop); // Push the final pop
@@ -391,7 +391,7 @@ impl LValue {
         }
     }
 
-    fn build_pattern(self, parser: &mut Parser) -> Pattern {
+    fn build_pattern(self) -> Pattern {
         let terms = self.into_terms();
         let is_variadic = terms.iter().any(|t| t.is_variadic_term());
         let len = if is_variadic { terms.len() - 1 } else { terms.len() };
@@ -421,7 +421,7 @@ impl LValue {
                     pattern.push_slice(low, high, lvalue.as_store_op());
                 },
                 terms @ LValue::Terms(_) => {
-                    pattern.push_pattern(index, terms.build_pattern(parser));
+                    pattern.push_pattern(index, terms.build_pattern());
                     index += 1;
                 },
             }
