@@ -1,7 +1,7 @@
 use std::cmp::{Ordering, Reverse};
 use std::collections::VecDeque;
 use fxhash::FxBuildHasher;
-use indexmap::IndexMap;
+use indexmap::{IndexMap, IndexSet};
 use itertools::Itertools;
 
 use crate::{util, vm};
@@ -653,5 +653,50 @@ pub fn create_memoized(f: ValuePtr) -> ValueResult {
     match f.is_evaluable() {
         true => ValuePtr::memoized(f).ok(),
         false => TypeErrorArgMustBeFunction(f).err()
+    }
+}
+
+pub fn set_union(other: ValuePtr, this: ValuePtr) -> ValueResult {
+    match this.ty() {
+        Type::Set => {
+            // this.union(other) := add everything from other to this
+            let mut set = this.as_set().borrow_mut();
+            for e in other.to_iter()? {
+                set.set.insert(e);
+            }
+            drop(set);
+            this.ok()
+        },
+        _ => TypeErrorArgMustBeSet(this).err()
+    }
+}
+
+pub fn set_intersect(other: ValuePtr, this: ValuePtr) -> ValueResult {
+    match this.ty() {
+        Type::Set => {
+            // this.intersect(other) := only keep elements of this that are also in other
+            // Since we have just an iterator, we need to compute a set of `other`, then repeatedly check `contains()` for each element in `this`
+            let mut set = this.as_set().borrow_mut();
+            let other = other.to_iter()?.collect::<IndexSet<ValuePtr, FxBuildHasher>>();
+            set.set.retain(|e| other.contains(e));
+            drop(set);
+            this.ok()
+        },
+        _ => TypeErrorArgMustBeSet(this).err()
+    }
+}
+
+pub fn set_difference(other: ValuePtr, this: ValuePtr) -> ValueResult {
+    match this.ty() {
+        Type::Set => {
+            // this.difference(other) := remove everything from this that is in other
+            let mut set = this.as_set().borrow_mut();
+            for e in other.to_iter()? {
+                set.set.remove(&e);
+            }
+            drop(set);
+            this.ok()
+        },
+        _ => TypeErrorArgMustBeSet(this).err()
     }
 }

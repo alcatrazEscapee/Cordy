@@ -801,6 +801,48 @@ Converts an integer to its unicode character representation, as a single-charact
 'A'
 ```
 
+### (Set) Union `<T> union(other: iterable<T>, self: set<T>) -> set<T>`
+
+Computes a union of `self` and `other`, mutating `self`. This is functionally similar to `self |= set(other)`, _except_ this will directly mutate `self`, which can be desirable for performance reasons with large sets. This will return `self`.
+
+**Example**
+
+```
+>>> let x = {1, 2, 3}
+>>> x . union({3, 4})
+{1, 2, 3, 4}
+>>> x
+{1, 2, 3, 4}
+```
+
+### (Set) Intersect `<T> intersect(other: iterable<T>, self: set<T>) -> set<T>`
+
+Computes an intersection of `self` and `other`, mutating `self`. This is functionally similar to `self &= set(other)`, _except_ this will directly mutate `self`, which can be desirable for performance reasons with large sets. This will return `self`.
+
+**Example**
+
+```
+>>> let x = {1, 2, 3}
+>>> x . intersect({2, 3, 4})
+{2, 3}
+>>> x
+{2, 3}
+```
+
+### (Set) Difference `<T> difference(other: iterable<T>, self: set<T>) -> set<T>`
+
+Computes a (non-symmetric) difference of `self` and `other`, mutating `self`. This is functionally similar to `self -= set(other)`, _except_ this will directly mutate `self`, which can be desirable for performance reasons with large sets. This will return `self`.
+
+**Example**
+
+```
+>>> let x = {1, 2, 3}
+>>> x . difference({3, 4})
+{1, 2}
+>>> x
+{1, 2}
+```
+
 ### (Dict) Default `<K, V> default(x: V, it: dict<K, V>) -> dict<K, V>`
 
 Sets the default value of `it` to `x`, and then returns `it`. This means that any future queries into `it` via the index syntax, if the key is not in the dictionary, will return `x`.

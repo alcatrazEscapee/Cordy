@@ -308,6 +308,7 @@ impl AsError for RuntimeError {
             RuntimeError::TypeErrorArgMustBeIndexable(ls) => format!("TypeError: Cannot index {}", ls.as_error()),
             RuntimeError::TypeErrorArgMustBeSliceable(ls) => format!("TypeError: Cannot slice {}", ls.as_error()),
             RuntimeError::TypeErrorArgMustBeList(v) => format!("TypeError: Expected {} to be a list", v.as_error()),
+            RuntimeError::TypeErrorArgMustBeSet(v) => format!("TypeError: Expected {} to be a set", v.as_error()),
             RuntimeError::TypeErrorArgMustBeDict(v) => format!("TypeError: Expected {} to be a dict", v.as_error()),
             RuntimeError::TypeErrorArgMustBeFunction(v) => format!("TypeError: Expected {} to be a function", v.as_error()),
             RuntimeError::TypeErrorArgMustBeCmpOrKeyFunction(v) => format!("TypeError: Expected {} to be a '<A, B> fn key(A) -> B' or '<A> cmp(A, A) -> int' function", v.as_error()),
