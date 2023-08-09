@@ -1,0 +1,7 @@
+let x = /*
+big comment
+*/
+1
+let y = /* but this one
+doesn't
+end! * / * / *

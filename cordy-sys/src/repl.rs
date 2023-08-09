@@ -281,6 +281,20 @@ z
 : [12: int, 6: int, 2: int]
 ")}
 
+    #[test] fn test_unterminated_strings_and_block_comments_cause_continuations() { run("\
+/* block
+comment */
+'long
+string'
+", "\
+>>> /* block
+... comment */
+>>> 'long
+... string'
+long
+string
+")}
+
     fn run(inputs: &'static str, outputs: &'static str) {
         let repl: Vec<String> = inputs.lines()
             .rev() // rev() because we pop from the end, but list them sequentially.
