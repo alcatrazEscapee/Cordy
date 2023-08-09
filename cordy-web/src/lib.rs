@@ -151,12 +151,6 @@ impl EscapedString {
         EscapedString { inner }
     }
 
-    fn push_str(&mut self, s: &str) {
-        for c in s.chars() {
-            self.push(c)
-        }
-    }
-
     fn push(&mut self, c: char) {
         match c {
             '[' => self.inner.push_str("&#91;"),
