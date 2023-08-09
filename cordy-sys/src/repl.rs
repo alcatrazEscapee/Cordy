@@ -26,6 +26,12 @@ pub struct Repl<W: Write> {
     vm: VirtualMachine<Empty, W>
 }
 
+impl<W : Write> Repl<W> {
+    pub fn view(&self) -> &SourceView {
+        self.vm.view()
+    }
+}
+
 struct Empty;
 
 impl Read for Empty {
