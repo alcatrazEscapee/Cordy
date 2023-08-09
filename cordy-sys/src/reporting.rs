@@ -442,7 +442,8 @@ impl AsError for ScanError {
             ScanErrorType::InvalidNumericPrefix(c) => format!("Invalid numeric prefix: '0{}'", c),
             ScanErrorType::InvalidNumericValue(e) => format!("Invalid numeric value: {}", e),
             ScanErrorType::InvalidCharacter(c) => format!("Invalid character: '{}'", c),
-            ScanErrorType::UnterminatedStringLiteral => String::from("Unterminated string literal (missing a closing single quote)")
+            ScanErrorType::UnterminatedStringLiteral => String::from("Unterminated string literal (missing a closing quote)"),
+            ScanErrorType::UnterminatedBlockComment => String::from("Unterminated block comment (missing a closing '*/')"),
         }
     }
 }

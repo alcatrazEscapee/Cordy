@@ -43,7 +43,7 @@ pub struct ScanError {
 
 impl ScanError {
     pub fn is_eof(&self) -> bool {
-        matches!(self.error, UnterminatedStringLiteral)
+        matches!(self.error, UnterminatedStringLiteral | UnterminatedBlockComment)
     }
 }
 
@@ -59,6 +59,7 @@ pub enum ScanErrorType {
     InvalidNumericValue(ParseIntError),
     InvalidCharacter(char),
     UnterminatedStringLiteral,
+    UnterminatedBlockComment,
 }
 
 #[derive(Eq, PartialEq, Debug, Clone)]
@@ -315,10 +316,7 @@ impl<'a> Scanner<'a> {
                                    None => {
                                        // Manually report this error at the source point, not at the destination point of the string
                                        // It makes it much easier to read.
-                                       self.errors.push(ScanError {
-                                           error: UnterminatedStringLiteral,
-                                           loc: Location::new(start, (self.cursor - start) as u32 + 1, self.index)
-                                       });
+                                       self.push_err_at(start, 1, UnterminatedStringLiteral);
                                        break
                                    }
                                }
@@ -381,17 +379,24 @@ impl<'a> Scanner<'a> {
                                }
                            }
                            Some('*') => {
+                               let start: usize = self.cursor;
                                loop {
                                    match self.advance() {
                                        Some('*') => {
                                            match self.advance() {
                                                Some('/') => break,
                                                Some(_) => {},
-                                               None => break
+                                               None => {
+                                                   self.push_err_at(start, 2, UnterminatedBlockComment);
+                                                   break
+                                               }
                                            }
                                        },
                                        Some(_) => {},
-                                       None => break
+                                       None => {
+                                           self.push_err_at(start, 2, UnterminatedBlockComment);
+                                           break
+                                       }
                                    }
                                }
                            }
@@ -441,7 +446,6 @@ impl<'a> Scanner<'a> {
                        ';' => self.push(1, Semicolon),
                        '@' => self.push(1, At),
                        '?' => self.push(1, QuestionMark),
-                       '\\' => {}, // Discard backslashes... like a ninja
 
                        e => self.push_err(0, 1, InvalidCharacter(e))
                    }
@@ -522,6 +526,16 @@ impl<'a> Scanner<'a> {
         });
     }
 
+    /// Reports an error at a given source point, not until the end. Used for 'unterminated' errors, as it makes them easier to read.
+    fn push_err_at(&mut self, start: usize, width: u32, error: ScanErrorType) {
+        // Manually report this error at the source point, not at the destination point of the string
+        // It makes it much easier to read.
+        self.errors.push(ScanError {
+            error,
+            loc: Location::new(start, (self.cursor - start) as u32 + width, self.index)
+        });
+    }
+
 
     /// Consumes the next character (unconditionally) and adds it to the buffer
     /// **Note**: This function must only be invoked after `Some()` has been matched to a `peek()` variant.
@@ -598,6 +612,7 @@ mod tests {
     #[test] fn test_invalid_numeric_prefix() { run("invalid_numeric_prefix"); }
     #[test] fn test_invalid_numeric_value() { run("invalid_numeric_value"); }
     #[test] fn test_string_with_newlines() { run("string_with_newlines"); }
+    #[test] fn test_unterminated_block_comment() { run("unterminated_block_comment"); }
     #[test] fn test_unterminated_string_literal() { run("unterminated_string_literal"); }
 
 
