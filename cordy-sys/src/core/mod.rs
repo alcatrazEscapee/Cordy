@@ -1,13 +1,11 @@
-use std::cmp::Ordering;
 use std::collections::{BinaryHeap, VecDeque};
 use std::default::Default;
 use std::fs;
-use std::hash::{Hash, Hasher};
+use std::hash::Hash;
 use fxhash::FxBuildHasher;
 use indexmap::{IndexMap, IndexSet};
 
 use crate::trace;
-use crate::util::impl_partial_ord;
 use crate::vm::{ErrorResult, IntoIterableValue, IntoValue, MAX_INT, MIN_INT, operator, RuntimeError, Type, ValueOption, ValuePtr, ValueResult, VirtualInterface};
 use crate::vm::operator::BinaryOp;
 
@@ -152,6 +150,8 @@ pub enum NativeFunction {
     Lcm,
     CountOnes,
     CountZeros,
+    Real,
+    Imag,
 }
 
 
@@ -400,6 +400,8 @@ const fn load_native_functions() -> [NativeFunctionInfo; NativeFunction::total()
         new(Lcm, "lcm", "...", IterNonEmpty),
         new(CountOnes, "count_ones", "x", Arg1),
         new(CountZeros, "count_zeros", "x", Arg1),
+        new(Real, "real", "x", Arg1),
+        new(Imag, "imag", "x", Arg1),
     ]
 }
 
@@ -458,21 +460,12 @@ impl Argument {
 ///
 /// This *should be* optimize-able, given that we already perform a dispatch against the function once, when creating the partial function. So, we use `PartialArgument` to represent that state, post-dispatch.
 /// We can also create partial argument types that have an explicit number of partial arguments
-#[derive(Debug, Clone, Eq)]
+#[derive(Debug, Clone)]
 pub enum PartialArgument {
     Arg2Par1(ValuePtr),
     Arg3Par1(ValuePtr),
     Arg3Par2(ValuePtr, ValuePtr),
 }
-
-// For Eq, Ord, since we don't want to compare on the values (just the function), we ignore this completely, just returning true
-// This *does* still have an issue, where a partial function will not return == to the function, but otherwise be indistinguishable in user code
-// This is fine for now, maybe figure out how to fix that later
-// todo: fix issues with partial function + native function equality and other operators
-impl PartialEq for PartialArgument { fn eq(&self, _: &Self) -> bool { true } }
-impl_partial_ord!(PartialArgument);
-impl std::cmp::Ord for PartialArgument { fn cmp(&self, _: &Self) -> Ordering { Ordering::Equal } }
-impl Hash for PartialArgument { fn hash<H: Hasher>(&self, _: &mut H) {} }
 
 impl PartialArgument {
     /// Returns the minimum amount of arguments needed to evaluate this function, where below this number it will return a partial function
@@ -883,6 +876,8 @@ fn invoke_arg1<VM : VirtualInterface>(f: NativeFunction, a1: ValuePtr, vm: &mut 
         Sqrt => math::sqrt(a1),
         CountOnes => math::count_ones(a1),
         CountZeros => math::count_zeros(a1),
+        Real => math::get_real(a1),
+        Imag => math::get_imag(a1),
 
         _ => panic!("core::invoke_arg1() not supported for {:?}", f),
     }

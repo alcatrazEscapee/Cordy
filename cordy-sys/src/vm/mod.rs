@@ -1666,6 +1666,16 @@ mod tests {
     #[test] fn test_env_exists() { run_str("env . repr . print", "fn env(...)\n"); }
     #[test] fn test_argv_exists() { run_str("argv . repr . print", "fn argv()\n"); }
     #[test] fn test_argv_is_empty() { run_str("argv() . repr . print", "[]\n"); }
+    #[test] fn test_real_of_bool() { run_str("true . real . print", "1\n"); }
+    #[test] fn test_real_of_int() { run_str("123 . real . print", "123\n"); }
+    #[test] fn test_real_of_imag() { run_str("123i . real . print", "0\n"); }
+    #[test] fn test_real_of_complex() { run_str("1 + 2j . real . print", "1\n"); }
+    #[test] fn test_real_of_str() { run_str("'hello' . real . print", "TypeError: Expected 'hello' of type 'str' to be a complex\n  at: line 1 (<test>)\n\n1 | 'hello' . real . print\n2 |         ^^^^^^\n"); }
+    #[test] fn test_imag_of_bool() { run_str("true . imag . print", "0\n"); }
+    #[test] fn test_imag_of_int() { run_str("123 . imag . print", "0\n"); }
+    #[test] fn test_imag_of_imag() { run_str("123j . imag . print", "123\n"); }
+    #[test] fn test_imag_of_complex() { run_str("4i + 6 . imag . print", "4\n"); }
+    #[test] fn test_imag_of_str() { run_str("'4i + 6' . imag . print", "TypeError: Expected '4i + 6' of type 'str' to be a complex\n  at: line 1 (<test>)\n\n1 | '4i + 6' . imag . print\n2 |          ^^^^^^\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }

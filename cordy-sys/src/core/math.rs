@@ -71,3 +71,19 @@ pub fn count_zeros(value: ValuePtr) -> ValueResult {
         .to_value()
         .ok()
 }
+
+pub fn get_real(value: ValuePtr) -> ValueResult {
+    match value.ty() {
+        Type::Complex => value.as_precise_complex().value.inner.re.to_value().ok(),
+        Type::Bool | Type::Int => value.as_int().to_value().ok(),
+        _ => TypeErrorArgMustBeComplex(value).err()
+    }
+}
+
+pub fn get_imag(value: ValuePtr) -> ValueResult {
+    match value.ty() {
+        Type::Complex => value.as_precise_complex().value.inner.im.to_value().ok(),
+        Type::Bool | Type::Int => 0i64.to_value().ok(),
+        _ => TypeErrorArgMustBeComplex(value).err()
+    }
+}

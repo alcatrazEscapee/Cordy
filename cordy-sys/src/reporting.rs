@@ -301,6 +301,7 @@ impl AsError for RuntimeError {
             RuntimeError::TypeErrorCannotConvertToInt(v) => format!("TypeError: Cannot convert {} to an int", v.as_error()),
             RuntimeError::TypeErrorFieldNotPresentOnValue(v, f, b) => format!("TypeError: Cannot get field '{}' on {}", f, if *b { v.to_repr_str() } else { v.as_error() }),
             RuntimeError::TypeErrorArgMustBeInt(v) => format!("TypeError: Expected {} to be a int", v.as_error()),
+            RuntimeError::TypeErrorArgMustBeComplex(v) => format!("TypeError: Expected {} to be a complex", v.as_error()),
             RuntimeError::TypeErrorArgMustBeStr(v) => format!("TypeError: Expected {} to be a string", v.as_error()),
             RuntimeError::TypeErrorArgMustBeChar(v) => format!("TypeError: Expected {} to be a single character string", v.as_error()),
             RuntimeError::TypeErrorArgMustBeIterable(v) => format!("TypeError: Expected {} to be an iterable", v.as_error()),

@@ -47,6 +47,7 @@ pub enum RuntimeError {
     TypeErrorFieldNotPresentOnValue(ValuePtr, String, bool), // value, field name, is the value to be printed with to_repr_str()?
 
     TypeErrorArgMustBeInt(ValuePtr),
+    TypeErrorArgMustBeComplex(ValuePtr),
     TypeErrorArgMustBeStr(ValuePtr),
     TypeErrorArgMustBeChar(ValuePtr),
     TypeErrorArgMustBeIterable(ValuePtr),
