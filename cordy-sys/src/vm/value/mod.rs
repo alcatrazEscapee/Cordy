@@ -1060,11 +1060,19 @@ impl Hash for PartialFunctionImpl {
 }
 
 
-#[derive(Eq, PartialEq, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct PartialNativeFunctionImpl {
     pub func: NativeFunction,
     pub partial: PartialArgument,
 }
+
+impl Eq for PartialNativeFunctionImpl {}
+impl PartialEq<Self> for PartialNativeFunctionImpl {
+    fn eq(&self, other: &Self) -> bool {
+        self.func == other.func
+    }
+}
+
 
 impl Hash for PartialNativeFunctionImpl {
     fn hash<H: Hasher>(&self, state: &mut H) {

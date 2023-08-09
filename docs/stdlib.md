@@ -646,6 +646,36 @@ Returns the number of ones in the 63-bit, signed, binary representation of `x`
 
 Returns the number of zeros in the 63-bit, signed, binary representation of `x`
 
+### Real `real(x: bool | int | complex) -> int`
+
+With an int-like argument, returns the real part. For `bool` and `int`, this is the same as invoking `int`. For `complex`, this will return the real component as an integer.
+
+**Example**
+
+```
+>>> true . real
+1
+>>> 5 . real
+5
+>>> 7 + 13i . real
+7
+```
+
+### Imag `imag(x: bool | int | complex) -> int`
+
+With an int-like argument, returns the imaginary part. For `bool` and `int`, this will always return `0`. For `complex`, this will return the imaginary component as an integer.
+
+**Example**
+
+```
+>>> true . imag
+0
+>>> 5 . imag
+0
+>>> 7 + 13i . imag
+13
+```
+
 ### Lcm `lcm(...) -> int`
 
 Possible signatures:
