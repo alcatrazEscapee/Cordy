@@ -54,6 +54,7 @@ pub enum RuntimeError {
     TypeErrorArgMustBeIndexable(ValuePtr),
     TypeErrorArgMustBeSliceable(ValuePtr),
     TypeErrorArgMustBeList(ValuePtr),
+    TypeErrorArgMustBeSet(ValuePtr),
     TypeErrorArgMustBeDict(ValuePtr),
     TypeErrorArgMustBeFunction(ValuePtr),
     TypeErrorArgMustBeCmpOrKeyFunction(ValuePtr),

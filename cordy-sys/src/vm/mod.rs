@@ -1452,6 +1452,15 @@ mod tests {
     #[test] fn test_set_insert_self() { run_str("let x = set() ; x.push(x)", "ValueError: Cannot create recursive hash based collection from '{{...}}' of type 'set'\n  at: line 1 (<test>)\n\n1 | let x = set() ; x.push(x)\n2 |                  ^^^^^^^^\n"); }
     #[test] fn test_set_indirect_insert_self() { run_str("let x = set() ; x.push([x])", "ValueError: Cannot create recursive hash based collection from '{[{...}]}' of type 'set'\n  at: line 1 (<test>)\n\n1 | let x = set() ; x.push([x])\n2 |                  ^^^^^^^^^^\n"); }
     #[test] fn test_set_recursive_repr() { run_str("let x = set() ; x.push(x) ; x.print", "ValueError: Cannot create recursive hash based collection from '{{...}}' of type 'set'\n  at: line 1 (<test>)\n\n1 | let x = set() ; x.push(x) ; x.print\n2 |                  ^^^^^^^^\n"); }
+    #[test] fn test_set_union() { run_str("{1, 2, 3} . union({5, 6, 7}) . print", "{1, 2, 3, 5, 6, 7}\n"); }
+    #[test] fn test_set_union_with_list() { run_str("{1, 2, 3} . union([5, 6, 7]) . print", "{1, 2, 3, 5, 6, 7}\n"); }
+    #[test] fn test_set_union_mutates_self() { run_str("let x = {1, 2, 3} ; x . union([5, 6, 7]) ; x . print", "{1, 2, 3, 5, 6, 7}\n"); }
+    #[test] fn test_set_intersect() { run_str("{1, 2, 3} . intersect({2, 3, 4, 5}) . print", "{2, 3}\n"); }
+    #[test] fn test_set_intersect_with_list() { run_str("{1, 2, 3} . intersect([2, 3, 4, 5]) . print", "{2, 3}\n"); }
+    #[test] fn test_set_intersect_mutates_self() { run_str("let x = {1, 2, 3} ; x . intersect([2, 3, 4, 5]) ; x . print", "{2, 3}\n"); }
+    #[test] fn test_set_difference() { run_str("{1, 2, 3, 4, 5} . difference({4, 5, 6}) . print", "{1, 2, 3}\n"); }
+    #[test] fn test_set_difference_with_list() { run_str("{1, 2, 3, 4, 5} . difference([4, 5, 6]) . print", "{1, 2, 3}\n"); }
+    #[test] fn test_set_difference_mutates_self() { run_str("let x = {1, 2, 3, 4, 5} ; x . difference([4, 5, 6]) ; x . print", "{1, 2, 3}\n"); }
     #[test] fn test_dict_empty_constructor() { run_str("dict() . print", "{}\n"); }
     #[test] fn test_dict_literal_single() { run_str("{'hello': 'world'} . print", "{'hello': 'world'}\n"); }
     #[test] fn test_dict_literal_multiple() { run_str("{1: 'a', 2: 'b', 3: 'c'} . print", "{1: 'a', 2: 'b', 3: 'c'}\n"); }

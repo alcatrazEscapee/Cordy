@@ -126,6 +126,9 @@ pub enum NativeFunction {
     Any,
     All,
     Memoize,
+    Union,
+    Intersect,
+    Difference,
 
     Peek, // Peek first value
     Pop, // Remove value at end
@@ -376,6 +379,9 @@ const fn load_native_functions() -> [NativeFunctionInfo; NativeFunction::total()
         new(Any, "any", "f, it", Arg2),
         new(All, "all", "f, it", Arg2),
         new(Memoize, "memoize", "f", Arg1),
+        new(Union, "union", "other, self", Arg2),
+        new(Intersect, "intersect", "other, self", Arg2),
+        new(Difference, "difference", "other, self", Arg2),
 
         new(Peek, "peek", "collection", Arg1),
         new(Pop, "pop", "collection", Arg1),
@@ -948,6 +954,9 @@ fn invoke_arg2<VM : VirtualInterface>(f: NativeFunction, a1: ValuePtr, a2: Value
         Combinations => collections::combinations(a1, a2),
         Any => collections::any(vm, a1, a2),
         All => collections::all(vm, a1, a2),
+        Union => collections::set_union(a1, a2),
+        Intersect => collections::set_intersect(a1, a2),
+        Difference => collections::set_difference(a1, a2),
 
         Push => collections::push(a1, a2),
         PushFront => collections::push_front(a1, a2),
