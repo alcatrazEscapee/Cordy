@@ -62,7 +62,8 @@ pub enum ScanErrorType {
     UnterminatedBlockComment,
 }
 
-#[derive(Eq, PartialEq, Debug, Clone)]
+#[repr(u8)]
+#[derive(Eq, PartialEq, Debug, Clone, Copy)]
 pub enum ScanTokenType {
     Keyword,
     Constant,
@@ -71,6 +72,8 @@ pub enum ScanTokenType {
     Number,
     String,
     Syntax,
+    Blank, // Used for newline tokens
+    Comment, // Special type, used for comments, which don't have any emitted tokens, but still may need to highlight.
 }
 
 
@@ -177,6 +180,7 @@ impl ScanToken {
                 Some(_) => ScanTokenType::Native,
                 _ => ScanTokenType::Syntax,
             }
+            NewLine => ScanTokenType::Blank,
             _ => ScanTokenType::Syntax
         }
     }

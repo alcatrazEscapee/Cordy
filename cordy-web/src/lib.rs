@@ -1,14 +1,13 @@
 use std::cell::RefCell;
 use std::io;
 use std::io::Write;
-use std::iter::Peekable;
 use std::rc::Rc;
-use std::str::Chars;
 use wasm_bindgen::prelude::*;
 
-use cordy_sys::{compiler, SourceView, SYS_VERSION};
-use cordy_sys::compiler::ScanTokenType;
+use cordy_sys::SYS_VERSION;
 use cordy_sys::repl::{ReadResult, Repl, RunResult};
+
+mod syntax;
 
 
 #[allow(dead_code)]
@@ -43,75 +42,11 @@ pub fn prompt() -> String {
 #[wasm_bindgen]
 pub fn scan(input: String) -> String {
     let lock = Lock;
-
-    // For multiline syntax (i.e. strings, comments), we need to scan the entire view thus far - which is the current REPL text, plus the input here
-    // But, we don't want to *output* any of that - only output the new input
     let prefix: &String = Manager::get(&lock).repl.view().text();
-    let mut full_input: String = prefix.clone();
-    full_input.push_str(input.as_str());
 
-    let view = SourceView::new(String::new(), full_input);
-    let scan = compiler::scan(&view);
-    let mut output: EscapedString = EscapedString::new(String::with_capacity(view.text().len()));
-    let mut chars = input.chars().peekable();
-
-    // The index of the next character of `chars` to be consumed
-    // We start at the length of the `prefix`, so we don't output anything that occurred before the prefix
-    let mut index = prefix.len();
-
-    for (loc, token) in scan {
-        if index > loc.end() {
-            continue; // In the beginning, skip any tokens that end before the start of the current text
-        }
-
-        // Consume any leading whitespace and/or comments, leading up to the token
-        consume_whitespace_and_comment(&mut chars, &mut output, &mut index, |_, index| *index < loc.start());
-
-        // Don't escape the prefix
-        output.inner.push_str(match token {
-            ScanTokenType::Keyword => "[[b;#b5f;]",
-            ScanTokenType::Constant => "[[b;#27f;]",
-            ScanTokenType::Native => "[[;#b80;]",
-            ScanTokenType::Type => "[[;#2aa;]",
-            ScanTokenType::Number => "[[;#385;]",
-            ScanTokenType::String => "[[;#b10;]",
-            ScanTokenType::Syntax => "",
-        });
-
-        while index <= loc.end() { // Consume the token itself
-            output.push(chars.next().unwrap());
-            index += 1;
-        }
-
-        // Don't escape the suffix - all except a syntax generate a color and need to close it
-        if !matches!(token, ScanTokenType::Syntax) {
-            output.inner.push(']');
-        }
-    }
-
-    // Consume any trailing whitespace or comment characters, after all tokens have been parsed
-    consume_whitespace_and_comment(&mut chars, &mut output, &mut index, |c, _| c.peek().is_some());
-
-    output.inner
+    syntax::scan(input, prefix)
 }
 
-
-fn consume_whitespace_and_comment<F>(chars: &mut Peekable<Chars>, output: &mut EscapedString, index: &mut usize, mut end: F)
-    where F : FnMut(&mut Peekable<Chars>, &mut usize) -> bool {
-    while let Some(' ' | '\t' | '\r' | '\n') = chars.peek() {
-        output.push(chars.next().unwrap());
-        *index += 1;
-    }
-
-    if end(chars, index) {
-        output.inner.push_str("[[;#aaa;]");
-        while end(chars, index) {
-            output.push(chars.next().unwrap());
-            *index += 1;
-        }
-        output.inner.push(']');
-    }
-}
 
 /// Executes the provided code string, and returns the results.
 ///
@@ -139,26 +74,6 @@ pub fn exec(input: String) -> RunResultJs {
     cordy_sys::util::strip_line_ending(&mut lines);
 
     RunResultJs { exit, lines }
-}
-
-/// Handles escaping control (formatting) characters in the output
-struct EscapedString {
-    inner: String
-}
-
-impl EscapedString {
-    fn new(inner: String) -> EscapedString {
-        EscapedString { inner }
-    }
-
-    fn push(&mut self, c: char) {
-        match c {
-            '[' => self.inner.push_str("&#91;"),
-            '\\' => self.inner.push_str("&#92;"),
-            ']' => self.inner.push_str("&#93;"),
-            _ => self.inner.push(c),
-        }
-    }
 }
 
 
