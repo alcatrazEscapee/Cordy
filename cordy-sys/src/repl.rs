@@ -110,7 +110,7 @@ impl<W: Write> Repl<W> {
         };
 
         match line.as_str() {
-            "" => return RunResult::Ok,
+            "" if !self.continuation => return RunResult::Ok,
             "#stack" => {
                 self.vm.println(self.vm.debug_stack());
                 return RunResult::Ok
@@ -299,6 +299,20 @@ string'
 ... string'
 long
 string
+")}
+
+    // Note that \n\ is used to indicate a newline, with trailing space, so IDE doesn't nuke the trailing spaces
+    #[test] fn test_continuation_of_empty_lines_in_string_literal() { run("\
+'
+
+
+' . repr
+", "\
+>>> '
+... \n\
+... \n\
+... ' . repr
+'\\n\\n\\n'
 ")}
 
     fn run(inputs: &'static str, outputs: &'static str) {
