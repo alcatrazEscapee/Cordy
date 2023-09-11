@@ -173,7 +173,7 @@ impl ScanToken {
         match self {
             StringLiteral(_) => ScanTokenType::String,
             IntLiteral(_) | ComplexLiteral(_) => ScanTokenType::Number,
-            KeywordTrue | KeywordFalse | KeywordNil => ScanTokenType::Constant,
+            KeywordTrue | KeywordFalse | KeywordNil | LogicalAnd | LogicalOr => ScanTokenType::Constant,
             KeywordLet | KeywordFn | KeywordReturn | KeywordIf | KeywordElif | KeywordElse | KeywordThen | KeywordLoop | KeywordWhile | KeywordFor | KeywordIn | KeywordIs | KeywordNot | KeywordBreak | KeywordContinue | KeywordDo | KeywordStruct | KeywordExit | KeywordAssert => ScanTokenType::Keyword,
             Identifier(it)  => match NativeFunction::find(it.as_str()) {
                 Some(NativeFunction::Int | NativeFunction::Str | NativeFunction::Function | NativeFunction::List | NativeFunction::Heap | NativeFunction::Dict | NativeFunction::Set | NativeFunction::Vector | NativeFunction::Any | NativeFunction::Bool | NativeFunction::Iterable | NativeFunction::Complex) => ScanTokenType::Type,
