@@ -364,34 +364,37 @@ impl<'a> Parser<'a> {
     /// A specialization of `error()` which provides the last token (the result of `peek()`) to the provided error function
     /// This avoids ugly borrow checker issues where `match self.peek() { ... t => self.error(Error(t)) }` does not work, despite the semantics being identical.
     pub fn error_with<F : FnOnce(Option<ScanToken>) -> ParserErrorType>(&mut self, error: F) {
-        let token = self.peek().cloned();
-        self.error(error(token));
+        self.do_error(self.next_location(), error(self.peek().cloned()), true)
     }
 
     /// Pushes a new error token into the output error stream.
     pub fn error(&mut self, error: ParserErrorType) {
-        trace::trace_parser!("push_err (error = {}) {:?}", self.error_recovery, error);
-        if !self.error_recovery {
-            self.errors.push(ParserError::new(error, self.next_location()));
-        }
-        self.error_recovery = true;
+        self.do_error(self.next_location(), error, true)
     }
 
     /// Pushes a new error token into the output error stream, but does not initiate error recovery.
     /// This is useful for semantic errors which are valid lexically, but still need to report errors.
     pub fn semantic_error(&mut self, error: ParserErrorType) {
-        trace::trace_parser!("push_err (error = {}) {:?}", self.error_recovery, error);
-        if !self.error_recovery {
-            self.errors.push(ParserError::new(error, self.prev_location()));
-        }
+        self.do_error(self.prev_location(), error, false)
+    }
+
+    pub fn semantic_error_at(&mut self, loc: Location, error: ParserErrorType) {
+        self.do_error(loc, error, false)
     }
 
     /// Pushes a new error token into the output error stream, based on the provided runtime error (produced by constant expressions at compile time)
     /// Does not initiate error recovery.
     pub fn runtime_error(&mut self, loc: Location, error: Box<RuntimeError>) {
+        self.do_error(loc, Runtime(error), false)
+    }
+
+    fn do_error(&mut self, loc: Location, error: ParserErrorType, error_recovery: bool) {
         trace::trace_parser!("push_err (error = {}) {:?}", self.error_recovery, error);
         if !self.error_recovery {
-            self.errors.push(ParserError::new(Runtime(error), loc));
+            self.errors.push(ParserError::new(error, loc));
+        }
+        if error_recovery {
+            self.error_recovery = true;
         }
     }
 

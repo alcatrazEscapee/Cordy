@@ -59,7 +59,8 @@ impl ParserError {
             StructNotInGlobalScope |
             NonDefaultParameterAfterDefaultParameter |
             ParameterAfterVarParameter |
-            UnrollNotAllowedInSlice => false,
+            UnrollNotAllowedInSlice |
+            UnrollNotAllowedInPartialOperator => false,
 
             Runtime(_) => false,
         }
@@ -115,6 +116,7 @@ pub enum ParserErrorType {
     NonDefaultParameterAfterDefaultParameter,
     ParameterAfterVarParameter,
     UnrollNotAllowedInSlice,
+    UnrollNotAllowedInPartialOperator,
 
     Runtime(Box<RuntimeError>),
 }
