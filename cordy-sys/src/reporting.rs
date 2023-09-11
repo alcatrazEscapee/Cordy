@@ -432,6 +432,7 @@ impl AsError for ParserError {
             ParserErrorType::NonDefaultParameterAfterDefaultParameter => String::from("Non-default argument cannot follow default argument."),
             ParserErrorType::ParameterAfterVarParameter => String::from("Variadic parameter must be the last one in the function."),
             ParserErrorType::UnrollNotAllowedInSlice => String::from("Unrolled expression with '...' not allowed in slice literal."),
+            ParserErrorType::UnrollNotAllowedInPartialOperator => String::from("Unrolled expression with '...' not allowed to be attached to a implicit partially-evaluated operator"),
 
             ParserErrorType::Runtime(e) => e.as_error(),
         }

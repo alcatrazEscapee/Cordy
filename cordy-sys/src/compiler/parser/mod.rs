@@ -1383,7 +1383,7 @@ impl Parser<'_> {
     }
 
     fn parse_expr_2_unary(&mut self) -> Expr {
-        trace::trace_parser!("rule <expr-2>");
+        trace::trace_parser!("rule <expr-2-unary>");
 
         let stack: Vec<(Location, UnaryOp)> = self.parse_expr_2_prefix_operators();
         let mut expr: Expr = self.parse_expr_1_terminal();
@@ -1399,6 +1399,8 @@ impl Parser<'_> {
     }
 
     fn parse_expr_2_prefix_operators(&mut self) -> Vec<(Location, UnaryOp)> {
+        trace::trace_parser!("rule <expr-2-prefix-operators>");
+
         let mut stack: Vec<(Location, UnaryOp)> = Vec::new();
         loop {
             match self.peek() {
@@ -1416,6 +1418,7 @@ impl Parser<'_> {
     }
 
     fn parse_expr_2_suffix_operators(&mut self, mut expr: Expr) -> Expr {
+        trace::trace_parser!("rule <expr-2-suffix-operators>");
         loop {
             // The opening token of a suffix operator must be on the same line
             match self.peek_no_newline() {
@@ -1468,7 +1471,7 @@ impl Parser<'_> {
 
                     // Consumed `[` <expression> `:` so far
                     let arg2: Expr = match self.peek() {
-                        Some(Colon) => Expr::nil(), // No second argument, but we have a third argument. Don't consume the colon as it's the seperator
+                        Some(Colon) => Expr::nil(), // No second argument, but we have a third argument. Don't consume the colon as it's the separator
                         Some(CloseSquareBracket) => { // No second argument, so a unbounded slice
                             let loc_end = self.advance_with();
                             expr = expr.slice(loc_start | loc_end, arg1, Expr::nil());
@@ -1552,18 +1555,43 @@ impl Parser<'_> {
     }
 
     fn parse_expr_2_bare_suffix(&mut self, expr: Expr) -> Expr {
+        trace::trace_parser!("rule <expr-2-bare-suffix>");
         let loc_start = self.next_location();
         let arg = self.parse_expr_1_terminal();
         expr.eval(loc_start | self.prev_location(), vec![arg], false)
     }
 
     fn parse_expr_2_unary_function_call(&mut self, loc_start: Location, expr: Expr) -> Expr {
+        trace::trace_parser!("rule <expr-2-unary-function-call>");
+
         // First argument
         let mut any_unroll: bool = false;
         let mut args: Vec<Expr> = Vec::new();
 
         loop {
-            args.push(self.parse_expr_top_level_or_unrolled(&mut any_unroll));
+            let loc_arg = self.next_location();
+            let arg = self.parse_expr_top_level_or_unrolled(&mut any_unroll);
+
+            // Check for a trailing operator followed by `)`
+            // In that case, we have something like `map ( 3 + )`, which we treat as a shorthand for `map (( 3 + ))`
+            // There's nothing else legal this could possibly be if we see operator and then end of parens
+            //
+            // N.B. This argument can't be unrolled, because there's no situation where a partially evaluated function is unroll-able.
+            // So we just deny it here rather than having a runtime error.
+            let was_unroll: bool = arg.is_unroll(); // Store here because `partial_arg` won't be an unroll
+            match self.parse_expr_1_partial_operator_right(arg) {
+                Ok(partial_arg) => {
+                    if was_unroll {
+                        self.semantic_error_at(loc_arg | self.prev_location(), UnrollNotAllowedInPartialOperator);
+                    }
+
+                    // In this case, we need to early exit since we won't expect a `CloseParen` nor a trailing comma
+                    args.push(partial_arg);
+                    return expr.eval(loc_start | self.prev_location(), args, any_unroll)
+                },
+                Err(arg) => args.push(arg), // No partial operator, proceed as usual
+            }
+
             if self.parse_optional_trailing_comma(CloseParen, ExpectedCommaOrEndOfArguments) {
                 break;
             }
@@ -1576,6 +1604,8 @@ impl Parser<'_> {
 
     /// Parses a `-> <field>` - either returns a `(Location, field_index)` pairing, or `None` and raises a parse error.
     fn parse_expr_2_field_access(&mut self) -> Option<(Location, u32)> {
+        trace::trace_parser!("rule <expr-2-field-access>");
+
         let loc_start = self.advance_with(); // Consume `->`
         match self.peek() {
             Some(Identifier(_)) => {
@@ -1981,6 +2011,16 @@ mod tests {
     #[test] fn test_partial_binary_ops() { run_expr("(+) ((*)) (/)", "OperatorAdd OperatorMul Call(1) OperatorDiv Call(1)") }
     #[test] fn test_partial_binary_op_left_eval() { run_expr("(+1)", "OperatorAddSwap Int(1) Call(1)"); }
     #[test] fn test_partial_binary_op_right_eval() { run_expr("(1+)", "OperatorAdd Int(1) Call(1)"); }
+    #[test] fn test_partial_binary_op_long_left_eval() { run_expr("(not in 3)", "OperatorNotInSwap Int(3) Call(1)") }
+    #[test] fn test_partial_binary_op_long_right_eval() { run_expr("(3 not in)", "OperatorNotIn Int(3) Call(1)") }
+    #[test] fn test_partial_binary_op_in_call_left_eval() { run_expr("print ((+ 3))", "Print OperatorAddSwap Int(3) Call(1) Call(1)") }
+    #[test] fn test_partial_binary_op_in_call_right_eval() { run_expr("print ((3 +))", "Print OperatorAdd Int(3) Call(1) Call(1)") }
+    #[test] fn test_partial_binary_op_in_call_long_left_eval() { run_expr("print ((is not 3))", "Print OperatorIsNotSwap Int(3) Call(1) Call(1)") }
+    #[test] fn test_partial_binary_op_in_call_long_right_eval() { run_expr("print ((3 is not))", "Print OperatorIsNot Int(3) Call(1) Call(1)") }
+    #[test] fn test_partial_binary_op_in_implicit_call_left_eval() { run_expr("print (+ 3)", "Print OperatorAddSwap Int(3) Call(1) Call(1)") }
+    #[test] fn test_partial_binary_op_in_implicit_call_right_eval() { run_expr("print (3 +)", "Print OperatorAdd Int(3) Call(1) Call(1)") }
+    #[test] fn test_partial_binary_op_in_implicit_call_long_left_eval() { run_expr("print (is not 3)", "Print OperatorIsNotSwap Int(3) Call(1) Call(1)") }
+    #[test] fn test_partial_binary_op_in_implicit_call_long_right_eval() { run_expr("print (3 is not)", "Print OperatorIsNot Int(3) Call(1) Call(1)") }
     #[test] fn test_if_then_else() { run_expr("if true then 1 else 2", "True JumpIfFalsePop(4) Int(1) Jump(5) Int(2)")}
 
     #[test] fn test_let_eof() { run_err("let", "Expected a variable binding, either a name, or '_', or pattern (i.e. 'x, (_, y), *z'), got end of input instead\n  at: line 1 (<test>)\n\n1 | let\n2 |     ^^^\n"); }
@@ -1989,6 +2029,8 @@ mod tests {
     #[test] fn test_let_no_expression() { run_err("let x = &", "Expected an expression terminal, got '&' token instead\n  at: line 1 (<test>)\n\n1 | let x = &\n2 |         ^\n"); }
     #[test] fn test_expression_function_with_name() { run_err("(fn hello() {})", "Expected a '(' token, got identifier 'hello' instead\n  at: line 1 (<test>)\n\n1 | (fn hello() {})\n2 |     ^^^^^\n"); }
     #[test] fn test_top_level_function_in_error_recovery_mode() { run_err("+ fn hello() {}", "Expected an expression terminal, got '+' token instead\n  at: line 1 (<test>)\n\n1 | + fn hello() {}\n2 | ^\n"); }
+    #[test] fn test_partial_binary_op_implicit_unroll_error_left() { run_err("print (... + 3)", "Expected an expression terminal, got '+' token instead\n  at: line 1 (<test>)\n\n1 | print (... + 3)\n2 |            ^\n") }
+    #[test] fn test_partial_binary_op_implicit_unroll_error_right() { run_err("print (... 3 +)", "Unrolled expression with '...' not allowed to be attached to a implicit partially-evaluated operator\n  at: line 1 (<test>)\n\n1 | print (... 3 +)\n2 |        ^^^^^^^^\n") }
 
     #[test] fn test_array_access_after_newline() { run("array_access_after_newline"); }
     #[test] fn test_array_access_no_newline() { run("array_access_no_newline"); }
