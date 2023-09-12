@@ -651,6 +651,6 @@ mod tests {
             }
         }
 
-        resource.compare(actual);
+        resource.assert_eq(actual);
     }
 }

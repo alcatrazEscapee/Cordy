@@ -2104,14 +2104,14 @@ mod tests {
             .expect("Failed to compile")
             .raw_disassembly();
 
-        assert_eq!(actual, expected);
+        test_util::assert_eq(actual, expected);
     }
 
     fn run_err(text: &'static str, expected: &'static str) {
         let view: SourceView = SourceView::new(String::from("<test>"), String::from(text));
-        let actual: Vec<String> = compiler::compile(false, &view).expect_err("Expected a parser error");
+        let actual: String = compiler::compile(false, &view).expect_err("Expected a parser error").join("\n");
 
-        assert_eq!(actual.join("\n"), expected);
+        test_util::assert_eq(actual, String::from(expected));
     }
 
     fn run(path: &'static str) {
@@ -2122,6 +2122,6 @@ mod tests {
             Err(err) => err
         };
 
-        resource.compare(actual)
+        resource.assert_eq(actual)
     }
 }

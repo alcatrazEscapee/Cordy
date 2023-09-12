@@ -15,6 +15,11 @@ pub fn get_resource(resource_type: &'static str, path: &'static str) -> Resource
     }
 }
 
+/// Version of `assert_eq` with explicit actual and expected parameters, that prints the entire thing including newlines.
+pub fn assert_eq(actual: String, expected: String) {
+    assert_eq!(actual, expected, "\n=== Expected ===\n{}\n=== Actual ===\n{}\n", expected, actual);
+}
+
 impl Resource {
 
     pub fn view(self: &Self) -> SourceView {
@@ -22,13 +27,13 @@ impl Resource {
     }
 
     /// Takes `actual`, writes it to `.cor.out`, and compares it against the `.cor.trace` file
-    pub fn compare(self: &Self, actual: Vec<String>) {
+    pub fn assert_eq(self: &Self, actual: Vec<String>) {
         let actual: String = actual.join("\n");
         let expected: String = fs::read_to_string(self.root.with_extension("cor.trace"))
             .expect(format!("Reading: {:?}", self.root).as_str());
 
         fs::write(self.root.with_extension("cor.out"), &actual).unwrap();
 
-        assert_eq!(actual, expected.replace("\r", ""));
+        assert_eq(actual, expected.replace("\r", ""));
     }
 }
