@@ -861,6 +861,7 @@ impl Parser<'_> {
         self.advance(); // Consume `let`
 
         loop {
+            let loc_start = self.next_location();
             match self.parse_bare_lvalue() {
                 Some(mut lvalue) => {
                     match self.peek() {
@@ -875,6 +876,12 @@ impl Parser<'_> {
                         },
                         _ => {
                             // `let` <lvalue>
+                            // This must be a simple / trivial lvalue - complex pattern elements are not allowed here (empty, variadic, or nested terms)
+                            // It makes no sense for them to be here, since everything gets initialized to null anyway
+                            // Don't write `let a, _, *b`, just write `let a, b`
+                            if lvalue.is_non_trivial() {
+                                self.semantic_error_at(loc_start | self.prev_location(), LetWithPatternBindingNoExpression);
+                            }
                             lvalue.declare_locals(self);
                             lvalue.initialize_locals(self);
                             lvalue.emit_default_values(self, false); // `in_place = false` causes us to emit *all* `Nil` values, which is what we want.
@@ -2023,10 +2030,13 @@ mod tests {
     #[test] fn test_partial_binary_op_in_implicit_call_long_right_eval() { run_expr("print (3 is not)", "Print OperatorIsNot Int(3) Call(1) Call(1)") }
     #[test] fn test_if_then_else() { run_expr("if true then 1 else 2", "True JumpIfFalsePop(4) Int(1) Jump(5) Int(2)")}
 
-    #[test] fn test_let_eof() { run_err("let", "Expected a variable binding, either a name, or '_', or pattern (i.e. 'x, (_, y), *z'), got end of input instead\n  at: line 1 (<test>)\n\n1 | let\n2 |     ^^^\n"); }
-    #[test] fn test_let_no_identifier() { run_err("let =", "Expected a variable binding, either a name, or '_', or pattern (i.e. 'x, (_, y), *z'), got '=' token instead\n  at: line 1 (<test>)\n\n1 | let =\n2 |     ^\n"); }
+    #[test] fn test_let_eof() { run_err("let", "Expected a variable binding, either a name, '_', or pattern, got end of input instead\n  at: line 1 (<test>)\n\n1 | let\n2 |     ^^^\n"); }
+    #[test] fn test_let_no_identifier() { run_err("let =", "Expected a variable binding, either a name, '_', or pattern, got '=' token instead\n  at: line 1 (<test>)\n\n1 | let =\n2 |     ^\n"); }
     #[test] fn test_let_expression_eof() { run_err("let x =", "Expected an expression terminal, got end of input instead\n  at: line 1 (<test>)\n\n1 | let x =\n2 |         ^^^\n"); }
     #[test] fn test_let_no_expression() { run_err("let x = &", "Expected an expression terminal, got '&' token instead\n  at: line 1 (<test>)\n\n1 | let x = &\n2 |         ^\n"); }
+    #[test] fn test_let_no_expression_with_empty() { run_err("let _ ;", "'let' with a pattern variable must be followed by an expression if the pattern contains nontrivial pattern elements.\n  at: line 1 (<test>)\n\n1 | let _ ;\n2 |     ^\n") }
+    #[test] fn test_let_no_expression_with_variadic() { run_err("let a, *b ;", "'let' with a pattern variable must be followed by an expression if the pattern contains nontrivial pattern elements.\n  at: line 1 (<test>)\n\n1 | let a, *b ;\n2 |     ^^^^^\n") }
+    #[test] fn test_let_no_expression_with_nested() { run_err("let (a, b) ;", "'let' with a pattern variable must be followed by an expression if the pattern contains nontrivial pattern elements.\n  at: line 1 (<test>)\n\n1 | let (a, b) ;\n2 |     ^^^^^^\n") }
     #[test] fn test_expression_function_with_name() { run_err("(fn hello() {})", "Expected a '(' token, got identifier 'hello' instead\n  at: line 1 (<test>)\n\n1 | (fn hello() {})\n2 |     ^^^^^\n"); }
     #[test] fn test_top_level_function_in_error_recovery_mode() { run_err("+ fn hello() {}", "Expected an expression terminal, got '+' token instead\n  at: line 1 (<test>)\n\n1 | + fn hello() {}\n2 | ^\n"); }
     #[test] fn test_partial_binary_op_implicit_unroll_error_left() { run_err("print (... + 3)", "Expected an expression terminal, got '+' token instead\n  at: line 1 (<test>)\n\n1 | print (... + 3)\n2 |            ^\n") }

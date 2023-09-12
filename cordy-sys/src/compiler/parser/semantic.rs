@@ -252,6 +252,15 @@ impl LValue {
     /// Returns `true` if the `LValue` is a top-level `LValue::Named`, i.e. `<name>`.
     pub fn is_named(&self) -> bool { matches!(self, LValue::Named(_)) }
 
+    /// Returns `true` if the `LValue` is non-trivial, i.e. it contains any of `_`, `*`, or nested elements.
+    pub fn is_non_trivial(&self) -> bool {
+        match self {
+            LValue::Named(_) => false,
+            LValue::Empty | LValue::VarEmpty | LValue::VarNamed(_) => true,
+            LValue::Terms(terms) => terms.iter().any(|term| term.is_non_trivial() || matches!(term, LValue::Terms(_)))
+        }
+    }
+
     fn into_terms(self) -> Vec<LValue> { match self { LValue::Terms(it) => it, _ => panic!("Expected LValue::Terms") } }
 
     /// Converts this `LValue` into a code-representation string.
