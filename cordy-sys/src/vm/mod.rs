@@ -1732,7 +1732,7 @@ mod tests {
         let compile = compiler::compile(true, &view);
 
         if compile.is_err() {
-            assert_eq!(format!("Compile Error:\n\n{}", compile.err().unwrap().join("\n")).as_str(), expected);
+            test_util::assert_eq(format!("Compile Error:\n\n{}", compile.err().unwrap().join("\n")), String::from(expected));
             return
         }
 
@@ -1755,18 +1755,15 @@ mod tests {
             output.push_str(view.format(&error).as_str());
         }
 
-        assert_eq!(output.as_str(), expected);
+        test_util::assert_eq(output, String::from(expected));
     }
 
     fn run(path: &'static str) {
         let resource = test_util::get_resource("compiler", path);
         let view: SourceView = resource.view();
-        let compile= compiler::compile(true, &view);
+        let compile = compiler::compile(true, &view);
 
-        if compile.is_err() {
-            assert_eq!(format!("Compile Error:\n\n{}", compile.err().unwrap().join("\n")).as_str(), "Compiled");
-            return
-        }
+        assert!(compile.is_ok(), "Compile Error:\n\n{}", compile.err().unwrap().join("\n"));
 
         let compile = compile.unwrap();
         println!("[-d] === Compiled ===");
@@ -1787,6 +1784,6 @@ mod tests {
             output.push_str(view.format(&error).as_str());
         }
 
-        resource.compare(output.split("\n").map(String::from).collect::<Vec<String>>());
+        resource.assert_eq(output.split("\n").map(String::from).collect::<Vec<String>>());
     }
 }
