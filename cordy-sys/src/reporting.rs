@@ -411,7 +411,7 @@ impl AsError for ParserError {
             ParserErrorType::ExpectedCommaOrEndOfParameters(e) => format!("Expected a ',' or ')' after function parameter, got {} instead", e.as_error()),
             ParserErrorType::ExpectedPatternTerm(e) => format!("Expected a name, '_', or variadic term in a pattern variable, got {} instead", e.as_error()),
             ParserErrorType::ExpectedUnderscoreOrVariableNameAfterVariadicInPattern(e) => format!("Expected a name or '_' after '*' in a pattern variable, got {} instead", e.as_error()),
-            ParserErrorType::ExpectedUnderscoreOrVariableNameOrPattern(e) => format!("Expected a variable binding, either a name, or '_', or pattern (i.e. 'x, (_, y), *z'), got {} instead", e.as_error()),
+            ParserErrorType::ExpectedUnderscoreOrVariableNameOrPattern(e) => format!("Expected a variable binding, either a name, '_', or pattern, got {} instead", e.as_error()),
             ParserErrorType::ExpectedAnnotationOrNamedFunction(e) => format!("Expected another decorator, or a named function after decorator, got {} instead", e.as_error()),
             ParserErrorType::ExpectedStructNameAfterStruct(e) => format!("Expected a struct name after 'struct' keyword, got {} instead", e.as_error()),
             ParserErrorType::ExpectedFieldNameAfterArrow(e) => format!("Expected a field name after '->', got {} instead", e.as_error()),
@@ -424,8 +424,8 @@ impl AsError for ParserError {
             ParserErrorType::InvalidLValue(e) => format!("Invalid value used as a function parameter: '{}'", e),
 
             ParserErrorType::InvalidAssignmentTarget => String::from("The left hand side of an assignment expression must be a variable, array access, or property access"),
-            ParserErrorType::MultipleVariadicTermsInPattern => String::from("Pattern is not allowed to have more than one variadic (i.e. '*') term."),
-            ParserErrorType::LetWithPatternBindingNoExpression => String::from("'let' with a pattern variable must be followed by an expression if the pattern contains non-simple elements such as variadic (i.e. '*'), empty (i.e. '_'), or nested (i.e. 'x, (_, y)) terms."),
+            ParserErrorType::MultipleVariadicTermsInPattern => String::from("Pattern is not allowed to have more than one variadic ('*') term."),
+            ParserErrorType::LetWithPatternBindingNoExpression => String::from("'let' with a pattern variable must be followed by an expression if the pattern contains nontrivial pattern elements."),
             ParserErrorType::BreakOutsideOfLoop => String::from("Invalid 'break' statement outside of an enclosing loop"),
             ParserErrorType::ContinueOutsideOfLoop => String::from("Invalid 'continue' statement outside of an enclosing loop"),
             ParserErrorType::StructNotInGlobalScope => String::from("'struct' statements can only be present in global scope."),
@@ -466,7 +466,7 @@ impl AsError for ScanToken {
             ScanToken::Identifier(s) => format!("identifier \'{}\'", s),
             ScanToken::StringLiteral(s) => format!("string '{}'", s),
             ScanToken::IntLiteral(i) => format!("integer '{}'", i),
-            ScanToken::ComplexLiteral(i) => format!("complex integer '{}'", i),
+            ScanToken::ComplexLiteral(i) => format!("complex integer '{}i'", i),
 
             ScanToken::KeywordLet => String::from("'let' keyword"),
             ScanToken::KeywordFn => String::from("'fn' keyword"),
@@ -519,8 +519,8 @@ impl AsError for ScanToken {
 
             ScanToken::Not => String::from("'!' token"),
 
-            ScanToken::LogicalAnd => String::from("'&&' token"),
-            ScanToken::LogicalOr => String::from("'||' token"),
+            ScanToken::LogicalAnd => String::from("'and' keyword"),
+            ScanToken::LogicalOr => String::from("'or' keyword"),
 
             ScanToken::NotEquals => String::from("'!=' token"),
             ScanToken::DoubleEquals => String::from("'==' token"),
