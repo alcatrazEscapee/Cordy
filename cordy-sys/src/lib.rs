@@ -5,6 +5,7 @@ pub use crate::reporting::{AsError, Location, SourceView};
 pub use crate::compiler::ScanTokenType;
 
 pub mod compiler;
+pub mod syntax;
 pub mod repl;
 pub mod util;
 pub mod vm;

@@ -4,10 +4,10 @@ use std::io::Write;
 use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 
-use cordy_sys::SYS_VERSION;
+use cordy_sys::{ScanTokenType, syntax, SYS_VERSION};
 use cordy_sys::repl::{ReadResult, Repl, RunResult};
+use cordy_sys::syntax::{BlockingFormatter, Formatter};
 
-mod syntax;
 
 
 #[allow(dead_code)]
@@ -43,8 +43,9 @@ pub fn prompt() -> String {
 pub fn scan(input: String) -> String {
     let lock = Lock;
     let prefix: &String = Manager::get(&lock).repl.view().text();
-
-    syntax::scan(input, prefix)
+    let mut fmt = BlockingFormatter::new(TerminalFormatter(String::with_capacity(input.len())));
+    syntax::scan(input, prefix, &mut fmt);
+    fmt.fmt.0
 }
 
 
@@ -105,6 +106,41 @@ impl Write for SharedBufWriter {
     fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
         self.0.borrow_mut().extend_from_slice(buf);
         Ok(())
+    }
+}
+
+
+struct TerminalFormatter(String);
+
+impl Formatter for TerminalFormatter {
+    fn begin(&mut self, ty: ScanTokenType) {
+        self.0.push_str(match ty {
+            ScanTokenType::Keyword => "[[b;#b5f;]",
+            ScanTokenType::Constant => "[[b;#27f;]",
+            ScanTokenType::Native => "[[;#b80;]",
+            ScanTokenType::Type => "[[;#2aa;]",
+            ScanTokenType::Number => "[[;#385;]",
+            ScanTokenType::String => "[[;#b10;]",
+            ScanTokenType::Comment => "[[;#aaa;]",
+            _ => "",
+        });
+    }
+
+    fn end(&mut self, ty: ScanTokenType) {
+        self.0.push_str(match ty {
+            ScanTokenType::Syntax |
+            ScanTokenType::Blank => "",
+            _ => "]"
+        });
+    }
+
+    fn push(&mut self, c: char) {
+        match c {
+            '[' => self.0.push_str("&#91;"),
+            '\\' => self.0.push_str("&#92;"),
+            ']' => self.0.push_str("&#93;"),
+            _ => self.0.push(c),
+        }
     }
 }
 

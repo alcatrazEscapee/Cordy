@@ -206,7 +206,7 @@ impl<'a> Scanner<'a> {
                        ' ' | '\t' | '\r' | '\n' => {},
 
                        'a'..='z' | 'A'..='Z' => {
-                           let mut buffer: Vec<char> = Vec::new();
+                           let mut buffer: String = String::new();
                            buffer.push(c);
                            loop {
                                match self.peek() {
@@ -220,27 +220,35 @@ impl<'a> Scanner<'a> {
                             match self.peek() {
                                 Some('x') => {
                                     self.advance();
-                                    let mut buffer: Vec<char> = Vec::new();
+                                    let mut buffer: String = String::new();
+                                    let mut extra_len = 0;
                                     loop {
                                         match self.peek() {
                                             Some('0'..='9' | 'A'..='F' | 'a'..='f') => self.push_advance(&mut buffer),
-                                            Some('_') => self.skip(),
+                                            Some('_') => {
+                                                self.skip();
+                                                extra_len += 1;
+                                            },
                                             _ => break
                                         };
                                     }
-                                    self.screen_int(buffer, 16);
+                                    self.screen_int(buffer, 16, extra_len);
                                 },
                                 Some('b') => {
                                     self.advance();
-                                    let mut buffer: Vec<char> = Vec::new();
+                                    let mut buffer: String = String::new();
+                                    let mut extra_len = 0;
                                     loop {
                                         match self.peek() {
                                             Some('1' | '0') => self.push_advance(&mut buffer),
-                                            Some('_') => self.skip(),
+                                            Some('_') => {
+                                                self.skip();
+                                                extra_len += 1;
+                                            },
                                             _ => break
                                         }
                                     }
-                                    self.screen_int(buffer, 2);
+                                    self.screen_int(buffer, 2, extra_len);
                                 },
                                 Some('i' | 'j') => { // Complex literal `0i` which is equal to `0`
                                     self.advance();
@@ -259,16 +267,20 @@ impl<'a> Scanner<'a> {
                             }
                        }
                        '1'..='9' => {
-                           let mut buffer: Vec<char> = Vec::new();
+                           let mut buffer: String = String::new();
+                           let mut extra_len = 0;
                            buffer.push(c);
                            loop {
                                match self.peek() {
                                    Some('0'..='9') => self.push_advance(&mut buffer),
-                                   Some('_') => self.skip(),
+                                   Some('_') => {
+                                       self.skip();
+                                       extra_len += 1;
+                                   },
                                    _ => break
                                }
                            }
-                           self.screen_int(buffer, 10);
+                           self.screen_int(buffer, 10, extra_len);
                        },
 
                        open @ ('\'' | '"') => {
@@ -459,10 +471,9 @@ impl<'a> Scanner<'a> {
         }
     }
 
-    fn screen_identifier(&mut self, buffer: Vec<char>) {
-        let string: String = buffer.iter().collect();
-        let len: usize = string.len();
-        let token: ScanToken = match string.as_str() {
+    fn screen_identifier(&mut self, buffer: String) {
+        let len: usize = buffer.len();
+        let token: ScanToken = match buffer.as_str() {
             "let" => KeywordLet,
             "fn" => KeywordFn,
             "return" => KeywordReturn,
@@ -487,14 +498,13 @@ impl<'a> Scanner<'a> {
             "assert" => KeywordAssert,
             "and" => LogicalAnd,
             "or" => LogicalOr,
-             _ => Identifier(string)
+             _ => Identifier(buffer)
         };
         self.push(len, token);
     }
 
-    fn screen_int(&mut self, buffer: Vec<char>, radix: u32) {
-        let string: String = buffer.iter().collect();
-        let mut len: usize = string.len();
+    fn screen_int(&mut self, buffer: String, radix: u32, extra_len: usize) {
+        let mut len: usize = buffer.len() + extra_len;
         let is_complex: bool = match self.peek() {
             Some('i' | 'j') => {
                 self.advance();
@@ -507,7 +517,7 @@ impl<'a> Scanner<'a> {
             len += 2; // To account for the numeric prefix
         }
 
-        match i64::from_str_radix(string.as_str(), radix) {
+        match i64::from_str_radix(buffer.as_str(), radix) {
             Ok(value) => self.push(len, if is_complex { ComplexLiteral(value) } else { IntLiteral(value) }),
             Err(e) => self.push_err(0, len, InvalidNumericValue(e))
         }
@@ -543,7 +553,7 @@ impl<'a> Scanner<'a> {
 
     /// Consumes the next character (unconditionally) and adds it to the buffer
     /// **Note**: This function must only be invoked after `Some()` has been matched to a `peek()` variant.
-    fn push_advance(&mut self, buffer: &mut Vec<char>) {
+    fn push_advance(&mut self, buffer: &mut String) {
         buffer.push(self.advance().unwrap());
     }
 
