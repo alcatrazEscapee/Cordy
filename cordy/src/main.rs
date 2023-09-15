@@ -3,17 +3,49 @@ use std::io::Write;
 use rustyline::{DefaultEditor, Editor};
 use rustyline::error::ReadlineError;
 
-use cordy_sys::{compiler, repl, SourceView, SYS_VERSION};
+use cordy_sys::{compiler, repl, ScanTokenType, SourceView, syntax, SYS_VERSION};
 use cordy_sys::compiler::CompileResult;
 use cordy_sys::repl::{Reader, ReadResult};
+use cordy_sys::syntax::{BlockingFormatter, Formatter};
 use cordy_sys::vm::{ExitType, VirtualMachine};
+
+
+const HELP_MESSAGE: &'static str = "\
+cordy [options] <file> [program arguments...]
+When invoked with no arguments, this will open a REPL for the Cordy language (exit with 'exit' or Ctrl-C)
+Options:
+  -h --help             : Show this message, then exit.
+  -v --version          : Print the version, then exit.
+  -d --disassembly      : Dump the disassembly view. Does nothing in REPL mode.
+     --no-line-numbers  : In disassembly view, omits the leading '0001' style line numbers
+  -o --optimize         : Enables compiler optimizations and transformations.
+  -f --format           : Outputs a formatted view HTML view of the code
+     --no-format-colors : Omits the <style> tag containing color definitions for the formatted code
+";
+
+const FORMAT_COLORS: &'static str = "\
+<style>
+    p.cordy { font-family: monospace; }
+    span.cordy-keyword { color: #b5f; font-weight: bold; }
+    span.cordy-constant { color: #27f; font-weight: bold; }
+    span.cordy-native { color: #b80; }
+    span.cordy-type { color: #2aa; }
+    span.cordy-number { color: #385; }
+    span.cordy-string { color: #b10; }
+    span.cordy-syntax { }
+    span.cordy-comment { color: #aaa; }
+</style>
+";
 
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let mut options: Options = match parse_args(args) {
-        Some(args) => args,
-        None => return
+        Ok(args) => args,
+        Err(err) => {
+            eprintln!("{}", err);
+            return;
+        }
     };
     match options.mode {
         Mode::Help => {
@@ -36,14 +68,15 @@ fn main() {
     }
 }
 
-fn parse_args(args: Vec<String>) -> Option<Options> {
+fn parse_args(args: Vec<String>) -> Result<Options, String> {
     let mut iter = args.into_iter();
     let mut options: Options = Options {
         file: None,
         args: Vec::new(),
         mode: Mode::Default,
         optimize: false,
-        no_line_numbers: false
+        no_line_numbers: false,
+        no_format_colors: false,
     };
 
     if iter.next().is_none() {
@@ -52,11 +85,13 @@ fn parse_args(args: Vec<String>) -> Option<Options> {
 
     for arg in iter.by_ref() {
         match arg.as_str() {
-            "-h" | "--help" => options.mode.set(Mode::Help).ok()?,
-            "-v" | "--version" => options.mode.set(Mode::Version).ok()?,
-            "-d" | "--disassembly" => options.mode.set(Mode::Disassembly).ok()?,
+            "-h" | "--help" => options.mode.set(Mode::Help)?,
+            "-v" | "--version" => options.mode.set(Mode::Version)?,
+            "-d" | "--disassembly" => options.mode.set(Mode::Disassembly)?,
+            "-f" | "--format" => options.mode.set(Mode::Format)?,
             "-o" | "--optimize" => options.optimize = true,
             "--no-line-numbers" => options.no_line_numbers = true,
+            "--no-format-colors" => options.no_format_colors = true,
             a => {
                 options.file = Some(String::from(a));
                 break
@@ -65,18 +100,11 @@ fn parse_args(args: Vec<String>) -> Option<Options> {
     }
 
     options.args.extend(iter);
-    Some(options)
+    Ok(options)
 }
 
 fn print_help() {
-    println!("cordy [options] <file> [program arguments...]");
-    println!("When invoked with no arguments, this will open a REPL for the Cordy language (exit with 'exit' or Ctrl-C)");
-    println!("Options:");
-    println!("  -h --help         : Show this message, then exit.");
-    println!("  -v --version      : Print the version, then exit.");
-    println!("  -d --disassembly  : Dump the disassembly view. Does nothing in REPL mode.");
-    println!("  -o --optimize     : Enables compiler optimizations and transformations.");
-    println!("  --no-line-numbers : In disassembly view, omits the leading '0001' style line numbers");
+    println!("{}", HELP_MESSAGE);
 }
 
 fn print_version() {
@@ -85,6 +113,17 @@ fn print_version() {
 
 fn run_main(name: String, options: Options) -> Result<(), String> {
     let text: String = fs::read_to_string(&name).map_err(|_| format!("Unable to read file '{}'", name))?;
+
+    if options.mode == Mode::Format {
+        let mut fmt = BlockingFormatter::new(RenderedFormatter(String::new()));
+        syntax::scan(text, &String::new(), &mut fmt);
+        if !options.no_format_colors {
+            println!("{}", FORMAT_COLORS);
+        }
+        println!("<p class=\"cordy\">{}</p>", fmt.fmt.0);
+        return Ok(())
+    }
+
     let view: SourceView = SourceView::new(name, text);
     let compiled: CompileResult = compiler::compile(options.optimize, &view).map_err(|e| e.join("\n"))?;
 
@@ -142,18 +181,60 @@ struct Options {
     mode: Mode,
     optimize: bool,
     no_line_numbers: bool,
+    no_format_colors: bool,
 }
 
 #[derive(Eq, PartialEq)]
-enum Mode { Default, Help, Version, Disassembly }
+enum Mode { Default, Help, Version, Disassembly, Format }
 
 impl Mode {
     fn set(&mut self, new: Mode) -> Result<(), String> {
         if *self != Mode::Default {
-            Err(String::from("Must only specify one of --help, --version, or --disassembly"))
+            Err(String::from("Must only specify one of --help, --version, --disassembly, or --format"))
         } else {
             *self = new;
             Ok(())
+        }
+    }
+}
+
+struct RenderedFormatter(String);
+
+impl Formatter for RenderedFormatter {
+    fn begin(&mut self, ty: ScanTokenType) {
+        if ty != ScanTokenType::Blank {
+            self.0.push_str("<span class=\"cordy-");
+            self.0.push_str(match ty {
+                ScanTokenType::Keyword => "keyword",
+                ScanTokenType::Constant => "constant",
+                ScanTokenType::Native => "native",
+                ScanTokenType::Type => "type",
+                ScanTokenType::Number => "number",
+                ScanTokenType::String => "string",
+                ScanTokenType::Syntax => "syntax",
+                ScanTokenType::Blank => "",
+                ScanTokenType::Comment => "comment",
+            });
+            self.0.push_str("\">");
+        }
+    }
+
+    fn end(&mut self, _: ScanTokenType) {
+        self.0.push_str("</span>")
+    }
+
+    fn push(&mut self, c: char) {
+        match c {
+            '\r' => {},
+            '\n' => self.0.push_str("<br>\n"),
+            '\t' => for _ in 0..4 { self.push(' ') },
+            ' ' => self.0.push_str("&nbsp;"),
+            '<' => self.0.push_str("&lt;"),
+            '>' => self.0.push_str("&gt;"),
+            '"' => self.0.push_str("&quot;"),
+            '\'' => self.0.push_str("&#39;"),
+            '&' => self.0.push_str("&amp;"),
+            _ => self.0.push(c),
         }
     }
 }
