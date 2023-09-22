@@ -17,7 +17,7 @@ The below type signatures are entirely for documentation purposes, as Cordy does
 ---
 
 
-### Print `print(any, ...)`
+#### Print `print(any, ...)`
 
 Prints each argument, space separated and with a single `\n` suffix, to standard output. Non-string types will have `str()` called on them before printing.
 
@@ -25,27 +25,27 @@ When called with no arguments, prints a single `\n` character.
 
 Returns `nil`
 
-### Read `read() -> str`
+#### Read `read() -> str`
 
 Reads from `stdin` until end of file. Returns the result as a string.
 
-N.B When reading from external sources, newline `\r\n` sequences will be replaced with a single `\n`.
+N.B. When reading from external sources, newline `\r\n` sequences will be replaced with a single `\n`.
 
-### Read Line `read_line() -> str`
+#### Read Line `read_line() -> str`
 
 Reads a single line from `stdin`. Returns the result as a string, with the newline suffix removed.
 
-### Read Text `read_text(path: str) -> str`
+#### Read Text `read_text(path: str) -> str`
 
 Reads from a text file, located at `path`. Any error reading the file will cause the program to exit. Returns the result as a string. 
 
-N.B When reading from external sources, newline `\r\n` sequences will be replaced with a single `\n`.
+N.B. When reading from external sources, newline `\r\n` sequences will be replaced with a single `\n`.
 
-### Write Text `write_text(path: str, content: str) -> str`
+#### Write Text `write_text(path: str, content: str) -> str`
 
 Writes the string `content` to the file at `path`, in overwrite mode. A file will be created if it does not exist, and if it does it will be overwritten.
 
-### Env `env(...) -> any`
+#### Env `env(...) -> any`
 
 Possible signatures:
 
@@ -68,7 +68,7 @@ $ DUCKS=1337 cordy example.cor
 '1337'
 ```
 
-### Argv `argv() -> list<str>`
+#### Argv `argv() -> list<str>`
 
 Returns the list of user defined program arguments when invoked. These are arguments appended to the cordy invocation after the file name.
 
@@ -82,13 +82,13 @@ $ cordy example.cor --number-of-ducks 2 -run
 ['--number-of-ducks', '2', '-run']
 ```
 
-### Bool `bool(x: any) -> bool`
+#### Bool `bool(x: any) -> bool`
 
 Returns the argument as a boolean. `nil`, `0`, `false`, `''`, and empty collections, will return `false`, everything else will return `true`.
 
 The keyword `bool` can also be used in an `is` expression, to check if a value is of the type `bool`.
 
-### Int `int(...) -> int`
+#### Int `int(...) -> int`
 
 **Possible Signatures**
 
@@ -110,14 +110,14 @@ true
 false
 ```
 
-### Str `str(x: any) -> str`
+#### Str `str(x: any) -> str`
 
 Returns the argument as a string. See also `repr`.
 
 The keyword `str` can also be used in an `is` expression, to check if a value is of the type `str`.
 
 
-### List `list(...) -> list`
+#### List `list(...) -> list`
 
 Possible signatures:
 
@@ -140,7 +140,7 @@ The keyword `list` can also be used in an `is` expression, to check if a value i
 [1, 2, 3, 4]
 ```
 
-### Set `set(...) -> set`
+#### Set `set(...) -> set`
 
 Possible signatures:
 
@@ -163,7 +163,7 @@ The keyword `set` can also be used in an `is` expression, to check if a value is
 {1, 2, 3, 4}
 ```
 
-### Dict `dict(...) -> dict`
+#### Dict `dict(...) -> dict`
 
 Possible signatures:
 
@@ -175,7 +175,7 @@ With no arguments, creates an empty dictionary. With one argument, treats the ar
 
 The keyword `dict` can also be used in an `is` expression, to check if a value is of the type `dict`.
 
-### Heap `heap(...) -> heap`
+#### Heap `heap(...) -> heap`
 
 Possible signatures:
 
@@ -189,7 +189,7 @@ With no arguments, creates an empty heap. With one argument, treats the argument
 
 The keyword `heap` can also be used in an `is` expression, to check if a value is of the type `heap`.
 
-### Vector `vector(...) -> vector`
+#### Vector `vector(...) -> vector`
 
 Possible signatures:
 
@@ -201,7 +201,7 @@ With no arguments, creates an empty vector. With one argument, treats the argume
 
 The keyword `vector` can also be used in an `is` expression, to check if a value is of the type `vector`.
 
-### Function `function`
+#### Function `function`
 
 The keyword `function` can be used in an `is` expression, to check if a value is of the type `function`.
 
@@ -216,7 +216,7 @@ true
 false
 ```
 
-### Iterable `iterable`
+#### Iterable `iterable`
 
 The keyword `iterable` can be used in an `is` expression, to check if a value is of any `iterable` type.
 
@@ -229,7 +229,7 @@ true
 false
 ```
 
-### Repr `repr(x: any) -> str`
+#### Repr `repr(x: any) -> str`
 
 Returns the full representation of `x`, as a string. Strings are wrapped in single quotes, unlike `str`, although is functionally similar in other respects.
 
@@ -240,7 +240,7 @@ Returns the full representation of `x`, as a string. Strings are wrapped in sing
 'hello'
 ```
 
-### Eval `eval(x: str) -> any`
+#### Eval `eval(x: str) -> any`
 
 Compiles and evaluates the Cordy expression represented by the string `x`. This is the inverse operation of `repr`. Note that `eval` cannot reference any variables and cannot define any (unless inside an anonymous function). Raises an error if the string `x` is not valid and evaluable Cordy code.
 
@@ -251,7 +251,7 @@ Compiles and evaluates the Cordy expression represented by the string `x`. This 
 3
 ```
 
-### Type Of `typeof(x: any) -> any`
+#### Type Of `typeof(x: any) -> any`
 
 Returns the *type* of the argument. This returns either the value, or a function representing the type for each individual input. For example, `typeof(3)` will return the function `int`, `typeof([1, 2, 3])` will return the native function `list`. The `typeof` function has a few fundamental guarantees:
 
@@ -275,11 +275,11 @@ list
 function
 ```
 
-### Len `len(x: iterable) -> int`
+#### Len `len(x: iterable) -> int`
 
 Returns the length of `x`. For strings, this returns the number of Unicode Scalar Values. It is `O(1)` except for `str`, which is `O(n)`.
 
-### Range `range(...) -> list<int>`
+#### Range `range(...) -> list<int>`
 
 Possible signatures:
 
@@ -291,7 +291,7 @@ Returns a range of `int`, from `start` inclusive, to `stop` exclusive, counting 
 
 **Note**: this function is lazy, and will produce elements when iterated through, i.e. by calling `list`.
 
-### Enumerate `<A> enumerate(x: iterable<A>) -> list<vector<int, A>>`
+#### Enumerate `<A> enumerate(x: iterable<A>) -> list<vector<int, A>>`
 
 Returns a `list` of pairs, of index and value of each element in the iterable `x`.
 
@@ -304,7 +304,7 @@ Returns a `list` of pairs, of index and value of each element in the iterable `x
 [(0, 'h'), (1, 'e'), (2, 'y')]
 ```
 
-### Sum `sum(...) -> int`
+#### Sum `sum(...) -> int`
 
 Possible signatures:
 
@@ -313,7 +313,7 @@ Possible signatures:
 
 With one argument, returns the sum of each value in the iterable. With more than one argument, returns the sum of all the arguments. Raises an error when invoked with no arguments.
 
-### Min `min(...) -> int`
+#### Min `min(...) -> int`
 
 Possible signatures:
 
@@ -324,7 +324,7 @@ With one argument, returns the minimum of each value in the iterable. With more 
 
 Note that the special case `min(int)` or `int.min` will return the lowest possible signed 63-bit integer representable.
 
-### Min By `min_by(...) -> int`
+#### Min By `min_by(...) -> int`
 
 Possible signatures:
 
@@ -333,7 +333,7 @@ Possible signatures:
 
 Returns either a minimum of `it` by the key `key`, or a minimum by the comparator function `cmp`, depending on the number of arguments required by `key` / `cmp`. Raises an error when `it` is an empty iterable.
 
-### Max `max(...) -> int`
+#### Max `max(...) -> int`
 
 Possible signatures:
 
@@ -344,7 +344,7 @@ With one argument, returns the maximum of each value in the iterable. With more 
 
 Note that the special case `max(int)` or `int.max` will return the highest possible signed 63-bit integer representable.
 
-### Max By `max_by(...) -> int`
+#### Max By `max_by(...) -> int`
 
 Possible signatures:
 
@@ -353,7 +353,7 @@ Possible signatures:
 
 Returns either a maximum of `it` by the key function `key`, or a minimum by the comparator function `cmp`, depending on the number of arguments required by `key` / `cmp`. Raises an error when `it` is an empty iterable.
 
-### Map `<A, B> map(f: fn(A) -> B, it: iterable<A>) -> list<B>`
+#### Map `<A, B> map(f: fn(A) -> B, it: iterable<A>) -> list<B>`
 
 Applies the function `f` to each value in the iterable `it`, and returns the list of each result.
 
@@ -364,7 +364,7 @@ Applies the function `f` to each value in the iterable `it`, and returns the lis
 [2, 4, 6]
 ```
 
-### Filter `<A> filter(f: fn(A) -> any, it: iterable<A>) -> list<A>`
+#### Filter `<A> filter(f: fn(A) -> any, it: iterable<A>) -> list<A>`
 
 Applies the function `f` to each value in the iterable `it`, and retains that value if it returns a truthy value. Returns a list of all elements which returned a truthy value.
 
@@ -375,7 +375,7 @@ Applies the function `f` to each value in the iterable `it`, and retains that va
 [4, 2]
 ```
 
-### Flat Map `<A, B> flat_map(f: fn(A) -> iterable<B>, it: iterable<A>) -> list<B>`
+#### Flat Map `<A, B> flat_map(f: fn(A) -> iterable<B>, it: iterable<A>) -> list<B>`
 
 Applies the function `f` to each element in `it`, and then concatenates the results. This is equivalent to `. map(f) . concat`.
 
@@ -386,7 +386,7 @@ Applies the function `f` to each element in `it`, and then concatenates the resu
 [0, 0, 1, 0, 1, 2, 0, 1, 2, 3]
 ```
 
-### Concat `<A> concat(it: iterable<iterable<A>>) -> list<A>`
+#### Concat `<A> concat(it: iterable<iterable<A>>) -> list<A>`
 
 Concatenates the iterables in the input into one list. This is equivalent to `flat_map(fn(x) -> x)`, but should be preferred over that due to performance.
 
@@ -397,7 +397,7 @@ Concatenates the iterables in the input into one list. This is equivalent to `fl
 [1, 2, 3, 4, 5, 6, 7, 8, 9]
 ```
 
-### Zip `<A> zip(...) -> list<A>`
+#### Zip `<A> zip(...) -> list<A>`
 
 Possible signatures:
 
@@ -415,7 +415,7 @@ When invoked with a single argument, treats the argument as an iterable and each
 [('h', 't', 'w'), ('e', 'h', 'o'), ('e', 'e', 'r')]
 ```
 
-### Reduce `<A> reduce(f: fn(A, A) -> A, it: iterable<A>) -> A`
+#### Reduce `<A> reduce(f: fn(A, A) -> A, it: iterable<A>) -> A`
 
 Reduces an iterable to a single value by successively applying `f` on the first two elements in the iterable, until only one remains. Raises an error if the argument was an empty iterable
 
@@ -428,7 +428,7 @@ Reduces an iterable to a single value by successively applying `f` on the first 
 'hello the world'
 ```
 
-### Sort `<A> sort(it: iterable<A>) -> list<A>`
+#### Sort `<A> sort(it: iterable<A>) -> list<A>`
 
 Returns a list of the elements in `it`, sorted in ascending order. Note that if `it` contains multiple different types the returned order is unspecified as different types will compare as equal.
 
@@ -439,7 +439,7 @@ Returns a list of the elements in `it`, sorted in ascending order. Note that if 
 [1, 2, 3, 4, 5]
 ```
 
-### Sort By `<A> sort_by(...) -> list<A>`
+#### Sort By `<A> sort_by(...) -> list<A>`
 
 Possible signatures:
 
@@ -448,7 +448,7 @@ Possible signatures:
 
 Returns the elements from `it` in a sorted ascending order, either by the key function `key`, or by the comparator function `cmp`, depending on the number of arguments required by `key` / `cmp`.
 
-### Group By `<T, K> group_by(by: int | fn(T) -> K, it: iterable<T>) -> list<vector<T>> | dict<K, vector<T>>`
+#### Group By `<T, K> group_by(by: int | fn(T) -> K, it: iterable<T>) -> list<vector<T>> | dict<K, vector<T>>`
 
 Possible signatures:
 
@@ -477,7 +477,7 @@ When invoked with a function as the argument to `by`, this will instead use the 
 {'odd': (1, 3, 5), 'even': (2, 4)}
 ```
 
-### Reverse `<A> reverse(it: iterable<A>) -> list<A>`
+#### Reverse `<A> reverse(it: iterable<A>) -> list<A>`
 
 Returns a list of the elements in `it`, in reverse order.
 
@@ -488,7 +488,7 @@ Returns a list of the elements in `it`, in reverse order.
 [7, 5, 3, 1]
 ```
 
-### Permutations `<A> permutations(n: int, it: iterable<A>) -> list<vector<A>>`
+#### Permutations `<A> permutations(n: int, it: iterable<A>) -> list<vector<A>>`
 
 Returns a list of all permutations of `n` elements from `it`. If `n` is larger than the length of `it`, nothing will be returned. Raises an error if `n` is negative.
 
@@ -499,7 +499,7 @@ Returns a list of all permutations of `n` elements from `it`. If `n` is larger t
 [(1, 2), (1, 3), (2, 1), (2, 3), (3, 1), (3, 2)]
 ```
 
-### Combinations `<A> combinations(n: int, it: iterable<A>) -> list<vector<A>>`
+#### Combinations `<A> combinations(n: int, it: iterable<A>) -> list<vector<A>>`
 
 Returns a list of all combinations of `n` elements from `it`. If `n` is larger than the length of `it`, nothing will be returned. Raises an error if `n` is negative.
 
@@ -510,7 +510,7 @@ Returns a list of all combinations of `n` elements from `it`. If `n` is larger t
 [(1, 2), (1, 3), (2, 3)]
 ```
 
-### Any `<A> any(f: fn(A) -> bool, it: iterable<A>) -> bool`
+#### Any `<A> any(f: fn(A) -> bool, it: iterable<A>) -> bool`
 
 Returns `true` if any of the values in `it` return `true` to the function `f`. This is lazy and only evaluates as many elements in `it` as needed.
 
@@ -519,7 +519,7 @@ Returns `true` if any of the values in `it` return `true` to the function `f`. T
 true
 ```
 
-### All `<A> all(f: fn(A) -> bool, it: iterable<A>) -> bool`
+#### All `<A> all(f: fn(A) -> bool, it: iterable<A>) -> bool`
 
 Returns `true` if all the values in `it` return `true` to the function `f`. This is lazy and only evaluates as many elements in `it` as needed.
 
@@ -530,7 +530,7 @@ Returns `true` if all the values in `it` return `true` to the function `f`. This
 true
 ```
 
-### Memoize `<A> memoize(f: fn(...) -> A) -> fn(...) -> A`
+#### Memoize `<A> memoize(f: fn(...) -> A) -> fn(...) -> A`
 
 This creates a memorizing wrapper around a function. The returned function will cache all values based on the input parameters. The return value is invoked identically to the provided function.
 
@@ -549,23 +549,23 @@ add was called
 3
 ```
 
-### Pop `<A> pop(it: iterable<A>) -> A`
+#### Pop `<A> pop(it: iterable<A>) -> A`
 
 Pops a value from a collection. For `list`, this will be a value at the back of the collection. For a `heap`, this is the top of the heap, i.e. the minimum value. For a `dict`, this will return a key-value pair.
 
-### Pop Front `<A> pop_front(it: list<A>) -> A`
+#### Pop Front `<A> pop_front(it: list<A>) -> A`
 
 Pops a value from the front of a list.
 
-### Push `<A> push(x: A, it: list<A> | set<A> | heap<A>) -> iterable<A>`
+#### Push `<A> push(x: A, it: list<A> | set<A> | heap<A>) -> iterable<A>`
 
 Pushes a value `x` into a collection `it`. For `list`, this will be a value at the back of the collection. Returns the collection.
 
-### Push Front `<A> push_front(x: A, it: list<A>) -> list<A>`
+#### Push Front `<A> push_front(x: A, it: list<A>) -> list<A>`
 
 Pushes a value `x` into the front of a list. Returns the list.
 
-### Insert `insert(...)`
+#### Insert `insert(...)`
 
 Possible signatures:
 
@@ -574,7 +574,7 @@ Possible signatures:
 
 Inserts a value `x` into a collection `it`, either by key, or by value. For `list`, will return an error if the index is out of bounds of the list. Returns the collection.
 
-### Remove `remove(...)`
+#### Remove `remove(...)`
 
 Possible signatures:
 
@@ -584,11 +584,11 @@ Possible signatures:
 
 Removes a value from a collection `it`, with the behavior differing by collection. For `list`, this removes a value by index. For `set`, this will remove by value, and return `true` if the value was present. For `dict`, this will remove an entry by key, and return `true` if the key was removed.
 
-### Clear `clear(it: iterable) -> iterable`
+#### Clear `clear(it: iterable) -> iterable`
 
 Clears the contents of a collection. Returns the collection.
 
-### Find `<A> find(x: A | fn(A) -> bool, it: iterable<A>) -> A`
+#### Find `<A> find(x: A | fn(A) -> bool, it: iterable<A>) -> A`
 
 If `x` is a function, this will find the first value from the left in `it` where a value returns `true` to the function. If `x` is a value, it will return the first value from the left in `it` where a value is equal to `x`.
 
@@ -605,7 +605,7 @@ Returns `nil` if the value was not found.
 3
 ```
 
-### Right Find `<A> rfind(x: A | fn(A) -> bool, it: iterable<A>) -> A`
+#### Right Find `<A> rfind(x: A | fn(A) -> bool, it: iterable<A>) -> A`
 
 If `x` is a function, this will find the first value from the right in `it` where a value returns `true` to the function. If `x` is a value, it will return the first value from the right in `it` where a value is equal to `x`.
 
@@ -622,31 +622,31 @@ Returns `nil` if the value was not found.
 3
 ```
 
-### Index Of `<A> index_of(x: A | fn(A) -> bool, it: iterable<A>) -> int`
+#### Index Of `<A> index_of(x: A | fn(A) -> bool, it: iterable<A>) -> int`
 
 Like `find`, but for an indexable collection, returns the index where the value was found, not the value itself.
 
-### Right Index Of `<A> rindex_of(x: A | fn(A) -> bool, it: iterable<A>) -> int`
+#### Right Index Of `<A> rindex_of(x: A | fn(A) -> bool, it: iterable<A>) -> int`
 
 Like `rfind`, but for an indexable collection, returns the index where the value was found, not the value itself.
 
-### (Int) Abs `abs(x: int) -> int`
+#### (Int) Abs `abs(x: int) -> int`
 
 Returns the absolute value of `x`.
 
-### (Int) Sqrt `sqrt(x: int) -> int`
+#### (Int) Sqrt `sqrt(x: int) -> int`
 
 Returns the positive integer square root of `x`, or the largest `y` such that `y*y <= x`.
 
-### (Int) Count Ones `count_ones(x: int) -> int`
+#### (Int) Count Ones `count_ones(x: int) -> int`
 
 Returns the number of ones in the 63-bit, signed, binary representation of `x`
 
-### (Int) Count Zeros `count_zeros(x: int) -> int`
+#### (Int) Count Zeros `count_zeros(x: int) -> int`
 
 Returns the number of zeros in the 63-bit, signed, binary representation of `x`
 
-### Real `real(x: bool | int | complex) -> int`
+#### Real `real(x: bool | int | complex) -> int`
 
 With an int-like argument, returns the real part. For `bool` and `int`, this is the same as invoking `int`. For `complex`, this will return the real component as an integer.
 
@@ -661,7 +661,7 @@ With an int-like argument, returns the real part. For `bool` and `int`, this is 
 7
 ```
 
-### Imag `imag(x: bool | int | complex) -> int`
+#### Imag `imag(x: bool | int | complex) -> int`
 
 With an int-like argument, returns the imaginary part. For `bool` and `int`, this will always return `0`. For `complex`, this will return the imaginary component as an integer.
 
@@ -676,7 +676,7 @@ With an int-like argument, returns the imaginary part. For `bool` and `int`, thi
 13
 ```
 
-### Lcm `lcm(...) -> int`
+#### Lcm `lcm(...) -> int`
 
 Possible signatures:
 
@@ -685,7 +685,7 @@ Possible signatures:
 
 With one argument, returns the least common multiple of each value in the iterable. With more than one argument, returns the least common multiple of all the arguments. Raises an error when invoked with no arguments.
 
-### Gcd `gcd(...) -> int`
+#### Gcd `gcd(...) -> int`
 
 Possible signatures:
 
@@ -694,7 +694,7 @@ Possible signatures:
 
 With one argument, returns the greatest common divisor of each value in the iterable. With more than one argument, returns the greatest common divisor of all the arguments. Raises an error when invoked with no arguments.
 
-### (Str) Split `split(pattern: str, x: str) -> list<str>`
+#### (Str) Split `split(pattern: str, x: str) -> list<str>`
 
 Splits a string `x` based on `pattern`, with regular expression (regex) support. If `pattern` is an empty string, this functions identical to `list` applied to a string, and returns a list of all characters in the string. Otherwise, it will treat `pattern` like a regex, and split the string on sequences matching the regex.
 
@@ -711,9 +711,9 @@ Regex syntax is the same as used by the `replace`, and `search` functions.
 ['hello', 'the', 'world', '!']
 ```
 
-### (Str) Join `join(joiner: str, iter: iterable<any>) -> str`
+#### (Str) Join `join(joiner: str, iter: iterable<any>) -> str`
 
-Joins an iterable into a single string. First calls `str()` on any arguments, and joins them seperated by `joiner`.
+Joins an iterable into a single string. First calls `str()` on any arguments, and joins them separated by `joiner`.
 
 **Example**
 
@@ -730,7 +730,7 @@ This is a native optimized form of the below usage of `reduce`:
 >>> reduce(fn(x, y) -> str(x) + joiner + str(y), iter)
 ```
 
-### (Str) Replace `replace(...) -> str`
+#### (Str) Replace `replace(...) -> str`
 
 **Possible Signatures**
 
@@ -758,7 +758,7 @@ Note that capture groups can also be referenced in a string via `$<number>` synt
 'Bob And Alice'
 ```
 
-### (Str) Search `search(pattern: str, x: str) -> list<vector<str>>`
+#### (Str) Search `search(pattern: str, x: str) -> list<vector<str>>`
 
 Matches a string `x` against a given `pattern`, and returns a list of all results. The pattern is a regular expression (regex), with syntax identical to using `replace`. When invoked, this returns a list of all matches in the string, or an empty list if no matches are found. A match consists of a vector of all capture groups, with the first group containing the entire match.
 
@@ -775,7 +775,7 @@ Note, for simple substring searching, it is sufficient to test for truthiness, a
 [('bob', 'b', 'b'), ('and', 'a', 'd'), ('alice', 'a', 'e')]
 ```
 
-### Ord `ord(x: str) -> int`
+#### Ord `ord(x: str) -> int`
 
 When called with a string containing exactly one character (unicode scalar value), returns the integer representing the unicode character.
 
@@ -788,7 +788,7 @@ When called with a string containing exactly one character (unicode scalar value
 65
 ```
 
-### Char `char(x: int) -> str`
+#### Char `char(x: int) -> str`
 
 Converts an integer to its unicode character representation, as a single-character string. If the integer represents an invalid character, an error will be raised instead.
 
@@ -801,7 +801,7 @@ Converts an integer to its unicode character representation, as a single-charact
 'A'
 ```
 
-### (Set) Union `<T> union(other: iterable<T>, self: set<T>) -> set<T>`
+#### (Set) Union `<T> union(other: iterable<T>, self: set<T>) -> set<T>`
 
 Computes a union of `self` and `other`, mutating `self`. This is functionally similar to `self |= set(other)`, _except_ this will directly mutate `self`, which can be desirable for performance reasons with large sets. This will return `self`.
 
@@ -815,7 +815,7 @@ Computes a union of `self` and `other`, mutating `self`. This is functionally si
 {1, 2, 3, 4}
 ```
 
-### (Set) Intersect `<T> intersect(other: iterable<T>, self: set<T>) -> set<T>`
+#### (Set) Intersect `<T> intersect(other: iterable<T>, self: set<T>) -> set<T>`
 
 Computes an intersection of `self` and `other`, mutating `self`. This is functionally similar to `self &= set(other)`, _except_ this will directly mutate `self`, which can be desirable for performance reasons with large sets. This will return `self`.
 
@@ -829,7 +829,7 @@ Computes an intersection of `self` and `other`, mutating `self`. This is functio
 {2, 3}
 ```
 
-### (Set) Difference `<T> difference(other: iterable<T>, self: set<T>) -> set<T>`
+#### (Set) Difference `<T> difference(other: iterable<T>, self: set<T>) -> set<T>`
 
 Computes a (non-symmetric) difference of `self` and `other`, mutating `self`. This is functionally similar to `self -= set(other)`, _except_ this will directly mutate `self`, which can be desirable for performance reasons with large sets. This will return `self`.
 
@@ -843,7 +843,7 @@ Computes a (non-symmetric) difference of `self` and `other`, mutating `self`. Th
 {1, 2}
 ```
 
-### (Dict) Default `<K, V> default(x: V, it: dict<K, V>) -> dict<K, V>`
+#### (Dict) Default `<K, V> default(x: V, it: dict<K, V>) -> dict<K, V>`
 
 Sets the default value of `it` to `x`, and then returns `it`. This means that any future queries into `it` via the index syntax, if the key is not in the dictionary, will return `x`.
 
@@ -858,10 +858,10 @@ d . default('nope')
 d['hello'] // returns 'nope'
 ```
 
-### (Dict) Keys `<K, V> keys(it: dict<K, V>) -> set<K>`
+#### (Dict) Keys `<K, V> keys(it: dict<K, V>) -> set<K>`
 
 Returns a set of all keys in `it`, maintaining insertion order.
 
-### (Dict) Values `<K, V> values(it: dict<K, V>) -> list<V>`
+#### (Dict) Values `<K, V> values(it: dict<K, V>) -> list<V>`
 
 Returns a list of all values in `it`, maintaining insertion order.
