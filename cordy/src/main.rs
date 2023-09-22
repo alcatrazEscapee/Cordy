@@ -1,4 +1,5 @@
 use std::{fs, io};
+use std::collections::HashSet;
 use std::io::Write;
 use rustyline::{DefaultEditor, Editor};
 use rustyline::error::ReadlineError;
@@ -20,7 +21,9 @@ Options:
      --no-line-numbers  : In disassembly view, omits the leading '0001' style line numbers
   -o --optimize         : Enables compiler optimizations and transformations.
   -f --format           : Outputs a formatted view HTML view of the code
-     --no-format-colors : Omits the <style> tag containing color definitions for the formatted code
+     --format-no-style  : Omits the <style> tag containing color definitions for the formatted code
+     --format-no=...    : Omits any of the <span> tags for the given categories (comma seperated) of token.
+                          Categories are any of [keyword, constant, native, type, number, string, syntax, comment]
 ";
 
 const FORMAT_COLORS: &'static str = "\
@@ -76,7 +79,8 @@ fn parse_args(args: Vec<String>) -> Result<Options, String> {
         mode: Mode::Default,
         optimize: false,
         no_line_numbers: false,
-        no_format_colors: false,
+        format_no_style: false,
+        format_no: HashSet::new(),
     };
 
     if iter.next().is_none() {
@@ -91,7 +95,24 @@ fn parse_args(args: Vec<String>) -> Result<Options, String> {
             "-f" | "--format" => options.mode.set(Mode::Format)?,
             "-o" | "--optimize" => options.optimize = true,
             "--no-line-numbers" => options.no_line_numbers = true,
-            "--no-format-colors" => options.no_format_colors = true,
+            "--format-no-style" => options.format_no_style = true,
+            a if a.starts_with("--format-no=") => {
+                for key in a.strip_prefix("--format-no=")
+                    .unwrap()
+                    .split(',') {
+                    options.format_no.insert(match key {
+                        "keyword" => ScanTokenType::Keyword,
+                        "constant" => ScanTokenType::Constant,
+                        "native" => ScanTokenType::Native,
+                        "type" => ScanTokenType::Type,
+                        "number" => ScanTokenType::Number,
+                        "string" => ScanTokenType::String,
+                        "syntax" => ScanTokenType::Syntax,
+                        "comment" => ScanTokenType::Comment,
+                        key => return Err(format!("Unrecognized argument to --format-no={}", key)),
+                    });
+                }
+            },
             a => {
                 options.file = Some(String::from(a));
                 break
@@ -115,12 +136,12 @@ fn run_main(name: String, options: Options) -> Result<(), String> {
     let text: String = fs::read_to_string(&name).map_err(|_| format!("Unable to read file '{}'", name))?;
 
     if options.mode == Mode::Format {
-        let mut fmt = BlockingFormatter::new(RenderedFormatter(String::new()));
+        let mut fmt = BlockingFormatter::new(RenderedFormatter { inner: String::new(), skip: options.format_no });
         syntax::scan(text, &String::new(), &mut fmt);
-        if !options.no_format_colors {
+        if !options.format_no_style {
             println!("{}", FORMAT_COLORS);
         }
-        println!("<p class=\"cordy\">{}</p>", fmt.fmt.0);
+        println!("<code class=\"cordy\"><pre>{}</pre></code>", fmt.fmt.inner);
         return Ok(())
     }
 
@@ -181,7 +202,8 @@ struct Options {
     mode: Mode,
     optimize: bool,
     no_line_numbers: bool,
-    no_format_colors: bool,
+    format_no_style: bool,
+    format_no: HashSet<ScanTokenType>,
 }
 
 #[derive(Eq, PartialEq)]
@@ -198,43 +220,48 @@ impl Mode {
     }
 }
 
-struct RenderedFormatter(String);
+struct RenderedFormatter {
+    inner: String,
+    skip: HashSet<ScanTokenType>
+}
 
 impl Formatter for RenderedFormatter {
     fn begin(&mut self, ty: ScanTokenType) {
         if ty != ScanTokenType::Blank {
-            self.0.push_str("<span class=\"cordy-");
-            self.0.push_str(match ty {
-                ScanTokenType::Keyword => "keyword",
-                ScanTokenType::Constant => "constant",
-                ScanTokenType::Native => "native",
-                ScanTokenType::Type => "type",
-                ScanTokenType::Number => "number",
-                ScanTokenType::String => "string",
-                ScanTokenType::Syntax => "syntax",
-                ScanTokenType::Blank => "",
-                ScanTokenType::Comment => "comment",
-            });
-            self.0.push_str("\">");
+            if !self.skip.contains(&ty) {
+                self.inner.push_str("<span class=\"cordy-");
+                self.inner.push_str(match ty {
+                    ScanTokenType::Keyword => "keyword",
+                    ScanTokenType::Constant => "constant",
+                    ScanTokenType::Native => "native",
+                    ScanTokenType::Type => "type",
+                    ScanTokenType::Number => "number",
+                    ScanTokenType::String => "string",
+                    ScanTokenType::Syntax => "syntax",
+                    ScanTokenType::Blank => "",
+                    ScanTokenType::Comment => "comment",
+                });
+                self.inner.push_str("\">");
+            }
         }
     }
 
-    fn end(&mut self, _: ScanTokenType) {
-        self.0.push_str("</span>")
+    fn end(&mut self, ty: ScanTokenType) {
+        if !self.skip.contains(&ty) {
+            self.inner.push_str("</span>")
+        }
     }
 
     fn push(&mut self, c: char) {
         match c {
             '\r' => {},
-            '\n' => self.0.push_str("<br>\n"),
             '\t' => for _ in 0..4 { self.push(' ') },
-            ' ' => self.0.push_str("&nbsp;"),
-            '<' => self.0.push_str("&lt;"),
-            '>' => self.0.push_str("&gt;"),
-            '"' => self.0.push_str("&quot;"),
-            '\'' => self.0.push_str("&#39;"),
-            '&' => self.0.push_str("&amp;"),
-            _ => self.0.push(c),
+            '<' => self.inner.push_str("&lt;"),
+            '>' => self.inner.push_str("&gt;"),
+            '"' => self.inner.push_str("&quot;"),
+            '\'' => self.inner.push_str("&#39;"),
+            '&' => self.inner.push_str("&amp;"),
+            _ => self.inner.push(c),
         }
     }
 }

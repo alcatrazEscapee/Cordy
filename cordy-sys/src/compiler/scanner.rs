@@ -63,7 +63,7 @@ pub enum ScanErrorType {
 }
 
 #[repr(u8)]
-#[derive(Eq, PartialEq, Debug, Clone, Copy)]
+#[derive(Eq, PartialEq, Debug, Clone, Copy, Hash)]
 pub enum ScanTokenType {
     Keyword,
     Constant,

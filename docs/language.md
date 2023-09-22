@@ -162,7 +162,7 @@ Alternatively, single-argument functions can be invoked with the `.` operator, w
 'hello' . foo
 ```
 
-Finally, functions can also be evaluated, one argument at a time, left associatively, simply by adjacent whitespace (but not newline!) seperated arguments after the function:
+Finally, functions can also be evaluated, one argument at a time, left associatively, simply by adjacent whitespace (but not newline!) separated arguments after the function:
 
 ```rust
 // same as writing `foo(1)(2)(3)`, which is the same as `foo(1, 2, 3)` if `foo` returns partial functions for the first two arguments
@@ -271,7 +271,7 @@ fn ((x, y)) {
 In addition to this, they support bare `*` arguments like in Python. These must be the last argument in the function, and they collect all arguments into a vector when called:
 
 ```rust
-// Note that `b` will be a vector of all arguments exclusing the first
+// Note that `b` will be a vector of all arguments excluding the first
 // It may be empty
 fn foo(a, *b) -> print(a, ...b)
 
@@ -301,11 +301,11 @@ bar() // prints 'goodbye'
 Variables declared in loops are captured each iteration of the loop. So the following code:
 
 ```rust
-let values = []
+let numbers = []
 for i in range(5) {
-    values.push(fn() -> i)
+    numbers.push(fn() -> i)
 }
-values . map(fn(f) -> f()) . print
+numbers . map(fn(f) -> f()) . print
 ```
 
 Will print the sequence `[1, 2, 3, 4, 5]`, as intuitively expected.
