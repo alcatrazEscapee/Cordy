@@ -629,7 +629,6 @@ pub fn right_find<VM: VirtualInterface>(vm: &mut VM, finder: ValuePtr, args: Val
     // Identical to the above except we use `.reverse()`, and subtract the index from `len`
     let mut iter = args.to_iter()?.reverse();
     let len = iter.len();
-    dbg!(len, &iter);
     if finder.is_evaluable() {
         let finder: InvokeArg1 = InvokeArg1::from(finder)?;
         for (i, v) in iter.enumerate() {

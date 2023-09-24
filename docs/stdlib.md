@@ -93,9 +93,9 @@ The keyword `bool` can also be used in an `is` expression, to check if a value i
 **Possible Signatures**
 
 - `int(x: any) -> int`
-- `<T> int(x: any, default: T) -> int | T`
+- `<T> int(x: any, def: T) -> int | T`
 
-Returns the argument as an integer. `nil` and `false` evaluate to `0`, where strings will be parsed as an integer or raise an error. If a second argument is provided, will instead return the default value instead of raising an error.
+Returns the argument as an integer. `nil` and `false` evaluate to `0`, where strings will be parsed as an integer or raise an error. If a second argument is provided, will instead return the `def` value instead of raising an error.
 
 The keyword `int` can also be used in an `is` expression, to check if a value is of the type `int`.
 
@@ -317,8 +317,8 @@ With one argument, returns the sum of each value in the iterable. With more than
 
 Possible signatures:
 
-- `min(it: iterable<int>) -> int`
-- `min(int, ...) -> int`
+- `<T> min(it: iterable<T>) -> T`
+- `<T> min(T, ...) -> T`
 
 With one argument, returns the minimum of each value in the iterable. With more than one argument, returns the minimum of all the arguments. Raises an error when invoked with no arguments.
 
@@ -337,8 +337,8 @@ Returns either a minimum of `it` by the key `key`, or a minimum by the comparato
 
 Possible signatures:
 
-- `max(it: iterable<int>) -> int`
-- `max(int, ...) -> int`
+- `<T> max(it: iterable<T>) -> T`
+- `<T> max(T, ...) -> T`
 
 With one argument, returns the maximum of each value in the iterable. With more than one argument, returns the maximum of all the arguments. Raises an error when invoked with no arguments.
 

@@ -24,11 +24,10 @@ use ScanToken::{*};
 pub(super) type ParseRule = fn(&mut Parser) -> ();
 
 mod core;
-mod errors;
 mod expr;
-
-mod semantic;
+mod errors;
 mod codegen;
+mod semantic;
 mod optimizer;
 
 
@@ -256,11 +255,6 @@ impl Parser<'_> {
                 Some(KeywordAssert) => self.parse_assert_statement(),
                 Some(KeywordStruct) => self.parse_struct_statement(),
                 Some(CloseBrace) => break,
-                Some(KeywordExit) => {
-                    self.push_delayed_pop();
-                    self.advance();
-                    self.push(Exit);
-                },
                 Some(Semicolon) => {
                     self.push_delayed_pop();
                     self.advance();
@@ -2028,7 +2022,9 @@ mod tests {
     #[test] fn test_partial_binary_op_in_implicit_call_right_eval() { run_expr("print (3 +)", "Print OperatorAdd Int(3) Call(1) Call(1)") }
     #[test] fn test_partial_binary_op_in_implicit_call_long_left_eval() { run_expr("print (is not 3)", "Print OperatorIsNotSwap Int(3) Call(1) Call(1)") }
     #[test] fn test_partial_binary_op_in_implicit_call_long_right_eval() { run_expr("print (3 is not)", "Print OperatorIsNot Int(3) Call(1) Call(1)") }
-    #[test] fn test_if_then_else() { run_expr("if true then 1 else 2", "True JumpIfFalsePop(4) Int(1) Jump(5) Int(2)")}
+    #[test] fn test_if_then_else() { run_expr("if true then 1 else 2", "True JumpIfFalsePop(4) Int(1) Jump(5) Int(2)") }
+    #[test] fn test_nil_with_call() { run_expr("nil()", "Nil Call(0)") }
+    #[test] fn test_exit_with_call() { run_expr("exit()", "Exit Call(0)") }
 
     #[test] fn test_let_eof() { run_err("let", "Expected a variable binding, either a name, '_', or pattern, got end of input instead\n  at: line 1 (<test>)\n\n1 | let\n2 |     ^^^\n"); }
     #[test] fn test_let_no_identifier() { run_err("let =", "Expected a variable binding, either a name, '_', or pattern, got '=' token instead\n  at: line 1 (<test>)\n\n1 | let =\n2 |     ^\n"); }
