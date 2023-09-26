@@ -3,7 +3,7 @@ use crate::compiler::parser::optimizer::Optimize;
 use crate::compiler::parser::Parser;
 use crate::reporting::Location;
 use crate::vm::Opcode;
-use crate::vm::operator::BinaryOp;
+use crate::vm::operator::{BinaryOp, CompareOp};
 
 use Opcode::{*};
 
@@ -68,6 +68,36 @@ impl<'a> Parser<'a> {
                     self.emit_expr(*rhs);
                 }
                 self.push_with(Binary(op), loc);
+            },
+            Expr(_, ExprType::Compare(lhs, mut ops)) => {
+                assert!(ops.len() > 1); // Any other situations should be expressed differently
+
+                // Multiple comparison ops need to chain a series of `and` operations, and the last one will be a normal binary op
+                // <lhs>
+                // <rhs>
+                // Compare -> pop both, compare, if true, then push rhs again
+                //         -> if false, push false, then jump to end of chain
+                // We reserve the compare now, and fix it later, at the top-level compare op
+                self.emit_expr(*lhs);
+
+                let mut compare_ops: Vec<(CompareOp, usize)> = Vec::new();
+                for (loc, op, rhs) in ops.drain(..ops.len() - 1) {
+                    self.emit_expr(rhs);
+                    compare_ops.push((op, self.reserve_with(loc)));
+                }
+
+                // Last op
+                // <lhs>
+                // <rhs>
+                // Binary(op)
+                // <- fix all jumps to jump to here
+                let (loc, op, rhs) = ops.pop().unwrap();
+                self.emit_expr(rhs);
+                self.push_with(Binary(op.to_binary()), loc);
+
+                for (op, cmp) in compare_ops {
+                    self.fix_jump(cmp, |offset| Compare(op, offset));
+                }
             },
             Expr(loc, ExprType::Literal(op, args)) => {
                 self.push(LiteralBegin(op, args.len() as u32));

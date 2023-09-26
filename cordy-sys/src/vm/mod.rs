@@ -497,16 +497,29 @@ impl<R, W> VirtualMachine<R, W> where
             },
 
             Unary(op) => {
-                let a1: ValuePtr = self.pop();
-                let ret: ValuePtr = op.apply(a1)?;
+                let arg: ValuePtr = self.pop();
+                let ret: ValuePtr = op.apply(arg)?;
                 self.push(ret);
             },
             Binary(op) => {
-                let a2: ValuePtr = self.pop();
-                let a1: ValuePtr = self.pop();
-                let ret: ValuePtr = op.apply(a1, a2)?;
+                let rhs: ValuePtr = self.pop();
+                let lhs: ValuePtr = self.pop();
+                let ret: ValuePtr = op.apply(lhs, rhs)?;
                 self.push(ret);
             },
+            Compare(op, offset) => {
+                let rhs: ValuePtr = self.pop();
+                let lhs: ValuePtr = self.pop();
+                if op.apply(&lhs, &rhs) {
+                    // If true, then push back `rhs`, and continue
+                    self.push(rhs);
+                } else {
+                    // If false, then push `false` and jump to end of chain
+                    let jump: usize = self.ip.add_offset(offset);
+                    self.push(false.to_value());
+                    self.ip = jump;
+                }
+            }
 
             Slice => {
                 let arg2: ValuePtr = self.pop();
@@ -1227,6 +1240,14 @@ mod tests {
     #[test] fn test_operator_sub_as_unary() { run_str("(-)(3) . print", "-3\n"); }
     #[test] fn test_operator_sub_as_binary() { run_str("(-)(5, 2) . print", "3\n"); }
     #[test] fn test_operator_sub_as_partial_not_allowed() { run_str("(-3) . print", "-3\n"); }
+    #[test] fn test_operator_lt_chained_yes() { run_str("(1 < 2 < 3) . print", "true\n") }
+    #[test] fn test_operator_lt_chained_yes_long() { run_str("let x = 5 ; (1 < 5 <= x >= x > 3 <= x < 7) . print", "true\n") }
+    #[test] fn test_operator_lt_chained_no() { run_str("(1 < 5 < 2) . print", "false\n") }
+    #[test] fn test_operator_lt_chained_no_long() { run_str("let x = 9 ; (1 < 5 <= x >= x > 3 <= x < 7) . print", "false\n") }
+    #[test] fn test_operator_eq_chained_short_circuit_yes_yes() { run_str("(print(1) == print(2) == print(3)) . print", "1\n2\n3\ntrue\n") }
+    #[test] fn test_operator_eq_chained_short_circuit_yes_no() { run_str("(print(1) == print(2) != print(3)) . print", "1\n2\n3\nfalse\n") }
+    #[test] fn test_operator_eq_chained_short_circuit_no_yes() { run_str("(print(1) != print(2) == print(3)) . print", "1\n2\nfalse\n") }
+    #[test] fn test_operator_eq_chained_short_circuit_no_no() { run_str("(print(1) != print(2) != print(3)) . print", "1\n2\nfalse\n") }
     #[test] fn test_arrow_functions_01() { run_str("fn foo() -> 3 ; foo() . print", "3\n"); }
     #[test] fn test_arrow_functions_02() { run_str("fn foo() -> 3 ; foo() . print", "3\n"); }
     #[test] fn test_arrow_functions_03() { run_str("fn foo(a) -> 3 * a ; 5 . foo . print", "15\n"); }

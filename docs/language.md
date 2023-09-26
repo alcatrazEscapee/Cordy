@@ -34,9 +34,10 @@ Expressions in Cordy are similar to C style languages. Cordy has a number of mat
 - `and` and `or` are short-circuiting, logical operators.
 - `<`, `>`, `>=`, `<=`, `==`, and `!=` compare values. Any values, regardless of types, can be compared for equality or ordering.
   - Note: different types will always compare as equal ordering.
+  - Chained comparison operators behave intuitively like in Python: `a < b < c` is equivalent to `(a < b) and (b < c)` (without evaluating `b` twice).
 - `if condition then value_if_true else value_if_false` is a short-circuiting ternary operator.
-  - Note that all boolean comparisons will take the truthy value of it's argument. `nil`, `0`, `false`, `''`, empty collections, and empty `range` and `enumerate` types are the only falsy values, everything else is truthy.
-- `is` (along with `is not`) is an operator used to check the type of a value.
+  - Note that all boolean comparisons will take the truthy value of its argument. `nil`, `0`, `false`, `''`, empty collections, and empty `range` and `enumerate` types are the only falsy values, everything else is truthy.
+- `is` (along with `is not`) is an operator used to check if a value (left hand operand) is of a given type (right hand operand).
 - `in` (along with `not in`) is a special operator used for checking membership in collections, or substrings.
 - `max=` and `min=` are special cases of the builtin functions `max` and `min`, expressed as an assignment operator. `a max= b` is semantically equivalent to `a = if b > a then b else a`, similar for `min=`.
 

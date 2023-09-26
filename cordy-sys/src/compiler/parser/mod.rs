@@ -10,7 +10,7 @@ use crate::core::{NativeFunction, Pattern};
 use crate::reporting::Location;
 use crate::trace;
 use crate::vm::{Opcode, StructTypeImpl, ValuePtr};
-use crate::vm::operator::{BinaryOp, UnaryOp};
+use crate::vm::operator::{BinaryOp, CompareOp, UnaryOp};
 
 pub use crate::compiler::parser::errors::{ParserError, ParserErrorType};
 pub use crate::compiler::parser::semantic::{Fields, Locals};
@@ -1757,15 +1757,16 @@ impl Parser<'_> {
 
     fn parse_expr_8(&mut self) -> Expr {
         trace::trace_parser!("rule <expr-8>");
-        let mut expr: Expr = self.parse_expr_7();
+        let expr: Expr = self.parse_expr_7();
+        let mut ops: Vec<(Location, CompareOp, Expr)> = Vec::new();
         loop {
-            let maybe_op: Option<BinaryOp> = match self.peek() {
-                Some(LessThan) => Some(BinaryOp::LessThan),
-                Some(LessThanEquals) => Some(BinaryOp::LessThanEqual),
-                Some(GreaterThan) => Some(BinaryOp::GreaterThan),
-                Some(GreaterThanEquals) => Some(BinaryOp::GreaterThanEqual),
-                Some(DoubleEquals) => Some(BinaryOp::Equal),
-                Some(NotEquals) => Some(BinaryOp::NotEqual),
+            let maybe_op: Option<CompareOp> = match self.peek() {
+                Some(LessThan) => Some(CompareOp::LessThan),
+                Some(LessThanEquals) => Some(CompareOp::LessThanEqual),
+                Some(GreaterThan) => Some(CompareOp::GreaterThan),
+                Some(GreaterThanEquals) => Some(CompareOp::GreaterThanEqual),
+                Some(DoubleEquals) => Some(CompareOp::Equal),
+                Some(NotEquals) => Some(CompareOp::NotEqual),
                 _ => None
             };
             if maybe_op.is_some() && self.peek2() == Some(&CloseParen) {
@@ -1774,12 +1775,13 @@ impl Parser<'_> {
             match maybe_op {
                 Some(op) => {
                     let loc = self.advance_with();
-                    expr = expr.binary(loc, op, self.parse_expr_7(), false);
+                    let rhs = self.parse_expr_7();
+                    ops.push((loc, op, rhs));
                 },
                 None => break
             }
         }
-        expr
+        expr.compare(ops)
     }
 
     fn parse_expr_9(&mut self) -> Expr {
@@ -1978,6 +1980,11 @@ mod tests {
     #[test] fn test_binary_or_and() { run_expr("1 or (2 and 3)", "Int(1) JumpIfTrue(7) Pop Int(2) JumpIfFalse(7) Pop Int(3)"); }
     #[test] fn test_binary_equal() { run_expr("1 == 2", "Int(1) Int(2) Equal") }
     #[test] fn test_binary_equal_add() { run_expr("1 == 2 + 3", "Int(1) Int(2) Int(3) Add Equal") }
+    #[test] fn test_chained_binary_lt() { run_expr("1 < 2 < 3", "Int(1) Int(2) LessThanCompare(5) Int(3) LessThan") }
+    #[test] fn test_chained_binary_lt_gt() { run_expr("1 < 2 > 3 < 4", "Int(1) Int(2) LessThanCompare(7) Int(3) GreaterThanCompare(7) Int(4) LessThan") }
+    #[test] fn test_chained_binary_eq_ne() { run_expr("1 == 2 != 3", "Int(1) Int(2) EqualCompare(5) Int(3) NotEqual") }
+    #[test] fn test_chained_binary_with_left_parens() { run_expr("1 < (2 < 3)", "Int(1) Int(2) Int(3) LessThan LessThan") }
+    #[test] fn test_chained_binary_with_right_parens() { run_expr("(1 < 2) < 3", "Int(1) Int(2) LessThan Int(3) LessThan") }
     #[test] fn test_function_call_no_args() { run_expr("print()", "Print Call(0)") }
     #[test] fn test_function_call_one_arg() { run_expr("print(1)", "Print Int(1) Call(1)") }
     #[test] fn test_function_call_many_args() { run_expr("print(1, 2, 3)", "Print Int(1) Int(2) Int(3) Call(3)") }
