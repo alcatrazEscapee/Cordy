@@ -22,6 +22,12 @@ pub enum BinaryOp {
     Mul, Div, Pow, Mod, Is, IsNot, Add, Sub, LeftShift, RightShift, And, Or, Xor, In, NotIn, LessThan, GreaterThan, LessThanEqual, GreaterThanEqual, Equal, NotEqual, Max, Min
 }
 
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum CompareOp {
+    LessThan, GreaterThan, LessThanEqual, GreaterThanEqual, Equal, NotEqual
+}
+
 impl UnaryOp {
     pub fn apply(self, arg: ValuePtr) -> ValueResult {
         match self {
@@ -57,6 +63,30 @@ impl BinaryOp {
             BinaryOp::NotEqual => (lhs != rhs).to_value().ok(),
             BinaryOp::Max => std::cmp::max(lhs, rhs).ok(),
             BinaryOp::Min => std::cmp::min(lhs, rhs).ok(),
+        }
+    }
+}
+
+impl CompareOp {
+    pub fn apply(self, lhs: &ValuePtr, rhs: &ValuePtr) -> bool {
+        match self {
+            CompareOp::LessThan => lhs < rhs,
+            CompareOp::GreaterThan => lhs > rhs,
+            CompareOp::LessThanEqual => lhs <= rhs,
+            CompareOp::GreaterThanEqual => lhs >= rhs,
+            CompareOp::Equal => lhs == rhs,
+            CompareOp::NotEqual => lhs != rhs,
+        }
+    }
+
+    pub fn to_binary(self) -> BinaryOp {
+        match self {
+            CompareOp::LessThan => BinaryOp::LessThan,
+            CompareOp::LessThanEqual => BinaryOp::LessThanEqual,
+            CompareOp::GreaterThan => BinaryOp::GreaterThan,
+            CompareOp::GreaterThanEqual => BinaryOp::GreaterThanEqual,
+            CompareOp::Equal => BinaryOp::Equal,
+            CompareOp::NotEqual => BinaryOp::NotEqual,
         }
     }
 }

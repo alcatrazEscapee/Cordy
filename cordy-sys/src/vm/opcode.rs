@@ -2,7 +2,7 @@ use crate::compiler::Fields;
 use crate::core::NativeFunction;
 use crate::util::OffsetAdd;
 use crate::vm::{Type, ValuePtr};
-use crate::vm::operator::{BinaryOp, UnaryOp};
+use crate::vm::operator::{BinaryOp, CompareOp, UnaryOp};
 use crate::vm::value::LiteralType;
 
 use Opcode::{*};
@@ -130,6 +130,7 @@ pub enum Opcode {
 
     Unary(UnaryOp),
     Binary(BinaryOp),
+    Compare(CompareOp, i32),
 
     // Special
     Exit,
@@ -190,8 +191,9 @@ impl Opcode {
                 TestIterable(_) => "TestIterable",
                 _ => unreachable!()
             }, ip.add_offset(*offset + 1)),
-            Binary(op) => format!("{:?}", op),
             Unary(op) => format!("{:?}", op),
+            Binary(op) => format!("{:?}", op),
+            Compare(op, offset) => format!("{:?}Compare({})", op.to_binary(), ip.add_offset(*offset + 1)),
             NativeFunction(op) => format!("{:?}", op),
             Unroll(_) => String::from("Unroll"),
             Call(nargs, unroll) => format!("Call{}({})", if *unroll { "..." } else { "" }, nargs),

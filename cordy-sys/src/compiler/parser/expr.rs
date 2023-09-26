@@ -2,13 +2,13 @@ use crate::compiler::parser::semantic::{LValue, LValueReference};
 use crate::core::NativeFunction;
 use crate::reporting::Location;
 use crate::vm::{C64, LiteralType, Opcode, RuntimeError, Type, ValuePtr, ValueResult};
-use crate::vm::operator::{BinaryOp, UnaryOp};
+use crate::vm::operator::{BinaryOp, CompareOp, UnaryOp};
 
 
 #[derive(Debug, Clone)]
 pub struct Expr(pub Location, pub ExprType);
 
-type Arg = Box<Expr>;
+type ExprPtr = Box<Expr>;
 
 #[derive(Debug, Clone)]
 pub enum ExprType {
@@ -22,10 +22,10 @@ pub enum ExprType {
     LValue(LValueReference),
     NativeFunction(NativeFunction),
     Function(u32, Vec<Opcode>),
-    SliceLiteral(Arg, Arg, Box<Option<Expr>>),
+    SliceLiteral(ExprPtr, ExprPtr, Box<Option<Expr>>),
 
     // Operators + Functions
-    Unary(UnaryOp, Arg),
+    Unary(UnaryOp, ExprPtr),
 
     /// Arguments are `op, lhs, rhs, swap`
     /// If `swap` is `true`, then **both** of the following effects will apply:
@@ -36,29 +36,31 @@ pub enum ExprType {
     /// This means that a `binary_with(op, lhs, rhs, swap)` is equivalent to saying that "rhs needs to be evaluated before lhs in the operation op(lhs, rhs)"
     ///
     /// **The side (right vs left) of each argument is still correct!!!**
-    Binary(BinaryOp, Arg, Arg, bool),
+    Binary(BinaryOp, ExprPtr, ExprPtr, bool),
+    /// Expression for chained comparison operators
+    Compare(ExprPtr, Vec<(Location, CompareOp, Expr)>),
     Literal(LiteralType, Vec<Expr>),
-    Unroll(Arg, bool), // first: bool
-    Eval(Arg, Vec<Expr>, bool), // any_unroll: bool
-    Compose(Arg, Arg),
-    LogicalAnd(Arg, Arg),
-    LogicalOr(Arg, Arg),
-    Index(Arg, Arg),
-    Slice(Arg, Arg, Arg),
-    SliceWithStep(Arg, Arg, Arg, Arg),
-    IfThenElse(Arg, Arg, Arg),
-    GetField(Arg, u32),
-    SetField(Arg, u32, Arg),
-    SwapField(Arg, u32, Arg, BinaryOp),
+    Unroll(ExprPtr, bool), // first: bool
+    Eval(ExprPtr, Vec<Expr>, bool), // any_unroll: bool
+    Compose(ExprPtr, ExprPtr),
+    LogicalAnd(ExprPtr, ExprPtr),
+    LogicalOr(ExprPtr, ExprPtr),
+    Index(ExprPtr, ExprPtr),
+    Slice(ExprPtr, ExprPtr, ExprPtr),
+    SliceWithStep(ExprPtr, ExprPtr, ExprPtr, ExprPtr),
+    IfThenElse(ExprPtr, ExprPtr, ExprPtr),
+    GetField(ExprPtr, u32),
+    SetField(ExprPtr, u32, ExprPtr),
+    SwapField(ExprPtr, u32, ExprPtr, BinaryOp),
     GetFieldFunction(u32),
 
     // Assignments
-    Assignment(LValueReference, Arg),
-    ArrayAssignment(Arg, Arg, Arg),
+    Assignment(LValueReference, ExprPtr),
+    ArrayAssignment(ExprPtr, ExprPtr, ExprPtr),
 
     /// Note that `BinaryOp::NotEqual` is used to indicate this is a `Compose()` operation under the hood
-    ArrayOpAssignment(Arg, Arg, BinaryOp, Arg),
-    PatternAssignment(LValue, Arg),
+    ArrayOpAssignment(ExprPtr, ExprPtr, BinaryOp, ExprPtr),
+    PatternAssignment(LValue, ExprPtr),
 
     // Error
     RuntimeError(Box<RuntimeError>),
@@ -103,6 +105,16 @@ impl Expr {
 
     pub fn unary(self, loc: Location, op: UnaryOp) -> Expr { Expr(loc, ExprType::Unary(op, Box::new(self))) }
     pub fn binary(self, loc: Location, op: BinaryOp, rhs: Expr, swap: bool) -> Expr { Expr(loc, ExprType::Binary(op, Box::new(self), Box::new(rhs), swap)) }
+    pub fn compare(self, mut ops: Vec<(Location, CompareOp, Expr)>) -> Expr {
+        match ops.len() {
+            0 => self,
+            1 => {
+                let (loc, op, rhs) = ops.pop().unwrap();
+                self.binary(loc, op.to_binary(), rhs, false)
+            }
+            _ => Expr(Location::empty(), ExprType::Compare(Box::new(self), ops))
+        }
+    }
     pub fn unroll(self, loc: Location, first: bool) -> Expr { Expr(loc, ExprType::Unroll(Box::new(self), first)) }
     pub fn eval(self, loc: Location, args: Vec<Expr>, any_unroll: bool) -> Expr { Expr(loc, ExprType::Eval(Box::new(self), args, any_unroll)) }
     pub fn compose(self, loc: Location, f: Expr) -> Expr { Expr(loc, ExprType::Compose(Box::new(self), Box::new(f))) }
