@@ -16,7 +16,7 @@ use cordy_sys::vm::{ExitType, VirtualMachine};
 static GLOBAL: MiMalloc = MiMalloc;
 
 
-const HELP_MESSAGE: &'static str = "\
+const HELP_MESSAGE: &str = "\
 cordy [options] <file> [program arguments...]
 When invoked with no arguments, this will open a REPL for the Cordy language (exit with 'exit' or Ctrl-C)
 Options:
@@ -31,7 +31,7 @@ Options:
                           Categories are any of [keyword, constant, native, type, number, string, syntax, comment]
 ";
 
-const FORMAT_COLORS: &'static str = "\
+const FORMAT_COLORS: &str = "\
 <style>
     p.cordy { font-family: monospace; }
     span.cordy-keyword { color: #b5f; font-weight: bold; }
@@ -232,22 +232,20 @@ struct RenderedFormatter {
 
 impl Formatter for RenderedFormatter {
     fn begin(&mut self, ty: ScanTokenType) {
-        if ty != ScanTokenType::Blank {
-            if !self.skip.contains(&ty) {
-                self.inner.push_str("<span class=\"cordy-");
-                self.inner.push_str(match ty {
-                    ScanTokenType::Keyword => "keyword",
-                    ScanTokenType::Constant => "constant",
-                    ScanTokenType::Native => "native",
-                    ScanTokenType::Type => "type",
-                    ScanTokenType::Number => "number",
-                    ScanTokenType::String => "string",
-                    ScanTokenType::Syntax => "syntax",
-                    ScanTokenType::Blank => "",
-                    ScanTokenType::Comment => "comment",
-                });
-                self.inner.push_str("\">");
-            }
+        if ty != ScanTokenType::Blank && !self.skip.contains(&ty) {
+            self.inner.push_str("<span class=\"cordy-");
+            self.inner.push_str(match ty {
+                ScanTokenType::Keyword => "keyword",
+                ScanTokenType::Constant => "constant",
+                ScanTokenType::Native => "native",
+                ScanTokenType::Type => "type",
+                ScanTokenType::Number => "number",
+                ScanTokenType::String => "string",
+                ScanTokenType::Syntax => "syntax",
+                ScanTokenType::Blank => "",
+                ScanTokenType::Comment => "comment",
+            });
+            self.inner.push_str("\">");
         }
     }
 
