@@ -3,12 +3,17 @@ use std::collections::HashSet;
 use std::io::Write;
 use rustyline::{DefaultEditor, Editor};
 use rustyline::error::ReadlineError;
+use mimalloc::MiMalloc;
 
 use cordy_sys::{compiler, repl, ScanTokenType, SourceView, syntax, SYS_VERSION};
 use cordy_sys::compiler::CompileResult;
 use cordy_sys::repl::{Reader, ReadResult};
 use cordy_sys::syntax::{BlockingFormatter, Formatter};
 use cordy_sys::vm::{ExitType, VirtualMachine};
+
+
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
 
 
 const HELP_MESSAGE: &'static str = "\
