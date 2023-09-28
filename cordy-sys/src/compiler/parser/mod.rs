@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use indexmap::IndexSet;
 
 use crate::compiler::{CompileParameters, CompileResult};
 use crate::compiler::parser::core::ParserState;
@@ -42,8 +43,8 @@ pub(super) fn parse(enable_optimization: bool, scan_result: ScanResult) -> Compi
 }
 
 
-pub(super) fn parse_incremental(scan_result: ScanResult, params: &mut CompileParameters, rule: ParseRule) -> Vec<ParserError> {
-    let mut errors: Vec<ParserError> = Vec::new();
+pub(super) fn parse_incremental(scan_result: ScanResult, params: &mut CompileParameters, rule: ParseRule) -> IndexSet<ParserError> {
+    let mut errors: IndexSet<ParserError> = IndexSet::new();
 
     rule(&mut Parser::new(params.enable_optimization, scan_result.tokens, params.code, &mut errors, params.constants, params.patterns, params.globals, params.locations, params.fields, params.locals, &mut Vec::new()));
 
@@ -54,7 +55,7 @@ pub(super) fn parse_incremental(scan_result: ScanResult, params: &mut CompilePar
 fn parse_rule(enable_optimization: bool, tokens: Vec<(Location, ScanToken)>, rule: fn(&mut Parser) -> ()) -> CompileResult {
     let mut result = CompileResult {
         code: Vec::new(),
-        errors: Vec::new(),
+        errors: IndexSet::new(),
 
         constants: Vec::new(),
         patterns: Vec::new(),
@@ -81,7 +82,8 @@ pub(super) struct Parser<'a> {
     /// It is then baked, emitting into `raw_output` and `locations`
     raw_output: &'a mut Vec<Opcode>,
     output: Vec<(Location, Opcode)>,
-    errors: &'a mut Vec<ParserError>,
+    /// Use an `IndexSet` to keep consistent (insertion order) iteration, and also enforce strict uniqueness of errors
+    errors: &'a mut IndexSet<ParserError>,
 
     /// A 1-1 mapping of the output tokens to their location
     locations: &'a mut Vec<Location>,
@@ -134,7 +136,7 @@ impl Parser<'_> {
 
         tokens: Vec<(Location, ScanToken)>,
         output: &'b mut Vec<Opcode>,
-        errors: &'b mut Vec<ParserError>,
+        errors: &'b mut IndexSet<ParserError>,
 
         constants: &'b mut Vec<ValuePtr>,
         patterns: &'b mut Vec<Pattern<StoreOp>>,
@@ -252,7 +254,7 @@ impl Parser<'_> {
         // Errors due to late bound globals that were never fixed
         for global in self.late_bound_globals.drain(..) {
             if let Some(error) = global.error() {
-                self.errors.push(error);
+                self.errors.insert(error);
             }
         }
     }
@@ -2067,6 +2069,7 @@ mod tests {
     #[test] fn test_partial_binary_op_implicit_unroll_error_right() { run_err("print (... 3 +)", "Unrolled expression with '...' not allowed to be attached to a implicit partially-evaluated operator\n  at: line 1 (<test>)\n\n1 | print (... 3 +)\n2 |        ^^^^^^^^\n") }
     #[test] fn test_late_bound_global_in_load() { run_err("fn foo() { print(x) }", "Undeclared identifier: 'x'\n  at: line 1 (<test>)\n\n1 | fn foo() { print(x) }\n2 |                  ^\n") }
     #[test] fn test_late_bound_global_in_store() { run_err("fn foo() { y = x + 1 } let y", "Undeclared identifier: 'x'\n  at: line 1 (<test>)\n\n1 | fn foo() { y = x + 1 } let y\n2 |                ^\n") }
+    #[test] fn test_late_bound_global_in_load_store_duplicate_error() { run_err("fn foo() { x += 1 }", "Undeclared identifier: 'x'\n  at: line 1 (<test>)\n\n1 | fn foo() { x += 1 }\n2 |            ^\n") }
     #[test] fn test_late_bound_global_in_pattern() { run_err("fn foo() { x, y = nil }", "Undeclared identifier: 'x'\n  at: line 1 (<test>)\n\n1 | fn foo() { x, y = nil }\n2 |                 ^\n\nUndeclared identifier: 'y'\n  at: line 1 (<test>)\n\n1 | fn foo() { x, y = nil }\n2 |                 ^\n") }
 
     #[test] fn test_array_access_after_newline() { run("array_access_after_newline"); }

@@ -8,7 +8,7 @@ use crate::vm::operator::{BinaryOp, UnaryOp};
 
 
 /// `Location` represents a position in the source code.
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
 pub struct Location {
     /// Start character index, inclusive
     start: usize,

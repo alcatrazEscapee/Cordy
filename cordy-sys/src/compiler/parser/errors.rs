@@ -5,7 +5,7 @@ use crate::vm::RuntimeError;
 use ParserErrorType::{*};
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub struct ParserError {
     pub error: ParserErrorType,
     pub loc: Location,
@@ -74,7 +74,7 @@ impl AsErrorWithContext for ParserError {
 }
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub enum ParserErrorType {
     UnexpectedTokenAfterEoF(ScanToken),
 
