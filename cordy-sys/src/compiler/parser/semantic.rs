@@ -5,7 +5,6 @@
 
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::rc::Rc;
 use fxhash::FxBuildHasher;
 use itertools::Itertools;
 
@@ -575,7 +574,7 @@ impl<'a> Parser<'a> {
     fn declare_pattern(&mut self, pattern: Pattern) {
         let pattern_id: u32 = self.patterns.len() as u32;
 
-        self.patterns.push(Rc::new(pattern));
+        self.patterns.push(pattern);
         self.push(ExecPattern(pattern_id));
     }
 

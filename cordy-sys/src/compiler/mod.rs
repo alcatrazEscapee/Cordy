@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use crate::compiler::parser::ParseRule;
 use crate::compiler::scanner::ScanResult;
 use crate::reporting::{Location, SourceView};
@@ -109,7 +107,7 @@ pub struct CompileParameters<'a> {
     code: &'a mut Vec<Opcode>,
 
     constants: &'a mut Vec<ValuePtr>,
-    patterns: &'a mut Vec<Rc<Pattern>>,
+    patterns: &'a mut Vec<Pattern>,
     globals: &'a mut Vec<String>,
     locations: &'a mut Vec<Location>,
     fields: &'a mut Fields,
@@ -141,7 +139,7 @@ impl<'a> CompileParameters<'a> {
         enable_optimization: bool,
         code: &'a mut Vec<Opcode>,
         constants: &'a mut Vec<ValuePtr>,
-        patterns: &'a mut Vec<Rc<Pattern>>,
+        patterns: &'a mut Vec<Pattern>,
         globals: &'a mut Vec<String>,
         locations: &'a mut Vec<Location>,
         fields: &'a mut Fields,
@@ -185,7 +183,7 @@ pub struct CompileResult {
     errors: Vec<ParserError>,
 
     pub constants: Vec<ValuePtr>,
-    pub patterns: Vec<Rc<Pattern>>,
+    pub patterns: Vec<Pattern>,
     pub globals: Vec<String>,
     pub locations: Vec<Location>,
     pub fields: Fields,

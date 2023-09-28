@@ -1,5 +1,4 @@
 use std::collections::VecDeque;
-use std::rc::Rc;
 
 use crate::compiler::{CompileParameters, CompileResult};
 use crate::compiler::parser::core::ParserState;
@@ -119,7 +118,7 @@ pub(super) struct Parser<'a> {
     /// Note that this list is considered starting at the length of `baked_functions`
     functions: Vec<ParserFunctionImpl>,
 
-    patterns: &'a mut Vec<Rc<Pattern>>,
+    patterns: &'a mut Vec<Pattern>,
 }
 
 
@@ -133,7 +132,7 @@ impl Parser<'_> {
         errors: &'b mut Vec<ParserError>,
 
         constants: &'b mut Vec<ValuePtr>,
-        patterns: &'b mut Vec<Rc<Pattern>>,
+        patterns: &'b mut Vec<Pattern>,
         globals_reference: &'b mut Vec<String>,
         locations: &'b mut Vec<Location>,
         fields: &'b mut Fields,
