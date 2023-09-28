@@ -77,7 +77,7 @@ pub enum ScanTokenType {
 }
 
 
-#[derive(Eq, PartialEq, Debug, Clone)]
+#[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub enum ScanToken {
     // Special
     Identifier(String),

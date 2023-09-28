@@ -11,13 +11,13 @@ use Type::{*};
 
 
 #[repr(u8)]
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
 pub enum UnaryOp {
     Neg, Not
 }
 
 #[repr(u8)]
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
 pub enum BinaryOp {
     Mul, Div, Pow, Mod, Is, IsNot, Add, Sub, LeftShift, RightShift, And, Or, Xor, In, NotIn, LessThan, GreaterThan, LessThanEqual, GreaterThanEqual, Equal, NotEqual, Max, Min
 }

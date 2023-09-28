@@ -393,7 +393,7 @@ impl<'a> Parser<'a> {
     fn do_error(&mut self, loc: Location, error: ParserErrorType, error_recovery: bool) {
         trace::trace_parser!("push_err (error = {}) {:?}", self.error_recovery, error);
         if !self.error_recovery {
-            self.errors.push(ParserError::new(error, loc));
+            self.errors.insert(ParserError::new(error, loc));
         }
         if error_recovery {
             self.error_recovery = true;
