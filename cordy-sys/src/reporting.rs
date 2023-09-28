@@ -204,8 +204,21 @@ impl SourceEntry {
 
         if start_lineno == end_lineno {
             // Single line error, so point to the exact column start + end
-            for _ in 0..=start_col { text.push(' '); }
-            for _ in start_col..=end_col { text.push('^'); }
+            // N.B. We match the indentation of the original line so that despite any weird tab/space mixing, at least both the '^' and original line match up
+            let line = &index.lines[start_lineno];
+            if !line.is_empty() {
+                text.push(' ');
+                for c in line.chars().take(start_col) {
+                    match c {
+                        '\t' => text.push('\t'),
+                        _ => text.push(' '),
+                    }
+                }
+            }
+
+            for _ in start_col..=end_col {
+                text.push('^');
+            }
         } else {
             // For multi-line errors, just point directly up across the entire bottom line
             let longest_line_len: usize = (start_lineno..=end_lineno)
