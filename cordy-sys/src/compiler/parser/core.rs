@@ -4,7 +4,7 @@
 
 use crate::compiler::parser::{Parser, ParserError};
 use crate::compiler::parser::ParserErrorType;
-use crate::compiler::parser::semantic::{LValueReference, Reference};
+use crate::compiler::parser::semantic::{LValueReference, ReferenceType};
 use crate::compiler::scanner::ScanToken;
 use crate::reporting::Location;
 use crate::trace;
@@ -316,8 +316,9 @@ impl<'a> Parser<'a> {
         match lvalue {
             LValueReference::Local(index) => self.push_with(PushLocal(index), loc),
             LValueReference::Global(index) => self.push_with(PushGlobal(index), loc),
-            LValueReference::LateBoundGlobal(global) => {
-                self.late_bound_globals.push(Reference::Load(global.update_opcode(self.functions.len() - 1, self.next_opcode())));
+            LValueReference::LateBoundGlobal(mut global) => {
+                global.update(ReferenceType::Load, self);
+                self.late_bound_globals.push(global);
                 self.push_with(Noop, loc); // Will be fixed when the global is declared, or caught at EoF as an error
             }
             LValueReference::UpValue(index) => self.push_with(PushUpValue(index), loc),
@@ -331,8 +332,9 @@ impl<'a> Parser<'a> {
         match lvalue {
             LValueReference::Local(index) => self.push(StoreLocal(index, false)),
             LValueReference::Global(index) => self.push(StoreGlobal(index, false)),
-            LValueReference::LateBoundGlobal(global) => {
-                self.late_bound_globals.push(Reference::Store(global.update_opcode(self.functions.len() - 1, self.next_opcode())));
+            LValueReference::LateBoundGlobal(mut global) => {
+                global.update(ReferenceType::Store, self);
+                self.late_bound_globals.push(global);
                 self.push(Noop); // Will be fixed when the global is declared, or caught at EoF as an error
             },
             LValueReference::UpValue(index) => self.push(StoreUpValue(index)),

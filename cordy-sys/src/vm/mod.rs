@@ -44,7 +44,7 @@ pub struct VirtualMachine<R, W> {
 
     /// N.B. This field must not be modified by any mutable reference to the VM
     /// Non-mutable references (via `unsafe`) are handed out to `self.patterns` while a `&mut` reference is kept of the VM.
-    patterns: Vec<Pattern>,
+    patterns: Vec<Pattern<StoreOp>>,
     globals: Vec<String>,
     locations: Vec<Location>,
     fields: Fields,
@@ -405,7 +405,7 @@ impl<R, W> VirtualMachine<R, W> where
                 // So we invoke some unsafe code here to split the mutable and immutable reference
                 // This just copies the reference, which lets us have a separate `&VM` that we treat as only pointing to `& VM.patterns`
                 let pattern = unsafe {
-                    std::mem::transmute_copy::<&Pattern, &Pattern>(&&self.patterns[index as usize])
+                    std::mem::transmute_copy::<&Pattern<StoreOp>, &Pattern<StoreOp>>(&&self.patterns[index as usize])
                 };
                 pattern.apply(self, &top)?;
             },
@@ -1746,6 +1746,8 @@ mod tests {
     #[test] fn test_function_capture_from_outer_scope() { run("function_capture_from_outer_scope"); }
     #[test] fn test_late_bound_global() { run("late_bound_global"); }
     #[test] fn test_late_bound_global_assignment() { run("late_bound_global_assignment"); }
+    #[test] fn test_late_bound_global_in_pattern() { run("late_bound_global_in_pattern") }
+    #[test] fn test_late_bound_global_in_pattern_invalid() { run("late_bound_global_in_pattern_invalid") }
     #[test] fn test_late_bound_global_invalid() { run("late_bound_global_invalid"); }
     #[test] fn test_map_loop_with_multiple_references() { run("map_loop_with_multiple_references"); }
     #[test] fn test_memoize() { run("memoize"); }

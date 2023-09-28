@@ -1,7 +1,7 @@
 use crate::compiler::parser::ParseRule;
 use crate::compiler::scanner::ScanResult;
 use crate::reporting::{Location, SourceView};
-use crate::vm::{AnyResult, Opcode, RuntimeError, ValuePtr};
+use crate::vm::{AnyResult, Opcode, RuntimeError, StoreOp, ValuePtr};
 use crate::core::Pattern;
 
 pub use crate::compiler::parser::{default, Fields, Locals, ParserError, ParserErrorType};
@@ -107,7 +107,7 @@ pub struct CompileParameters<'a> {
     code: &'a mut Vec<Opcode>,
 
     constants: &'a mut Vec<ValuePtr>,
-    patterns: &'a mut Vec<Pattern>,
+    patterns: &'a mut Vec<Pattern<StoreOp>>,
     globals: &'a mut Vec<String>,
     locations: &'a mut Vec<Location>,
     fields: &'a mut Fields,
@@ -139,7 +139,7 @@ impl<'a> CompileParameters<'a> {
         enable_optimization: bool,
         code: &'a mut Vec<Opcode>,
         constants: &'a mut Vec<ValuePtr>,
-        patterns: &'a mut Vec<Pattern>,
+        patterns: &'a mut Vec<Pattern<StoreOp>>,
         globals: &'a mut Vec<String>,
         locations: &'a mut Vec<Location>,
         fields: &'a mut Fields,
@@ -183,7 +183,7 @@ pub struct CompileResult {
     errors: Vec<ParserError>,
 
     pub constants: Vec<ValuePtr>,
-    pub patterns: Vec<Pattern>,
+    pub patterns: Vec<Pattern<StoreOp>>,
     pub globals: Vec<String>,
     pub locations: Vec<Location>,
     pub fields: Fields,

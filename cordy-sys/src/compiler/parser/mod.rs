@@ -3,12 +3,12 @@ use std::collections::VecDeque;
 use crate::compiler::{CompileParameters, CompileResult};
 use crate::compiler::parser::core::ParserState;
 use crate::compiler::parser::expr::{Expr, ExprType};
-use crate::compiler::parser::semantic::{LateBoundGlobal, LValue, LValueReference, ParserFunctionImpl, Reference};
+use crate::compiler::parser::semantic::{LateBoundGlobal, LValue, LValueReference, ParserFunctionImpl, ParserStoreOp};
 use crate::compiler::scanner::{ScanResult, ScanToken};
 use crate::core::{NativeFunction, Pattern};
 use crate::reporting::Location;
 use crate::trace;
-use crate::vm::{Opcode, StructTypeImpl, ValuePtr};
+use crate::vm::{Opcode, StoreOp, StructTypeImpl, ValuePtr};
 use crate::vm::operator::{BinaryOp, CompareOp, UnaryOp};
 
 pub use crate::compiler::parser::errors::{ParserError, ParserErrorType};
@@ -107,7 +107,10 @@ pub(super) struct Parser<'a> {
     /// A table of all struct fields and types. This is used to resolve `-> <name>` references at compile time, to a `field index`. At runtime it is used as a lookup to resolve a `(type index, field index)` into a `field offset`, which is used to access the underlying field.
     fields: &'a mut Fields,
 
-    late_bound_globals: Vec<Reference<LateBoundGlobal>>, // Table of all late bound globals, as they occur.
+    /// Table of all late bound globals, as they occur
+    late_bound_globals: Vec<LateBoundGlobal>,
+    late_bound_global_index: usize,
+
     synthetic_local_index: usize, // A counter for unique synthetic local variables (`$1`, `$2`, etc.)
     scope_depth: u32, // Current scope depth
     function_depth: u32,
@@ -115,10 +118,12 @@ pub(super) struct Parser<'a> {
     constants: &'a mut Vec<ValuePtr>,
 
     /// List of all functions known to the parser, in their unbaked form.
-    /// Note that this list is considered starting at the length of `baked_functions`
     functions: Vec<ParserFunctionImpl>,
 
-    patterns: &'a mut Vec<Pattern>,
+    /// List of patterns known to the parser, in their unbaked form.
+    patterns: Vec<Pattern<ParserStoreOp>>,
+    /// List of baked patterns already known to the parser.
+    baked_patterns: &'a mut Vec<Pattern<StoreOp>>,
 }
 
 
@@ -132,7 +137,7 @@ impl Parser<'_> {
         errors: &'b mut Vec<ParserError>,
 
         constants: &'b mut Vec<ValuePtr>,
-        patterns: &'b mut Vec<Pattern>,
+        patterns: &'b mut Vec<Pattern<StoreOp>>,
         globals_reference: &'b mut Vec<String>,
         locations: &'b mut Vec<Location>,
         fields: &'b mut Fields,
@@ -160,7 +165,9 @@ impl Parser<'_> {
 
             locals,
             fields,
+
             late_bound_globals: Vec::new(),
+            late_bound_global_index: 0,
 
             synthetic_local_index: 0,
             scope_depth: 0,
@@ -168,7 +175,8 @@ impl Parser<'_> {
 
             constants,
             functions: Vec::new(),
-            patterns,
+            patterns: Vec::new(),
+            baked_patterns: patterns,
         }
     }
 
@@ -224,12 +232,26 @@ impl Parser<'_> {
             func.bake(self.constants, head, tail);
         }
 
+        // Emit patterns
+        for pattern in self.patterns.drain(..) {
+            self.baked_patterns.push(pattern.map(&mut |op| {
+                match op {
+                    ParserStoreOp::Bound(op) => op,
+                    // Just need to insert a dummy value here
+                    // Errors will be emitted below
+                    ParserStoreOp::LateBoundGlobal(_) => StoreOp::Local(0)
+                }
+            }));
+        }
+
         if let Some(t) = self.peek() {
             let token: ScanToken = t.clone();
             self.error(UnexpectedTokenAfterEoF(token));
         }
+
+        // Errors due to late bound globals that were never fixed
         for global in self.late_bound_globals.drain(..) {
-            if let Some(error) = global.target().error() {
+            if let Some(error) = global.error() {
                 self.errors.push(error);
             }
         }
@@ -2043,6 +2065,9 @@ mod tests {
     #[test] fn test_top_level_function_in_error_recovery_mode() { run_err("+ fn hello() {}", "Expected an expression terminal, got '+' token instead\n  at: line 1 (<test>)\n\n1 | + fn hello() {}\n2 | ^\n"); }
     #[test] fn test_partial_binary_op_implicit_unroll_error_left() { run_err("print (... + 3)", "Expected an expression terminal, got '+' token instead\n  at: line 1 (<test>)\n\n1 | print (... + 3)\n2 |            ^\n") }
     #[test] fn test_partial_binary_op_implicit_unroll_error_right() { run_err("print (... 3 +)", "Unrolled expression with '...' not allowed to be attached to a implicit partially-evaluated operator\n  at: line 1 (<test>)\n\n1 | print (... 3 +)\n2 |        ^^^^^^^^\n") }
+    #[test] fn test_late_bound_global_in_load() { run_err("fn foo() { print(x) }", "Undeclared identifier: 'x'\n  at: line 1 (<test>)\n\n1 | fn foo() { print(x) }\n2 |                  ^\n") }
+    #[test] fn test_late_bound_global_in_store() { run_err("fn foo() { y = x + 1 } let y", "Undeclared identifier: 'x'\n  at: line 1 (<test>)\n\n1 | fn foo() { y = x + 1 } let y\n2 |                ^\n") }
+    #[test] fn test_late_bound_global_in_pattern() { run_err("fn foo() { x, y = nil }", "Undeclared identifier: 'x'\n  at: line 1 (<test>)\n\n1 | fn foo() { x, y = nil }\n2 |                 ^\n\nUndeclared identifier: 'y'\n  at: line 1 (<test>)\n\n1 | fn foo() { x, y = nil }\n2 |                 ^\n") }
 
     #[test] fn test_array_access_after_newline() { run("array_access_after_newline"); }
     #[test] fn test_array_access_no_newline() { run("array_access_no_newline"); }

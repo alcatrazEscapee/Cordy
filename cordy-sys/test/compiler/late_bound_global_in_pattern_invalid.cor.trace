@@ -1,0 +1,6 @@
+ValueError: 'x' was referenced but has not been declared yet
+  at: line 2 (late_bound_global_in_pattern_invalid.cor)
+  at: `fn foo()` (line 5)
+
+2 |     x, y = (1, 2)
+3 |                 ^

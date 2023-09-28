@@ -171,25 +171,32 @@ impl Local {
 
 #[derive(Debug, Clone)]
 pub struct LateBoundGlobal {
+    /// A unique index for every late bound global.
+    index: usize,
     name: String,
     /// This is a pair of (function ordinal, code ordinal)
     /// Note that the function ordinal is an index into `self.functions`, not an absolute function ID (and is thus a `usize` not a `u32`)
     opcode: (usize, usize),
-
-    error: Option<ParserError>, // An error that would be thrown from here, if the variable does not end up bound
+    /// The reference type of this late bound global, for fixing later
+    ty: ReferenceType,
+    /// An error that would be thrown from here, if the variable does not end up bound
+    error: Option<ParserError>,
 }
 
 impl LateBoundGlobal {
-    pub fn new(name: String, ordinal: usize, opcode: usize, error: Option<ParserError>) -> LateBoundGlobal {
+    pub fn new(index: usize, name: String, ordinal: usize, opcode: usize, error: Option<ParserError>) -> LateBoundGlobal {
         LateBoundGlobal {
+            index,
             name,
             opcode: (ordinal, opcode),
+            ty: ReferenceType::Invalid,
             error
         }
     }
 
-    pub fn update_opcode(self, ordinal: usize, opcode: usize) -> Self {
-        LateBoundGlobal::new(self.name, ordinal, opcode, self.error)
+    pub(super) fn update(&mut self, ty: ReferenceType, parser: &Parser) {
+        self.opcode = (parser.functions.len() - 1, parser.next_opcode());
+        self.ty = ty;
     }
 
     pub fn error(self) -> Option<ParserError> {
@@ -239,6 +246,12 @@ pub enum LValueReference {
 
     /// `NativeFunction()` is not an `LValue`, however it is included as it is a possible resolution for a declared variable.
     NativeFunction(core::NativeFunction),
+}
+
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum ReferenceType {
+    Invalid, Load, LoadPattern, Store
 }
 
 
@@ -390,7 +403,7 @@ impl LValue {
                 }
             }
             LValue::Terms(_) => {
-                let pattern = self.build_pattern();
+                let pattern = self.build_pattern(parser);
                 parser.declare_pattern(pattern);
                 if !in_expression {
                     parser.push(Pop); // Push the final pop
@@ -399,12 +412,12 @@ impl LValue {
         }
     }
 
-    fn build_pattern(self) -> Pattern {
+    fn build_pattern(self, parser: &mut Parser) -> Pattern<ParserStoreOp> {
         let terms = self.into_terms();
         let is_variadic = terms.iter().any(|t| t.is_variadic_term());
         let len = if is_variadic { terms.len() - 1 } else { terms.len() };
 
-        let mut pattern: Pattern = Pattern::new(len, is_variadic);
+        let mut pattern: Pattern<ParserStoreOp> = Pattern::new(len, is_variadic);
 
         let mut index: i64 = 0;
         for term in terms {
@@ -418,7 +431,7 @@ impl LValue {
                     index = -(len as i64 - index);
                 },
                 LValue::Named(lvalue) => {
-                    pattern.push_index(index, lvalue.as_store_op());
+                    pattern.push_index(index, lvalue.as_store_op(parser));
                     index += 1;
                 },
                 LValue::VarNamed(lvalue) => {
@@ -426,10 +439,10 @@ impl LValue {
                     index = -(len as i64 - index);
                     let high = index;
 
-                    pattern.push_slice(low, high, lvalue.as_store_op());
+                    pattern.push_slice(low, high, lvalue.as_store_op(parser));
                 },
                 terms @ LValue::Terms(_) => {
-                    pattern.push_pattern(index, terms.build_pattern());
+                    pattern.push_pattern(index, terms.build_pattern(parser));
                     index += 1;
                 },
             }
@@ -447,30 +460,28 @@ impl LValueReference {
         }
     }
 
-    fn as_store_op(self) -> StoreOp {
+    fn as_store_op(self, parser: &mut Parser) -> ParserStoreOp {
         match self {
-            LValueReference::Local(index) => StoreOp::Local(index),
-            LValueReference::Global(index) => StoreOp::Global(index),
-            LValueReference::LateBoundGlobal(_global) => {
-                // todo: support this
-                panic!("can't support late bound globals in pattern destructuring yet");
+            LValueReference::Local(index) => ParserStoreOp::Bound(StoreOp::Local(index)),
+            LValueReference::Global(index) => ParserStoreOp::Bound(StoreOp::Global(index)),
+            LValueReference::LateBoundGlobal(mut global) => {
+                let index = global.index;
+
+                global.update(ReferenceType::LoadPattern, parser);
+                parser.late_bound_globals.push(global);
+
+                ParserStoreOp::LateBoundGlobal(index)
             },
-            LValueReference::UpValue(index) => StoreOp::UpValue(index),
+            LValueReference::UpValue(index) => ParserStoreOp::Bound(StoreOp::UpValue(index)),
             _ => panic!("Invalid store: {:?}", self),
         }
     }
 }
 
 #[derive(Debug)]
-pub enum Reference<T> where T : Debug {
-    Load(T), Store(T)
-}
-
-impl<T : Debug> Reference<T> {
-    pub fn target_ref(&self) -> &T { match self { Reference::Load(it) | Reference::Store(it) => it } }
-    pub fn target(self) -> T { match self { Reference::Load(it) | Reference::Store(it) => it } }
-
-    pub fn is_load(&self) -> bool { matches!(self, Reference::Load(_)) }
+pub enum ParserStoreOp {
+    Bound(StoreOp),
+    LateBoundGlobal(usize),
 }
 
 
@@ -571,8 +582,8 @@ impl<'a> Parser<'a> {
     }
 
     /// Declares a `Pattern`, stores the pattern, and then emits a `ExecPattern` opcode for it
-    fn declare_pattern(&mut self, pattern: Pattern) {
-        let pattern_id: u32 = self.patterns.len() as u32;
+    fn declare_pattern(&mut self, pattern: Pattern<ParserStoreOp>) {
+        let pattern_id: u32 = (self.patterns.len() + self.baked_patterns.len()) as u32;
 
         self.patterns.push(pattern);
         self.push(ExecPattern(pattern_id));
@@ -600,22 +611,40 @@ impl<'a> Parser<'a> {
         let index = self.declare_local_internal(name);
         let local = &self.locals.last().unwrap().locals[index];
 
+        // If global, then fix references to this global
         if local.is_global() {
-
-            // Fix references to this global
             for global in &self.late_bound_globals {
-                if global.target_ref().name == local.name {
-                    let opcode = global.target_ref().opcode;
-                    self.functions[opcode.0].code[opcode.1].1 = if global.is_load() {
-                        PushGlobal(local.index)
-                    } else {
-                        StoreGlobal(local.index, false)
-                    };
+                if global.name == local.name {
+                    let (func_index, code_index) = global.opcode;
+                    let global_index = global.index;
+                    let (_, opcode) = &mut self.functions[func_index].code[code_index];
+
+                    match global.ty {
+                        ReferenceType::Load => *opcode = PushGlobal(local.index),
+                        ReferenceType::Store => *opcode = StoreGlobal(local.index, false),
+                        ReferenceType::LoadPattern => {
+                            // Need to update all the matching late bound globals in the pattern, which should be referred to by `ExecPattern`
+                            let pattern_index: usize = match opcode {
+                                ExecPattern(index) => *index as usize - self.baked_patterns.len(),
+                                _ => panic!("LoadPattern should find a ExecPattern to update"),
+                            };
+
+                            let pattern = &mut self.patterns[pattern_index];
+                            pattern.visit(&mut |op| {
+                                if let ParserStoreOp::LateBoundGlobal(index) = op {
+                                    if *index == global_index {
+                                        *op = ParserStoreOp::Bound(StoreOp::Global(local.index))
+                                    }
+                                }
+                            });
+                        },
+                        ReferenceType::Invalid => panic!("Invalid reference type set!")
+                    }
                 }
             }
 
             // And remove them
-            self.late_bound_globals.retain(|global| global.target_ref().name != local.name);
+            self.late_bound_globals.retain(|global| global.name != local.name);
 
             // Declare this global variable's name
             self.globals_reference.push(local.name.clone());
@@ -797,7 +826,9 @@ impl<'a> Parser<'a> {
         if self.function_depth > 0 {
             // Assume a late bound global
             let error = self.deferred_error(UndeclaredIdentifier(name.clone()));
-            let global = LateBoundGlobal::new(name, self.functions.len() - 1, self.next_opcode(), error);
+            let global = LateBoundGlobal::new(self.late_bound_global_index, name, self.functions.len() - 1, self.next_opcode(), error);
+
+            self.late_bound_global_index += 1;
             return LValueReference::LateBoundGlobal(global);
         }
 
