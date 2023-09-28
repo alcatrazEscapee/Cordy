@@ -1,0 +1,8 @@
+fn foo() {
+    x, y = (1, 2)
+}
+
+let x, y
+foo()
+
+print(x, y)
