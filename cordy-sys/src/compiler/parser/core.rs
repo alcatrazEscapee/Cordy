@@ -416,6 +416,6 @@ impl<'a> Parser<'a> {
 
     /// Returns the source location of the next token, aka the one in `peek()`
     pub fn next_location(&self) -> Location {
-        self.input.front().map(|u| u.0).unwrap_or_else(Location::empty)
+        self.input.front().map(|&(loc, _)| loc).unwrap_or_else(Location::empty)
     }
 }

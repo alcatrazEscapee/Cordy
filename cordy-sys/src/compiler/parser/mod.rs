@@ -2056,9 +2056,9 @@ mod tests {
     #[test] fn test_nil_with_call() { run_expr("nil()", "Nil Call(0)") }
     #[test] fn test_exit_with_call() { run_expr("exit()", "Exit Call(0)") }
 
-    #[test] fn test_let_eof() { run_err("let", "Expected a variable binding, either a name, '_', or pattern, got end of input instead\n  at: line 1 (<test>)\n\n1 | let\n2 |     ^^^\n"); }
+    #[test] fn test_let_eof() { run_err("let", "Expected a variable binding, either a name, '_', or pattern, got end of input instead\n  at: line 1 (<test>)\n\n1 | let\n2 |    ^^^\n"); }
     #[test] fn test_let_no_identifier() { run_err("let =", "Expected a variable binding, either a name, '_', or pattern, got '=' token instead\n  at: line 1 (<test>)\n\n1 | let =\n2 |     ^\n"); }
-    #[test] fn test_let_expression_eof() { run_err("let x =", "Expected an expression terminal, got end of input instead\n  at: line 1 (<test>)\n\n1 | let x =\n2 |         ^^^\n"); }
+    #[test] fn test_let_expression_eof() { run_err("let x =", "Expected an expression terminal, got end of input instead\n  at: line 1 (<test>)\n\n1 | let x =\n2 |        ^^^\n"); }
     #[test] fn test_let_no_expression() { run_err("let x = &", "Expected an expression terminal, got '&' token instead\n  at: line 1 (<test>)\n\n1 | let x = &\n2 |         ^\n"); }
     #[test] fn test_let_no_expression_with_empty() { run_err("let _ ;", "'let' with a pattern variable must be followed by an expression if the pattern contains nontrivial pattern elements.\n  at: line 1 (<test>)\n\n1 | let _ ;\n2 |     ^\n") }
     #[test] fn test_let_no_expression_with_variadic() { run_err("let a, *b ;", "'let' with a pattern variable must be followed by an expression if the pattern contains nontrivial pattern elements.\n  at: line 1 (<test>)\n\n1 | let a, *b ;\n2 |     ^^^^^\n") }
@@ -2071,6 +2071,9 @@ mod tests {
     #[test] fn test_late_bound_global_in_store() { run_err("fn foo() { y = x + 1 } let y", "Undeclared identifier: 'x'\n  at: line 1 (<test>)\n\n1 | fn foo() { y = x + 1 } let y\n2 |                ^\n") }
     #[test] fn test_late_bound_global_in_load_store_duplicate_error() { run_err("fn foo() { x += 1 }", "Undeclared identifier: 'x'\n  at: line 1 (<test>)\n\n1 | fn foo() { x += 1 }\n2 |            ^\n") }
     #[test] fn test_late_bound_global_in_pattern() { run_err("fn foo() { x, y = nil }", "Undeclared identifier: 'x'\n  at: line 1 (<test>)\n\n1 | fn foo() { x, y = nil }\n2 |                 ^\n\nUndeclared identifier: 'y'\n  at: line 1 (<test>)\n\n1 | fn foo() { x, y = nil }\n2 |                 ^\n") }
+    #[test] fn test_error_on_line_with_weird_indentation_1() { run_err("  \t    \t&", "Expected an expression terminal, got '&' token instead\n  at: line 1 (<test>)\n\n1 |   \t    \t&\n2 |   \t    \t^\n") }
+    #[test] fn test_error_on_line_with_weird_indentation_2() { run_err("\t\t  &", "Expected an expression terminal, got '&' token instead\n  at: line 1 (<test>)\n\n1 | \t\t  &\n2 | \t\t  ^\n") }
+    #[test] fn test_error_on_line_with_weird_indentation_3() { run_err("\t  \t     &", "Expected an expression terminal, got '&' token instead\n  at: line 1 (<test>)\n\n1 | \t  \t     &\n2 | \t  \t     ^\n") }
 
     #[test] fn test_array_access_after_newline() { run("array_access_after_newline"); }
     #[test] fn test_array_access_no_newline() { run("array_access_no_newline"); }
