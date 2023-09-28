@@ -41,7 +41,10 @@ pub struct VirtualMachine<R, W> {
     unroll_stack: Vec<i32>,
 
     constants: Vec<ValuePtr>,
-    patterns: Vec<Rc<Pattern>>,
+
+    /// N.B. This field must not be modified by any mutable reference to the VM
+    /// Non-mutable references (via `unsafe`) are handed out to `self.patterns` while a `&mut` reference is kept of the VM.
+    patterns: Vec<Pattern>,
     globals: Vec<String>,
     locations: Vec<Location>,
     fields: Fields,
@@ -395,9 +398,15 @@ impl<R, W> VirtualMachine<R, W> where
             },
 
             ExecPattern(index) => {
-                // I would do away with the `.clone()`s here, and the `Rc<>` on patterns, but we need no borrows to call `apply(&mut VM)`
                 let top = self.peek(0).clone();
-                let pattern = self.patterns[index as usize].clone();
+
+                // Here, we would like to split the VM struct into a `& self.patterns` and a `&mut self.<everything else>`
+                // But, there's no mechanism for the compiler to understand that this is legal
+                // So we invoke some unsafe code here to split the mutable and immutable reference
+                // This just copies the reference, which lets us have a separate `&VM` that we treat as only pointing to `& VM.patterns`
+                let pattern = unsafe {
+                    std::mem::transmute_copy::<&Pattern, &Pattern>(&&self.patterns[index as usize])
+                };
                 pattern.apply(self, &top)?;
             },
 
