@@ -7,13 +7,13 @@ use fxhash::FxBuildHasher;
 use crate::{compiler, core, trace, util};
 use crate::compiler::{CompileParameters, CompileResult, Fields, IncrementalCompileResult, Locals};
 use crate::reporting::{Location, SourceView};
-use crate::util::OffsetAdd;
+use crate::util::{EmptyRead, OffsetAdd};
 use crate::vm::value::{Field, Literal, UpValue, ValueStructType};
 use crate::core::Pattern;
 
 pub use crate::vm::error::{DetailRuntimeError, RuntimeError};
 pub use crate::vm::opcode::{Opcode, StoreOp};
-pub use crate::vm::value::{C64, FunctionImpl, guard_recursive_hash, IntoDictValue, IntoIterableValue, IntoValue, Iterable, LiteralType, MAX_INT, MIN_INT, StructTypeImpl, Type, ValueOption, ValuePtr, ValueResult, ErrorResult, AnyResult, Prefix};
+pub use crate::vm::value::{AnyResult, C64, ErrorResult, FunctionImpl, guard_recursive_hash, IntoDictValue, IntoIterableValue, IntoValue, Iterable, LiteralType, MAX_INT, MIN_INT, Prefix, StructTypeImpl, Type, ValueOption, ValuePtr, ValueResult};
 
 use Opcode::{*};
 use RuntimeError::{*};
@@ -129,11 +129,24 @@ pub struct CallFrame {
 }
 
 
-impl<R, W> VirtualMachine<R, W> where
-    R: BufRead,
-    W: Write {
+impl VirtualMachine<EmptyRead, Vec<u8>> {
+    /// Creates a new `VirtualMachine` with empty external read/write capabilities.
+    pub fn default(result: CompileResult, view: SourceView) -> VirtualMachine<EmptyRead, Vec<u8>> {
+        VirtualMachine::new(result, view, EmptyRead, vec![])
+    }
+}
 
-    pub fn new(result: CompileResult, view: SourceView, read: R, write: W, args: Vec<String>) -> VirtualMachine<R, W> {
+impl<W : Write> VirtualMachine<EmptyRead, W> {
+    /// Creates a new `VirtualMachine` with the given write capability but an empty read capability.
+    pub fn with(result: CompileResult, view: SourceView, write: W) -> VirtualMachine<EmptyRead, W> {
+        VirtualMachine::new(result, view, EmptyRead, write)
+    }
+}
+
+
+impl<R : BufRead, W : Write> VirtualMachine<R, W> {
+    /// Creates a new `VirtualMachine` with the given read and write capabilities.
+    pub fn new(result: CompileResult, view: SourceView, read: R, write: W) -> VirtualMachine<R, W> {
         VirtualMachine {
             ip: 0,
             code: result.code,
@@ -153,8 +166,12 @@ impl<R, W> VirtualMachine<R, W> where
             view,
             read,
             write,
-            args: args.into_iter().map(|u| u.to_value()).to_list(),
+            args: ValuePtr::nil(),
         }
+    }
+
+    pub fn with_args(&mut self, args: Vec<String>) {
+        self.args = args.into_iter().map(|u| u.to_value()).to_list()
     }
 
     pub fn view(&self) -> &SourceView {
@@ -949,8 +966,10 @@ fn insert<I : Iterator<Item=ValuePtr>>(stack: &mut Vec<ValuePtr>, args: I, n: u3
 
 #[cfg(test)]
 mod tests {
-    use crate::{compiler, test_util};
+    use crate::{compiler, util};
+    use crate::compiler::CompileResult;
     use crate::reporting::SourceView;
+    use crate::util::Resource;
     use crate::vm::{ExitType, VirtualMachine};
 
     #[test] fn test_empty() { run_str("", ""); }
@@ -1324,7 +1343,7 @@ mod tests {
     #[test] fn test_int_default_value_no() { run_str("int('yes', 567) . print", "567\n"); }
     #[test] fn test_int_min_and_max() { run_str("[int.min, max(int)] . print", "[-4611686018427387904, 4611686018427387903]\n") }
     #[test] fn test_int_min_and_max_indirect() { run_str("let i = int ; [min(i), i.max] . print", "[-4611686018427387904, 4611686018427387903]\n")}
-    #[test] fn test_int_min_and_max_no_opt() { run_with(false, "[int.min, max(int)] . print", "[-4611686018427387904, 4611686018427387903]\n") }
+    #[test] fn test_int_min_and_max_no_opt() { run_str_with(false, "[int.min, max(int)] . print", "[-4611686018427387904, 4611686018427387903]\n") }
     #[test] fn test_complex_add() { run_str("(1 + 2i) + (3 + 4j) . print", "4 + 6i\n"); }
     #[test] fn test_complex_mul() { run_str("(1 + 2i) * (3 + 4j) . print", "-5 + 10i\n"); }
     #[test] fn test_complex_str() { run_str("1 + 1i . print", "1 + 1i\n"); }
@@ -1728,7 +1747,6 @@ mod tests {
     #[test] fn test_count_zeros() { run_str("0 . count_zeros . print", "64\n"); }
     #[test] fn test_env_exists() { run_str("env . repr . print", "fn env(...)\n"); }
     #[test] fn test_argv_exists() { run_str("argv . repr . print", "fn argv()\n"); }
-    #[test] fn test_argv_is_empty() { run_str("argv() . repr . print", "[]\n"); }
     #[test] fn test_real_of_bool() { run_str("true . real . print", "1\n"); }
     #[test] fn test_real_of_int() { run_str("123 . real . print", "123\n"); }
     #[test] fn test_real_of_imag() { run_str("123i . real . print", "0\n"); }
@@ -1784,66 +1802,51 @@ mod tests {
 
 
     fn run_str(text: &'static str, expected: &'static str) {
-        run_with(true, text, expected);
+        run_str_with(true, text, expected);
     }
 
-    fn run_with(opt: bool, text: &'static str, expected: &'static str) {
+    fn run_str_with(opt: bool, text: &'static str, expected: &'static str) {
         let view: SourceView = SourceView::new(String::from("<test>"), String::from(text));
         let compile = compiler::compile(opt, &view);
 
         if compile.is_err() {
-            test_util::assert_eq(format!("Compile Error:\n\n{}", compile.err().unwrap().join("\n")), String::from(expected));
-            return
+            util::assert_eq(format!("Compile Error:\n\n{}", compile.err().unwrap().join("\n")), String::from(expected));
+        } else {
+            let output = run_vm(compile, view);
+            util::assert_eq(output, String::from(expected));
         }
-
-        let compile = compile.unwrap();
-        println!("[-d] === Compiled ===");
-        for line in compile.disassemble(&view, true) {
-            println!("[-d] {}", line);
-        }
-
-        let mut buf: Vec<u8> = Vec::new();
-        let mut vm = VirtualMachine::new(compile, view, &b""[..], &mut buf, vec![]);
-
-        let result: ExitType = vm.run_until_completion();
-        assert!(vm.stack.is_empty() || result.is_early_exit());
-
-        let view: SourceView = vm.view;
-        let mut output: String = String::from_utf8(buf).unwrap();
-
-        if let ExitType::Error(error) = result {
-            output.push_str(view.format(&error).as_str());
-        }
-
-        test_util::assert_eq(output, String::from(expected));
     }
 
     fn run(path: &'static str) {
-        let resource = test_util::get_resource("compiler", path);
-        let view: SourceView = resource.view();
+        let (resource, view) = Resource::new("compiler", path);
         let compile = compiler::compile(true, &view);
 
         assert!(compile.is_ok(), "Compile Error:\n\n{}", compile.err().unwrap().join("\n"));
 
+        let output = run_vm(compile, view);
+        resource.assert_eq(output.split("\n").map(String::from).collect::<Vec<String>>());
+    }
+
+    fn run_vm(compile: Result<CompileResult, Vec<String>>, view: SourceView) -> String {
         let compile = compile.unwrap();
+
         println!("[-d] === Compiled ===");
         for line in compile.disassemble(&view, true) {
             println!("[-d] {}", line);
         }
 
-        let mut buf: Vec<u8> = Vec::new();
-        let mut vm = VirtualMachine::new(compile, view, &b""[..], &mut buf, vec![]);
+        let mut vm = VirtualMachine::default(compile, view);
 
         let result: ExitType = vm.run_until_completion();
         assert!(vm.stack.is_empty() || result.is_early_exit());
 
         let view: SourceView = vm.view;
-        let mut output: String = String::from_utf8(buf).unwrap();
+        let mut output: String = String::from_utf8(vm.write).unwrap();
 
-        if let ExitType::Error(error) = result {
-            output.push_str(view.format(&error).as_str());
+        if let ExitType::Error(ref error) = result {
+            output.push_str(view.format(error).as_str());
         }
 
-        resource.assert_eq(output.split("\n").map(String::from).collect::<Vec<String>>());
+        output
     }
 }

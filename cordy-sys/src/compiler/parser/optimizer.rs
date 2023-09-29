@@ -264,7 +264,7 @@ enum Purity {
 
 #[cfg(test)]
 mod tests {
-    use crate::{compiler, SourceView, test_util};
+    use crate::{compiler, SourceView, util};
 
     #[test] fn test_constant_folding_int_add() { run_expr("1 + 2", "Int(3) Pop") }
     #[test] fn test_constant_folding_bool_add() { run_expr("1 + true - 4", "Int(-2) Pop") }
@@ -329,6 +329,6 @@ mod tests {
             .expect("Failed to compile")
             .raw_disassembly();
 
-        test_util::assert_eq(actual, expected);
+        util::assert_eq(actual, expected);
     }
 }

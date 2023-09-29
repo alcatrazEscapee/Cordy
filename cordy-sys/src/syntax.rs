@@ -133,7 +133,7 @@ impl<F : Formatter> Formatter for BlockingFormatter<F> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{ScanTokenType, syntax, test_util};
+    use crate::{ScanTokenType, syntax, util};
     use crate::syntax::{BlockingFormatter, Formatter};
 
     struct TestFormatter(String);
@@ -164,11 +164,11 @@ mod tests {
         let mut fmt = TestFormatter(String::new());
         syntax::scan(String::from(input), &String::from(prefix), &mut fmt);
 
-        test_util::assert_eq(fmt.0, String::from(expected));
+        util::assert_eq(fmt.0, String::from(expected));
 
         let mut fmt = BlockingFormatter::new(TestFormatter(String::new()));
         syntax::scan(String::from(input), &String::from(prefix), &mut fmt);
 
-        test_util::assert_eq(fmt.fmt.0, String::from(expected_blocking.unwrap_or(expected)));
+        util::assert_eq(fmt.fmt.0, String::from(expected_blocking.unwrap_or(expected)));
     }
 }

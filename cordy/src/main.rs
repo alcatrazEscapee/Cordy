@@ -166,11 +166,11 @@ fn run_main(name: String, options: Options) -> Result<(), String> {
 }
 
 fn run_vm(compiled: CompileResult, program_args: Vec<String>, view: SourceView) -> Result<(), String> {
-
     let stdin = io::stdin().lock();
     let stdout = io::stdout();
-    let mut vm = VirtualMachine::new(compiled, view, stdin, stdout, program_args);
+    let mut vm = VirtualMachine::new(compiled, view, stdin, stdout);
 
+    vm.with_args(program_args);
     match vm.run_until_completion() {
         ExitType::Error(error) => Err(vm.view().format(&error)),
         _ => Ok(())

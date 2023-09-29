@@ -1967,8 +1967,9 @@ impl Parser<'_> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{compiler, test_util};
+    use crate::{compiler, util};
     use crate::reporting::SourceView;
+    use crate::util::Resource;
 
     #[test] fn test_nil() { run_expr("nil", "Nil") }
     #[test] fn test_true() { run_expr("true", "True") }
@@ -2137,19 +2138,18 @@ mod tests {
             .expect("Failed to compile")
             .raw_disassembly();
 
-        test_util::assert_eq(actual, expected);
+        util::assert_eq(actual, expected);
     }
 
     fn run_err(text: &'static str, expected: &'static str) {
         let view: SourceView = SourceView::new(String::from("<test>"), String::from(text));
         let actual: String = compiler::compile(false, &view).expect_err("Expected a parser error").join("\n");
 
-        test_util::assert_eq(actual, String::from(expected));
+        util::assert_eq(actual, String::from(expected));
     }
 
     fn run(path: &'static str) {
-        let resource = test_util::get_resource("parser", path);
-        let view: SourceView = resource.view();
+        let (resource, view) = Resource::new("parser", path);
         let actual: Vec<String> = match compiler::compile(false, &view) {
             Ok(compile) => compile.disassemble(&view, true),
             Err(err) => err
