@@ -1075,11 +1075,20 @@ fn type_of(value: ValuePtr) -> ValuePtr {
 
         Type::Range => Range.to_value(),
         Type::Enumerate => Enumerate.to_value(),
-        Type::Slice => Function.to_value(),
+        Type::Iter => Iterable.to_value(),
 
-        Type::Iter | Type::Memoized | Type::Error | Type::None | Type::Never => panic!("{:?} is synthetic and cannot have type_of() called on it", value),
+        Type::Slice |
+        Type::Memoized |
+        Type::Function |
+        Type::PartialFunction |
+        Type::NativeFunction |
+        Type::PartialNativeFunction |
+        Type::Closure |
+        Type::GetField => Function.to_value(),
 
-        Type::Function | Type::PartialFunction | Type::NativeFunction | Type::PartialNativeFunction | Type::Closure | Type::GetField => Function.to_value(),
+        Type::Error |
+        Type::None |
+        Type::Never => panic!("{:?} is synthetic and cannot have type_of() called on it", value),
     }
 }
 

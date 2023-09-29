@@ -179,8 +179,7 @@ impl ValuePtr {
     /// **Implementation Note**
     ///
     /// Looking at the assembly of this function in compiler explorer shows some interesting insights.
-    /// First, the generated assembly is _way better_ using the hardcoded functions like `is_int()` over `ty() == Type::Int`. So those will continue to exist,
-    /// and should be used over `ty() == Type::Int`.
+    /// First, the generated assembly is _way better_ using the hardcoded functions like `is_int()` over `ty() == Type::Int`. So those will continue to exist, and should be used over `ty() == Type::Int`.
     ///
     /// Secondly, `ty() == Type::Str` vs. a more 'optimized' expression, such as `self.is_ptr() && (*self.as_ptr()).ty == Type::Str` has no significant difference in the output... _as long as_, `unreachable!()` is not used. This, is actually terrible because it forces us to consider a panic as a possible outcome of this check.
     /// I'm wary about using `unreachable_unchecked!()` because of the possibility of undefined behavior, but luckily, there is a better solution: `Type::Never`
