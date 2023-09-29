@@ -20,6 +20,7 @@ pub enum RuntimeError {
     IncorrectArgumentsStruct(StructTypeImpl, u32),
 
     IOError(String),
+    MonitorError(String),
 
     ValueErrorIndexOutOfBounds(i64, usize),
     ValueErrorStepCannotBeZero,
