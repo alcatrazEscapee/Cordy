@@ -1,8 +1,8 @@
-use std::io;
-use std::io::{BufRead, Read, Write};
+use std::io::{Write};
 
 use crate::{compiler, SourceView};
 use crate::compiler::{IncrementalCompileResult, Locals};
+use crate::util::EmptyRead;
 use crate::vm::{ExitType, VirtualInterface, VirtualMachine};
 
 
@@ -26,17 +26,6 @@ pub struct Repl<W: Write> {
     vm: VirtualMachine<EmptyRead, W>
 }
 
-
-struct EmptyRead;
-
-impl Read for EmptyRead {
-    fn read(&mut self, _: &mut [u8]) -> io::Result<usize> { Ok(0) }
-}
-
-impl BufRead for EmptyRead {
-    fn fill_buf(&mut self) -> io::Result<&[u8]> { Ok(&[]) }
-    fn consume(&mut self, _: usize) {}
-}
 
 /// A result returned from a read line operation.
 pub enum ReadResult {
@@ -79,7 +68,7 @@ impl<W: Write> Repl<W> {
             repeat_input,
             continuation: false,
             locals: Locals::empty(),
-            vm: VirtualMachine::new(compile, view, EmptyRead, writer, vec![])
+            vm: VirtualMachine::with(compile, view, writer)
         }
     }
 
@@ -143,7 +132,7 @@ impl<W: Write> Repl<W> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{repl, test_util};
+    use crate::{repl, util};
     use crate::repl::{Reader, ReadResult};
 
     impl Reader for Vec<String> {
@@ -309,6 +298,6 @@ string
         let result = repl::run(repl, &mut buf, true);
 
         assert!(result.is_ok());
-        test_util::assert_eq(String::from_utf8(buf).unwrap(), String::from(outputs));
+        util::assert_eq(String::from_utf8(buf).unwrap(), String::from(outputs));
     }
 }

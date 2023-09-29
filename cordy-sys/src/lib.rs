@@ -14,9 +14,6 @@ mod reporting;
 mod trace;
 mod core;
 
-#[cfg(test)]
-mod test_util;
-
 pub const SYS_VERSION: &str = version();
 
 const fn version() -> &'static str {

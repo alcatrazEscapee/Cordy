@@ -1125,7 +1125,7 @@ mod tests {
     /// Asserts that no panics are generated from calling all supported combinations of argument types.
     #[test]
     fn test_native_functions_support_from_arg() {
-        let mut vm = VirtualMachine::new(compiler::default(), SourceView::empty(), &b""[..], vec![], vec![]);
+        let mut vm = VirtualMachine::default(compiler::default(), SourceView::empty());
 
         for info in &core::NATIVE_FUNCTIONS {
             match info.arg {
@@ -1178,7 +1178,7 @@ mod tests {
     /// Asserts that `nargs < native.nargs()` is a sufficient condition for declaring a function is consistent
     #[test]
     fn test_consistency_condition() {
-        let mut vm = VirtualMachine::new(compiler::default(), SourceView::empty(), &b""[..], vec![], vec![]);
+        let mut vm = VirtualMachine::default(compiler::default(), SourceView::empty());
 
         fn is_partial(v: &ValuePtr, f: NativeFunction) -> bool {
             v.is_partial_native() && v.as_partial_native_ref().func == f

@@ -76,7 +76,7 @@ fn run(name: &'static str, text: &'static str, criterion: &mut Criterion) {
     };
 
     // Run once initially and ensure that we don't error
-    let mut vm = VirtualMachine::new(compile.clone(), view, &b""[..], vec![], vec![]);
+    let mut vm = VirtualMachine::default(compile.clone(), view);
     match vm.run_until_completion() {
         ExitType::Exit => {},
         ExitType::Error(e) => panic!("{}", vm.view().format(&e)),
@@ -87,7 +87,7 @@ fn run(name: &'static str, text: &'static str, criterion: &mut Criterion) {
     criterion.bench_function(name, |b| b.iter_batched(
         || {
             // For benchmarks, clone the compile result but use a new empty `SourceView`, since the runtime should not throw an error
-            VirtualMachine::new(compile.clone(), SourceView::empty(), &b""[..], vec![], vec![])
+            VirtualMachine::default(compile.clone(), SourceView::empty())
         },
         |mut vm| {
             vm.run_until_completion()

@@ -1,3 +1,5 @@
+use std::io;
+use std::io::{BufRead, Read};
 use std::ops::{ControlFlow, Try};
 
 use crate::vm::{ErrorResult, Prefix, RuntimeError};
@@ -55,3 +57,53 @@ macro_rules! impl_partial_ord {
 }
 
 pub(crate) use impl_partial_ord;
+
+
+pub struct EmptyRead;
+
+impl Read for EmptyRead {
+    fn read(&mut self, _: &mut [u8]) -> io::Result<usize> { Ok(0) }
+}
+
+impl BufRead for EmptyRead {
+    fn fill_buf(&mut self) -> io::Result<&[u8]> { Ok(&[]) }
+    fn consume(&mut self, _: usize) {}
+}
+
+
+#[cfg(test)] use std::{env, fs};
+#[cfg(test)] use std::path::PathBuf;
+#[cfg(test)] use crate::SourceView;
+
+/// Version of `assert_eq` with explicit actual and expected parameters, that prints the entire thing including newlines.
+#[cfg(test)]
+pub fn assert_eq(actual: String, expected: String) {
+    assert_eq!(actual, expected, "\n=== Expected ===\n{}\n=== Actual ===\n{}\n", expected, actual);
+}
+
+
+#[cfg(test)]
+pub struct Resource {
+    root: PathBuf,
+}
+
+#[cfg(test)]
+impl Resource {
+
+    pub fn new(resource_type: &'static str, path: &'static str) -> (Resource, SourceView) {
+        let root = [env::var("CARGO_MANIFEST_DIR").unwrap().as_str(), "test", resource_type, format!("{}.cor", path).as_str()].iter().collect::<PathBuf>();
+        let view = SourceView::new(format!("{}.cor", path), fs::read_to_string(&root).expect(format!("Reading: {:?}", root).as_str()));
+        (Resource { root }, view)
+    }
+
+    /// Takes `actual`, writes it to `.cor.out`, and compares it against the `.cor.trace` file
+    pub fn assert_eq(self: &Self, actual: Vec<String>) {
+        let actual: String = actual.join("\n");
+        let expected: String = fs::read_to_string(self.root.with_extension("cor.trace"))
+            .expect(format!("Reading: {:?}", self.root).as_str());
+
+        fs::write(self.root.with_extension("cor.out"), &actual).unwrap();
+
+        assert_eq(actual, expected.replace("\r", ""));
+    }
+}
