@@ -49,6 +49,7 @@ pub enum NativeFunction {
     Repr,
     Eval,
     TypeOf,
+    Monitor,
 
     // Native Operators
     OperatorSub,
@@ -303,6 +304,7 @@ const fn load_native_functions() -> [NativeFunctionInfo; NativeFunction::total()
         new(Repr, "repr", "x", Arg1),
         new(Eval, "eval", "expr", Arg1),
         new(TypeOf, "typeof", "x", Arg1),
+        new(Monitor, "monitor", "cmd", Arg1),
 
         // operator
         op1(OperatorSub, "(-)", "x", Arg1To2),
@@ -856,6 +858,7 @@ fn invoke_arg1<VM : VirtualInterface>(f: NativeFunction, a1: ValuePtr, vm: &mut 
         Repr => a1.to_repr_str().to_value().ok(),
         Eval => vm.invoke_eval(a1.check_str()?.as_str().borrow_const()),
         TypeOf => type_of(a1).ok(),
+        Monitor => vm.invoke_monitor(a1.check_str()?.as_str().borrow_const()),
 
         OperatorSub => operator::unary_sub(a1),
         OperatorUnaryNot => operator::unary_not(a1),

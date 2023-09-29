@@ -90,6 +90,7 @@ pub trait VirtualInterface {
     fn invoke_func(&mut self, f: ValuePtr, args: &[ValuePtr]) -> ValueResult;
 
     fn invoke_eval(&mut self, s: &String) -> ValueResult;
+    fn invoke_monitor(&mut self, cmd: &String) -> ValueResult;
 
     /// Executes a `StoreOp`, storing the value `value`
     fn store(&mut self, op: StoreOp, value: ValuePtr) -> AnyResult;
@@ -831,6 +832,22 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
         ret.ok()
     }
 
+    fn invoke_monitor(&mut self, cmd: &String) -> ValueResult {
+        match cmd.as_str() {
+            "stack" => self.stack.iter().cloned().to_list().ok(),
+            "call-stack" => self.call_stack.iter()
+                .map(|frame| vec![frame.frame_pointer.to_value(), frame.return_ip.to_value()].to_value())
+                .to_list()
+                .ok(),
+            "code" => self.code.iter()
+                .enumerate()
+                .map(|(ip, op)| op.disassembly(ip, &mut std::iter::empty(), &self.fields, &self.constants).to_value())
+                .to_vector()
+                .ok(),
+            _ => MonitorError(cmd.clone()).err(),
+        }
+    }
+
     fn store(&mut self, op: StoreOp, value: ValuePtr) -> AnyResult {
         match op {
             StoreOp::Local(index) => self.store_local(index, value),
@@ -1542,6 +1559,11 @@ mod tests {
     #[test] fn test_assert_fail() { run_str("assert 1 + 2 != 3", "Assertion Failed: nil\n  at: line 1 (<test>)\n\n1 | assert 1 + 2 != 3\n2 |        ^^^^^^^^^^\n"); }
     #[test] fn test_assert_fail_with_message() { run_str("assert 'here' in 'the goose is gone' : 'goose issues are afoot'", "Assertion Failed: goose issues are afoot\n  at: line 1 (<test>)\n\n1 | assert 'here' in 'the goose is gone' : 'goose issues are afoot'\n2 |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n"); }
     #[test] fn test_assert_messages_are_lazy() { run_str("assert true : exit ; print('should reach here')", "should reach here\n"); }
+    #[test] fn test_monitor_stack() { run_str("let x = 1, b = [], c ; monitor 'stack' . print", "[1, [], nil, fn print(...), fn monitor(cmd)]\n") }
+    #[test] fn test_monitor_stack_modification() { run_str("let x = [false] ; ( monitor 'stack' )[0][0] = true ; x . print", "[true]\n") }
+    #[test] fn test_monitor_call_stack() { run_str("fn foo() { bar() } fn bar() { monitor 'call-stack' . print } foo()", "[(0, 0), (3, 6), (4, 11)]\n") }
+    #[test] fn test_monitor_code() { run_str("monitor 'code' . print", "('Print', 'Monitor', 'Str('code')', 'Call(1)', 'Call(1)', 'Pop', 'Exit')\n") }
+    #[test] fn test_monitor_error() { run_str("monitor 'foobar'", "MonitorError: Illegal monitor command 'foobar'\n  at: line 1 (<test>)\n\n1 | monitor 'foobar'\n2 |         ^^^^^^^^\n") }
     #[test] fn test_len_list() { run_str("[1, 2, 3] . len . print", "3\n"); }
     #[test] fn test_len_str() { run_str("'12345' . len . print", "5\n"); }
     #[test] fn test_sum_list() { run_str("[1, 2, 3, 4] . sum . print", "10\n"); }

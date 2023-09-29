@@ -169,8 +169,8 @@ impl Opcode {
                     }, constant.to_repr_str())
                 }
             },
-            PushGlobal(id) | StoreGlobal(id, _) | PushLocal(id) | StoreLocal(id, _) => match locals.next() {
-                Some(local) => format!("{}({}) -> {}", match self {
+            PushGlobal(id) | StoreGlobal(id, _) | PushLocal(id) | StoreLocal(id, _) => {
+                let op: &'static str = match self {
                     StoreGlobal(_, true) => "StoreGlobalPop",
                     StoreGlobal(_, false) => "StoreGlobal",
                     StoreLocal(_, true) => "StoreLocalPop",
@@ -178,8 +178,11 @@ impl Opcode {
                     PushGlobal(_) => "PushGlobal",
                     PushLocal(_) => "PushLocal",
                     _ => unreachable!(),
-                }, id, local),
-                None => format!("{:?}", self),
+                };
+                match locals.next() {
+                    Some(local) => format!("{}({}) -> {}", op, id, local),
+                    None => format!("{}({})", op, id),
+                }
             },
             GetField(fid) | SetField(fid) | GetFieldFunction(fid) => format!("{:?} -> {}", self, fields.get_field_name(*fid)),
             JumpIfFalse(offset) | JumpIfFalsePop(offset) | JumpIfTrue(offset) | JumpIfTruePop(offset) | Jump(offset) | TestIterable(offset) => format!("{}({})", match self {

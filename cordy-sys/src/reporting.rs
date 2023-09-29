@@ -288,6 +288,7 @@ impl AsError for RuntimeError {
             RuntimeError::IncorrectArgumentsStruct(s, n) => format!("Incorrect number of arguments for {}, got {}", s.as_error(), n),
 
             RuntimeError::IOError(e) => format!("IOError: {}", e),
+            RuntimeError::MonitorError(e) => format!("MonitorError: Illegal monitor command '{}'", e),
 
             RuntimeError::ValueErrorIndexOutOfBounds(i, ln) => format!("Index '{}' is out of bounds for list of length [0, {})", i, ln),
             RuntimeError::ValueErrorStepCannotBeZero => String::from("ValueError: 'step' argument cannot be zero"),

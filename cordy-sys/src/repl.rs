@@ -23,28 +23,18 @@ pub struct Repl<W: Write> {
     repeat_input: bool,
     continuation: bool,
     locals: Vec<Locals>,
-    vm: VirtualMachine<Empty, W>
+    vm: VirtualMachine<EmptyRead, W>
 }
 
-impl<W : Write> Repl<W> {
-    pub fn view(&self) -> &SourceView {
-        self.vm.view()
-    }
+
+struct EmptyRead;
+
+impl Read for EmptyRead {
+    fn read(&mut self, _: &mut [u8]) -> io::Result<usize> { Ok(0) }
 }
 
-struct Empty;
-
-impl Read for Empty {
-    fn read(&mut self, _: &mut [u8]) -> io::Result<usize> {
-        Ok(0)
-    }
-}
-
-impl BufRead for Empty {
-    fn fill_buf(&mut self) -> io::Result<&[u8]> {
-        Ok(&[])
-    }
-
+impl BufRead for EmptyRead {
+    fn fill_buf(&mut self) -> io::Result<&[u8]> { Ok(&[]) }
     fn consume(&mut self, _: usize) {}
 }
 
@@ -89,8 +79,12 @@ impl<W: Write> Repl<W> {
             repeat_input,
             continuation: false,
             locals: Locals::empty(),
-            vm: VirtualMachine::new(compile, view, Empty, writer, vec![])
+            vm: VirtualMachine::new(compile, view, EmptyRead, writer, vec![])
         }
+    }
+
+    pub fn view(&self) -> &SourceView {
+        self.vm.view()
     }
 
     pub fn prompt(&self) -> &'static str {
@@ -109,17 +103,8 @@ impl<W: Write> Repl<W> {
             ReadResult::Exit => return RunResult::Exit,
         };
 
-        match line.as_str() {
-            "" if !self.continuation => return RunResult::Ok,
-            "#stack" => {
-                self.vm.println(self.vm.debug_stack());
-                return RunResult::Ok
-            },
-            "#call-stack" => {
-                self.vm.println(self.vm.debug_call_stack());
-                return RunResult::Ok
-            },
-            _ => {},
+        if line.as_str() == "" && !self.continuation {
+            return RunResult::Ok;
         }
 
         let buffer = self.vm.view_mut().text_mut();
@@ -158,7 +143,7 @@ impl<W: Write> Repl<W> {
 
 #[cfg(test)]
 mod tests {
-    use crate::repl;
+    use crate::{repl, test_util};
     use crate::repl::{Reader, ReadResult};
 
     impl Reader for Vec<String> {
@@ -191,10 +176,10 @@ that is to be expected
 
     #[test] fn test_debug_stack() { run("\
 let x = nil, y = 123, z = 'hello world'
-#stack", "\
+monitor('stack')", "\
 >>> let x = nil, y = 123, z = 'hello world'
->>> #stack
-: ['hello world': str, 123: int, nil: nil]
+>>> monitor('stack')
+[nil, 123, 'hello world', fn monitor(cmd)]
 ")}
 
     #[test] fn test_declare_and_exec_function() { run("\
@@ -230,7 +215,7 @@ eval('fn() { let x = 1, y = 2 ; x + y }()')
     #[test] fn test_error_and_continue() { run("\
 print + 1
 print(1)
-#stack
+'stack'.monitor
 ", "\
 >>> print + 1
 TypeError: Cannot add 'print' of type 'native function' and '1' of type 'int'
@@ -242,8 +227,8 @@ TypeError: Cannot add 'print' of type 'native function' and '1' of type 'int'
 >>> print(1)
 1
 nil
->>> #stack
-: []
+>>> 'stack'.monitor
+[fn monitor(cmd)]
 ")}
 
     #[test] fn test_error_in_declared_function() { run("\
@@ -263,17 +248,17 @@ TypeError: Cannot add 'print' of type 'native function' and '1' of type 'int'
 
     #[test] fn test_locals_are_retained_between_incremental_compiles() { run("\
 let x = 2, y = 4
-#stack
+monitor('stack')
 x
 x + y
 y += x
 let z = y * 2
 z
-#stack
+monitor('stack')
 ", "\
 >>> let x = 2, y = 4
->>> #stack
-: [4: int, 2: int]
+>>> monitor('stack')
+[2, 4, fn monitor(cmd)]
 >>> x
 2
 >>> x + y
@@ -283,8 +268,8 @@ z
 >>> let z = y * 2
 >>> z
 12
->>> #stack
-: [12: int, 6: int, 2: int]
+>>> monitor('stack')
+[2, 6, 12, fn monitor(cmd)]
 ")}
 
     #[test] fn test_unterminated_strings_and_block_comments_cause_continuations() { run("\
@@ -324,6 +309,6 @@ string
         let result = repl::run(repl, &mut buf, true);
 
         assert!(result.is_ok());
-        assert_eq!(String::from_utf8(buf).unwrap(), String::from(outputs));
+        test_util::assert_eq(String::from_utf8(buf).unwrap(), String::from(outputs));
     }
 }
