@@ -360,8 +360,8 @@ const fn load_native_functions() -> [NativeFunctionInfo; NativeFunction::total()
         new(Range, "range", "start, stop, step", Arg1To3),
         new(Enumerate, "enumerate", "iter", Arg1),
         new(Sum, "sum", "...", IterNonEmpty),
-        new(Min, "min", "...", IterNonEmpty),
-        new(Max, "max", "...", IterNonEmpty),
+        new(Min, "min", "...", UniqueNonEmpty),
+        new(Max, "max", "...", UniqueNonEmpty),
         new(MinBy, "min_by", "key_or_cmp, iter", Arg2),
         new(MaxBy, "max_by", "key_or_cmp, iter", Arg2),
         new(Map, "map", "f, iter", Arg2),
@@ -443,6 +443,7 @@ pub enum Argument {
     Arg2,
     Arg3,
     Unique,
+    UniqueNonEmpty,
     Iter,
     IterNonEmpty,
     Invalid,
@@ -542,7 +543,7 @@ impl InvokeArg0 {
             Type::NativeFunction => match f.as_native().info().arg {
                 Arg0 | Arg0To1 | Unique | Iter => Ok(InvokeArg0::Native(f.as_native())),
                 Arg1 | Arg1To2 | Arg1To3 | Arg2 | Arg3 => Ok(InvokeArg0::Noop(f)), // Partial with zero arg = no-op
-                IterNonEmpty => IncorrectArgumentsNativeFunction(f.as_native(), 0).err(),
+                UniqueNonEmpty | IterNonEmpty => IncorrectArgumentsNativeFunction(f.as_native(), 0).err(),
                 Invalid => ValueIsNotFunctionEvaluable(f).err(),
             },
             Type::PartialNativeFunction => Ok(InvokeArg0::Noop(f)),
@@ -565,7 +566,7 @@ impl InvokeArg1 {
             Type::Function | Type::Closure | Type::PartialFunction | Type::List | Type::Slice | Type::StructType | Type::GetField | Type::Memoized => Ok(InvokeArg1::User(f)),
             Type::NativeFunction => match f.as_native().info().arg {
                 Arg0To1 | Arg1 | Arg1To2 | Arg1To3 | Unique => Ok(InvokeArg1::Native(f.as_native())),
-                Iter | IterNonEmpty => Ok(InvokeArg1::NativeVar(f.as_native())),
+                Iter | UniqueNonEmpty | IterNonEmpty => Ok(InvokeArg1::NativeVar(f.as_native())),
                 Arg2 => Ok(InvokeArg1::Arg2Par1(f.as_native())),
                 Arg3 => Ok(InvokeArg1::Arg3Par1(f.as_native())),
                 Arg0 => IncorrectArgumentsNativeFunction(f.as_native(), 1).err(),
@@ -603,7 +604,7 @@ impl InvokeArg2 {
             Type::Function | Type::Closure | Type::PartialFunction | Type::List | Type::Slice | Type::StructType | Type::GetField | Type::Memoized => Ok(InvokeArg2::User(f)),
             Type::NativeFunction => match f.as_native().info().arg {
                 Arg1To2 | Arg1To3 | Arg2 | Unique => Ok(InvokeArg2::Native(f.as_native())),
-                Iter | IterNonEmpty => Ok(InvokeArg2::NativeVar(f.as_native())),
+                Iter | UniqueNonEmpty | IterNonEmpty => Ok(InvokeArg2::NativeVar(f.as_native())),
                 Arg3 => Ok(InvokeArg2::Arg3Par1(f.as_native())),
                 Arg0 | Arg0To1 | Arg1 => IncorrectArgumentsNativeFunction(f.as_native(), 2).err(),
                 Invalid => ValueIsNotFunctionEvaluable(f).err(),
@@ -723,6 +724,17 @@ pub fn invoke_stack<VM : VirtualInterface>(f: NativeFunction, nargs: u32, vm: &m
         },
         Unique => match nargs {
             0 => invoke_arg0(f, vm),
+            1 => {
+                let a1: ValuePtr = vm.pop();
+                invoke_arg1(f, a1, vm)
+            },
+            _ => {
+                let args = vm.popn(nargs).into_iter();
+                invoke_var(f, args, vm)
+            }
+        },
+        UniqueNonEmpty => match nargs {
+            0 => IncorrectArgumentsNativeFunction(f, nargs).err(),
             1 => {
                 let a1: ValuePtr = vm.pop();
                 invoke_arg1(f, a1, vm)
@@ -1132,6 +1144,10 @@ mod tests {
                 },
                 Argument::Unique => {
                     let _ = core::invoke_arg0(info.native, &mut vm);
+                    let _ = core::invoke_arg1(info.native, ValuePtr::nil(), &mut vm);
+                    let _ = core::invoke_var(info.native, vec![ValuePtr::nil()].into_iter(), &mut vm);
+                },
+                Argument::UniqueNonEmpty => {
                     let _ = core::invoke_arg1(info.native, ValuePtr::nil(), &mut vm);
                     let _ = core::invoke_var(info.native, vec![ValuePtr::nil()].into_iter(), &mut vm);
                 },
