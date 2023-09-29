@@ -275,6 +275,31 @@ list
 function
 ```
 
+#### Monitor `monitor(cmd: str) -> any`
+
+Executes commands to monitor and inspect the state of the Cordy VM at runtime. `cmd` must be one of the following values:
+
+- `'stack'`: Returns a (copy of) the current program stack as a `list<any>`. The returned list will not mutate the original stack, although mutable types on the stack _can_ be modified and will reflect modifications done.
+- `'call-stack'`: Returns a view of the current program call stack as a `list<(int, int)>` Each entry consists of a pair of `frame_pointer` and `return_ip`.
+- `'code'`: Returns a disassembly view of the current executing code as a `list<str>`. This is not modifiable in any way.
+
+Any other value of `cmd` will cause a `MonitorError` to be raised.
+
+**Example**
+
+```
+>>> struct Box(value)
+>>> let box = Box('hello') // lvt offset = 1
+>>> box
+Box(value='hello')
+>>> let *_, (fp, _) = monitor 'call-stack' // access frame pointer of current call frame
+>>> let sp = monitor 'stack' [fp + 1] // access stack to get pointer to the original 'box'
+>>> sp->value = 'goodbye' // which we can mutate
+goodbye
+>>> box // and will reflect changes
+Box(value='goodbye')
+```
+
 #### Len `len(x: iterable) -> int`
 
 Returns the length of `x`. For strings, this returns the number of Unicode Scalar Values. It is `O(1)` except for `str`, which is `O(n)`.
