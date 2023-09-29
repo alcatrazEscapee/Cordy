@@ -827,7 +827,7 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
         self.call_function(eval_head, 0, None);
         self.run()?;
         let ret = self.pop();
-        self.push(ValuePtr::nil()); // `eval` executes as a user function but is called like a native function, this prevents stack fuckery
+        self.push(ValuePtr::nil()); // `eval` executes as a user function but is called like a native function, this prevents stack corruption
         ret.ok()
     }
 
@@ -1306,6 +1306,8 @@ mod tests {
     #[test] fn test_int_default_value_yes() { run_str("int('123', 567) . print", "123\n"); }
     #[test] fn test_int_default_value_no() { run_str("int('yes', 567) . print", "567\n"); }
     #[test] fn test_int_min_and_max() { run_str("[int.min, max(int)] . print", "[-4611686018427387904, 4611686018427387903]\n") }
+    #[test] fn test_int_min_and_max_indirect() { run_str("let i = int ; [min(i), i.max] . print", "[-4611686018427387904, 4611686018427387903]\n")}
+    #[test] fn test_int_min_and_max_no_opt() { run_with(false, "[int.min, max(int)] . print", "[-4611686018427387904, 4611686018427387903]\n") }
     #[test] fn test_complex_add() { run_str("(1 + 2i) + (3 + 4j) . print", "4 + 6i\n"); }
     #[test] fn test_complex_mul() { run_str("(1 + 2i) * (3 + 4j) . print", "-5 + 10i\n"); }
     #[test] fn test_complex_str() { run_str("1 + 1i . print", "1 + 1i\n"); }
@@ -1760,8 +1762,12 @@ mod tests {
 
 
     fn run_str(text: &'static str, expected: &'static str) {
+        run_with(true, text, expected);
+    }
+
+    fn run_with(opt: bool, text: &'static str, expected: &'static str) {
         let view: SourceView = SourceView::new(String::from("<test>"), String::from(text));
-        let compile = compiler::compile(true, &view);
+        let compile = compiler::compile(opt, &view);
 
         if compile.is_err() {
             test_util::assert_eq(format!("Compile Error:\n\n{}", compile.err().unwrap().join("\n")), String::from(expected));
