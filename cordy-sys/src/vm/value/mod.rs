@@ -557,7 +557,6 @@ impl ValuePtr {
             Type::Vector => !self.as_vector().borrow().vector.is_empty(),
             Type::Range => !self.as_range_ref().is_empty(),
             Type::Enumerate => self.as_enumerate_ref().inner.to_bool(),
-            Type::Iter | Type::Memoized => panic!("{:?} is a synthetic type should not have as_bool() invoked on it", self),
             _ => true,
         }
     }
