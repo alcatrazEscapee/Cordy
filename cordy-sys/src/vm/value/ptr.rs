@@ -80,43 +80,35 @@ const PTR_MASK: usize = !0b11;
 pub const MAX_INT: i64 = 0x3fff_ffff_ffff_ffffu64 as i64;
 pub const MIN_INT: i64 = 0xc000_0000_0000_0000u64 as i64;
 
-pub struct Field(pub u32);
 
-impl From<bool> for ValuePtr {
-    fn from(value: bool) -> Self {
-        ValuePtr { tag: if value { TAG_TRUE } else { TAG_FALSE } }
-    }
+pub(super) fn from_bool(value: bool) -> ValuePtr {
+    ValuePtr { tag: if value { TAG_TRUE } else { TAG_FALSE } }
 }
 
-impl From<i64> for ValuePtr {
-    fn from(value: i64) -> Self {
-        debug_assert!(MIN_INT <= value && value <= MAX_INT);
-        ValuePtr { long_tag: TAG_INT as u64 | ((value << 1) as u64) }
-    }
+pub(super) fn from_usize(value: usize) -> ValuePtr {
+    debug_assert!(value <= MAX_INT as usize); // Check that it is safe to cast to `i64`
+    from_i64(value as i64)
 }
 
-impl From<NativeFunction> for ValuePtr {
-    fn from(value: NativeFunction) -> Self {
-        ValuePtr { tag: TAG_NATIVE | ((value as usize) << 6) }
-    }
+pub(super) fn from_i64(value: i64) -> ValuePtr {
+    debug_assert!(MIN_INT <= value && value <= MAX_INT);
+    ValuePtr { long_tag: TAG_INT as u64 | ((value << 1) as u64) }
 }
 
-impl From<Field> for ValuePtr {
-    fn from(value: Field) -> Self {
-        ValuePtr { long_tag: TAG_FIELD as u64 | ((value.0 as u64) << 6) }
-    }
+pub(super) fn from_native(value: NativeFunction) -> ValuePtr {
+    ValuePtr { tag: TAG_NATIVE | ((value as usize) << 6) }
 }
 
-impl<T : OwnedValue> From<Prefix<T>> for ValuePtr {
-    fn from(value: Prefix<T>) -> Self {
-        ValuePtr { tag: TAG_PTR | (Box::into_raw(Box::new(value)) as usize) }
-    }
+pub(super) fn from_field(value: u32) -> ValuePtr {
+    ValuePtr { long_tag: TAG_FIELD as u64 | ((value as u64) << 6) }
 }
 
-impl<T : SharedValue> From<SharedPrefix<T>> for ValuePtr {
-    fn from(value: SharedPrefix<T>) -> Self {
-        ValuePtr { tag: TAG_PTR | (Box::into_raw(Box::new(value)) as usize) }
-    }
+pub(super) fn from_owned<T : OwnedValue>(value: Prefix<T>) -> ValuePtr {
+    ValuePtr { tag: TAG_PTR | (Box::into_raw(Box::new(value)) as usize) }
+}
+
+pub(super) fn from_shared<T : SharedValue>(value: SharedPrefix<T>) -> ValuePtr {
+    ValuePtr { tag: TAG_PTR | (Box::into_raw(Box::new(value)) as usize) }
 }
 
 
