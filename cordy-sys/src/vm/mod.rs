@@ -89,7 +89,7 @@ pub trait VirtualInterface {
     fn invoke_func2(&mut self, f: ValuePtr, a1: ValuePtr, a2: ValuePtr) -> ValueResult;
     fn invoke_func(&mut self, f: ValuePtr, args: &[ValuePtr]) -> ValueResult;
 
-    fn invoke_eval(&mut self, s: &String) -> ValueResult;
+    fn invoke_eval(&mut self, s: String) -> ValueResult;
     fn invoke_monitor(&mut self, cmd: &str) -> ValueResult;
 
     /// Executes a `StoreOp`, storing the value `value`
@@ -104,7 +104,7 @@ pub trait VirtualInterface {
     fn read(&mut self) -> String;
 
     fn get_envs(&self) -> ValuePtr;
-    fn get_env(&self, name: &String) -> ValuePtr;
+    fn get_env(&self, name: &str) -> ValuePtr;
     fn get_args(&self) -> ValuePtr;
 
     // Stack Manipulation
@@ -188,7 +188,7 @@ impl<R : BufRead, W : Write> VirtualMachine<R, W> {
     }
 
     /// Bridge method to `compiler::eval_compile`
-    pub fn eval_compile(&mut self, text: &String) -> AnyResult {
+    pub fn eval_compile(&mut self, text: String) -> AnyResult {
         let mut locals = Locals::empty();
         compiler::eval_compile(text, self.as_compile_parameters(false, &mut locals))
     }
@@ -838,7 +838,7 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
         self.invoke_and_spin(args.len() as u32)
     }
 
-    fn invoke_eval(&mut self, text: &String) -> ValueResult {
+    fn invoke_eval(&mut self, text: String) -> ValueResult {
         let eval_head: usize = self.code.len();
 
         self.eval_compile(text)?;
@@ -897,7 +897,7 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
         std::env::vars().map(|(k, v)| (k.to_value(), v.to_value())).to_dict()
     }
 
-    fn get_env(&self, name: &String) -> ValuePtr {
+    fn get_env(&self, name: &str) -> ValuePtr {
         std::env::var(name).map_or(ValuePtr::nil(), |u| u.to_value())
     }
 

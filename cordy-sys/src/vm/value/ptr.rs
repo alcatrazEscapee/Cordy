@@ -199,7 +199,7 @@ impl ValuePtr {
         }
     }
 
-    pub fn as_short_str(&self) -> &str {
+    pub(super) fn as_short_str(&self) -> &str {
         unsafe {
             // First, check the length, which is encoded in the high three bits of the tag
             let len = (self.tag & STR_LEN_MASK) >> STR_TAG_BYTES;

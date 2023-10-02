@@ -374,7 +374,7 @@ impl ValuePtr {
 
     fn safe_to_str(&self, rc: &mut RecursionGuard) -> String {
         match self.ty() {
-            Type::ShortStr | Type::LongStr => self.as_heap_string(),
+            Type::ShortStr | Type::LongStr => self.as_str_owned(),
             Type::Function => self.as_function().borrow_const().name.clone(),
             Type::PartialFunction => self.as_partial_function_ref().func.ptr.safe_to_str(rc),
             Type::NativeFunction => self.as_native().name().to_string(),
@@ -575,7 +575,7 @@ impl ValuePtr {
     pub fn to_iter(self) -> ErrorResult<Iterable> {
         match self.ty() {
             Type::ShortStr | Type::LongStr => {
-                let string: String = self.as_heap_string();
+                let string: String = self.as_str_owned();
                 let chars: Chars<'static> = unsafe {
                     std::mem::transmute(string.chars())
                 };
@@ -943,9 +943,6 @@ impl<I> IntoDictValue for I where I : Iterator<Item=(ValuePtr, ValuePtr)> {
         self.collect::<IndexMap<ValuePtr, ValuePtr, FxBuildHasher>>().to_value()
     }
 }
-
-
-// Need to manually implement for strings because we need to implement `IntoValue` uniquely, to call `ptr::from_str` instead
 
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
