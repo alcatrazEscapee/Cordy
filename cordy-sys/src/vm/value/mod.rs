@@ -7,7 +7,6 @@ use std::hash::{Hash, Hasher};
 use std::iter::{FromIterator, FusedIterator};
 use std::ops::{ControlFlow, FromResidual, Try};
 use std::rc::Rc;
-use std::str::Chars;
 use fxhash::FxBuildHasher;
 use indexmap::{IndexMap, IndexSet};
 use itertools::Itertools;
@@ -18,9 +17,9 @@ use crate::core::{InvokeArg0, NativeFunction, PartialArgument};
 use crate::util::impl_partial_ord;
 use crate::vm::error::RuntimeError;
 use crate::vm::value::ptr::{Ref, RefMut, SharedPrefix};
+use crate::vm::value::str::{RefStr, IntoRefStr, IterStr};
 
 pub use crate::vm::value::ptr::{MAX_INT, MIN_INT, ValuePtr, Prefix};
-pub use crate::vm::value::str::{RefStr, IntoRefStr};
 
 use RuntimeError::{*};
 
@@ -587,13 +586,7 @@ impl ValuePtr {
     /// Guaranteed to return either a `Error` or `Iter`
     pub fn to_iter(self) -> ErrorResult<Iterable> {
         match self.ty() {
-            Type::ShortStr | Type::LongStr => {
-                let string: String = self.as_str_owned();
-                let chars: Chars<'static> = unsafe {
-                    std::mem::transmute(string.chars())
-                };
-                Ok(Iterable::Str(string, chars))
-            },
+            Type::ShortStr | Type::LongStr => Ok(Iterable::Str(self.as_str_iter())),
             Type::List | Type::Set | Type::Dict | Type::Vector => Ok(Iterable::Collection(0, self)),
 
             // Heaps completely unbox themselves to be iterated over
@@ -1507,7 +1500,7 @@ impl SliceImpl {
 /// This makes string iteration with early exiting, `O(1)` upfront, and reduces the constant factor of boxing each `char` into a `Value::Str`.
 #[derive(Debug, Clone)]
 pub enum Iterable {
-    Str(String, Chars<'static>),
+    Str(IterStr),
     Unit(ValueOption),
     Collection(usize, ValuePtr),
     RawVector(usize, Vec<ValuePtr>),
@@ -1520,7 +1513,7 @@ impl Iterable {
     /// Returns the original length of the iterable - not the amount of elements remaining.
     pub fn len(&self) -> usize {
         match &self {
-            Iterable::Str(it, _) => it.chars().count(),
+            Iterable::Str(it) => it.count(),
             Iterable::Unit(it) => it.is_some() as usize,
             Iterable::Collection(_, it) => it.len().unwrap(), // `.unwrap()` is safe because we only construct this with collection types
             Iterable::RawVector(_, it) => it.len(),
@@ -1576,7 +1569,7 @@ impl Iterator for Iterable {
 
     fn next(&mut self) -> Option<Self::Item> {
         match self {
-            Iterable::Str(_, chars) => chars.next().map(|u| u.to_value()),
+            Iterable::Str(it) => it.next().map(|u| u.to_value()),
             Iterable::Unit(it) => it.take().as_option(),
             Iterable::Collection(index, it) => {
                 let ret = Iterable::get(it, *index);
@@ -1603,7 +1596,7 @@ impl Iterator for IterableRev {
 
     fn next(&mut self) -> Option<Self::Item> {
         match &mut self.0 {
-            Iterable::Str(_, chars) => chars.next_back().map(|u| u.to_value()),
+            Iterable::Str(it) => it.next_back().map(|u| u.to_value()),
             Iterable::Unit(it) => it.take().as_option(),
             Iterable::Collection(index, it) => {
                 if *index == 0 {
