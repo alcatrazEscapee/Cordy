@@ -188,6 +188,10 @@ impl ValuePtr {
         ValuePtr { tag: TAG_NONE }
     }
 
+    pub const fn empty_str() -> ValuePtr {
+        ValuePtr { tag: TAG_STR }
+    }
+
     // `.as_T()` methods for inline types take a `&self` for convenience. Copying the value is the same as copying the reference.
 
     pub fn as_int(&self) -> i64 {

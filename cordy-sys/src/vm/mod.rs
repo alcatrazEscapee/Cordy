@@ -97,8 +97,8 @@ pub trait VirtualInterface {
 
     // Wrapped IO
     fn println0(&mut self);
-    fn println(&mut self, str: String);
-    fn print(&mut self, str: String);
+    fn println(&mut self, str: &str);
+    fn print(&mut self, str: &str);
 
     fn read_line(&mut self) -> String;
     fn read(&mut self) -> String;
@@ -568,7 +568,7 @@ impl<R : BufRead, W : Write> VirtualMachine<R, W> {
             },
             AssertFailed => {
                 let ret: ValuePtr = self.pop();
-                return RuntimeAssertFailed(ret.to_str()).err()
+                return RuntimeAssertFailed(ret.to_str().as_owned()).err()
             },
         }
         Ok(())
@@ -877,8 +877,8 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
     // ===== IO Methods ===== //
 
     fn println0(&mut self) { writeln!(&mut self.write).unwrap(); }
-    fn println(&mut self, str: String) { writeln!(&mut self.write, "{}", str).unwrap(); }
-    fn print(&mut self, str: String) { write!(&mut self.write, "{}", str).unwrap(); }
+    fn println(&mut self, str: &str) { writeln!(&mut self.write, "{}", str).unwrap(); }
+    fn print(&mut self, str: &str) { write!(&mut self.write, "{}", str).unwrap(); }
 
     fn read_line(&mut self) -> String {
         let mut buf = String::new();

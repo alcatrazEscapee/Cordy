@@ -84,7 +84,8 @@ impl<W: Write> Repl<W> {
         let line: String = match input {
             ReadResult::Ok(line) => {
                 if self.repeat_input {
-                    self.vm.println(format!("{}{}", self.prompt(), line))
+                    self.vm.print(self.prompt());
+                    self.vm.println(line.as_str())
                 }
                 line
             },
@@ -106,7 +107,7 @@ impl<W: Write> Repl<W> {
             IncrementalCompileResult::Success => {},
             IncrementalCompileResult::Errors(errors) => {
                 for e in errors {
-                    self.vm.println(e);
+                    self.vm.println(e.as_str());
                 }
                 self.vm.view_mut().push(String::from("<stdin>"), String::new());
                 return RunResult::Ok
@@ -120,7 +121,7 @@ impl<W: Write> Repl<W> {
         match self.vm.run_until_completion() {
             ExitType::Exit | ExitType::Return => return RunResult::Exit,
             ExitType::Yield => {},
-            ExitType::Error(error) => self.vm.println(self.vm.view().format(&error)),
+            ExitType::Error(error) => self.vm.println(self.vm.view().format(&error).as_str()),
         }
 
         self.vm.view_mut().push(String::from("<stdin>"), String::new());
