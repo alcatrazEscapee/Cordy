@@ -34,7 +34,9 @@ impl ValuePtr {
     }
 
     /// Returns the `ValuePtr` as a heap-allocated, owned `String`.
-    pub fn as_heap_string(&self) -> String {
+    ///
+    /// **Note**: This will always copy the underlying `String`, even when it is a `Type::LongStr`. Do not use unless an owned `String` is absolutely required.
+    pub fn as_str_owned(&self) -> String {
         String::from(self.as_str_slice())
     }
 

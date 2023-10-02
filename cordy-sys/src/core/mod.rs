@@ -844,7 +844,7 @@ fn invoke_arg1<VM : VirtualInterface>(f: NativeFunction, a1: ValuePtr, vm: &mut 
                 Err(err) => IOError(err.to_string()).err(),
             }
         },
-        Env => vm.get_env(&a1.check_str()?.as_heap_string()).ok(),
+        Env => vm.get_env(&a1.check_str()?.as_str_slice()).ok(),
 
         Bool => a1.to_bool().to_value().ok(),
         Int => math::convert_to_int(a1, ValueOption::none()),
@@ -856,7 +856,7 @@ fn invoke_arg1<VM : VirtualInterface>(f: NativeFunction, a1: ValuePtr, vm: &mut 
             a1.to_iter()?.to_vector().ok()
         },
         Repr => a1.to_repr_str().to_value().ok(),
-        Eval => vm.invoke_eval(&a1.check_str()?.as_heap_string()),
+        Eval => vm.invoke_eval(a1.check_str()?.as_str_owned()),
         TypeOf => type_of(a1).ok(),
         Monitor => vm.invoke_monitor(a1.check_str()?.as_str_slice()),
 

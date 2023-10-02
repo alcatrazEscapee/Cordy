@@ -43,12 +43,10 @@ pub fn replace<VM: VirtualInterface>(vm: &mut VM, pattern: ValuePtr, replacer: V
         let mut err = None;
         let replaced: ValuePtr = regex.replace_all(text, |captures: &Captures| {
             let arg: ValuePtr = as_result(captures);
-            let ret: String = util::catch::<String>(&mut err, || {
-                Ok(replacer.invoke(arg, vm)?
-                    .check_str()?
-                    .as_heap_string())
-            }, String::new());
-            ret
+            util::catch::<String>(&mut err, || Ok(replacer.invoke(arg, vm)?
+                .check_str()?
+                .as_str_owned()),
+                String::new())
         }).to_value();
         util::join::<ValuePtr, Box<Prefix<RuntimeError>>, ValueResult>(replaced, err)
     } else {

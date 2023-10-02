@@ -64,8 +64,8 @@ pub fn incremental_compile(mut params: CompileParameters) -> IncrementalCompileR
 /// Note that this does not insert a terminal `Pop` or `Exit`, and instead pushes a `Return` which exits `eval`'s special call frame.
 ///
 /// This is the API used to run an `eval()` statement.
-pub fn eval_compile(text: &String, mut params: CompileParameters) -> AnyResult {
-    params.view.push(String::from("<eval>"), text.to_owned());
+pub fn eval_compile(text: String, mut params: CompileParameters) -> AnyResult {
+    params.view.push(String::from("<eval>"), text);
     try_incremental_compile(&mut params, |parser| parser.parse_incremental_eval(), false)
         .ok_or_runtime_error()
 }
