@@ -163,7 +163,7 @@ impl Opcode {
                     Type::StructType => format!("StructType({})", constant.as_struct_type().borrow_const().as_str()),
                     ty => format!("{}({})", match ty {
                         Type::Int => "Int",
-                        Type::Str => "Str",
+                        Type::ShortStr | Type::LongStr => "Str",
                         Type::Complex => "Complex",
                         _ => panic!("Not a constant: {:?}", constant),
                     }, constant.to_repr_str())

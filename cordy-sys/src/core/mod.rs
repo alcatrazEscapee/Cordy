@@ -1062,7 +1062,7 @@ fn type_of(value: ValuePtr) -> ValuePtr {
         Type::Bool => Bool.to_value(),
         Type::Int => Int.to_value(),
         Type::Complex => Complex.to_value(),
-        Type::Str => Str.to_value(),
+        Type::ShortStr | Type::LongStr => Str.to_value(),
 
         Type::List => List.to_value(),
         Type::Set => Set.to_value(),

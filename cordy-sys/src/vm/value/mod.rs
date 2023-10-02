@@ -42,7 +42,8 @@ pub enum Type {
     NativeFunction,
     GetField,
     Complex,
-    Str,
+    ShortStr,
+    LongStr,
     List,
     Set,
     Dict,
@@ -70,7 +71,7 @@ impl Type {
     }
 
     fn is_shared(&self) -> bool {
-        matches!(self, Type::Str | Type::List | Type::Set | Type::Dict | Type::Heap | Type::Vector | Type::Function | Type::Closure | Type::Memoized | Type::Struct | Type::StructType)
+        matches!(self, Type::LongStr | Type::List | Type::Set | Type::Dict | Type::Heap | Type::Vector | Type::Function | Type::Closure | Type::Memoized | Type::Struct | Type::StructType)
     }
 }
 
@@ -373,7 +374,7 @@ impl ValuePtr {
 
     fn safe_to_str(&self, rc: &mut RecursionGuard) -> String {
         match self.ty() {
-            Type::Str => self.as_heap_string(),
+            Type::ShortStr | Type::LongStr => self.as_heap_string(),
             Type::Function => self.as_function().borrow_const().name.clone(),
             Type::PartialFunction => self.as_partial_function_ref().func.ptr.safe_to_str(rc),
             Type::NativeFunction => self.as_native().name().to_string(),
@@ -407,7 +408,7 @@ impl ValuePtr {
                     format!("{} + {}i", c.re, c.im)
                 }
             },
-            Type::Str => {
+            Type::ShortStr | Type::LongStr => {
                 let escaped = format!("{:?}", self.as_str_slice());
                 format!("'{}'", &escaped[1..escaped.len() - 1])
             },
@@ -520,7 +521,7 @@ impl ValuePtr {
             Type::Bool => "bool",
             Type::Int => "int",
             Type::Complex => "complex",
-            Type::Str => "str",
+            Type::ShortStr | Type::LongStr => "str",
             Type::List => "list",
             Type::Set => "set",
             Type::Dict => "dict",
@@ -555,7 +556,7 @@ impl ValuePtr {
             Type::Nil => false,
             Type::Bool => self.as_bool(),
             Type::Int => self.as_int() != 0,
-            Type::Str => !self.as_str_slice().is_empty(),
+            Type::ShortStr | Type::LongStr => !self.as_str_slice().is_empty(),
             Type::List => !self.as_list().borrow().list.is_empty(),
             Type::Set => !self.as_set().borrow().set.is_empty(),
             Type::Dict => !self.as_dict().borrow().dict.is_empty(),
@@ -573,7 +574,7 @@ impl ValuePtr {
     /// Guaranteed to return either a `Error` or `Iter`
     pub fn to_iter(self) -> ErrorResult<Iterable> {
         match self.ty() {
-            Type::Str => {
+            Type::ShortStr | Type::LongStr => {
                 let string: String = self.as_heap_string();
                 let chars: Chars<'static> = unsafe {
                     std::mem::transmute(string.chars())
@@ -624,7 +625,7 @@ impl ValuePtr {
     /// Converts this `Value` to a `ValueAsIndex`, which is a index-able object, supported for `List`, `Vector`, and `Str`
     pub fn to_index(&self) -> ErrorResult<Indexable> {
         match self.ty() {
-            Type::Str => Ok(Indexable::Str(self.as_str_slice())),
+            Type::ShortStr | Type::LongStr => Ok(Indexable::Str(self.as_str_slice())),
             Type::List => Ok(Indexable::List(self.as_list().borrow_mut())),
             Type::Vector => Ok(Indexable::Vector(self.as_vector().borrow_mut())),
             _ => TypeErrorArgMustBeIndexable(self.clone()).err()
@@ -634,7 +635,7 @@ impl ValuePtr {
     /// Converts this `Value` to a `ValueAsSlice`, which is a builder for slice-like structures, supported for `List` and `Str`
     pub fn to_slice(&self) -> ErrorResult<Sliceable> {
         match self.ty() {
-            Type::Str => Ok(Sliceable::Str(self.as_str_slice(), String::new())),
+            Type::ShortStr | Type::LongStr => Ok(Sliceable::Str(self.as_str_slice(), String::new())),
             Type::List => Ok(Sliceable::List(self.as_list().borrow(), VecDeque::new())),
             Type::Vector => Ok(Sliceable::Vector(self.as_vector().borrow(), Vec::new())),
             _ => TypeErrorArgMustBeSliceable(self.clone()).err()
@@ -674,7 +675,7 @@ impl ValuePtr {
     /// Returns the length of this `Value`. Equivalent to the native function `len`. Raises a type error if the value does not have a length.
     pub fn len(&self) -> ErrorResult<usize> {
         match self.ty() {
-            Type::Str => Ok(self.as_str_slice().chars().count()),
+            Type::ShortStr | Type::LongStr => Ok(self.as_str_slice().chars().count()),
             Type::List => Ok(self.as_list().borrow().list.len()),
             Type::Set => Ok(self.as_set().borrow().set.len()),
             Type::Dict => Ok(self.as_dict().borrow().dict.len()),
@@ -717,7 +718,7 @@ impl ValuePtr {
 
     /// Returns if the value is iterable.
     pub fn is_iter(&self) -> bool {
-        matches!(self.ty(), Type::Str | Type::List | Type::Set | Type::Dict | Type::Heap | Type::Vector | Type::Range | Type::Enumerate)
+        matches!(self.ty(), Type::ShortStr | Type::LongStr | Type::List | Type::Set | Type::Dict | Type::Heap | Type::Vector | Type::Range | Type::Enumerate)
     }
 
     /// Returns if the value is function-evaluable. Note that single-element lists are not considered functions here.
@@ -851,7 +852,6 @@ impl_owned_value!(Type::Slice, SliceImpl, as_slice, as_slice_ref, is_slice);
 impl_owned_value!(Type::Iter, Iterable, as_iterable, as_iterable_ref, is_iterable);
 impl_owned_value!(Type::Error, RuntimeError, as_err, as_err_ref, is_err);
 
-impl_shared_value!(Type::Str, String, ConstValue, as_long_str, is_long_str);
 impl_shared_value!(Type::List, ListImpl, MutValue, as_list, is_list);
 impl_shared_value!(Type::Set, SetImpl, MutValue, as_set, is_set);
 impl_shared_value!(Type::Dict, DictImpl, MutValue, as_dict, is_dict);
@@ -890,8 +890,9 @@ impl_into!(ComplexImpl, self, if self.inner.im == 0 {
     ptr::from_owned(Prefix::new(Type::Complex, self))
 });
 impl_into!(bool, self, ptr::from_bool(self));
-impl_into!(char, self, String::from(self).to_value());
-impl_into!(&str, self, String::from(self).to_value());
+impl_into!(char, self, ptr::from_char(self));
+impl_into!(&str, self, ptr::from_str(self));
+impl_into!(String, self, ptr::from_str(self.as_str()));
 impl_into!(NativeFunction, self, ptr::from_native(self));
 impl_into!(VecDeque<ValuePtr>, self, ListImpl { list: self }.to_value());
 impl_into!(Vec<ValuePtr>, self, VectorImpl { vector: self }.to_value());
@@ -942,6 +943,9 @@ impl<I> IntoDictValue for I where I : Iterator<Item=(ValuePtr, ValuePtr)> {
         self.collect::<IndexMap<ValuePtr, ValuePtr, FxBuildHasher>>().to_value()
     }
 }
+
+
+// Need to manually implement for strings because we need to implement `IntoValue` uniquely, to call `ptr::from_str` instead
 
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
