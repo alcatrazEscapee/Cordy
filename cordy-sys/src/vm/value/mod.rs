@@ -19,12 +19,13 @@ use crate::util::impl_partial_ord;
 use crate::vm::error::RuntimeError;
 use crate::vm::value::ptr::{Ref, RefMut, SharedPrefix};
 
-pub use crate::vm::value::ptr::{MAX_INT, MIN_INT, ValuePtr, Field, Prefix};
+pub use crate::vm::value::ptr::{MAX_INT, MIN_INT, ValuePtr, Prefix};
 
 use RuntimeError::{*};
 
 pub type ErrorResult<T> = Result<T, Box<Prefix<RuntimeError>>>;
 pub type AnyResult = ErrorResult<()>;
+
 
 mod ptr;
 
@@ -244,7 +245,7 @@ impl Try for ValueResult {
 /// Associated type for `Try`
 impl FromResidual for ValueResult {
     fn from_residual(residual: Box<Prefix<RuntimeError>>) -> ValueResult {
-        ValueResult { ptr: ValuePtr::from(*residual) }
+        ValueResult { ptr: ptr::from_owned(*residual) }
     }
 }
 
@@ -308,6 +309,10 @@ pub type C64 = num_complex::Complex<i64>;
 impl ValuePtr {
 
     // Constructors
+
+    pub fn field(field: u32) -> ValuePtr {
+        ptr::from_field(field)
+    }
 
     pub fn partial(func: ValuePtr, args: Vec<ValuePtr>) -> ValuePtr {
         PartialFunctionImpl { func: ValueFunction::new(func), args }.to_value()
@@ -790,7 +795,7 @@ macro_rules! impl_owned_value {
 
         impl IntoValue for $inner {
             fn to_value(self) -> ValuePtr {
-                ValuePtr::from(Prefix::new($ty, self))
+                ptr::from_owned(Prefix::new($ty, self))
             }
         }
 
@@ -817,7 +822,7 @@ macro_rules! impl_shared_value {
 
         impl IntoValue for $inner {
             fn to_value(self) -> ValuePtr {
-                ValuePtr::from(SharedPrefix::new($ty, self))
+                ptr::from_shared(SharedPrefix::new($ty, self))
             }
         }
 
@@ -875,18 +880,18 @@ macro_rules! impl_into {
 }
 
 impl_into!(ValuePtr, self, self);
-impl_into!(usize, self, ValuePtr::from(self as i64));
-impl_into!(i64, self, ValuePtr::from(self));
+impl_into!(usize, self, ptr::from_usize(self));
+impl_into!(i64, self, ptr::from_i64(self));
 impl_into!(num_complex::Complex<i64>, self, ComplexImpl { inner: self }.to_value());
 impl_into!(ComplexImpl, self, if self.inner.im == 0 {
-    ValuePtr::from(self.inner.re)
+    ptr::from_i64(self.inner.re)
 } else {
-    ValuePtr::from(Prefix::new(Type::Complex, self))
+    ptr::from_owned(Prefix::new(Type::Complex, self))
 });
-impl_into!(bool, self, ValuePtr::from(self));
+impl_into!(bool, self, ptr::from_bool(self));
 impl_into!(char, self, String::from(self).to_value());
 impl_into!(&str, self, String::from(self).to_value());
-impl_into!(NativeFunction, self, ValuePtr::from(self));
+impl_into!(NativeFunction, self, ptr::from_native(self));
 impl_into!(VecDeque<ValuePtr>, self, ListImpl { list: self }.to_value());
 impl_into!(Vec<ValuePtr>, self, VectorImpl { vector: self }.to_value());
 impl_into!((ValuePtr, ValuePtr), self, vec![self.0, self.1].to_value());

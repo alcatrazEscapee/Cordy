@@ -8,7 +8,7 @@ use crate::{compiler, core, trace, util};
 use crate::compiler::{CompileParameters, CompileResult, Fields, IncrementalCompileResult, Locals};
 use crate::reporting::{Location, SourceView};
 use crate::util::{EmptyRead, OffsetAdd};
-use crate::vm::value::{Field, Literal, UpValue, ValueStructType};
+use crate::vm::value::{Literal, UpValue, ValueStructType};
 use crate::core::Pattern;
 
 pub use crate::vm::error::{DetailRuntimeError, RuntimeError};
@@ -20,8 +20,8 @@ use RuntimeError::{*};
 
 pub mod operator;
 
-mod value;
 mod opcode;
+mod value;
 mod error;
 
 /// Per-test, how many instructions should be allowed to execute.
@@ -514,7 +514,7 @@ impl<R : BufRead, W : Write> VirtualMachine<R, W> {
                 self.push(ret);
             },
             GetFieldFunction(field_index) => {
-                self.push(ValuePtr::from(Field(field_index)));
+                self.push(ValuePtr::field(field_index));
             },
             SetField(field_index) => {
                 let a2: ValuePtr = self.pop();
