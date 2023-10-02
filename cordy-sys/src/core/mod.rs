@@ -839,12 +839,12 @@ fn invoke_arg1<VM : VirtualInterface>(f: NativeFunction, a1: ValuePtr, vm: &mut 
         },
         ReadText => {
             let path = a1.check_str()?;
-            match fs::read_to_string::<&str>(path.as_str().borrow_const().as_ref()) {
+            match fs::read_to_string::<&str>(path.as_str_slice().as_ref()) {
                 Ok(text) => text.replace('\r', "").to_value().ok(),
                 Err(err) => IOError(err.to_string()).err(),
             }
         },
-        Env => vm.get_env(a1.check_str()?.as_str().borrow_const()).ok(),
+        Env => vm.get_env(&a1.check_str()?.as_heap_string()).ok(),
 
         Bool => a1.to_bool().to_value().ok(),
         Int => math::convert_to_int(a1, ValueOption::none()),
@@ -856,9 +856,9 @@ fn invoke_arg1<VM : VirtualInterface>(f: NativeFunction, a1: ValuePtr, vm: &mut 
             a1.to_iter()?.to_vector().ok()
         },
         Repr => a1.to_repr_str().to_value().ok(),
-        Eval => vm.invoke_eval(a1.check_str()?.as_str().borrow_const()),
+        Eval => vm.invoke_eval(&a1.check_str()?.as_heap_string()),
         TypeOf => type_of(a1).ok(),
-        Monitor => vm.invoke_monitor(a1.check_str()?.as_str().borrow_const()),
+        Monitor => vm.invoke_monitor(a1.check_str()?.as_str_slice()),
 
         OperatorSub => operator::unary_sub(a1),
         OperatorUnaryNot => operator::unary_not(a1),
@@ -909,7 +909,7 @@ fn invoke_arg2<VM : VirtualInterface>(f: NativeFunction, a1: ValuePtr, a2: Value
         WriteText => {
             let path = a1.check_str()?;
             let text = a2.check_str()?;
-            match fs::write(path.as_str().borrow_const(), text.as_str().borrow_const()) {
+            match fs::write(path.as_str_slice(), text.as_str_slice()) {
                 Ok(_) => ValuePtr::nil().ok(),
                 Err(err) => IOError(err.to_string()).err(),
             }

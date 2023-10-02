@@ -65,6 +65,7 @@ const TAG_TRUE: usize      = 0b1_001_01;
 const TAG_NATIVE: usize    = 0b__010_01;
 const TAG_NONE: usize      = 0b__011_01;
 const TAG_FIELD: usize     = 0b__100_01;
+const TAG_STR: usize       = 0b__101_01;
 const TAG_PTR: usize       = 0b______11;
 
 const MASK_INT: usize      = 0b_______1;
@@ -72,6 +73,7 @@ const MASK_NIL: usize      = 0b__111_11;
 const MASK_BOOL: usize     = 0b__111_11;
 const MASK_NATIVE: usize   = 0b__111_11;
 const MASK_FIELD: usize    = 0b__111_11;
+const MASK_STR: usize      = 0b__111_11;
 const MASK_NONE: usize     = 0b__111_11;
 const MASK_PTR: usize      = 0b______11;
 
@@ -1091,7 +1093,7 @@ mod tests {
     fn test_shared_const_str_can_borrow_const() {
         let ptr = "".to_value();
 
-        let _r1 = ptr.as_str().borrow_const();
-        let _r2 = ptr.as_str().borrow();
+        let _r1 = ptr.as_long_str().borrow_const();
+        let _r2 = ptr.as_long_str().borrow();
     }
 }

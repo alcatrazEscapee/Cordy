@@ -12,8 +12,7 @@ use RuntimeError::{*};
 
 pub fn to_lower(value: ValuePtr) -> ValueResult {
     value.check_str()?
-        .as_str()
-        .borrow_const()
+        .as_str_slice()
         .to_lowercase()
         .to_value()
         .ok()
@@ -21,8 +20,7 @@ pub fn to_lower(value: ValuePtr) -> ValueResult {
 
 pub fn to_upper(value: ValuePtr) -> ValueResult {
     value.check_str()?
-        .as_str()
-        .borrow_const()
+        .as_str_slice()
         .to_uppercase()
         .to_value()
         .ok()
@@ -30,8 +28,7 @@ pub fn to_upper(value: ValuePtr) -> ValueResult {
 
 pub fn trim(value: ValuePtr) -> ValueResult {
     value.check_str()?
-        .as_str()
-        .borrow_const()
+        .as_str_slice()
         .trim()
         .to_value()
         .ok()
@@ -40,7 +37,7 @@ pub fn trim(value: ValuePtr) -> ValueResult {
 pub fn replace<VM: VirtualInterface>(vm: &mut VM, pattern: ValuePtr, replacer: ValuePtr, target: ValuePtr) -> ValueResult {
     let regex: Regex = compile_regex(pattern)?;
     let target = target.check_str()?;
-    let text = target.as_str().borrow_const().as_str();
+    let text = target.as_str_slice();
     if replacer.is_evaluable() {
         let replacer: InvokeArg1 = InvokeArg1::from(replacer)?;
         let mut err = None;
@@ -49,15 +46,13 @@ pub fn replace<VM: VirtualInterface>(vm: &mut VM, pattern: ValuePtr, replacer: V
             let ret: String = util::catch::<String>(&mut err, || {
                 Ok(replacer.invoke(arg, vm)?
                     .check_str()?
-                    .as_str()
-                    .borrow_const()
-                    .to_string())
+                    .as_heap_string())
             }, String::new());
             ret
         }).to_value();
         util::join::<ValuePtr, Box<Prefix<RuntimeError>>, ValueResult>(replaced, err)
     } else {
-        regex.replace_all(text, replacer.check_str()?.as_str().borrow_const().as_str())
+        regex.replace_all(text, replacer.check_str()?.as_str_slice())
             .to_value()
             .ok()
     }
@@ -66,7 +61,7 @@ pub fn replace<VM: VirtualInterface>(vm: &mut VM, pattern: ValuePtr, replacer: V
 pub fn search(pattern: ValuePtr, target: ValuePtr) -> ValueResult {
     let regex: Regex = compile_regex(pattern)?;
     let target = target.check_str()?;
-    let text: &String = target.as_str().borrow_const();
+    let text: &str = target.as_str_slice();
 
     let mut start: usize = 0;
     std::iter::from_fn(move || {
@@ -84,8 +79,8 @@ pub fn split(pattern: ValuePtr, target: ValuePtr) -> ValueResult {
     let pattern = pattern.check_str()?;
     let target = target.check_str()?;
 
-    if pattern.as_str().borrow_const().is_empty() { // Special case for empty string
-        return target.as_str().borrow_const()
+    if pattern.as_str_slice().is_empty() { // Special case for empty string
+        return target.as_str_slice()
             .chars()
             .map(|u| u.to_value())
             .to_list()
@@ -94,7 +89,7 @@ pub fn split(pattern: ValuePtr, target: ValuePtr) -> ValueResult {
 
     let regex: Regex = compile_regex(pattern)?;
 
-    fancy_split(&regex, target.as_str().borrow_const())
+    fancy_split(&regex, target.as_str_slice())
         .map(|u| u.to_value())
         .to_list()
         .ok()
@@ -107,7 +102,7 @@ fn as_result(captures: &Captures) -> ValuePtr {
 }
 
 fn compile_regex(a1: ValuePtr) -> ErrorResult<Regex> {
-    let raw = escape_regex(a1.check_str()?.as_str().borrow_const());
+    let raw = escape_regex(a1.check_str()?.as_str_slice());
     match Regex::new(&raw) {
         Ok(regex) => Ok(regex),
         Err(e) => ValueErrorCannotCompileRegex(raw, e.to_string()).err()
@@ -115,7 +110,7 @@ fn compile_regex(a1: ValuePtr) -> ErrorResult<Regex> {
 }
 
 /// Replaces escaped characters `\t`, `\n`, `\r` with their original un-escaped sequences.
-fn escape_regex(raw: &String) -> String {
+fn escape_regex(raw: &str) -> String {
     let mut result = String::with_capacity(raw.len());
     for c in raw.chars() {
         match c {
@@ -174,7 +169,7 @@ impl<'r, 't> FusedIterator for FancySplit<'r, 't> {}
 pub fn join(joiner: ValuePtr, it: ValuePtr) -> ValueResult {
     it.to_iter()?
         .map(|u| u.to_str())
-        .join(joiner.check_str()?.as_str().borrow_const())
+        .join(joiner.check_str()?.as_str_slice())
         .to_value()
         .ok()
 }
@@ -193,12 +188,12 @@ pub fn to_char(value: ValuePtr) -> ValueResult {
 
 pub fn to_ord(value: ValuePtr) -> ValueResult {
     let value = value.check_str()?;
-    let s = value.as_str().borrow_const();
+    let s = value.as_str_slice();
     match s.len() {
         1 => (s.chars().next().unwrap() as u32 as i64)
             .to_value()
             .ok(),
-        _ => TypeErrorArgMustBeChar(s.clone().to_value()).err(),
+        _ => TypeErrorArgMustBeChar(value).err(),
     }
 }
 
@@ -210,7 +205,7 @@ pub fn to_bin(value: ValuePtr) -> ValueResult {
     format!("{:b}", value.check_int()?.as_int()).to_value().ok()
 }
 
-pub fn format_string(literal: &String, args: ValuePtr) -> ValueResult {
+pub fn format_string(literal: &str, args: ValuePtr) -> ValueResult {
     StringFormatter::format(literal, args)
 }
 
@@ -223,7 +218,7 @@ struct StringFormatter<'a> {
 
 impl<'a> StringFormatter<'a> {
 
-    fn format(literal: &String, args: ValuePtr) -> ValueResult {
+    fn format(literal: &str, args: ValuePtr) -> ValueResult {
         let args = args.as_iter_or_unit();
         let len = literal.len();
 
