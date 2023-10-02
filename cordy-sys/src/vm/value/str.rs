@@ -7,6 +7,49 @@ impl SharedValue for String {}
 impl ConstValue for String {}
 
 
+/// A specialization of either a `String`, or a `&str`
+/// This is used in methods like `ValuePtr.to_str()` which in some cases, can return a unmodified view of a `&str`, but in other cases will always need to construct a new `String`
+pub enum RefStr<'a> {
+    Owned(String),
+    Borrow(&'a str),
+}
+
+
+impl<'a> RefStr<'a> {
+
+    pub fn as_slice(&self) -> &str {
+        match self {
+            RefStr::Owned(value) => value.as_str(),
+            RefStr::Borrow(value) => value,
+        }
+    }
+
+    pub fn as_owned(self) -> String {
+        match self {
+            RefStr::Owned(value) => value,
+            RefStr::Borrow(value) => String::from(value),
+        }
+    }
+}
+
+
+pub trait IntoRefStr<'a> {
+    fn to_ref_str(self) -> RefStr<'a>;
+}
+
+impl<'a> IntoRefStr<'a> for &'a str {
+    fn to_ref_str(self) -> RefStr<'a> {
+        RefStr::Borrow(self)
+    }
+}
+
+impl<'a> IntoRefStr<'a> for String {
+    fn to_ref_str(self) -> RefStr<'a> {
+        RefStr::Owned(self)
+    }
+}
+
+
 /// Implementation details of string types
 ///
 /// We implement a 'small string' optimization in Cordy, by having two separate string representations:
@@ -53,7 +96,7 @@ impl ValuePtr {
 
 #[cfg(test)]
 mod tests {
-    use crate::vm::{IntoValue};
+    use crate::vm::{IntoValue, ValuePtr};
 
     #[test]
     fn test_long_str() {
@@ -76,6 +119,15 @@ mod tests {
     #[test]
     fn test_empty_str() {
         let empty_str = "".to_value();
+
+        assert_eq!(empty_str.as_str_slice(), "");
+        assert!(empty_str.is_str());
+        assert!(empty_str.is_short_str());
+    }
+
+    #[test]
+    fn test_raw_empty_str() {
+        let empty_str = ValuePtr::empty_str();
 
         assert_eq!(empty_str.as_str_slice(), "");
         assert!(empty_str.is_str());

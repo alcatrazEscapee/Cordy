@@ -313,7 +313,10 @@ impl AsError for RuntimeError {
             RuntimeError::TypeErrorBinaryOp(op, l, r) => format!("TypeError: Cannot {} {} and {}", op.as_error(), l.as_error(), r.as_error()),
             RuntimeError::TypeErrorBinaryIs(l, r) => format!("TypeError: {} is not a type and cannot be used with binary 'is' on {}", r.as_error(), l.as_error()),
             RuntimeError::TypeErrorCannotConvertToInt(v) => format!("TypeError: Cannot convert {} to an int", v.as_error()),
-            RuntimeError::TypeErrorFieldNotPresentOnValue(v, f, b) => format!("TypeError: Cannot get field '{}' on {}", f, if *b { v.to_repr_str() } else { v.as_error() }),
+            RuntimeError::TypeErrorFieldNotPresentOnValue(v, f, b) => match *b {
+                true => format!("TypeError: Cannot get field '{}' on {}", f, v.to_repr_str().as_slice()),
+                false => format!("TypeError: Cannot get field '{}' on {}", f, v.as_error().as_str()),
+            },
             RuntimeError::TypeErrorArgMustBeInt(v) => format!("TypeError: Expected {} to be a int", v.as_error()),
             RuntimeError::TypeErrorArgMustBeComplex(v) => format!("TypeError: Expected {} to be a complex", v.as_error()),
             RuntimeError::TypeErrorArgMustBeStr(v) => format!("TypeError: Expected {} to be a string", v.as_error()),
@@ -342,7 +345,7 @@ impl AsError for Option<char> {
 
 impl AsError for ValuePtr {
     fn as_error(&self) -> String {
-        format!("'{}' of type '{}'", self.to_str(), self.as_type_str())
+        format!("'{}' of type '{}'", self.to_str().as_slice(), self.as_type_str())
     }
 }
 

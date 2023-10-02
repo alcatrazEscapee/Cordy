@@ -20,6 +20,7 @@ use crate::vm::error::RuntimeError;
 use crate::vm::value::ptr::{Ref, RefMut, SharedPrefix};
 
 pub use crate::vm::value::ptr::{MAX_INT, MIN_INT, ValuePtr, Prefix};
+pub use crate::vm::value::str::{RefStr, IntoRefStr};
 
 use RuntimeError::{*};
 
@@ -370,24 +371,24 @@ impl ValuePtr {
     }
 
     /// Converts the `Value` to a `String`. This is equivalent to the stdlib function `str()`
-    pub fn to_str(&self) -> String { self.safe_to_str(&mut RecursionGuard::new()) }
+    pub fn to_str(&self) -> RefStr { self.safe_to_str(&mut RecursionGuard::new()) }
 
-    fn safe_to_str(&self, rc: &mut RecursionGuard) -> String {
+    fn safe_to_str(&self, rc: &mut RecursionGuard) -> RefStr {
         match self.ty() {
-            Type::ShortStr | Type::LongStr => self.as_str_owned(),
-            Type::Function => self.as_function().borrow_const().name.clone(),
+            Type::ShortStr | Type::LongStr => self.as_str_slice().to_ref_str(),
+            Type::Function => self.as_function().borrow_const().name.as_str().to_ref_str(),
             Type::PartialFunction => self.as_partial_function_ref().func.ptr.safe_to_str(rc),
-            Type::NativeFunction => self.as_native().name().to_string(),
-            Type::PartialNativeFunction => self.as_partial_native_ref().func.name().to_string(),
-            Type::Closure => self.as_closure().borrow().func.get().name.to_owned(),
+            Type::NativeFunction => self.as_native().name().to_ref_str(),
+            Type::PartialNativeFunction => self.as_partial_native_ref().func.name().to_ref_str(),
+            Type::Closure => self.as_closure().borrow().func.get().name.clone().to_ref_str(),
             _ => self.safe_to_repr_str(rc),
         }
     }
 
     /// Converts the `Value` to a representative `String. This is equivalent to the stdlib function `repr()`, and meant to be an inverse of `eval()`
-    pub fn to_repr_str(&self) -> String { self.safe_to_repr_str(&mut RecursionGuard::new()) }
+    pub fn to_repr_str(&self) -> RefStr { self.safe_to_repr_str(&mut RecursionGuard::new()) }
 
-    fn safe_to_repr_str(&self, rc: &mut RecursionGuard) -> String {
+    fn safe_to_repr_str(&self, rc: &mut RecursionGuard) -> RefStr {
         macro_rules! recursive_guard {
             ($default:expr, $recursive:expr) => {{
                 let ret = if rc.enter(self) { $default } else { $recursive };
@@ -396,78 +397,90 @@ impl ValuePtr {
             }};
         }
 
+        fn map_join<'a, 'b, I : Iterator<Item=&'b ValuePtr>>(rc: &mut RecursionGuard, mut iter: I, prefix: char, suffix: char, empty: &'a str, sep: &str) -> RefStr<'a> {
+            // Avoids issues with `.map().join()` that create temporaries in the `map()` and then destroy them
+            match iter.next() {
+                None => empty.to_ref_str(),
+                Some(first) => {
+                    let (lower, _) = iter.size_hint();
+                    let mut result = String::with_capacity(lower * (sep.len() + 2));
+                    result.push(prefix);
+                    result.push_str(first.safe_to_repr_str(rc).as_slice());
+                    while let Some(next) = iter.next() {
+                        result.push_str(sep);
+                        result.push_str(next.safe_to_repr_str(rc).as_slice());
+                    }
+                    result.push(suffix);
+                    result.to_ref_str()
+                }
+            }
+        }
+
         match self.ty() {
-            Type::Nil => String::from("nil"),
-            Type::Bool => self.as_bool().to_string(),
-            Type::Int => self.as_int().to_string(),
+            Type::Nil => "nil".to_ref_str(),
+            Type::Bool => if self.as_bool() { "true" } else { "false" }.to_ref_str(),
+            Type::Int => self.as_int().to_string().to_ref_str(),
             Type::Complex => {
                 let c = &self.as_precise_complex_ref().inner;
-                if c.re == 0 {
+                let str = if c.re == 0 {
                     format!("{}i", c.im)
                 } else {
                     format!("{} + {}i", c.re, c.im)
-                }
+                };
+                str.to_ref_str()
             },
             Type::ShortStr | Type::LongStr => {
                 let escaped = format!("{:?}", self.as_str_slice());
-                format!("'{}'", &escaped[1..escaped.len() - 1])
+                format!("'{}'", &escaped[1..escaped.len() - 1]).to_ref_str()
             },
 
             Type::List => recursive_guard!(
-                String::from("[...]"),
-                format!("[{}]", self.as_list().borrow().list.iter()
-                    .map(|t| t.safe_to_repr_str(rc))
-                    .join(", "))
+                "[...]".to_ref_str(),
+                map_join(rc, self.as_list().borrow().list.iter(), '[', ']', "[]", ", ")
             ),
             Type::Set => recursive_guard!(
-                String::from("{...}"),
-                format!("{{{}}}", self.as_set().borrow().set.iter()
-                    .map(|t| t.safe_to_repr_str(rc))
-                    .join(", "))
+                "{...}".to_ref_str(),
+                map_join(rc, self.as_set().borrow().set.iter(), '{', '}', "{}", ", ")
             ),
             Type::Dict => recursive_guard!(
-                String::from("{...}"),
+                "{...}".to_ref_str(),
                 format!("{{{}}}", self.as_dict().borrow().dict.iter()
-                    .map(|(k, v)| format!("{}: {}", k.safe_to_repr_str(rc), v.safe_to_repr_str(rc)))
-                    .join(", "))
+                    .map(|(k, v)| format!("{}: {}", k.safe_to_repr_str(rc).as_slice(), v.safe_to_repr_str(rc).as_slice()))
+                    .join(", ")).to_ref_str()
             ),
             Type::Heap => recursive_guard!(
-                String::from("[...]"),
-                format!("[{}]", self.as_heap().borrow().heap.iter()
-                    .map(|t| t.0.safe_to_repr_str(rc))
-                    .join(", "))
+                "[...]".to_ref_str(),
+                map_join(rc, self.as_heap().borrow().heap.iter().map(|u| &u.0), '[', ']', "[]",  ", ")
             ),
             Type::Vector => recursive_guard!(
-                String::from("(...)"),
-                format!("({})", self.as_vector().borrow().vector.iter()
-                    .map(|t| t.safe_to_repr_str(rc))
-                    .join(", "))
+                "(...)".to_ref_str(),
+                map_join(rc, self.as_vector().borrow().vector.iter(), '(', ')', "()", ", ")
             ),
 
             Type::Struct => {
                 let it = self.as_struct().borrow();
                 recursive_guard!(
-                    format!("{}(...)", it.type_impl.get().name),
+                    format!("{}(...)", it.type_impl.get().name).to_ref_str(),
                     format!("{}({})", it.type_impl.get().name.as_str(), it.values.iter()
                         .zip(it.type_impl.get().field_names.iter())
-                        .map(|(v, k)| format!("{}={}", k, v.safe_to_repr_str(rc)))
-                        .join(", "))
+                        .map(|(v, k)| format!("{}={}", k, v.safe_to_repr_str(rc).as_slice()))
+                        .join(", ")).to_ref_str()
                 )
             },
             Type::StructType => {
                 let it = self.as_struct_type().borrow_const();
-                format!("struct {}({})", it.name.clone(), it.field_names.join(", "))
+                format!("struct {}({})", it.name.clone(), it.field_names.join(", ")).to_ref_str()
             },
 
             Type::Range => {
                 let r = self.as_range_ref();
                 if r.step == 0 {
-                    String::from("range(empty)")
+                    "range(empty)".to_ref_str()
                 } else {
-                    format!("range({}, {}, {})", r.start, r.stop, r.step)
+                    format!("range({}, {}, {})", r.start, r.stop, r.step).to_ref_str()
                 }
             },
-            Type::Enumerate => format!("enumerate({})", self.as_enumerate_ref().inner.safe_to_repr_str(rc)),
+            Type::Enumerate => format!("enumerate({})", self.as_enumerate_ref().inner.safe_to_repr_str(rc).as_slice()).to_ref_str(),
             Type::Slice => {
                 #[inline]
                 fn to_str(i: &ValuePtr) -> String {
@@ -482,19 +495,19 @@ impl ValuePtr {
                 match it.arg3.is_nil() {
                     false => format!("[{}:{}:{}]", to_str(&it.arg1), to_str(&it.arg2), it.arg3.as_int()),
                     true => format!("[{}:{}]", to_str(&it.arg1), to_str(&it.arg2)),
-                }
+                }.to_ref_str()
             },
 
-            Type::Iter => String::from("<synthetic> iterator"),
-            Type::Memoized => format!("@memoize {}", self.as_memoized().borrow().func.safe_to_repr_str(rc)),
+            Type::Iter => "<synthetic> iterator".to_ref_str(),
+            Type::Memoized => format!("@memoize {}", self.as_memoized().borrow().func.safe_to_repr_str(rc).as_slice()).to_ref_str(),
 
-            Type::GetField => String::from("(->)"),
+            Type::GetField => "(->)".to_ref_str(),
 
-            Type::Function => self.as_function().borrow_const().repr(),
+            Type::Function => self.as_function().borrow_const().repr().to_ref_str(),
             Type::PartialFunction => self.as_partial_function_ref().func.ptr.safe_to_repr_str(rc),
-            Type::NativeFunction => self.as_native().repr(),
-            Type::PartialNativeFunction => self.as_partial_native_ref().func.repr(),
-            Type::Closure => self.as_closure().borrow().func.get().repr(),
+            Type::NativeFunction => self.as_native().repr().to_ref_str(),
+            Type::PartialNativeFunction => self.as_partial_native_ref().func.repr().to_ref_str(),
+            Type::Closure => self.as_closure().borrow().func.get().repr().to_ref_str(),
 
             Type::Error | Type::None | Type::Never => unreachable!(),
         }
@@ -548,7 +561,7 @@ impl ValuePtr {
 
     /// Used by `trace` disabled code, do not remove!
     pub fn as_debug_str(&self) -> String {
-        format!("{}: {}", self.to_repr_str(), self.as_type_str())
+        format!("{}: {}", self.to_repr_str().as_slice(), self.as_type_str())
     }
 
     pub fn to_bool(&self) -> bool {
@@ -893,6 +906,7 @@ impl_into!(bool, self, ptr::from_bool(self));
 impl_into!(char, self, ptr::from_char(self));
 impl_into!(&str, self, ptr::from_str(self));
 impl_into!(String, self, ptr::from_str(self.as_str()));
+impl_into!(RefStr<'_>, self, ptr::from_str(self.as_slice()));
 impl_into!(NativeFunction, self, ptr::from_native(self));
 impl_into!(VecDeque<ValuePtr>, self, ListImpl { list: self }.to_value());
 impl_into!(Vec<ValuePtr>, self, VectorImpl { vector: self }.to_value());

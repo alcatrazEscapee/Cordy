@@ -834,7 +834,7 @@ fn invoke_arg0<VM : VirtualInterface>(f: NativeFunction, vm: &mut VM) -> ValueRe
 fn invoke_arg1<VM : VirtualInterface>(f: NativeFunction, a1: ValuePtr, vm: &mut VM) -> ValueResult {
     match f {
         Print => {
-            vm.println(a1.to_str());
+            vm.println(a1.to_str().as_slice());
             ValuePtr::nil().ok()
         },
         ReadText => {
@@ -999,9 +999,10 @@ fn invoke_arg3<VM : VirtualInterface>(f: NativeFunction, a1: ValuePtr, a2: Value
 fn invoke_var<VM : VirtualInterface, I : Iterator<Item=ValuePtr>>(f: NativeFunction, mut an: I, vm: &mut VM) -> ValueResult {
     match f {
         Print => {
-            vm.print(an.next().unwrap().to_str());
+            vm.print(an.next().unwrap().to_str().as_slice());
             for ai in an {
-                vm.print(format!(" {}", ai.to_str()));
+                vm.print(" ");
+                vm.print(ai.to_str().as_slice());
             }
             vm.println0();
             ValuePtr::nil().ok()
