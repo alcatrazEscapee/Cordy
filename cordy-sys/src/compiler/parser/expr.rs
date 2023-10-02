@@ -141,7 +141,7 @@ impl Expr {
             Type::Bool => Expr::bool(value.as_bool()),
             Type::Int => Expr::int(value.as_int()),
             Type::Complex => Expr::c64(value.as_precise_complex().value.inner),
-            Type::Str => Expr::str(value.as_heap_string()),
+            Type::ShortStr | Type::LongStr => Expr::str(value.as_heap_string()),
             _ => panic!("Not a constant value type"),
         }
     }

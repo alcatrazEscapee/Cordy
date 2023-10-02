@@ -54,6 +54,8 @@ pub union ValuePtr {
     /// the topmost 32-bits being uninitialized memory. So whenever we store an int, we need to store it as a `long_tag` to properly set the high bits.
     long_tag: u64,
     int: i64,
+    /// Used for string slices
+    bytes: [u8; 8],
 }
 
 
@@ -78,6 +80,9 @@ const MASK_NONE: usize     = 0b__111_11;
 const MASK_PTR: usize      = 0b______11;
 
 const PTR_MASK: usize = !0b11;
+const STR_LEN_MASK: usize = 0b111_000_00;
+const STR_TAG_BYTES: usize = 5;
+const STR_BYTES: usize = 7;
 
 pub const MAX_INT: i64 = 0x3fff_ffff_ffff_ffffu64 as i64;
 pub const MIN_INT: i64 = 0xc000_0000_0000_0000u64 as i64;
@@ -95,6 +100,65 @@ pub(super) fn from_usize(value: usize) -> ValuePtr {
 pub(super) fn from_i64(value: i64) -> ValuePtr {
     debug_assert!(MIN_INT <= value && value <= MAX_INT);
     ValuePtr { long_tag: TAG_INT as u64 | ((value << 1) as u64) }
+}
+
+pub(super) fn from_char(value: char) -> ValuePtr {
+    // `char` encodes in at most 4 bytes, so we always store it as an inline str
+    from_small_str(value.encode_utf8(&mut [0; 4]))
+}
+
+pub(super) fn from_str(str: &str) -> ValuePtr {
+    if str.len() <= STR_BYTES {
+        // Small strings are stored inline
+        from_small_str(str)
+    } else {
+        // And larger strings are shared, reference counted and stored on the heap
+        from_shared(SharedPrefix::new(Type::LongStr, String::from(str)))
+    }
+}
+
+fn from_small_str(str: &str) -> ValuePtr {
+    debug_assert!(str.len() <= STR_BYTES); // Should be asserted by the callers, but this code will blow up if not
+
+    // The string is short enough that we can store it inline with the lowest byte taking place of the tag.
+    // Create a new empty, 8-byte buffer
+    let mut bytes: [u8; 8] = [0; 8];
+
+    // Setup the tag byte - it needs to encode both the tag and the length
+    // The length can be at most 7, which is 0b111
+    // The tag is exactly 5 bytes long, which means we fit perfectly in a unsigned byte (8 bits)
+    let tag: u8 = ((str.len() as u8) << STR_TAG_BYTES) | (TAG_STR as u8);
+
+    // Little endian systems represent the slice as:
+    //
+    // [7b -------- slice ------- ][1b tag]
+    // 0   1   2   3   4   5   6   7
+    // high byte ----------------- low byte
+    //
+    // So we can obtain a pointer to 0, with length up to 7
+    // The reverse is true for big-endian systems:
+    //
+    // [1b tag][7b ------ slice ------ ]
+    //     0   1   2   3   4   5   6   7
+    // low byte ---------------------- high byte
+    //
+    // Ultimately, this changes how we need to copy the bytes into an array, and where to set the tag
+    // We need to handle this differently because we depend on the bytes being re-interpretable as a pointer later
+    #[cfg(target_endian = "little")]
+    {
+        bytes[0] = tag;
+        bytes[1..=str.len()].copy_from_slice(str.as_bytes());
+    }
+    #[cfg(target_endian = "big")]
+    {
+        bytes[..str.len()].copy_from_slice(str.as_bytes());
+        bytes[7] = tag;
+    }
+
+    // Using native-endian bytes is acceptable here, because we prepared them according to the native type above
+    let long_tag = u64::from_ne_bytes(bytes);
+
+    ValuePtr { long_tag }
 }
 
 pub(super) fn from_native(value: NativeFunction) -> ValuePtr {
@@ -132,6 +196,28 @@ impl ValuePtr {
             self.as_precise_int()
         } else {
             self.is_true() as i64
+        }
+    }
+
+    pub fn as_short_str(&self) -> &str {
+        unsafe {
+            // First, check the length, which is encoded in the high three bits of the tag
+            let len = (self.tag & STR_LEN_MASK) >> STR_TAG_BYTES;
+
+            // Need to handle both endian-ness, which encode the string inline slightly differently - see comment in `from_small_str()`
+            // - Using `self.bytes` is equivalent to `self.long_tag.to_ne_bytes()`, but it doesn't create data owned by this function
+            // - The Rust std lib function just calls `transmute` anyway.
+            // - The unchecked access is safe because we know that the buffer will only ever be UTF-8 by construction
+            std::str::from_utf8_unchecked({
+                #[cfg(target_endian = "little")]
+                {
+                    &self.bytes[1..=len]
+                }
+                #[cfg(target_endian = "big")]
+                {
+                    &self.bytes[..len]
+                }
+            })
         }
     }
 
@@ -191,6 +277,7 @@ impl ValuePtr {
                     TAG_NATIVE => Type::NativeFunction,
                     TAG_NONE => Type::None,
                     TAG_FIELD => Type::GetField,
+                    TAG_STR => Type::ShortStr,
                     _ => Type::Never,
                 },
                 TAG_PTR => (*self.as_ptr()).ty, // Check the prefix for the type
@@ -206,6 +293,7 @@ impl ValuePtr {
     pub const fn is_true(&self) -> bool { (unsafe { self.tag }) == TAG_TRUE }
     pub const fn is_int(&self) -> bool { self.is_precise_int() || self.is_bool() }
     pub const fn is_precise_int(&self) -> bool { (unsafe { self.tag } & MASK_INT) == TAG_INT }
+    pub const fn is_short_str(&self) -> bool { (unsafe { self.tag } & MASK_STR) == TAG_STR }
     pub const fn is_native(&self) -> bool { (unsafe { self.tag } & MASK_NATIVE) == TAG_NATIVE }
     pub const fn is_field(&self) -> bool { (unsafe { self.tag } & MASK_FIELD) == TAG_FIELD }
     pub const fn is_none(&self) -> bool { (unsafe { self.tag } & MASK_NONE) == TAG_NONE }
@@ -328,7 +416,8 @@ impl PartialEq for ValuePtr {
             Type::Bool |
             Type::Int |
             Type::NativeFunction => unsafe { self.tag == other.tag },
-            Type::GetField => unsafe { self.long_tag == other.long_tag },
+            Type::GetField |
+            Type::ShortStr => unsafe { self.long_tag == other.long_tag },
             // Owned types check equality based on their ref
             Type::Complex => self.as_ref::<ComplexImpl>() == other.as_ref::<ComplexImpl>(),
             Type::Range => self.as_ref::<RangeImpl>() == other.as_ref::<RangeImpl>(),
@@ -338,7 +427,7 @@ impl PartialEq for ValuePtr {
             Type::Slice => self.as_ref::<SliceImpl>() == other.as_ref::<SliceImpl>(),
             Type::Error => self.as_ref::<RuntimeError>() == other.as_ref::<RuntimeError>(),
             // Shared types check equality based on the shared ref
-            Type::Str => self.as_shared_ref::<String>() == other.as_shared_ref::<String>(),
+            Type::LongStr => self.as_shared_ref::<String>() == other.as_shared_ref::<String>(),
             Type::List => self.as_shared_ref::<ListImpl>() == other.as_shared_ref::<ListImpl>(),
             Type::Set => self.as_shared_ref::<SetImpl>() == other.as_shared_ref::<SetImpl>(),
             Type::Dict => self.as_shared_ref::<DictImpl>() == other.as_shared_ref::<DictImpl>(),
@@ -366,19 +455,20 @@ impl Ord for ValuePtr {
             return Ordering::Equal
         }
         match ty {
-            // Inline types can directly compare the tag value. This works for all except ints
+            // Inline types can directly compare the tag value. This works for all except ints and short strings
             Type::Nil |
             Type::Bool |
             Type::NativeFunction |
             Type::GetField => unsafe { self.tag.cmp(&other.tag) },
             Type::Int => self.as_precise_int().cmp(&other.as_precise_int()),
+            Type::ShortStr => self.as_str_slice().cmp(other.as_str_slice()),
 
             // Owned types check equality based on their ref
             Type::Complex => self.as_ref::<ComplexImpl>().cmp(other.as_ref::<ComplexImpl>()),
             Type::Range => self.as_ref::<RangeImpl>().cmp(other.as_ref::<RangeImpl>()),
             Type::Enumerate => self.as_ref::<EnumerateImpl>().cmp(other.as_ref::<EnumerateImpl>()),
             // Shared types check equality based on the shared ref
-            Type::Str => self.as_shared_ref::<String>().cmp(other.as_shared_ref::<String>()),
+            Type::LongStr => self.as_shared_ref::<String>().cmp(other.as_shared_ref::<String>()),
             Type::List => self.as_shared_ref::<ListImpl>().cmp(other.as_shared_ref::<ListImpl>()),
             Type::Set => self.as_shared_ref::<SetImpl>().cmp(other.as_shared_ref::<SetImpl>()),
             Type::Dict => self.as_shared_ref::<DictImpl>().cmp(other.as_shared_ref::<DictImpl>()),
@@ -414,6 +504,7 @@ impl Clone for ValuePtr {
                 Type::Nil |
                 Type::Bool |
                 Type::Int |
+                Type::ShortStr |
                 Type::NativeFunction |
                 Type::GetField => self.as_copy(),
                 // Owned types
@@ -426,7 +517,7 @@ impl Clone for ValuePtr {
                 Type::Iter => self.clone_owned::<Iterable>(),
                 Type::Error => self.clone_owned::<RuntimeError>(),
                 // Shared types
-                Type::Str => self.clone_shared::<String>(),
+                Type::LongStr => self.clone_shared::<String>(),
                 Type::List => self.clone_shared::<ListImpl>(),
                 Type::Set => self.clone_shared::<SetImpl>(),
                 Type::Dict => self.clone_shared::<DictImpl>(),
@@ -457,6 +548,7 @@ impl Drop for ValuePtr {
                 Type::Nil |
                 Type::Bool |
                 Type::Int |
+                Type::ShortStr |
                 Type::NativeFunction |
                 Type::GetField => {},
                 // Owned types
@@ -469,7 +561,7 @@ impl Drop for ValuePtr {
                 Type::Iter => self.drop_owned::<Iterable>(),
                 Type::Error => self.drop_owned::<RuntimeError>(),
                 // Shared types
-                Type::Str => self.drop_shared::<String>(),
+                Type::LongStr => self.drop_shared::<String>(),
                 Type::List => self.drop_shared::<ListImpl>(),
                 Type::Set => self.drop_shared::<SetImpl>(),
                 Type::Dict => self.drop_shared::<DictImpl>(),
@@ -496,6 +588,7 @@ impl Hash for ValuePtr {
             Type::Nil |
             Type::Bool |
             Type::Int |
+            Type::ShortStr |
             Type::NativeFunction |
             Type::GetField => unsafe { self.tag }.hash(state),
             // Owned types
@@ -506,7 +599,7 @@ impl Hash for ValuePtr {
             Type::PartialNativeFunction => self.as_ref::<PartialNativeFunctionImpl>().hash(state),
             Type::Slice => self.as_ref::<SliceImpl>().hash(state),
             // Shared types
-            Type::Str => self.as_shared_ref::<String>().hash(state),
+            Type::LongStr => self.as_shared_ref::<String>().hash(state),
             Type::List => self.as_shared_ref::<ListImpl>().hash(state),
             Type::Set => self.as_shared_ref::<SetImpl>().hash(state),
             Type::Dict => self.as_shared_ref::<DictImpl>().hash(state),
@@ -531,6 +624,7 @@ impl Debug for ValuePtr {
             Type::Nil => write!(f, "Nil"),
             Type::Bool => Debug::fmt(&self.as_bool(), f),
             Type::Int => Debug::fmt(&self.as_int(), f),
+            Type::ShortStr => Debug::fmt(&self.as_str_slice(), f),
             Type::NativeFunction => Debug::fmt(&self.as_native(), f),
             Type::GetField => f.debug_struct("GetField").field("field_index", &self.as_field()).finish(),
             // Owned types
@@ -542,7 +636,7 @@ impl Debug for ValuePtr {
             Type::Slice => Debug::fmt(self.as_ref::<SliceImpl>(), f),
             Type::Error => Debug::fmt(self.as_ref::<RuntimeError>(), f),
             // Shared types
-            Type::Str => Debug::fmt(self.as_shared_ref::<String>(), f),
+            Type::LongStr => Debug::fmt(self.as_shared_ref::<String>(), f),
             Type::List => Debug::fmt(self.as_shared_ref::<ListImpl>(), f),
             Type::Set => Debug::fmt(self.as_shared_ref::<SetImpl>(), f),
             Type::Dict => Debug::fmt(self.as_shared_ref::<DictImpl>(), f),
@@ -1042,7 +1136,7 @@ mod tests {
         assert!(ptr.is_ptr());
         assert!(!ptr.is_owned());
         assert!(ptr.is_shared());
-        assert_eq!(ptr.ty(), Type::Str);
+        assert_eq!(ptr.ty(), Type::LongStr);
         assert_eq!(format!("{:?}", ptr), String::from("\"hello world\""));
     }
 
@@ -1087,13 +1181,5 @@ mod tests {
 
         let _r1 = ptr.as_vector().borrow();
         let _r2 = ptr.as_vector().borrow();
-    }
-
-    #[test]
-    fn test_shared_const_str_can_borrow_const() {
-        let ptr = "".to_value();
-
-        let _r1 = ptr.as_long_str().borrow_const();
-        let _r2 = ptr.as_long_str().borrow();
     }
 }

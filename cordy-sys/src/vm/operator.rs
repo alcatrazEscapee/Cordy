@@ -116,8 +116,8 @@ pub fn binary_mul(lhs: ValuePtr, rhs: ValuePtr) -> ValueResult {
     match (lhs.ty(), rhs.ty()) {
         (Bool | Int, Bool | Int) => (lhs.as_int() * rhs.as_int()).to_value().ok(),
         (Bool | Int | Complex, Bool | Int | Complex) => (lhs.as_complex() * rhs.as_complex()).to_value().ok(),
-        (Str, Int) => binary_str_repeat(lhs, rhs),
-        (Int, Str) => binary_str_repeat(rhs, lhs),
+        (ShortStr | LongStr, Int) => binary_str_repeat(lhs, rhs),
+        (Int, ShortStr | LongStr) => binary_str_repeat(rhs, lhs),
         (List, Int) => binary_list_repeat(lhs, rhs),
         (Int, List) => binary_list_repeat(rhs, lhs),
         (Vector, Vector) => apply_vector_binary(lhs, rhs, binary_mul),
@@ -189,7 +189,7 @@ fn c64_div_floor(lhs: C64, rhs: C64) -> C64 {
 pub fn binary_mod(lhs: ValuePtr, rhs: ValuePtr) -> ValueResult {
     match (lhs.ty(), rhs.ty()) {
         (Bool | Int, Bool | Int) => num_integer::mod_floor(lhs.as_int(), rhs.as_int()).to_value().ok(),
-        (Str, _) => core::format_string(lhs.as_str_slice(), rhs),
+        (ShortStr | LongStr, _) => core::format_string(lhs.as_str_slice(), rhs),
         (Vector, Vector) => apply_vector_binary(lhs, rhs, binary_mod),
         (Vector, _) => apply_vector_binary_scalar_rhs(lhs, rhs, binary_mod),
         (_, Vector) => apply_vector_binary_scalar_lhs(lhs, rhs, binary_mod),
@@ -249,7 +249,7 @@ pub fn binary_is(lhs: ValuePtr, rhs: ValuePtr, invert: bool) -> ValueResult {
 /// When `invert = true`, this is a `binary_not_in` operator
 pub fn binary_in(lhs: ValuePtr, rhs: ValuePtr, invert: bool) -> ValueResult {
     (match (lhs.ty(), rhs.ty()) {
-        (Str, Str) => rhs.as_str_slice().contains(lhs.as_str_slice()),
+        (ShortStr | LongStr, ShortStr | LongStr) => rhs.as_str_slice().contains(lhs.as_str_slice()),
         (Int | Bool, Range) => rhs.as_range().value.contains(lhs.as_int()),
         (_, List) => rhs.as_list().borrow().list.contains(&lhs),
         (_, Set) => rhs.as_set().borrow().set.contains(&lhs),
@@ -272,8 +272,8 @@ pub fn binary_add(lhs: ValuePtr, rhs: ValuePtr) -> ValueResult {
             ret.extend(rhs.list.iter().cloned());
             ret.to_value().ok()
         }
-        (Str, _) => format!("{}{}", lhs.as_str_slice(), rhs.to_str()).to_value().ok(),
-        (_, Str) => format!("{}{}", lhs.to_str(), rhs.as_str_slice()).to_value().ok(),
+        (ShortStr | LongStr, _) => format!("{}{}", lhs.as_str_slice(), rhs.to_str()).to_value().ok(),
+        (_, ShortStr | LongStr) => format!("{}{}", lhs.to_str(), rhs.as_str_slice()).to_value().ok(),
         (Vector, Vector) => apply_vector_binary(lhs, rhs, binary_add),
         (Vector, _) => apply_vector_binary_scalar_rhs(lhs, rhs, binary_add),
         (_, Vector) => apply_vector_binary_scalar_lhs(lhs, rhs, binary_add),
