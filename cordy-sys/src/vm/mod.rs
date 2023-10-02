@@ -90,7 +90,7 @@ pub trait VirtualInterface {
     fn invoke_func(&mut self, f: ValuePtr, args: &[ValuePtr]) -> ValueResult;
 
     fn invoke_eval(&mut self, s: &String) -> ValueResult;
-    fn invoke_monitor(&mut self, cmd: &String) -> ValueResult;
+    fn invoke_monitor(&mut self, cmd: &str) -> ValueResult;
 
     /// Executes a `StoreOp`, storing the value `value`
     fn store(&mut self, op: StoreOp, value: ValuePtr) -> AnyResult;
@@ -849,8 +849,8 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
         ret.ok()
     }
 
-    fn invoke_monitor(&mut self, cmd: &String) -> ValueResult {
-        match cmd.as_str() {
+    fn invoke_monitor(&mut self, cmd: &str) -> ValueResult {
+        match cmd {
             "stack" => self.stack.iter().cloned().to_list().ok(),
             "call-stack" => self.call_stack.iter()
                 .map(|frame| vec![frame.frame_pointer.to_value(), frame.return_ip.to_value()].to_value())
@@ -861,7 +861,7 @@ impl <R, W> VirtualInterface for VirtualMachine<R, W> where
                 .map(|(ip, op)| op.disassembly(ip, &mut std::iter::empty(), &self.fields, &self.constants).to_value())
                 .to_list()
                 .ok(),
-            _ => MonitorError(cmd.clone()).err(),
+            _ => MonitorError(String::from(cmd)).err(),
         }
     }
 

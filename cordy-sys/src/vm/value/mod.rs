@@ -28,6 +28,7 @@ pub type AnyResult = ErrorResult<()>;
 
 
 mod ptr;
+mod str;
 
 
 /// `Type` is an enumeration of all the possible types (not including user-defined type variants such as `struct`s) possible in Cordy.
@@ -372,7 +373,7 @@ impl ValuePtr {
 
     fn safe_to_str(&self, rc: &mut RecursionGuard) -> String {
         match self.ty() {
-            Type::Str => self.as_str().borrow_const().to_owned(),
+            Type::Str => self.as_heap_string(),
             Type::Function => self.as_function().borrow_const().name.clone(),
             Type::PartialFunction => self.as_partial_function_ref().func.ptr.safe_to_str(rc),
             Type::NativeFunction => self.as_native().name().to_string(),
@@ -407,7 +408,7 @@ impl ValuePtr {
                 }
             },
             Type::Str => {
-                let escaped = format!("{:?}", self.as_str().borrow_const());
+                let escaped = format!("{:?}", self.as_str_slice());
                 format!("'{}'", &escaped[1..escaped.len() - 1])
             },
 
@@ -554,7 +555,7 @@ impl ValuePtr {
             Type::Nil => false,
             Type::Bool => self.as_bool(),
             Type::Int => self.as_int() != 0,
-            Type::Str => !self.as_str().borrow_const().is_empty(),
+            Type::Str => !self.as_str_slice().is_empty(),
             Type::List => !self.as_list().borrow().list.is_empty(),
             Type::Set => !self.as_set().borrow().set.is_empty(),
             Type::Dict => !self.as_dict().borrow().dict.is_empty(),
@@ -573,7 +574,7 @@ impl ValuePtr {
     pub fn to_iter(self) -> ErrorResult<Iterable> {
         match self.ty() {
             Type::Str => {
-                let string: String = self.as_str().borrow_const().clone();
+                let string: String = self.as_heap_string();
                 let chars: Chars<'static> = unsafe {
                     std::mem::transmute(string.chars())
                 };
@@ -623,7 +624,7 @@ impl ValuePtr {
     /// Converts this `Value` to a `ValueAsIndex`, which is a index-able object, supported for `List`, `Vector`, and `Str`
     pub fn to_index(&self) -> ErrorResult<Indexable> {
         match self.ty() {
-            Type::Str => Ok(Indexable::Str(self.as_str())),
+            Type::Str => Ok(Indexable::Str(self.as_str_slice())),
             Type::List => Ok(Indexable::List(self.as_list().borrow_mut())),
             Type::Vector => Ok(Indexable::Vector(self.as_vector().borrow_mut())),
             _ => TypeErrorArgMustBeIndexable(self.clone()).err()
@@ -633,7 +634,7 @@ impl ValuePtr {
     /// Converts this `Value` to a `ValueAsSlice`, which is a builder for slice-like structures, supported for `List` and `Str`
     pub fn to_slice(&self) -> ErrorResult<Sliceable> {
         match self.ty() {
-            Type::Str => Ok(Sliceable::Str(self.as_str(), String::new())),
+            Type::Str => Ok(Sliceable::Str(self.as_str_slice(), String::new())),
             Type::List => Ok(Sliceable::List(self.as_list().borrow(), VecDeque::new())),
             Type::Vector => Ok(Sliceable::Vector(self.as_vector().borrow(), Vec::new())),
             _ => TypeErrorArgMustBeSliceable(self.clone()).err()
@@ -670,10 +671,10 @@ impl ValuePtr {
         }
     }
 
-    /// Returns the length of this `Value`. Equivalent to the native function `len`. Raises a type error if the value does not have a lenth.
+    /// Returns the length of this `Value`. Equivalent to the native function `len`. Raises a type error if the value does not have a length.
     pub fn len(&self) -> ErrorResult<usize> {
         match self.ty() {
-            Type::Str => Ok(self.as_str().borrow_const().chars().count()),
+            Type::Str => Ok(self.as_str_slice().chars().count()),
             Type::List => Ok(self.as_list().borrow().list.len()),
             Type::Set => Ok(self.as_set().borrow().set.len()),
             Type::Dict => Ok(self.as_dict().borrow().dict.len()),
@@ -850,7 +851,7 @@ impl_owned_value!(Type::Slice, SliceImpl, as_slice, as_slice_ref, is_slice);
 impl_owned_value!(Type::Iter, Iterable, as_iterable, as_iterable_ref, is_iterable);
 impl_owned_value!(Type::Error, RuntimeError, as_err, as_err_ref, is_err);
 
-impl_shared_value!(Type::Str, String, ConstValue, as_str, is_str);
+impl_shared_value!(Type::Str, String, ConstValue, as_long_str, is_long_str);
 impl_shared_value!(Type::List, ListImpl, MutValue, as_list, is_list);
 impl_shared_value!(Type::Set, SetImpl, MutValue, as_set, is_set);
 impl_shared_value!(Type::Dict, DictImpl, MutValue, as_dict, is_dict);
@@ -1631,7 +1632,7 @@ impl Hash for MemoizedImpl {
 
 
 pub enum Indexable<'a> {
-    Str(&'a SharedPrefix<String>),
+    Str(&'a str),
     List(RefMut<'a, ListImpl>),
     Vector(RefMut<'a, VectorImpl>),
 }
@@ -1640,7 +1641,7 @@ impl<'a> Indexable<'a> {
 
     pub fn len(&self) -> usize {
         match self {
-            Indexable::Str(it) => it.borrow_const().len(),
+            Indexable::Str(it) => it.len(),
             Indexable::List(it) => it.list.len(),
             Indexable::Vector(it) => it.vector.len(),
         }
@@ -1660,7 +1661,7 @@ impl<'a> Indexable<'a> {
 
     pub fn get_index(&self, index: usize) -> ValuePtr {
         match self {
-            Indexable::Str(it) => it.borrow_const().chars().nth(index).unwrap().to_value(),
+            Indexable::Str(it) => it.chars().nth(index).unwrap().to_value(),
             Indexable::List(it) => it.list[index].clone(),
             Indexable::Vector(it) => it.vector[index].clone(),
         }
@@ -1669,7 +1670,7 @@ impl<'a> Indexable<'a> {
     /// Setting indexes only works for immutable collections - so not strings
     pub fn set_index(&mut self, index: usize, value: ValuePtr) -> AnyResult {
         match self {
-            Indexable::Str(it) => TypeErrorArgMustBeIndexable(it.borrow_const().clone().to_value()).err(),
+            Indexable::Str(it) => TypeErrorArgMustBeIndexable(it.to_value()).err(),
             Indexable::List(it) => {
                 it.list[index] = value;
                 Ok(())
@@ -1684,7 +1685,7 @@ impl<'a> Indexable<'a> {
 
 
 pub enum Sliceable<'a> {
-    Str(&'a SharedPrefix<String>, String),
+    Str(&'a str, String),
     List(Ref<'a, ListImpl>, VecDeque<ValuePtr>),
     Vector(Ref<'a, VectorImpl>, Vec<ValuePtr>),
 }
@@ -1693,7 +1694,7 @@ impl<'a> Sliceable<'a> {
 
     pub fn len(&self) -> usize {
         match self {
-            Sliceable::Str(it, _) => it.borrow_const().len(),
+            Sliceable::Str(it, _) => it.len(),
             Sliceable::List(it, _) => it.list.len(),
             Sliceable::Vector(it, _) => it.vector.len(),
         }
@@ -1703,7 +1704,7 @@ impl<'a> Sliceable<'a> {
         if index >= 0 && index < self.len() as i64 {
             let index = index as usize;
             match self {
-                Sliceable::Str(src, dest) => dest.push(src.borrow_const().chars().nth(index).unwrap()),
+                Sliceable::Str(src, dest) => dest.push(src.chars().nth(index).unwrap()),
                 Sliceable::List(src, dest) => dest.push_back(src.list[index].clone()),
                 Sliceable::Vector(src, dest) => dest.push(src.vector[index].clone()),
             }

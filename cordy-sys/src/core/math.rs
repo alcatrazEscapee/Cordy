@@ -10,7 +10,7 @@ pub fn convert_to_int(target: ValuePtr, default: ValueOption) -> ValueResult {
         Type::Nil => 0i64.to_value().ok(),
         Type::Bool => target.as_int().to_value().ok(),
         Type::Int => target.ok(),
-        Type::Str => match target.as_str().borrow_const().parse::<i64>() {
+        Type::Str => match target.as_str_slice().parse::<i64>() {
             Ok(i) => i.to_value().ok(),
             Err(_) => match default.as_option() {
                 Some(a2) => a2.ok(),
