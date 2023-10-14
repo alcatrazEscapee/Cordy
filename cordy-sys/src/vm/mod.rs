@@ -361,7 +361,7 @@ impl<R : BufRead, W : Write> VirtualMachine<R, W> {
 
             Closure => {
                 let f = self.pop();
-                self.push(ValuePtr::closure(f));
+                self.push(f.to_closure());
             },
 
             CloseLocal(index) => {
@@ -505,12 +505,12 @@ impl<R : BufRead, W : Write> VirtualMachine<R, W> {
 
             GetField(field_index) => {
                 let a1: ValuePtr = self.pop();
-                let ret: ValuePtr = a1.get_field(&self.fields, field_index)?;
+                let ret: ValuePtr = a1.get_field(&self.fields, &self.constants, field_index)?;
                 self.push(ret);
             },
             GetFieldPeek(field_index) => {
-                let a1: ValuePtr = self.peek(0).clone();
-                let ret: ValuePtr = a1.get_field(&self.fields, field_index)?;
+                let a1: &ValuePtr = self.peek(0);
+                let ret: ValuePtr = a1.get_field(&self.fields, &self.constants, field_index)?;
                 self.push(ret);
             },
             GetFieldFunction(field_index) => {
@@ -741,9 +741,8 @@ impl<R : BufRead, W : Write> VirtualMachine<R, W> {
             }
             Type::StructType => {
                 let type_impl = f.as_struct_type().borrow_const();
-                let expected_args = type_impl.field_names.len() as u32;
-                if nargs != expected_args {
-                    return IncorrectArgumentsStruct(type_impl.clone(), nargs).err()
+                if nargs != type_impl.num_fields() {
+                    return IncorrectArgumentsStruct(type_impl.as_str(), nargs).err()
                 }
 
                 let args: Vec<ValuePtr> = self.popn(nargs);
@@ -753,7 +752,7 @@ impl<R : BufRead, W : Write> VirtualMachine<R, W> {
                 self.push(instance);
 
                 Ok(FunctionType::Native)
-            },
+            }
             Type::GetField => {
                 let field_index = f.as_field();
                 if nargs != 1 {
@@ -761,7 +760,7 @@ impl<R : BufRead, W : Write> VirtualMachine<R, W> {
                 }
 
                 let arg: ValuePtr = self.pop();
-                let ret: ValuePtr = arg.get_field(&self.fields, field_index)?;
+                let ret: ValuePtr = arg.get_field(&self.fields, &self.constants, field_index)?;
 
                 self.pop(); // The get field
                 self.push(ret);
@@ -1038,6 +1037,9 @@ mod tests {
     #[test] fn test_struct_operator_is() { run_str("struct A() ; struct B() let a = A(), b = B() ; [a is A, A is function, a is B, A is A, a is function] . print", "[true, true, false, false, false]\n"); }
     #[test] fn test_struct_construct_not_enough_arguments() { run_str("struct Foo(a, b, c) ; Foo(1)(2) . print ; ", "Incorrect number of arguments for struct Foo(a, b, c), got 1\n  at: line 1 (<test>)\n\n1 | struct Foo(a, b, c) ; Foo(1)(2) . print ; \n2 |                          ^^^\n"); }
     #[test] fn test_struct_construct_too_many_arguments() { run_str("struct Foo(a, b, c) ; Foo(1, 2, 3, 4) . print", "Incorrect number of arguments for struct Foo(a, b, c), got 4\n  at: line 1 (<test>)\n\n1 | struct Foo(a, b, c) ; Foo(1, 2, 3, 4) . print\n2 |                          ^^^^^^^^^^^^\n"); }
+    #[test] fn test_struct_with_method() { run_str("struct Square(side) { fn area(sq) -> sq->side ** 2 } let x = Square(3) ; Square->area(x) . print", "9\n"); }
+    #[test] fn test_module_empty() { run_str("mod Foo mod Bar ; (Foo, Bar) . print", "(struct Foo(), struct Bar())\n"); }
+    #[test] fn test_module_with_method() { run_str("mod Foo { fn bar() -> 123 } ; Foo->bar() . print", "123\n"); }
     #[test] fn test_local_vars_01() { run_str("let x=0 do { x.print }", "0\n"); }
     #[test] fn test_local_vars_02() { run_str("let x=0 do { let x=1; x.print }", "1\n"); }
     #[test] fn test_local_vars_03() { run_str("let x=0 do { x.print let x=1 }", "0\n"); }

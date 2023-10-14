@@ -1,0 +1,8 @@
+L1: 0000 InitGlobal
+    0001 StructType(struct EmptyStruct())
+L2: 0002 InitGlobal
+    0003 StructType(struct EmptyStructWithImpl())
+L3: 0004 InitGlobal
+    0005 StructType(struct EmptyMod())
+    0006 PopN(3)
+    0007 Exit

@@ -1,0 +1,6 @@
+struct Point2(x, y) {
+    fn norm1(p) -> p->x + p->y
+}
+
+let p = Point2(2, 3)
+print(Point2->norm1(p))

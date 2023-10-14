@@ -1071,7 +1071,7 @@ fn type_of(value: ValuePtr) -> ValuePtr {
         Type::Heap => Heap.to_value(),
         Type::Vector => Vector.to_value(),
 
-        Type::Struct => value.as_struct().borrow().type_impl.get().clone().to_value(), // Structs return their type constructor
+        Type::Struct => value.as_struct().borrow().get_constructor(), // Structs return their type constructor
         Type::StructType => Function.to_value(), // And the type constructor returns `function`
 
         Type::Range => Range.to_value(),

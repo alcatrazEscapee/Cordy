@@ -1,0 +1,3 @@
+struct EmptyStruct() ;
+struct EmptyStructWithImpl() {}
+mod EmptyMod {}

@@ -288,7 +288,7 @@ impl ValueFunction {
     }
 }
 
-/// Like `ValueOption` or `ValueResult`, but indicates via type saftey, that the underlying `ValuePtr` is a `StructType`
+/// Like `ValueOption` or `ValueResult`, but indicates via type safety, that the underlying `ValuePtr` is a `StructType`
 #[derive(Debug, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct ValueStructType {
     ptr: ValuePtr
@@ -324,16 +324,8 @@ impl ValuePtr {
         PartialNativeFunctionImpl { func, partial }.to_value()
     }
 
-    pub fn closure(func: ValuePtr) -> ValuePtr {
-        func.to_closure()
-    }
-
     pub fn instance(type_impl: ValueStructType, values: Vec<ValuePtr>) -> ValuePtr {
-        StructImpl {
-            type_index: type_impl.get().type_index,
-            type_impl,
-            values,
-        }.to_value()
+        StructImpl { owner: type_impl, values }.to_value()
     }
 
     pub fn memoized(func: ValuePtr) -> ValuePtr {
@@ -459,17 +451,14 @@ impl ValuePtr {
             Type::Struct => {
                 let it = self.as_struct().borrow();
                 recursive_guard!(
-                    format!("{}(...)", it.type_impl.get().name).to_ref_str(),
-                    format!("{}({})", it.type_impl.get().name.as_str(), it.values.iter()
-                        .zip(it.type_impl.get().field_names.iter())
+                    format!("{}(...)", it.owner.get().name).to_ref_str(),
+                    format!("{}({})", it.owner.get().name.as_str(), it.values.iter()
+                        .zip(it.owner.get().fields.iter())
                         .map(|(v, k)| format!("{}={}", k, v.safe_to_repr_str(rc).as_slice()))
                         .join(", ")).to_ref_str()
                 )
             },
-            Type::StructType => {
-                let it = self.as_struct_type().borrow_const();
-                format!("struct {}({})", it.name.clone(), it.field_names.join(", ")).to_ref_str()
-            },
+            Type::StructType => self.as_struct_type().borrow_const().as_str().to_ref_str(),
 
             Type::Range => {
                 let r = self.as_range_ref();
@@ -672,7 +661,7 @@ impl ValuePtr {
             Type::NativeFunction => Some(self.as_native().min_nargs()),
             Type::PartialNativeFunction => Some(self.as_partial_native_ref().partial.min_nargs()),
             Type::Closure => Some(self.as_closure().borrow().func.get().min_args()),
-            Type::StructType => Some(self.as_struct_type().borrow_const().field_names.len() as u32),
+            Type::StructType => Some(self.as_struct_type().borrow_const().num_fields()),
             Type::Slice => Some(1),
             _ => None,
         }
@@ -693,32 +682,40 @@ impl ValuePtr {
         }
     }
 
-    pub fn get_field(self, fields: &Fields, field_index: u32) -> ValueResult {
+    pub fn get_field(&self, fields: &Fields, constants: &Vec<ValuePtr>, field_index: u32) -> ValueResult {
         match self.ty() {
             Type::Struct => {
-                let mut it = self.as_struct().borrow_mut();
-                match fields.get_field_offset(it.type_index, field_index) {
+                let it = self.as_struct().borrow_mut();
+                match fields.get_field_offset(it.get_type(), field_index) {
                     Some(field_offset) => it.get_field(field_offset).ok(),
-                    None => TypeErrorFieldNotPresentOnValue(it.type_impl.ptr.clone(), fields.get_field_name(field_index), true).err()
+                    None => TypeErrorFieldNotPresentOnValue(it.owner.ptr.clone(), fields.get_field_name(field_index), true).err()
                 }
             },
-            _ => TypeErrorFieldNotPresentOnValue(self, fields.get_field_name(field_index), false).err()
+            Type::StructType => {
+                let it = self.as_struct_type().borrow_const();
+                match fields.get_field_offset(it.constructor_type, field_index) {
+                    Some(field_offset) => it.get_method(field_offset, constants).ptr.ok(),
+                    None => TypeErrorFieldNotPresentOnValue(it.clone().to_value(), fields.get_field_name(field_index), true).err()
+                }
+            },
+            _ => TypeErrorFieldNotPresentOnValue(self.clone(), fields.get_field_name(field_index), false).err()
         }
     }
 
-    pub fn set_field(self, fields: &Fields, field_index: u32, value: ValuePtr) -> ValueResult {
+    pub fn set_field(&self, fields: &Fields, field_index: u32, value: ValuePtr) -> ValueResult {
         match self.ty() {
             Type::Struct => {
                 let mut it = self.as_struct().borrow_mut();
-                match fields.get_field_offset(it.type_index, field_index) {
+                match fields.get_field_offset(it.get_type(), field_index) {
                     Some(field_offset) => {
                         it.set_field(field_offset, value.clone());
                         value.ok()
                     },
-                    None => TypeErrorFieldNotPresentOnValue(it.type_impl.ptr.clone(), fields.get_field_name(field_index), true).err()
+                    None => TypeErrorFieldNotPresentOnValue(it.owner.ptr.clone(), fields.get_field_name(field_index), true).err()
                 }
             },
-            _ => TypeErrorFieldNotPresentOnValue(self, fields.get_field_name(field_index), false).err()
+            // todo: other errors for trying to set a field that exists but isn't mutable
+            _ => TypeErrorFieldNotPresentOnValue(self.clone(), fields.get_field_name(field_index), false).err()
         }
     }
 
@@ -1301,29 +1298,37 @@ impl Hash for HeapImpl {
     }
 }
 
-/// The `Value` type for a instance of a struct.
-/// It holds the `type_index` for easy access, but also the `type_impl`, in order to access fields such as the struct name or field names, when converting to a string.
-#[derive(Debug, Clone)]
+/// The implementation type for an instance of a struct.
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct StructImpl {
-    pub type_index: u32,
-    pub type_impl: ValueStructType,
+    owner: ValueStructType,
     values: Vec<ValuePtr>,
 }
 
 impl StructImpl {
-    fn get_field(&mut self, field_offset: usize) -> ValuePtr {
+
+    /// Returns `true` if the current struct instance is of the provided constructor type.
+    pub fn is_instance_of(&self, other: &StructTypeImpl) -> bool {
+        self.get_type() == other.instance_type
+    }
+
+    /// Returns the `u32` type index of the struct **instance type**. This is the type index used to reference fields.
+    pub fn get_type(&self) -> u32 {
+        self.owner.get().instance_type
+    }
+
+    /// Returns a cloned (owned) copy of the constructor of this struct type.
+    /// This is equivalent to the `typeof self` operator
+    pub fn get_constructor(&self) -> ValuePtr {
+        self.owner.get().clone().to_value()
+    }
+
+    fn get_field(&self, field_offset: usize) -> ValuePtr {
         self.values[field_offset].clone()
     }
 
     fn set_field(&mut self, field_offset: usize, value: ValuePtr) {
         self.values[field_offset] = value;
-    }
-}
-
-impl Eq for StructImpl {}
-impl PartialEq<Self> for StructImpl {
-    fn eq(&self, other: &Self) -> bool {
-        self.type_index == other.type_index && self.values == other.values
     }
 }
 
@@ -1335,41 +1340,53 @@ impl Ord for StructImpl {
     }
 }
 
-impl Hash for StructImpl {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.type_index.hash(state);
-        self.values.hash(state);
-    }
-}
 
 /// The `Value` type for a struct constructor. It is a single instance, immutable object which only holds metadata about the struct itself.
 #[derive(Debug, Clone, Eq)]
 pub struct StructTypeImpl {
-    pub name: String,
-    pub field_names: Vec<String>,
+    name: String,
+    fields: Vec<String>,
+    /// Methods are references to constant indices, and so accessing a method involves going (type, field) -> offset -> constant -> `ValuePtr`
+    methods: Vec<u32>,
 
-    pub type_index: u32,
+    /// The `u32` type index of the instances created by this owner / constructor object.
+    /// This is the type used to reference fields.
+    instance_type: u32,
+    /// The `u32` type index of this owner / constructor object.
+    /// This is the type used to reference methods.
+    constructor_type: u32,
 }
 
 impl StructTypeImpl {
-    pub fn new(name: String, field_names: Vec<String>, type_index: u32) -> StructTypeImpl {
-        StructTypeImpl { name, field_names, type_index }
+    pub fn new(name: String, fields: Vec<String>, methods: Vec<u32>, instance_type: u32, constructor_type: u32) -> StructTypeImpl {
+        StructTypeImpl { name, fields, methods, instance_type, constructor_type }
     }
 
+    pub fn num_fields(&self) -> u32 {
+        self.fields.len() as u32
+    }
+
+    /// Returns the method associated with this constructor / owner type.
+    /// Unlike fields, methods only have an accessor and cannot be mutated. They also will return the derived type here (which will be a user function)
+    fn get_method(&self, method_offset: usize, constants: &Vec<ValuePtr>) -> ValueFunction {
+        ValueFunction::new(constants[self.methods[method_offset] as usize].clone())
+    }
+
+    /// Returns the canonical representation of a struct/module in Cordy form, i.e. `Foo(a, b, c)`
     pub fn as_str(&self) -> String {
-        format!("struct {}({})", self.name, self.field_names.join(", "))
+        format!("struct {}({})", self.name, self.fields.join(", "))
     }
 }
 
 impl PartialEq for StructTypeImpl {
     fn eq(&self, other: &Self) -> bool {
-        self.type_index == other.type_index
+        self.instance_type == other.instance_type
     }
 }
 
 impl Hash for StructTypeImpl {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.type_index.hash(state);
+        self.instance_type.hash(state);
     }
 }
 

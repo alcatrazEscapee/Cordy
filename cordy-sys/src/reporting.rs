@@ -3,7 +3,7 @@ use std::ops::{BitOr, BitOrAssign};
 
 use crate::compiler::{ParserError, ParserErrorType, ScanError, ScanErrorType, ScanToken};
 use crate::core::NativeFunction;
-use crate::vm::{FunctionImpl, RuntimeError, StructTypeImpl, ValuePtr};
+use crate::vm::{FunctionImpl, RuntimeError, ValuePtr};
 use crate::vm::operator::{BinaryOp, UnaryOp};
 
 
@@ -285,7 +285,7 @@ impl AsError for RuntimeError {
             RuntimeError::IncorrectArgumentsUserFunction(f, n) => format!("Incorrect number of arguments for {}, got {}", f.as_error(), n),
             RuntimeError::IncorrectArgumentsNativeFunction(f, n) => format!("Incorrect number of arguments for {}, got {}", f.as_error(), n),
             RuntimeError::IncorrectArgumentsGetField(s, n) => format!("Incorrect number of arguments for native (->'{}'), got {}", s, n),
-            RuntimeError::IncorrectArgumentsStruct(s, n) => format!("Incorrect number of arguments for {}, got {}", s.as_error(), n),
+            RuntimeError::IncorrectArgumentsStruct(s, n) => format!("Incorrect number of arguments for {}, got {}", s, n),
 
             RuntimeError::IOError(e) => format!("IOError: {}", e),
             RuntimeError::MonitorError(e) => format!("MonitorError: Illegal monitor command '{}'", e),
@@ -352,12 +352,6 @@ impl AsError for ValuePtr {
 impl AsError for FunctionImpl {
     fn as_error(&self) -> String {
         self.repr()
-    }
-}
-
-impl AsError for StructTypeImpl {
-    fn as_error(&self) -> String {
-        self.as_str()
     }
 }
 
@@ -507,6 +501,9 @@ impl AsError for ScanToken {
             ScanToken::KeywordStruct => String::from("'struct' keyword"),
             ScanToken::KeywordExit => String::from("'exit' keyword"),
             ScanToken::KeywordAssert => String::from("'assert' keyword"),
+            ScanToken::KeywordMod => String::from("'mod' keyword"),
+            ScanToken::KeywordSelf => String::from("'self' keyword"),
+            ScanToken::KeywordNative => String::from("'native' keyword"),
 
             ScanToken::Equals => String::from("'=' token"),
             ScanToken::PlusEquals => String::from("'+=' token"),
