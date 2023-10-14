@@ -276,7 +276,8 @@ impl Parser<'_> {
                 Some(KeywordBreak) => self.parse_break_statement(),
                 Some(KeywordContinue) => self.parse_continue_statement(),
                 Some(KeywordAssert) => self.parse_assert_statement(),
-                Some(KeywordStruct) => self.parse_struct_statement(),
+                Some(KeywordStruct) => self.parse_struct_or_module(false),
+                Some(KeywordMod) => self.parse_struct_or_module(true),
                 Some(CloseBrace) => break,
                 Some(Semicolon) => {
                     self.push_delayed_pop();
@@ -299,13 +300,14 @@ impl Parser<'_> {
         self.expect_resync(CloseBrace);
     }
 
-    fn parse_struct_statement(&mut self) {
+    fn parse_struct_or_module(&mut self, is_module: bool) {
         self.push_delayed_pop();
         self.advance(); // Consume `struct`
 
         // Structs can only be declared in global scope
         // While technically we could support scoped structs - the struct constructor becomes a local, there, the use case is just not there
         // The struct object and fields would have to be globally known anyway.
+        // todo: support non-global scope?
         if self.function_depth != 0 || self.scope_depth != 0 {
             self.semantic_error(StructNotInGlobalScope);
             return;
@@ -322,37 +324,76 @@ impl Parser<'_> {
             _ => return,
         }
 
-        // Declare a type index, as at this point we know we're in totally global scope, and the type name must be unique
-        let type_index: u32 = self.declare_type();
-        let mut unique_fields: Vec<String> = Vec::new();
+        // Declare two types - one for the instance, and one for the constructor
+        // - Fields are members of the instance, whereas methods are members of the constructor
+        // - Modules allow only methods, whereas structs allow both fields and methods
+        let instance_type: u32 = self.declare_type();
+        let constructor_type: u32 = self.declare_type();
+        let mut field_names: Vec<String> = Vec::new();
 
-        self.expect(OpenParen);
+        // Only structs can have fields, because they are constructable and modules are not
+        if !is_module {
+            self.expect(OpenParen);
 
-        loop {
-            match self.peek() {
-                Some(Identifier(_)) => {
-                    let name: String = self.advance_identifier();
+            while let Some(Identifier(_)) = self.peek() {
+                let name: String = self.advance_identifier();
 
-                    if unique_fields.contains(&name) {
-                        self.semantic_error(DuplicateFieldName(name))
-                    } else {
-                        self.declare_field(type_index, unique_fields.len(), name.clone());
-                        unique_fields.push(name);
-                    }
+                if field_names.contains(&name) {
+                    self.semantic_error(DuplicateFieldName(name))
+                } else {
+                    self.declare_field(instance_type, field_names.len(), name.clone());
+                    field_names.push(name);
+                }
 
-                    // Consume `,` and allow trailing comma
-                    if let Some(Comma) = self.peek() {
-                        self.skip();
-                    }
-                },
-                _ => break, // `CloseParen` also breaks the loop, and hits resync below
+                // Consume `,` and allow trailing comma
+                if let Some(Comma) = self.peek() {
+                    self.skip();
+                }
             }
+            self.expect_resync(CloseParen);
         }
 
-        let id: u32 = self.declare_const(StructTypeImpl::new(type_name, unique_fields, type_index));
-        self.push(Constant(id));
+        // Both structs and modules can optionally be followed by a `{` implementation block
+        // Modules can have no implementation blocks, I supposed, which would make them remarkably pointless, but possible.
+        let mut methods: Vec<u32> = Vec::new();
+        let mut method_names: Vec<String> = Vec::new();
+        if let Some(OpenBrace) = self.peek() {
+            self.advance(); // Consume `{`
 
-        self.expect_resync(CloseParen);
+            // The only thing that can be contained in struct/module implementations is methods
+            // todo: support native functions here
+            loop {
+                match self.peek() {
+                    Some(KeywordFn) => {
+                        self.advance(); // Consume `fn`
+                        let method_name = self.parse_function_name();
+                        let (args, default_args, var_arg) = self.parse_function_parameters();
+
+                        if let Some(name) = method_name {
+                            if method_names.contains(&name) {
+                                // todo: unique error for methods as opposed to fields
+                                self.semantic_error(DuplicateFieldName(name))
+                            } else {
+                                self.declare_field(constructor_type, method_names.len(), name.clone());
+                                let func: u32 = self.declare_function(name.clone(), &args, var_arg);
+
+                                method_names.push(name);
+                                methods.push(func);
+                            }
+                        }
+
+                        // Emit the closed locals from the function body right away, because we are not in an expression context
+                        let closed_locals = self.parse_function_body(args, default_args);
+                        self.emit_closure_and_closed_locals(closed_locals);
+                    },
+                    _ => break
+                }
+            }
+            self.expect_resync(CloseBrace);
+        }
+
+        let id: u32 = self.declare_const(StructTypeImpl::new(type_name, field_names, methods, instance_type, constructor_type));
+        self.push(Constant(id));
     }
 
     fn parse_annotated_named_function(&mut self) {
@@ -383,9 +424,7 @@ impl Parser<'_> {
         self.push_delayed_pop();
         self.advance();
         let maybe_name: Option<String> = self.parse_function_name();
-        self.expect(OpenParen);
         let (args, default_args, var_arg) = self.parse_function_parameters();
-        self.expect_resync(CloseParen);
 
         // Named functions are a complicated local variable, and needs to be declared as such
         // Note that we always declare the function here, to preserve parser operation in the event of a parse error
@@ -411,9 +450,7 @@ impl Parser<'_> {
 
         // Function header - `fn` (<arg>, ...)
         self.advance();
-        self.expect(OpenParen);
         let (args, default_args, var_arg) = self.parse_function_parameters();
-        self.expect_resync(CloseParen);
 
         // Expression functions don't declare themselves as a local variable that can be referenced.
         // Instead, as they're part of an expression, they just push a single function instance onto the stack
@@ -437,7 +474,9 @@ impl Parser<'_> {
     fn parse_function_parameters(&mut self) -> (Vec<LValue>, Vec<Expr>, bool) {
         trace::trace_parser!("rule <function-parameters>");
 
+        self.expect(OpenParen);
         if let Some(CloseParen) = self.peek() {
+            self.advance(); // Consume `)`
             return (Vec::new(), Vec::new(), false)
         }
 
@@ -483,6 +522,7 @@ impl Parser<'_> {
                 break
             }
         }
+        self.expect_resync(CloseParen);
         (args, default_args, var_arg)
     }
 
@@ -2114,14 +2154,17 @@ mod tests {
     #[test] fn test_loop_2() { run("loop_2"); }
     #[test] fn test_loop_3() { run("loop_3"); }
     #[test] fn test_loop_4() { run("loop_4"); }
+    #[test] fn test_modules() { run("modules"); }
     #[test] fn test_multiple_undeclared_variables() { run("multiple_undeclared_variables"); }
     #[test] fn test_pattern_expression() { run("pattern_expression"); }
     #[test] fn test_pattern_expression_nested() { run("pattern_expression_nested"); }
+    #[test] fn test_struct_with_methods() { run("struct_with_methods"); }
     #[test] fn test_trailing_commas() { run("trailing_commas"); }
     #[test] fn test_weird_expression_statements() { run("weird_expression_statements"); }
     #[test] fn test_weird_closure_not_a_closure() { run("weird_closure_not_a_closure"); }
     #[test] fn test_weird_locals() { run("weird_locals"); }
     #[test] fn test_weird_loop_nesting_in_functions() { run("weird_loop_nesting_in_functions"); }
+    #[test] fn test_weird_structs() { run("weird_structs"); }
     #[test] fn test_weird_upvalue_index() { run("weird_upvalue_index"); }
     #[test] fn test_weird_upvalue_index_with_parameter() { run("weird_upvalue_index_with_parameter"); }
     #[test] fn test_while_1() { run("while_1"); }

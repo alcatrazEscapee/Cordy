@@ -108,6 +108,9 @@ pub enum ScanToken {
     KeywordStruct,
     KeywordExit,
     KeywordAssert,
+    KeywordMod,
+    KeywordSelf,
+    KeywordNative,
 
     // Syntax
     Equals,
@@ -496,6 +499,9 @@ impl<'a> Scanner<'a> {
             "struct" => KeywordStruct,
             "exit" => KeywordExit,
             "assert" => KeywordAssert,
+            "mod" => KeywordMod,
+            "self" => KeywordSelf,
+            "native" => KeywordNative,
             "and" => LogicalAnd,
             "or" => LogicalOr,
              _ => Identifier(buffer)
@@ -601,7 +607,7 @@ mod tests {
 
 
     #[test] fn test_empty() { run_str("", vec![]); }
-    #[test] fn test_keywords() { run_str("let fn return if elif else then loop while for in is not break continue do true false nil struct exit assert", vec![KeywordLet, KeywordFn, KeywordReturn, KeywordIf, KeywordElif, KeywordElse, KeywordThen, KeywordLoop, KeywordWhile, KeywordFor, KeywordIn, KeywordIs, KeywordNot, KeywordBreak, KeywordContinue, KeywordDo, KeywordTrue, KeywordFalse, KeywordNil, KeywordStruct, KeywordExit, KeywordAssert]); }
+    #[test] fn test_keywords() { run_str("let fn return if elif else then loop while for in is not break continue do true false nil struct exit assert mod self native", vec![KeywordLet, KeywordFn, KeywordReturn, KeywordIf, KeywordElif, KeywordElse, KeywordThen, KeywordLoop, KeywordWhile, KeywordFor, KeywordIn, KeywordIs, KeywordNot, KeywordBreak, KeywordContinue, KeywordDo, KeywordTrue, KeywordFalse, KeywordNil, KeywordStruct, KeywordExit, KeywordAssert, KeywordMod, KeywordSelf, KeywordNative]); }
     #[test] fn test_identifiers() { run_str("foobar big_bad_wolf ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz", vec![Identifier(String::from("foobar")), Identifier(String::from("big_bad_wolf")), Identifier(String::from("ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz"))]); }
     #[test] fn test_str_literals() { run_str("'abc' 'a \n 3' '\\''", vec![StringLiteral(String::from("abc")), NewLine, StringLiteral(String::from("a \n 3")), StringLiteral(String::from("'"))]); }
     #[test] fn test_double_quote_str_literals() { run_str("\"abc\" '\"' \"'\"", vec![StringLiteral(String::from("abc")), StringLiteral(String::from("\"")), StringLiteral(String::from("'"))]); }

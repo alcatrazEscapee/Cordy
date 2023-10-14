@@ -1,6 +1,6 @@
 use crate::core::NativeFunction;
 use crate::reporting::{AsError, AsErrorWithContext, Location, SourceView};
-use crate::vm::{CallFrame, IntoValue, StructTypeImpl, Type, ValueResult};
+use crate::vm::{CallFrame, IntoValue, Type, ValueResult};
 use crate::vm::operator::{BinaryOp, UnaryOp};
 use crate::vm::value::{FunctionImpl, Prefix, ValuePtr};
 
@@ -17,7 +17,7 @@ pub enum RuntimeError {
     IncorrectArgumentsUserFunction(FunctionImpl, u32),
     IncorrectArgumentsNativeFunction(NativeFunction, u32),
     IncorrectArgumentsGetField(String, u32),
-    IncorrectArgumentsStruct(StructTypeImpl, u32),
+    IncorrectArgumentsStruct(String, u32),
 
     IOError(String),
     MonitorError(String),

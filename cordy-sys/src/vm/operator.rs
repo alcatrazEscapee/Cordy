@@ -226,7 +226,7 @@ pub fn binary_pow(lhs: ValuePtr, rhs: ValuePtr) -> ValueResult {
 pub fn binary_is(lhs: ValuePtr, rhs: ValuePtr, invert: bool) -> ValueResult {
     (match rhs.ty() {
         Nil => lhs.is_nil(),
-        StructType => lhs.is_struct() && lhs.as_struct().borrow().type_index == rhs.as_struct_type().borrow_const().type_index,
+        StructType => lhs.is_struct() && lhs.as_struct().borrow().is_instance_of(rhs.as_struct_type().borrow_const()),
         NativeFunction => match rhs.as_native() {
             NativeFunction::Bool => lhs.is_bool(),
             NativeFunction::Int => lhs.is_int(),
