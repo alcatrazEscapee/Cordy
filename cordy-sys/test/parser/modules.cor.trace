@@ -1,5 +1,5 @@
 L1: 0000 InitGlobal
-L6: 0001 StructType(struct Util())
+L6: 0001 StructType(module Util)
 L8: 0002 Print
     0003 PushGlobal(0) -> Util
     0004 GetField(0) -> add

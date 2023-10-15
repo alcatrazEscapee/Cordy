@@ -376,7 +376,7 @@ impl ValuePtr {
         }
     }
 
-    /// Converts the `Value` to a representative `String. This is equivalent to the stdlib function `repr()`, and meant to be an inverse of `eval()`
+    /// Converts the `Value` to a representative `String`. This is equivalent to the stdlib function `repr()`, and meant to be an inverse of `eval()`
     pub fn to_repr_str(&self) -> RefStr { self.safe_to_repr_str(&mut RecursionGuard::new()) }
 
     fn safe_to_repr_str(&self, rc: &mut RecursionGuard) -> RefStr {
@@ -688,17 +688,17 @@ impl ValuePtr {
                 let it = self.as_struct().borrow_mut();
                 match fields.get_field_offset(it.get_type(), field_index) {
                     Some(field_offset) => it.get_field(field_offset).ok(),
-                    None => TypeErrorFieldNotPresentOnValue(it.owner.ptr.clone(), fields.get_field_name(field_index), true).err()
+                    None => err_field_not_found(it.owner.ptr.clone(), fields, field_index, true, true)
                 }
-            },
+            }
             Type::StructType => {
                 let it = self.as_struct_type().borrow_const();
                 match fields.get_field_offset(it.constructor_type, field_index) {
                     Some(field_offset) => it.get_method(field_offset, constants).ptr.ok(),
-                    None => TypeErrorFieldNotPresentOnValue(it.clone().to_value(), fields.get_field_name(field_index), true).err()
+                    None => err_field_not_found(it.clone().to_value(), fields, field_index, true, true)
                 }
-            },
-            _ => TypeErrorFieldNotPresentOnValue(self.clone(), fields.get_field_name(field_index), false).err()
+            }
+            _ => err_field_not_found(self.clone(), fields, field_index, false, true)
         }
     }
 
@@ -710,12 +710,13 @@ impl ValuePtr {
                     Some(field_offset) => {
                         it.set_field(field_offset, value.clone());
                         value.ok()
-                    },
-                    None => TypeErrorFieldNotPresentOnValue(it.owner.ptr.clone(), fields.get_field_name(field_index), true).err()
+                    }
+                    None => err_field_not_found(it.owner.ptr.clone(), fields, field_index, true, false)
                 }
-            },
-            // todo: other errors for trying to set a field that exists but isn't mutable
-            _ => TypeErrorFieldNotPresentOnValue(self.clone(), fields.get_field_name(field_index), false).err()
+            }
+            // This is just for specialization of errors
+            Type::StructType => err_field_not_found(self.clone(), fields, field_index, true, false),
+            _ => err_field_not_found(self.clone(), fields, field_index, false, false)
         }
     }
 
@@ -772,6 +773,11 @@ impl ValuePtr {
             false => TypeErrorArgMustBeDict(self).err()
         }
     }
+}
+
+#[cold]
+fn err_field_not_found(value: ValuePtr, fields: &Fields, field_index: u32, repr: bool, access: bool) -> ValueResult {
+    TypeErrorFieldNotPresentOnValue { value, field: fields.get_field_name(field_index), repr, access }.err()
 }
 
 /// A type used to prevent recursive `repr()` and `str()` calls.
@@ -1355,11 +1361,16 @@ pub struct StructTypeImpl {
     /// The `u32` type index of this owner / constructor object.
     /// This is the type used to reference methods.
     constructor_type: u32,
+
+    /// Flag that specifies this constructor object is a **module**. This affects a few properties:
+    /// - Modules are not invokable as functions, and raise an error upon doing so
+    /// - Modules canonical string representation is `module X` whereas structs return themselves as `struct X(... fields ...)`
+    module: bool,
 }
 
 impl StructTypeImpl {
-    pub fn new(name: String, fields: Vec<String>, methods: Vec<u32>, instance_type: u32, constructor_type: u32) -> StructTypeImpl {
-        StructTypeImpl { name, fields, methods, instance_type, constructor_type }
+    pub fn new(name: String, fields: Vec<String>, methods: Vec<u32>, instance_type: u32, constructor_type: u32, module: bool) -> StructTypeImpl {
+        StructTypeImpl { name, fields, methods, instance_type, constructor_type, module }
     }
 
     pub fn num_fields(&self) -> u32 {
@@ -1374,7 +1385,10 @@ impl StructTypeImpl {
 
     /// Returns the canonical representation of a struct/module in Cordy form, i.e. `Foo(a, b, c)`
     pub fn as_str(&self) -> String {
-        format!("struct {}({})", self.name, self.fields.join(", "))
+        match self.module {
+            true => format!("module {}", self.name),
+            false => format!("struct {}({})", self.name, self.fields.join(", "))
+        }
     }
 }
 

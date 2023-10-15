@@ -313,10 +313,12 @@ impl AsError for RuntimeError {
             RuntimeError::TypeErrorBinaryOp(op, l, r) => format!("TypeError: Cannot {} {} and {}", op.as_error(), l.as_error(), r.as_error()),
             RuntimeError::TypeErrorBinaryIs(l, r) => format!("TypeError: {} is not a type and cannot be used with binary 'is' on {}", r.as_error(), l.as_error()),
             RuntimeError::TypeErrorCannotConvertToInt(v) => format!("TypeError: Cannot convert {} to an int", v.as_error()),
-            RuntimeError::TypeErrorFieldNotPresentOnValue(v, f, b) => match *b {
-                true => format!("TypeError: Cannot get field '{}' on {}", f, v.to_repr_str().as_slice()),
-                false => format!("TypeError: Cannot get field '{}' on {}", f, v.as_error().as_str()),
-            },
+            RuntimeError::TypeErrorFieldNotPresentOnValue { value, field, repr, access} => format!(
+                "TypeError: Cannot {} field '{}' on {}",
+                if *access { "get" } else { "set" },
+                field,
+                if *repr { value.to_repr_str().as_owned() } else { value.as_error() }
+            ),
             RuntimeError::TypeErrorArgMustBeInt(v) => format!("TypeError: Expected {} to be a int", v.as_error()),
             RuntimeError::TypeErrorArgMustBeComplex(v) => format!("TypeError: Expected {} to be a complex", v.as_error()),
             RuntimeError::TypeErrorArgMustBeStr(v) => format!("TypeError: Expected {} to be a string", v.as_error()),
@@ -501,7 +503,7 @@ impl AsError for ScanToken {
             ScanToken::KeywordStruct => String::from("'struct' keyword"),
             ScanToken::KeywordExit => String::from("'exit' keyword"),
             ScanToken::KeywordAssert => String::from("'assert' keyword"),
-            ScanToken::KeywordMod => String::from("'mod' keyword"),
+            ScanToken::KeywordModule => String::from("'mod' keyword"),
             ScanToken::KeywordSelf => String::from("'self' keyword"),
             ScanToken::KeywordNative => String::from("'native' keyword"),
 
