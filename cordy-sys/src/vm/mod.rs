@@ -8,7 +8,7 @@ use crate::{compiler, core, trace, util};
 use crate::compiler::{CompileParameters, CompileResult, Fields, IncrementalCompileResult, Locals};
 use crate::reporting::{Location, SourceView};
 use crate::util::{EmptyRead, OffsetAdd};
-use crate::vm::value::{Literal, UpValue, ValueStructType};
+use crate::vm::value::{Literal, UpValue};
 use crate::core::Pattern;
 
 pub use crate::vm::error::{DetailRuntimeError, RuntimeError};
@@ -740,14 +740,17 @@ impl<R : BufRead, W : Write> VirtualMachine<R, W> {
                 Ok(FunctionType::Native)
             }
             Type::StructType => {
-                let type_impl = f.as_struct_type().borrow_const();
-                if nargs != type_impl.num_fields() {
-                    return IncorrectArgumentsStruct(type_impl.as_str(), nargs).err()
+                let owner = f.as_struct_type().borrow_const();
+                if owner.is_module() {
+                    return ValueIsNotFunctionEvaluable(f.clone()).err()
+                }
+                if nargs != owner.num_fields() {
+                    return IncorrectArgumentsStruct(owner.as_str(), nargs).err()
                 }
 
                 let args: Vec<ValuePtr> = self.popn(nargs);
-                let struct_type = self.pop();
-                let instance: ValuePtr = ValuePtr::instance(ValueStructType::new(struct_type), args);
+                let owner = self.pop();
+                let instance: ValuePtr = ValuePtr::instance(owner, args);
 
                 self.push(instance);
 
@@ -1050,6 +1053,8 @@ mod tests {
     #[test] fn test_module_is() { run_str("module A {} ; A is A . print ; A is function . print", "false\ntrue\n"); }
     #[test] fn test_module_field_cannot_be_set() { run_str("module A { fn a() {} } ; A->a = 123", "TypeError: Cannot set field 'a' on module A\n  at: line 1 (<test>)\n\n1 | module A { fn a() {} } ; A->a = 123\n2 |                               ^\n"); }
     #[test] fn test_module_field_not_found() { run_str("module A { fn a() {} } module B { fn b() -> 1 } A->b() . print", "TypeError: Cannot get field 'b' on module A\n  at: line 1 (<test>)\n\n1 | module A { fn a() {} } module B { fn b() -> 1 } A->b() . print\n2 |                                                  ^^^\n"); }
+    #[test] fn test_module_cannot_construct() { run_str("module Foo {} ; Foo()", "Tried to evaluate module Foo but it is not a function.\n  at: line 1 (<test>)\n\n1 | module Foo {} ; Foo()\n2 |                    ^^\n"); }
+    #[test] fn test_module_cannot_construct_with_args() { run_str("module Foo {} ; Foo(1, 2, 3)", "Tried to evaluate module Foo but it is not a function.\n  at: line 1 (<test>)\n\n1 | module Foo {} ; Foo(1, 2, 3)\n2 |                    ^^^^^^^^^\n"); }
     #[test] fn test_local_vars_01() { run_str("let x=0 do { x.print }", "0\n"); }
     #[test] fn test_local_vars_02() { run_str("let x=0 do { let x=1; x.print }", "1\n"); }
     #[test] fn test_local_vars_03() { run_str("let x=0 do { x.print let x=1 }", "0\n"); }

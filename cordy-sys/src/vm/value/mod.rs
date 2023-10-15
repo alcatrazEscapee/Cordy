@@ -288,23 +288,6 @@ impl ValueFunction {
     }
 }
 
-/// Like `ValueOption` or `ValueResult`, but indicates via type safety, that the underlying `ValuePtr` is a `StructType`
-#[derive(Debug, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
-pub struct ValueStructType {
-    ptr: ValuePtr
-}
-
-impl ValueStructType {
-    pub fn new(ptr: ValuePtr) -> ValueStructType {
-        debug_assert!(ptr.is_struct_type());
-        ValueStructType { ptr }
-    }
-
-    pub fn get(&self) -> &StructTypeImpl {
-        self.ptr.as_struct_type().borrow_const()
-    }
-}
-
 pub type C64 = num_complex::Complex<i64>;
 
 
@@ -324,8 +307,8 @@ impl ValuePtr {
         PartialNativeFunctionImpl { func, partial }.to_value()
     }
 
-    pub fn instance(type_impl: ValueStructType, values: Vec<ValuePtr>) -> ValuePtr {
-        StructImpl { owner: type_impl, values }.to_value()
+    pub fn instance(owner: ValuePtr, values: Vec<ValuePtr>) -> ValuePtr {
+        StructImpl { owner, values }.to_value()
     }
 
     pub fn memoized(func: ValuePtr) -> ValuePtr {
@@ -451,9 +434,9 @@ impl ValuePtr {
             Type::Struct => {
                 let it = self.as_struct().borrow();
                 recursive_guard!(
-                    format!("{}(...)", it.owner.get().name).to_ref_str(),
-                    format!("{}({})", it.owner.get().name.as_str(), it.values.iter()
-                        .zip(it.owner.get().fields.iter())
+                    format!("{}(...)", it.get_owner().name).to_ref_str(),
+                    format!("{}({})", it.get_owner().name.as_str(), it.values.iter()
+                        .zip(it.get_owner().fields.iter())
                         .map(|(v, k)| format!("{}={}", k, v.safe_to_repr_str(rc).as_slice()))
                         .join(", ")).to_ref_str()
                 )
@@ -688,7 +671,7 @@ impl ValuePtr {
                 let it = self.as_struct().borrow_mut();
                 match fields.get_field_offset(it.get_type(), field_index) {
                     Some(field_offset) => it.get_field(field_offset).ok(),
-                    None => err_field_not_found(it.owner.ptr.clone(), fields, field_index, true, true)
+                    None => err_field_not_found(it.get_constructor(), fields, field_index, true, true)
                 }
             }
             Type::StructType => {
@@ -711,7 +694,7 @@ impl ValuePtr {
                         it.set_field(field_offset, value.clone());
                         value.ok()
                     }
-                    None => err_field_not_found(it.owner.ptr.clone(), fields, field_index, true, false)
+                    None => err_field_not_found(it.get_constructor(), fields, field_index, true, false)
                 }
             }
             // This is just for specialization of errors
@@ -1307,7 +1290,8 @@ impl Hash for HeapImpl {
 /// The implementation type for an instance of a struct.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct StructImpl {
-    owner: ValueStructType,
+    /// `owner` must be a pointer to a `StructType` and will be dereferenced as `as_struct_type()` without checking.
+    owner: ValuePtr,
     values: Vec<ValuePtr>,
 }
 
@@ -1320,13 +1304,18 @@ impl StructImpl {
 
     /// Returns the `u32` type index of the struct **instance type**. This is the type index used to reference fields.
     pub fn get_type(&self) -> u32 {
-        self.owner.get().instance_type
+        self.get_owner().instance_type
     }
 
     /// Returns a cloned (owned) copy of the constructor of this struct type.
     /// This is equivalent to the `typeof self` operator
     pub fn get_constructor(&self) -> ValuePtr {
-        self.owner.get().clone().to_value()
+        self.owner.clone()
+    }
+
+    /// Returns the owner (constructor type) as a reference to the `StructTypeImpl`
+    pub fn get_owner(&self) -> &StructTypeImpl {
+        self.owner.as_struct_type().borrow_const()
     }
 
     fn get_field(&self, field_offset: usize) -> ValuePtr {
@@ -1375,6 +1364,10 @@ impl StructTypeImpl {
 
     pub fn num_fields(&self) -> u32 {
         self.fields.len() as u32
+    }
+
+    pub fn is_module(&self) -> bool {
+        self.module
     }
 
     /// Returns the method associated with this constructor / owner type.
