@@ -45,7 +45,12 @@ pub enum RuntimeError {
     TypeErrorBinaryOp(BinaryOp, ValuePtr, ValuePtr),
     TypeErrorBinaryIs(ValuePtr, ValuePtr),
     TypeErrorCannotConvertToInt(ValuePtr),
-    TypeErrorFieldNotPresentOnValue(ValuePtr, String, bool), // value, field name, is the value to be printed with to_repr_str()?
+    TypeErrorFieldNotPresentOnValue {
+        value: ValuePtr,
+        field: String,
+        repr: bool, // If true, print the value using it's repr() instead. Used for structs and modules
+        access: bool, // Was the field reference an access (get) or mutation (set)
+    },
 
     TypeErrorArgMustBeInt(ValuePtr),
     TypeErrorArgMustBeComplex(ValuePtr),

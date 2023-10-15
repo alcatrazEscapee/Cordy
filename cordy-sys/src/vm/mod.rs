@@ -1027,8 +1027,8 @@ mod tests {
     #[test] fn test_struct_get_field_of_not_struct() { run_str("struct Foo(a, b) (1, 2) -> a . print", "TypeError: Cannot get field 'a' on '(1, 2)' of type 'vector'\n  at: line 1 (<test>)\n\n1 | struct Foo(a, b) (1, 2) -> a . print\n2 |                         ^^^^\n"); }
     #[test] fn test_struct_get_field_with_overlapping_offsets() { run_str("struct Foo(a, b) struct Bar(b, a) Foo(1, 2) -> b . print", "2\n"); }
     #[test] fn test_struct_set_field_of_struct() { run_str("struct Foo(a, b) let x = Foo(1, 2) ; x->a = 3 ; x->a . print", "3\n"); }
-    #[test] fn test_struct_set_field_of_struct_wrong_name() { run_str("struct Foo(a, b) struct Bar(c, d) let x = Foo(1, 2) ; x->c = 3", "TypeError: Cannot get field 'c' on struct Foo(a, b)\n  at: line 1 (<test>)\n\n1 | struct Foo(a, b) struct Bar(c, d) let x = Foo(1, 2) ; x->c = 3\n2 |                                                            ^\n"); }
-    #[test] fn test_struct_set_field_of_not_struct() { run_str("struct Foo(a, b) (1, 2)->a = 3", "TypeError: Cannot get field 'a' on '(1, 2)' of type 'vector'\n  at: line 1 (<test>)\n\n1 | struct Foo(a, b) (1, 2)->a = 3\n2 |                            ^\n"); }
+    #[test] fn test_struct_set_field_of_struct_wrong_name() { run_str("struct Foo(a, b) struct Bar(c, d) let x = Foo(1, 2) ; x->c = 3", "TypeError: Cannot set field 'c' on struct Foo(a, b)\n  at: line 1 (<test>)\n\n1 | struct Foo(a, b) struct Bar(c, d) let x = Foo(1, 2) ; x->c = 3\n2 |                                                            ^\n"); }
+    #[test] fn test_struct_set_field_of_not_struct() { run_str("struct Foo(a, b) (1, 2)->a = 3", "TypeError: Cannot set field 'a' on '(1, 2)' of type 'vector'\n  at: line 1 (<test>)\n\n1 | struct Foo(a, b) (1, 2)->a = 3\n2 |                            ^\n"); }
     #[test] fn test_struct_op_set_field_of_struct() { run_str("struct Foo(a, b) let x = Foo(1, 2) ; x->a += 3 ; x->a . print", "4\n"); }
     #[test] fn test_struct_partial_get_field_in_bare_method() { run_str("struct Foo(a, b) let x = Foo(2, 3), f = (->b) ; x . f . print", "3\n"); }
     #[test] fn test_struct_partial_get_field_in_function_eval() { run_str("struct Foo(a, b) [Foo(1, 2), Foo(2, 3)] . map(->b) . print", "[2, 3]\n"); }
@@ -1038,8 +1038,18 @@ mod tests {
     #[test] fn test_struct_construct_not_enough_arguments() { run_str("struct Foo(a, b, c) ; Foo(1)(2) . print ; ", "Incorrect number of arguments for struct Foo(a, b, c), got 1\n  at: line 1 (<test>)\n\n1 | struct Foo(a, b, c) ; Foo(1)(2) . print ; \n2 |                          ^^^\n"); }
     #[test] fn test_struct_construct_too_many_arguments() { run_str("struct Foo(a, b, c) ; Foo(1, 2, 3, 4) . print", "Incorrect number of arguments for struct Foo(a, b, c), got 4\n  at: line 1 (<test>)\n\n1 | struct Foo(a, b, c) ; Foo(1, 2, 3, 4) . print\n2 |                          ^^^^^^^^^^^^\n"); }
     #[test] fn test_struct_with_method() { run_str("struct Square(side) { fn area(sq) -> sq->side ** 2 } let x = Square(3) ; Square->area(x) . print", "9\n"); }
-    #[test] fn test_module_empty() { run_str("mod Foo mod Bar ; (Foo, Bar) . print", "(struct Foo(), struct Bar())\n"); }
-    #[test] fn test_module_with_method() { run_str("mod Foo { fn bar() -> 123 } ; Foo->bar() . print", "123\n"); }
+    #[test] fn test_module_empty() { run_str("module Foo module Bar ; (Foo, Bar) . print", "(module Foo, module Bar)\n"); }
+    #[test] fn test_module_with_method() { run_str("module Foo { fn bar() -> 123 } ; Foo->bar() . print", "123\n"); }
+    #[test] fn test_modules_with_same_method() { run_str("module A { fn a() -> 1 } module B { fn a() -> 2 } ; (A->a(), B->a()) . print", "(1, 2)\n"); }
+    #[test] fn test_module_with_many_methods() { run_str("module A { fn a() -> 1 fn b() { 2 } } ; (A->a(), A->b()) . print", "(1, 2)\n"); }
+    #[test] fn test_module_indirect_method_access() { run_str("module A { fn a() { print 'hi' } } ; let f = A->a ; f()", "hi\n"); }
+    #[test] fn test_module_get_field_access() { run_str("module A { fn a() { print 'hi' } } ; let f = (->a) ; f(A)()", "hi\n"); }
+    #[test] fn test_module_and_struct() { run_str("struct A(a) ; module B { fn a() { print 'hi' } } ; let x = A('yes'), f = (->a) ; (f(x), f(B)) . print", "('yes', fn a())\n"); }
+    #[test] fn test_module_str_and_repr() { run_str("module A { fn a() {} } A . print ; A . repr . print", "module A\nmodule A\n"); }
+    #[test] fn test_module_typeof() { run_str("module A ; typeof A . print", "function\n"); }
+    #[test] fn test_module_is() { run_str("module A {} ; A is A . print ; A is function . print", "false\ntrue\n"); }
+    #[test] fn test_module_field_cannot_be_set() { run_str("module A { fn a() {} } ; A->a = 123", "TypeError: Cannot set field 'a' on module A\n  at: line 1 (<test>)\n\n1 | module A { fn a() {} } ; A->a = 123\n2 |                               ^\n"); }
+    #[test] fn test_module_field_not_found() { run_str("module A { fn a() {} } module B { fn b() -> 1 } A->b() . print", "TypeError: Cannot get field 'b' on module A\n  at: line 1 (<test>)\n\n1 | module A { fn a() {} } module B { fn b() -> 1 } A->b() . print\n2 |                                                  ^^^\n"); }
     #[test] fn test_local_vars_01() { run_str("let x=0 do { x.print }", "0\n"); }
     #[test] fn test_local_vars_02() { run_str("let x=0 do { let x=1; x.print }", "1\n"); }
     #[test] fn test_local_vars_03() { run_str("let x=0 do { x.print let x=1 }", "0\n"); }

@@ -277,7 +277,7 @@ impl Parser<'_> {
                 Some(KeywordContinue) => self.parse_continue_statement(),
                 Some(KeywordAssert) => self.parse_assert_statement(),
                 Some(KeywordStruct) => self.parse_struct_or_module(false),
-                Some(KeywordMod) => self.parse_struct_or_module(true),
+                Some(KeywordModule) => self.parse_struct_or_module(true),
                 Some(CloseBrace) => break,
                 Some(Semicolon) => {
                     self.push_delayed_pop();
@@ -366,20 +366,45 @@ impl Parser<'_> {
                 match self.peek() {
                     Some(KeywordFn) => {
                         self.advance(); // Consume `fn`
-                        let method_name = self.parse_function_name();
+
+                        let name = match self.peek() {
+                            Some(Identifier(_)) => {
+                                let name = self.advance_identifier();
+
+                                // Need to also check conflicts with fields
+                                // Technically we can have fields that conflict with methods, so long as the methods in question aren't `self` methods:
+                                // ```
+                                // struct Foo(bar) {
+                                //     fn bar() {}
+                                // }
+                                // ```
+                                // This references a `Foo->bar` and a `Foo(nil)->bar` which are distinct. But it introduces ambiguity if `bar` was a instance method:
+                                // ```
+                                // Foo(nil)->bar // is this a field or method?
+                                // ```
+                                // In the interest of preventing confusion, we deny this behavior completely.
+                                //
+                                // Some prior art:
+                                // - Java allows conflicts, but (1) access levels, and (2) you can't reference functions without invoking them, and (3) you can't invoke fields -> no ambiguity
+                                // - Python fields and methods are identical, meaning conflicts can occur and they must be unique (same situation here)
+                                if method_names.contains(&name) || field_names.contains(&name) {
+                                    self.semantic_error(DuplicateFieldName(name.clone()))
+                                }
+                                Some(name)
+                            },
+                            _ => {
+                                self.error_with(ExpectedFunctionNameAfterFn);
+                                None
+                            }
+                        };
                         let (args, default_args, var_arg) = self.parse_function_parameters();
 
-                        if let Some(name) = method_name {
-                            if method_names.contains(&name) {
-                                // todo: unique error for methods as opposed to fields
-                                self.semantic_error(DuplicateFieldName(name))
-                            } else {
-                                self.declare_field(constructor_type, method_names.len(), name.clone());
-                                let func: u32 = self.declare_function(name.clone(), &args, var_arg);
+                        if let Some(name) = name {
+                            self.declare_field(constructor_type, method_names.len(), name.clone());
+                            let func: u32 = self.declare_function(name.clone(), &args, var_arg);
 
-                                method_names.push(name);
-                                methods.push(func);
-                            }
+                            method_names.push(name);
+                            methods.push(func);
                         }
 
                         // Emit the closed locals from the function body right away, because we are not in an expression context
@@ -392,7 +417,7 @@ impl Parser<'_> {
             self.expect_resync(CloseBrace);
         }
 
-        let id: u32 = self.declare_const(StructTypeImpl::new(type_name, field_names, methods, instance_type, constructor_type));
+        let id: u32 = self.declare_const(StructTypeImpl::new(type_name, field_names, methods, instance_type, constructor_type, is_module));
         self.push(Constant(id));
     }
 
@@ -423,12 +448,19 @@ impl Parser<'_> {
         // Function header - `fn <name> (<arg>, ...)
         self.push_delayed_pop();
         self.advance();
-        let maybe_name: Option<String> = self.parse_function_name();
+
+        let name = match self.peek() {
+            Some(Identifier(_)) => Some(self.advance_identifier()),
+            _ => {
+                self.error_with(ExpectedFunctionNameAfterFn);
+                None
+            }
+        };
         let (args, default_args, var_arg) = self.parse_function_parameters();
 
         // Named functions are a complicated local variable, and needs to be declared as such
         // Note that we always declare the function here, to preserve parser operation in the event of a parse error
-        let name = maybe_name
+        let name = name
             .map(|name| {
                 if let Some(index) = self.declare_local(name.clone()) {
                     self.init_local(index);
@@ -457,17 +489,6 @@ impl Parser<'_> {
         let func: u32 = self.declare_function(String::from("_"), &args, var_arg);
         let closed_locals = self.parse_function_body(args, default_args);
         Expr::function(func, closed_locals)
-    }
-
-    fn parse_function_name(&mut self) -> Option<String> {
-        trace::trace_parser!("rule <function-name>");
-        match self.peek() {
-            Some(Identifier(_)) => Some(self.advance_identifier()),
-            _ => {
-                self.error_with(ExpectedFunctionNameAfterFn);
-                None
-            }
-        }
     }
 
     /// Returns the pair of `lvalue` parameters, and `Expr` default values, if present.
@@ -2112,9 +2133,13 @@ mod tests {
     #[test] fn test_late_bound_global_in_store() { run_err("fn foo() { y = x + 1 } let y", "Undeclared identifier: 'x'\n  at: line 1 (<test>)\n\n1 | fn foo() { y = x + 1 } let y\n2 |                ^\n") }
     #[test] fn test_late_bound_global_in_load_store_duplicate_error() { run_err("fn foo() { x += 1 }", "Undeclared identifier: 'x'\n  at: line 1 (<test>)\n\n1 | fn foo() { x += 1 }\n2 |            ^\n") }
     #[test] fn test_late_bound_global_in_pattern() { run_err("fn foo() { x, y = nil }", "Undeclared identifier: 'x'\n  at: line 1 (<test>)\n\n1 | fn foo() { x, y = nil }\n2 |                 ^\n\nUndeclared identifier: 'y'\n  at: line 1 (<test>)\n\n1 | fn foo() { x, y = nil }\n2 |                 ^\n") }
-    #[test] fn test_error_on_line_with_weird_indentation_1() { run_err("  \t    \t&", "Expected an expression terminal, got '&' token instead\n  at: line 1 (<test>)\n\n1 |   \t    \t&\n2 |   \t    \t^\n") }
-    #[test] fn test_error_on_line_with_weird_indentation_2() { run_err("\t\t  &", "Expected an expression terminal, got '&' token instead\n  at: line 1 (<test>)\n\n1 | \t\t  &\n2 | \t\t  ^\n") }
-    #[test] fn test_error_on_line_with_weird_indentation_3() { run_err("\t  \t     &", "Expected an expression terminal, got '&' token instead\n  at: line 1 (<test>)\n\n1 | \t  \t     &\n2 | \t  \t     ^\n") }
+    #[test] fn test_line_with_weird_indentation_1() { run_err("  \t    \t&", "Expected an expression terminal, got '&' token instead\n  at: line 1 (<test>)\n\n1 |   \t    \t&\n2 |   \t    \t^\n") }
+    #[test] fn test_line_with_weird_indentation_2() { run_err("\t\t  &", "Expected an expression terminal, got '&' token instead\n  at: line 1 (<test>)\n\n1 | \t\t  &\n2 | \t\t  ^\n") }
+    #[test] fn test_line_with_weird_indentation_3() { run_err("\t  \t     &", "Expected an expression terminal, got '&' token instead\n  at: line 1 (<test>)\n\n1 | \t  \t     &\n2 | \t  \t     ^\n") }
+    #[test] fn test_struct_with_duplicate_field() { run_err("struct A(a, b, a)", "Duplicate field name: 'a'\n  at: line 1 (<test>)\n\n1 | struct A(a, b, a)\n2 |                ^\n") }
+    #[test] fn test_struct_with_duplicate_method() { run_err("struct A(a) { fn b() {} fn b() {} }", "Duplicate field name: 'b'\n  at: line 1 (<test>)\n\n1 | struct A(a) { fn b() {} fn b() {} }\n2 |                            ^\n") }
+    #[test] fn test_struct_with_duplicate_both() { run_err("struct A(a, b) { fn a() {} }", "Duplicate field name: 'a'\n  at: line 1 (<test>)\n\n1 | struct A(a, b) { fn a() {} }\n2 |                     ^\n") }
+    #[test] fn test_module_with_duplicate_method() { run_err("module A { fn a() {} fn a() {} }", "Duplicate field name: 'a'\n  at: line 1 (<test>)\n\n1 | module A { fn a() {} fn a() {} }\n2 |                         ^\n") }
 
     #[test] fn test_array_access_after_newline() { run("array_access_after_newline"); }
     #[test] fn test_array_access_no_newline() { run("array_access_no_newline"); }
