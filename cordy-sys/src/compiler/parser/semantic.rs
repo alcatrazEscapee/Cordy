@@ -6,12 +6,13 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
 use fxhash::FxBuildHasher;
+use indexmap::IndexMap;
 use itertools::Itertools;
 
 use crate::compiler::parser::{Parser, ParserError, ParserErrorType};
 use crate::core;
 use crate::reporting::Location;
-use crate::vm::{FunctionImpl, IntoValue, Opcode, StoreOp, ValuePtr};
+use crate::vm::{FunctionImpl, IntoValue, Opcode, StoreOp, StructTypeImpl, ValuePtr};
 
 use Opcode::{*};
 use ParserErrorType::{*};
@@ -170,7 +171,7 @@ impl Local {
 
 
 #[derive(Debug, Clone)]
-pub struct LateBoundGlobal {
+pub struct LateBinding {
     /// A unique index for every late bound global.
     index: usize,
     name: String,
@@ -183,9 +184,9 @@ pub struct LateBoundGlobal {
     error: Option<ParserError>,
 }
 
-impl LateBoundGlobal {
-    pub fn new(index: usize, name: String, ordinal: usize, opcode: usize, error: Option<ParserError>) -> LateBoundGlobal {
-        LateBoundGlobal {
+impl LateBinding {
+    pub fn new(index: usize, name: String, ordinal: usize, opcode: usize, error: Option<ParserError>) -> LateBinding {
+        LateBinding {
             index,
             name,
             opcode: (ordinal, opcode),
@@ -239,7 +240,7 @@ pub enum LValueReference {
     Named(String),
     Local(u32),
     Global(u32),
-    LateBoundGlobal(LateBoundGlobal),
+    LateBinding(LateBinding),
     UpValue(u32),
     #[default]
     Invalid,
@@ -464,11 +465,11 @@ impl LValueReference {
         match self {
             LValueReference::Local(index) => ParserStoreOp::Bound(StoreOp::Local(index)),
             LValueReference::Global(index) => ParserStoreOp::Bound(StoreOp::Global(index)),
-            LValueReference::LateBoundGlobal(mut global) => {
+            LValueReference::LateBinding(mut global) => {
                 let index = global.index;
 
                 global.update(ReferenceType::LoadPattern, parser);
-                parser.late_bound_globals.push(global);
+                parser.late_bindings.push(global);
 
                 ParserStoreOp::LateBoundGlobal(index)
             },
@@ -529,6 +530,28 @@ impl ParserFunctionImpl {
     /// Marks a default argument as finished.
     pub(super) fn mark_default_arg(&mut self) {
         self.default_args.push(self.code.len());
+    }
+}
+
+
+/// A representation of a module (or struct) which may expose methods and fields that can be bound.
+pub struct Module {
+    name: String,
+    is_module: bool,
+
+    /// A map of method names to function indices. When resolving module methods, they don't do a `GetField` and rather bind directly to the method at compile-time.
+    methods: IndexMap<String, u32>,
+    fields: Vec<String>,
+}
+
+impl Module {
+    pub fn new(name: String, is_module: bool) -> Module {
+        Module { name, is_module, methods: IndexMap::new(), fields: Vec::new() }
+    }
+
+    pub fn bake(self, instance_type: u32, constructor_type: u32) -> StructTypeImpl {
+        let methods: Vec<u32> = self.methods.into_values().collect();
+        StructTypeImpl::new(self.name, self.fields, methods, instance_type, constructor_type, self.is_module)
     }
 }
 
@@ -613,13 +636,13 @@ impl<'a> Parser<'a> {
 
         // If global, then fix references to this global
         if local.is_global() {
-            for global in &self.late_bound_globals {
-                if global.name == local.name {
-                    let (func_index, code_index) = global.opcode;
-                    let global_index = global.index;
+            for binding in &self.late_bindings {
+                if binding.name == local.name {
+                    let (func_index, code_index) = binding.opcode;
+                    let binding_index = binding.index;
                     let (_, opcode) = &mut self.functions[func_index].code[code_index];
 
-                    match global.ty {
+                    match binding.ty {
                         ReferenceType::Load => *opcode = PushGlobal(local.index),
                         ReferenceType::Store => *opcode = StoreGlobal(local.index, false),
                         ReferenceType::LoadPattern => {
@@ -632,7 +655,7 @@ impl<'a> Parser<'a> {
                             let pattern = &mut self.patterns[pattern_index];
                             pattern.visit(&mut |op| {
                                 if let ParserStoreOp::LateBoundGlobal(index) = op {
-                                    if *index == global_index {
+                                    if *index == binding_index {
                                         *op = ParserStoreOp::Bound(StoreOp::Global(local.index))
                                     }
                                 }
@@ -644,7 +667,7 @@ impl<'a> Parser<'a> {
             }
 
             // And remove them
-            self.late_bound_globals.retain(|global| global.name != local.name);
+            self.late_bindings.retain(|global| global.name != local.name);
 
             // Declare this global variable's name
             self.globals_reference.push(local.name.clone());
@@ -769,16 +792,28 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Resolve an identifier, which can be one of many things, each of which are tried in-order
+    /// Resolve an identifier, which can be one of many things, each of which are tried in-order:
     ///
     /// 1. Native Functions. These cannot be shadowed (as it creates interesting conflict scenarios), and they are all technically global functions.
-    /// 2. Locals (in the current call frame), with the same function depth. Locals at a higher scope are shadowed (hidden) by locals in a deeper scope.
-    /// 3. Globals (relative to the origin of the stack, with function depth == 0 and stack depth == 0)
-    /// 4. Late Bound Globals:
-    ///     - If we are in a >0 function depth, we *do* allow late binding globals.
-    ///     - Note: we have to use a special opcode which checks if the global actually exists first. *And*, we need to fix it later if the global does not end up being bound by the end of compilation.
+    /// 2. Locals in the current function (the same function depth).
+    ///    - Higher (nested) scope locals shadow lower scoped locals.
+    /// 3. Locals in enclosing functions.
+    ///    - These are bound as _upvalues_, as they may be referenced once the function's scope has exited.
+    ///    - Upvalues are also shadowed by locals in higher (nested) scopes, and by ones in higher (nested) enclosing functions.
+    /// 4. Functions defined in enclosing modules.
+    ///    - Functions can be referenced directly (without need to emit a `Module->method` `GetField` opcode) by name, while in a function defined on that module.
+    ///    - todo: with `self` methods on modules, this also introduces more complexity here with binding to `self->` methods
+    /// 5. Global Variables (with both function depth == 0 and scope depth == 0)
     ///
-    /// **Note:** If this returns `LValueReference::Invalid`, a semantic error will have already been raised.
+    /// ### Late Binding
+    /// We also allow late binding for two explicit scenarios:
+    ///
+    /// - Functions defined in enclosing modules may be late bound, as neither may be invoked before the definition of the module is completed (as modules have no directly executable code)
+    /// - Global variables may be late bound (for semantic convenience), but this binding needs to be checked at runtime (via the `InitGlobal` opcode). Note this can only occur within a function scope (as otherwise code is purely procedural).
+    ///
+    /// In the event that late binding may be possible, we return a special 'late bound' `LValueReference`, which holds an error or information to be replaced when the variable is later bound.
+    ///
+    /// Finally, if no valid identifier can be found (i.e. in global scope, with no matching native function, local, or global), this will return `LValueReference::Invalid`. In this case, a semantic error will have already been raised.
     pub fn resolve_identifier(&mut self, name: String) -> LValueReference {
         if let Some(b) = core::NativeFunction::find(&name) {
             return LValueReference::NativeFunction(b);
@@ -821,15 +856,20 @@ impl<'a> Parser<'a> {
             }
         }
 
-        // 4. If we are in function depth > 0, we can assume that the variable must be a late bound global.
-        // We cannot late bind globals in function depth == 0, as all code there is still procedural.
-        if self.function_depth > 0 {
+        // 4. If we are within a function and module, we may bind to functions defined on this, or enclosing modules
+        if self.function_depth > 0 && self.module_depth > 0 {
+            
+        }
+
+        // 4. / 5. Late Bindings
+        // Either within a function or within a module
+        if self.function_depth > 0 || self.module_depth > 0 {
             // Assume a late bound global
             let error = self.deferred_error(UndeclaredIdentifier(name.clone()));
-            let global = LateBoundGlobal::new(self.late_bound_global_index, name, self.functions.len() - 1, self.next_opcode(), error);
+            let binding = LateBinding::new(self.late_binding_next_index, name, self.functions.len() - 1, self.next_opcode(), error);
 
-            self.late_bound_global_index += 1;
-            return LValueReference::LateBoundGlobal(global);
+            self.late_binding_next_index += 1;
+            return LValueReference::LateBinding(binding);
         }
 
         // In global scope if we still could not resolve a variable, we return `None`
@@ -896,19 +936,60 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Declares a field, and returns the corresponding `field index`. The field does not need to be unique, not even among fields.
-    /// The field **does** have to be unique among fields within this struct, however - this method will not check this condition, nor raise an error.
-    /// If the field has not been seen before, this will declare the field (assign a `field index` for it).
-    /// It will also insert the lookup entry for the field and type pair, to the desired field offset
-    pub fn declare_field(&mut self, type_index: u32, field_offset: usize, name: String) -> u32 {
+    /// Declares a field as part of the current module. If the field name is already used, raises a semantic error.
+    pub fn declare_field(&mut self, type_index: u32, name: String) {
+        let fields: &mut Vec<String> = &mut self.modules.last_mut().unwrap().fields;
+        if fields.contains(&name) {
+            self.semantic_error(DuplicateFieldName(name))
+        } else {
+            fields.push(name.clone());
+            let offset = fields.len() - 1;
+            self.declare_field_offset(name, type_index, offset);
+        }
+    }
+
+    /// Declares a method as part of the current module. If the method name is already in use (either via a field or method), raises a semantic error.
+    ///
+    /// Returns `true` if the declaration was successful.
+    pub fn declare_method(&mut self, type_index: u32, name: String, loc: Location, args: &[LValue], var_arg: bool) {
+        let module: &mut Module = self.modules.last_mut().unwrap();
+
+        // Need to also check conflicts with fields
+        // Technically we can have fields that conflict with methods, so long as the methods in question aren't `self` methods:
+        // ```
+        // struct Foo(bar) {
+        //     fn bar() {}
+        // }
+        // ```
+        // This references a `Foo->bar` and a `Foo(nil)->bar` which are distinct. But it introduces ambiguity if `bar` was a instance method:
+        // ```
+        // Foo(nil)->bar // is this a field or method?
+        // ```
+        // In the interest of preventing confusion, we deny this behavior completely.
+        //
+        // Some prior art:
+        // - Java allows conflicts, but (1) access levels, and (2) you can't reference functions without invoking them, and (3) you can't invoke fields -> no ambiguity
+        // - Python fields and methods are identical, meaning conflicts can occur and they must be unique (same situation here)
+        if module.fields.contains(&name) || module.methods.contains_key(&name) {
+            self.semantic_error_at(loc, DuplicateFieldName(name.clone()));
+        }
+
+        // Always declare the function, it will be cleaned up later
+        let function_id: u32 = self.declare_function(name.clone(), &args, var_arg);
+        let methods = &mut self.modules.last_mut().unwrap().methods;
+        let offset = methods.len();
+
+        methods.insert(name.clone(), function_id);
+        self.declare_field_offset(name, type_index, offset);
+    }
+
+    fn declare_field_offset(&mut self, name: String, type_index: u32, field_offset: usize) {
         let next_field_index: u32 = self.fields.fields.len() as u32;
         let field_index: u32 = *self.fields.fields
             .entry(name)
             .or_insert(next_field_index);
 
         self.fields.lookup.insert((type_index, field_index), field_offset);
-
-        field_index
     }
 
     /// Declares a new type, and returns the corresponding `type index`.
