@@ -4,12 +4,12 @@ use indexmap::IndexSet;
 use crate::compiler::{CompileParameters, CompileResult};
 use crate::compiler::parser::core::ParserState;
 use crate::compiler::parser::expr::{Expr, ExprType};
-use crate::compiler::parser::semantic::{LateBoundGlobal, LValue, LValueReference, ParserFunctionImpl, ParserStoreOp};
+use crate::compiler::parser::semantic::{LateBinding, LValue, LValueReference, Module, ParserFunctionImpl, ParserStoreOp};
 use crate::compiler::scanner::{ScanResult, ScanToken};
 use crate::core::{NativeFunction, Pattern};
 use crate::reporting::Location;
 use crate::trace;
-use crate::vm::{Opcode, StoreOp, StructTypeImpl, ValuePtr};
+use crate::vm::{Opcode, StoreOp, ValuePtr};
 use crate::vm::operator::{BinaryOp, CompareOp, UnaryOp};
 
 pub use crate::compiler::parser::errors::{ParserError, ParserErrorType};
@@ -109,13 +109,19 @@ pub(super) struct Parser<'a> {
     /// A table of all struct fields and types. This is used to resolve `-> <name>` references at compile time, to a `field index`. At runtime it is used as a lookup to resolve a `(type index, field index)` into a `field offset`, which is used to access the underlying field.
     fields: &'a mut Fields,
 
-    /// Table of all late bound globals, as they occur
-    late_bound_globals: Vec<LateBoundGlobal>,
-    late_bound_global_index: usize,
+    /// Vector of all current outstanding late bindings. This will get filtered as the binding is declared.
+    /// At the end of the compile, any unresolved late bindings are promoted to full errors.
+    late_bindings: Vec<LateBinding>,
+    /// An index which creates a unique index for each late binding as it is created.
+    /// This is incremented and always represents the next available index.
+    late_binding_next_index: usize,
 
     synthetic_local_index: usize, // A counter for unique synthetic local variables (`$1`, `$2`, etc.)
     scope_depth: u32, // Current scope depth
-    function_depth: u32,
+    function_depth: u32, // Current depth of nested / enclosing functions
+    module_depth: u32, // Current depth of nested modules / structs
+
+    modules: Vec<Module>,
 
     constants: &'a mut Vec<ValuePtr>,
 
@@ -168,13 +174,15 @@ impl Parser<'_> {
             locals,
             fields,
 
-            late_bound_globals: Vec::new(),
-            late_bound_global_index: 0,
+            late_bindings: Vec::new(),
+            late_binding_next_index: 0,
 
             synthetic_local_index: 0,
             scope_depth: 0,
             function_depth: 0,
+            module_depth: 0,
 
+            modules: Vec::new(),
             constants,
             functions: Vec::new(),
             patterns: Vec::new(),
@@ -252,7 +260,7 @@ impl Parser<'_> {
         }
 
         // Errors due to late bound globals that were never fixed
-        for global in self.late_bound_globals.drain(..) {
+        for global in self.late_bindings.drain(..) {
             if let Some(error) = global.error() {
                 self.errors.insert(error);
             }
@@ -304,10 +312,17 @@ impl Parser<'_> {
         self.push_delayed_pop();
         self.advance(); // Consume `struct`
 
-        // Structs can only be declared in global scope
-        // While technically we could support scoped structs - the struct constructor becomes a local, there, the use case is just not there
-        // The struct object and fields would have to be globally known anyway.
-        // todo: support non-global scope?
+        // Structs can only be declared in global scope (function and scope depth)
+        // Scoped structs or modules introduce a couple issues and have better existing solutions:
+        // 1. Scoped structs -> struct and module methods are allowed to be closures.
+        //    This is just weird, and better served by a struct declared globally with fields that are referenced (via `self` methods) in the struct
+        // 2. Nested structs + modules are still possible, but only within module scope depth:
+        // ```
+        // module outer {
+        //     module inner { // we can support this, and both are still ""global""
+        // ```
+        // 3. Instances of structs, and the module itself, can always escape an inner scope, so the object must be known globally anyway.
+        //    In these cases, it makes more sense to restrict them to only being available in global scope.
         if self.function_depth != 0 || self.scope_depth != 0 {
             self.semantic_error(StructNotInGlobalScope);
             return;
@@ -324,26 +339,24 @@ impl Parser<'_> {
             _ => return,
         }
 
+        // Increment module depth, after initial checks, now we know we are definitely parsing a module.
+        self.module_depth += 1;
+        self.modules.push(Module::new(type_name, is_module));
+
         // Declare two types - one for the instance, and one for the constructor
         // - Fields are members of the instance, whereas methods are members of the constructor
         // - Modules allow only methods, whereas structs allow both fields and methods
         let instance_type: u32 = self.declare_type();
         let constructor_type: u32 = self.declare_type();
-        let mut field_names: Vec<String> = Vec::new();
 
         // Only structs can have fields, because they are constructable and modules are not
         if !is_module {
             self.expect(OpenParen);
 
             while let Some(Identifier(_)) = self.peek() {
-                let name: String = self.advance_identifier();
+                let name = self.advance_identifier();
 
-                if field_names.contains(&name) {
-                    self.semantic_error(DuplicateFieldName(name))
-                } else {
-                    self.declare_field(instance_type, field_names.len(), name.clone());
-                    field_names.push(name);
-                }
+                self.declare_field(instance_type, name);
 
                 // Consume `,` and allow trailing comma
                 if let Some(Comma) = self.peek() {
@@ -355,8 +368,6 @@ impl Parser<'_> {
 
         // Both structs and modules can optionally be followed by a `{` implementation block
         // Modules can have no implementation blocks, I supposed, which would make them remarkably pointless, but possible.
-        let mut methods: Vec<u32> = Vec::new();
-        let mut method_names: Vec<String> = Vec::new();
         if let Some(OpenBrace) = self.peek() {
             self.advance(); // Consume `{`
 
@@ -367,49 +378,19 @@ impl Parser<'_> {
                     Some(KeywordFn) => {
                         self.advance(); // Consume `fn`
 
-                        let name = match self.peek() {
-                            Some(Identifier(_)) => {
-                                let name = self.advance_identifier();
+                        if let Some(Identifier(_)) = self.peek() {
+                            let name = self.advance_identifier();
+                            let loc = self.prev_location();
 
-                                // Need to also check conflicts with fields
-                                // Technically we can have fields that conflict with methods, so long as the methods in question aren't `self` methods:
-                                // ```
-                                // struct Foo(bar) {
-                                //     fn bar() {}
-                                // }
-                                // ```
-                                // This references a `Foo->bar` and a `Foo(nil)->bar` which are distinct. But it introduces ambiguity if `bar` was a instance method:
-                                // ```
-                                // Foo(nil)->bar // is this a field or method?
-                                // ```
-                                // In the interest of preventing confusion, we deny this behavior completely.
-                                //
-                                // Some prior art:
-                                // - Java allows conflicts, but (1) access levels, and (2) you can't reference functions without invoking them, and (3) you can't invoke fields -> no ambiguity
-                                // - Python fields and methods are identical, meaning conflicts can occur and they must be unique (same situation here)
-                                if method_names.contains(&name) || field_names.contains(&name) {
-                                    self.semantic_error(DuplicateFieldName(name.clone()))
-                                }
-                                Some(name)
-                            },
-                            _ => {
-                                self.error_with(ExpectedFunctionNameAfterFn);
-                                None
-                            }
-                        };
-                        let (args, default_args, var_arg) = self.parse_function_parameters();
+                            let (args, default_args, var_arg) = self.parse_function_parameters();
 
-                        if let Some(name) = name {
-                            self.declare_field(constructor_type, method_names.len(), name.clone());
-                            let func: u32 = self.declare_function(name.clone(), &args, var_arg);
+                            self.declare_method(constructor_type, name, loc, &args, var_arg);
 
-                            method_names.push(name);
-                            methods.push(func);
+                            let closed_locals = self.parse_function_body(args, default_args);
+                            self.emit_closure_and_closed_locals(closed_locals);
+                        } else {
+                            self.error_with(ExpectedFunctionNameAfterFn);
                         }
-
-                        // Emit the closed locals from the function body right away, because we are not in an expression context
-                        let closed_locals = self.parse_function_body(args, default_args);
-                        self.emit_closure_and_closed_locals(closed_locals);
                     },
                     _ => break
                 }
@@ -417,8 +398,13 @@ impl Parser<'_> {
             self.expect_resync(CloseBrace);
         }
 
-        let id: u32 = self.declare_const(StructTypeImpl::new(type_name, field_names, methods, instance_type, constructor_type, is_module));
+        let module = self.modules.pop().unwrap().bake(instance_type, constructor_type);
+        let id: u32 = self.declare_const(module);
+
         self.push(Constant(id));
+
+        // Decrement module depth
+        self.module_depth -= 1;
     }
 
     fn parse_annotated_named_function(&mut self) {
@@ -1951,7 +1937,7 @@ impl Parser<'_> {
             if let Some(BinaryOp::Equal) = maybe_op { // // Direct assignment statement
                 self.advance();
                 expr = match expr {
-                    Expr(_, ExprType::LValue(lvalue @ (LValueReference::Local(_) | LValueReference::UpValue(_) | LValueReference::Global(_) | LValueReference::LateBoundGlobal(_)))) => {
+                    Expr(_, ExprType::LValue(lvalue @ (LValueReference::Local(_) | LValueReference::UpValue(_) | LValueReference::Global(_) | LValueReference::LateBinding(_)))) => {
                         let rhs = self.parse_expr_10();
                         Expr::assign_lvalue(loc, lvalue, rhs)
                     },
@@ -1971,7 +1957,7 @@ impl Parser<'_> {
             } else if let Some(op) = maybe_op {
                 self.advance();
                 expr = match expr {
-                    Expr(lvalue_loc, ExprType::LValue(lvalue @ (LValueReference::Local(_) | LValueReference::UpValue(_) | LValueReference::Global(_) | LValueReference::LateBoundGlobal(_)))) => {
+                    Expr(lvalue_loc, ExprType::LValue(lvalue @ (LValueReference::Local(_) | LValueReference::UpValue(_) | LValueReference::Global(_) | LValueReference::LateBinding(_)))) => {
                         let lhs = Expr::lvalue(lvalue_loc, lvalue.clone());
                         let rhs = self.parse_expr_10();
                         Expr::assign_lvalue(loc, lvalue, match op {
