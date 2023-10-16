@@ -1,0 +1,27 @@
+L1: 0000 InitGlobal
+L6: 0001 StructType(module Util)
+L8: 0002 Print
+    0003 PushGlobal(0) -> Util
+    0004 GetField(0) -> add
+    0005 Int(1)
+    0006 Int(2)
+    0007 Call(2)
+    0008 PushGlobal(0) -> Util
+    0009 GetField(1) -> sub
+    0010 Int(6)
+    0011 Int(3)
+    0012 Call(2)
+    0013 Call(2)
+    0014 Pop
+    0015 Pop
+    0016 Exit
+L2: 0017 PushLocal(0) -> x
+    0018 PushLocal(1) -> y
+    0019 Add
+    0020 Return
+L4: 0021 Function(fn add(x, y) -> L[17, 20])
+    0022 PushLocal(0) -> x
+    0023 PushLocal(1) -> y
+    0024 Neg
+    0025 Call(2)
+L5: 0026 Return

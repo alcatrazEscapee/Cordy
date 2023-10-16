@@ -180,18 +180,20 @@ pub struct LateBinding {
     opcode: (usize, usize),
     /// The reference type of this late bound global, for fixing later
     ty: ReferenceType,
-    /// An error that would be thrown from here, if the variable does not end up bound
-    error: Option<ParserError>,
+    loc: Location,
+    /// If true, an error should be raised. Represents the state of the error recovery mode when hit
+    error: bool,
 }
 
 impl LateBinding {
-    pub fn new(index: usize, name: String, ordinal: usize, opcode: usize, error: Option<ParserError>) -> LateBinding {
+    pub fn new(index: usize, name: String, ordinal: usize, opcode: usize, loc: Location, error: bool) -> LateBinding {
         LateBinding {
             index,
             name,
             opcode: (ordinal, opcode),
             ty: ReferenceType::Invalid,
-            error
+            loc,
+            error,
         }
     }
 
@@ -200,8 +202,11 @@ impl LateBinding {
         self.ty = ty;
     }
 
-    pub fn error(self) -> Option<ParserError> {
-        self.error
+    pub fn to_error(self) -> Option<ParserError> {
+        match self.error {
+            true => Some(ParserError::new(UndeclaredIdentifier(self.name), self.loc)),
+            false => None
+        }
     }
 }
 
@@ -237,22 +242,21 @@ pub enum LValue {
 
 #[derive(Debug, Clone, Default)]
 pub enum LValueReference {
+    #[default]
+    Invalid,
     Named(String),
     Local(u32),
     Global(u32),
     LateBinding(LateBinding),
     UpValue(u32),
-    #[default]
-    Invalid,
-
-    /// `NativeFunction()` is not an `LValue`, however it is included as it is a possible resolution for a declared variable.
+    Method(u32),
     NativeFunction(core::NativeFunction),
 }
 
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum ReferenceType {
-    Invalid, Load, LoadPattern, Store
+    Invalid, Load, Store, StorePattern
 }
 
 
@@ -290,15 +294,15 @@ impl LValue {
 
     /// Resolves each identifier as a local variable that is currently declared.
     /// This will raise semantic errors for undeclared variables.
-    pub(super) fn resolve_locals(&mut self, parser: &mut Parser) {
+    pub(super) fn resolve_locals(&mut self, loc: Location, parser: &mut Parser) {
         match self {
             LValue::Named(it) | LValue::VarNamed(it) => {
                 let name: String = it.as_named();
-                *it = parser.resolve_identifier(name);
+                *it = parser.resolve_mutable_reference(loc, name);
             },
             LValue::Terms(lvalue) => {
                 for term in lvalue {
-                    term.resolve_locals(parser);
+                    term.resolve_locals(loc, parser);
                 }
             },
             _ => {},
@@ -468,12 +472,13 @@ impl LValueReference {
             LValueReference::LateBinding(mut global) => {
                 let index = global.index;
 
-                global.update(ReferenceType::LoadPattern, parser);
+                global.update(ReferenceType::StorePattern, parser);
                 parser.late_bindings.push(global);
 
                 ParserStoreOp::LateBoundGlobal(index)
             },
             LValueReference::UpValue(index) => ParserStoreOp::Bound(StoreOp::UpValue(index)),
+            LValueReference::Invalid => ParserStoreOp::Invalid, // Error has already been raised
             _ => panic!("Invalid store: {:?}", self),
         }
     }
@@ -483,6 +488,7 @@ impl LValueReference {
 pub enum ParserStoreOp {
     Bound(StoreOp),
     LateBoundGlobal(usize),
+    Invalid
 }
 
 
@@ -555,6 +561,11 @@ impl Module {
     }
 }
 
+enum LateBound {
+    Local(u32),
+    Method(u32)
+}
+
 
 impl<'a> Parser<'a> {
 
@@ -615,6 +626,8 @@ impl<'a> Parser<'a> {
     /// After a `let <name>`, `fn <name>`, or `struct <name>` declaration, tries to declare this as a local variable in the current scope.
     /// Returns the index of the local variable in `self.current_locals().locals`, or `None` if the variable could not be declared.
     /// Note that if `None` is returned, a semantic error will already have been raised.
+    ///
+    /// - If `is_const` is true, this variable will not be able to be reassigned. This is the case for modules and structs.
     pub fn declare_local(&mut self, name: String) -> Option<usize> {
 
         // Lookup the name as a binding - if it is, it will be denied as we don't allow shadowing global native functions
@@ -631,49 +644,64 @@ impl<'a> Parser<'a> {
             }
         }
 
-        let index = self.declare_local_internal(name);
+        let index = self.declare_local_internal(name.clone());
         let local = &self.locals.last().unwrap().locals[index];
 
-        // If global, then fix references to this global
         if local.is_global() {
-            for binding in &self.late_bindings {
-                if binding.name == local.name {
-                    let (func_index, code_index) = binding.opcode;
-                    let binding_index = binding.index;
-                    let (_, opcode) = &mut self.functions[func_index].code[code_index];
-
-                    match binding.ty {
-                        ReferenceType::Load => *opcode = PushGlobal(local.index),
-                        ReferenceType::Store => *opcode = StoreGlobal(local.index, false),
-                        ReferenceType::LoadPattern => {
-                            // Need to update all the matching late bound globals in the pattern, which should be referred to by `ExecPattern`
-                            let pattern_index: usize = match opcode {
-                                ExecPattern(index) => *index as usize - self.baked_patterns.len(),
-                                _ => panic!("LoadPattern should find a ExecPattern to update"),
-                            };
-
-                            let pattern = &mut self.patterns[pattern_index];
-                            pattern.visit(&mut |op| {
-                                if let ParserStoreOp::LateBoundGlobal(index) = op {
-                                    if *index == binding_index {
-                                        *op = ParserStoreOp::Bound(StoreOp::Global(local.index))
-                                    }
-                                }
-                            });
-                        },
-                        ReferenceType::Invalid => panic!("Invalid reference type set!")
-                    }
-                }
-            }
-
-            // And remove them
-            self.late_bindings.retain(|global| global.name != local.name);
+            // Resolve any late bound references to this global
+            self.resolve_late_bindings(name.clone(), LateBound::Local(local.index));
 
             // Declare this global variable's name
-            self.globals_reference.push(local.name.clone());
+            self.globals_reference.push(name);
         }
 
         Some(index)
+    }
+
+    /// Upon declaring a global variable, struct field or method, this will resolve any references to this variable if they exist.
+    /// It may raise errors due to the variable not being assignable (i.e. a module method).
+    fn resolve_late_bindings(&mut self, name: String, result: LateBound) {
+        let mut i = 0;
+        while i < self.late_bindings.len() {
+            let binding = &self.late_bindings[i];
+
+            // If the binding matches, it will be declared here
+            // The first declaration is always the matching one, as the precedence for methods/fields -> globals is always maintained
+            if binding.name == name {
+                let binding = self.late_bindings.swap_remove(i); // Remove this binding - this drops the borrow on self.bindings
+                let (func_index, code_index) = binding.opcode;
+                let binding_index = binding.index;
+                let (_, opcode) = &mut self.functions[func_index].code[code_index];
+
+                // Update the binding if possible
+                match (binding.ty, &result) {
+                    (ReferenceType::Load, LateBound::Local(index)) => *opcode = PushGlobal(*index),
+                    (ReferenceType::Load, LateBound::Method(index)) => *opcode = Constant(*index),
+                    (ReferenceType::Store, LateBound::Local(index)) => *opcode = StoreGlobal(*index, false),
+                    (ReferenceType::StorePattern, LateBound::Local(local)) => {
+                        // Need to update all the matching late bound globals in the pattern, which should be referred to by `ExecPattern`
+                        let pattern_index: usize = match opcode {
+                            ExecPattern(index) => *index as usize - self.baked_patterns.len(),
+                            _ => panic!("LoadPattern should find a ExecPattern to update"),
+                        };
+
+                        let pattern = &mut self.patterns[pattern_index];
+                        pattern.visit(&mut |op| {
+                            if let ParserStoreOp::LateBoundGlobal(index) = op {
+                                if *index == binding_index {
+                                    *op = ParserStoreOp::Bound(StoreOp::Global(*local))
+                                }
+                            }
+                        });
+                    },
+                    (ReferenceType::Invalid, _) => panic!("Invalid reference type set!"),
+                    (_, LateBound::Method(_)) => self.error_at(binding.loc, InvalidAssignmentTarget),
+                }
+                continue; // Skip the below i += 1, since this binding got swap-removed
+            }
+
+            i += 1;
+        }
     }
 
     /// Declares a synthetic local variable. Unlike `declare_local()`, this can never fail.
@@ -792,6 +820,22 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Resolves a reference like `resolve_reference()`, but requires that the reference returned be mutable (i.e. can be assigned to).
+    /// If the bound reference is not mutable, it will return `Invalid` instead.
+    ///
+    /// - Native Functions cannot be assigned to as they cannot be shadowed
+    /// - Methods in enclosing modules are not assignable
+    pub fn resolve_mutable_reference(&mut self, loc: Location, name: String) -> LValueReference {
+        match self.resolve_reference(name) {
+            LValueReference::NativeFunction(_) |
+            LValueReference::Method(_) => {
+                self.error_at(loc, InvalidAssignmentTarget);
+                LValueReference::Invalid
+            }
+            lvalue => lvalue
+        }
+    }
+
     /// Resolve an identifier, which can be one of many things, each of which are tried in-order:
     ///
     /// 1. Native Functions. These cannot be shadowed (as it creates interesting conflict scenarios), and they are all technically global functions.
@@ -814,7 +858,7 @@ impl<'a> Parser<'a> {
     /// In the event that late binding may be possible, we return a special 'late bound' `LValueReference`, which holds an error or information to be replaced when the variable is later bound.
     ///
     /// Finally, if no valid identifier can be found (i.e. in global scope, with no matching native function, local, or global), this will return `LValueReference::Invalid`. In this case, a semantic error will have already been raised.
-    pub fn resolve_identifier(&mut self, name: String) -> LValueReference {
+    pub fn resolve_reference(&mut self, name: String) -> LValueReference {
         if let Some(b) = core::NativeFunction::find(&name) {
             return LValueReference::NativeFunction(b);
         }
@@ -858,15 +902,30 @@ impl<'a> Parser<'a> {
 
         // 4. If we are within a function and module, we may bind to functions defined on this, or enclosing modules
         if self.function_depth > 0 && self.module_depth > 0 {
-            
+
+            // Search modules from top-down to find matching methods, then fields
+            // Field and method names are unique on a single module so we don't need to worry about conflicts
+            for module in self.modules.iter().rev() {
+                match module.methods.get(&name) {
+                    Some(function_id) => {
+                        return LValueReference::Method(*function_id)
+                    }
+                    None => {}
+                }
+            }
+
+            // todo: bind to fields, which requires a `self->` reference
+            // todo: consider case of binding to parent module with self:
+            // module Outer {
+            //     fn a() {}
+            //     struct Inner(a) {
+            //         fn b() { a }  <-- does this raise an error because `self->a` is not accessible? or bind to `Outer->a` ?
         }
 
         // 4. / 5. Late Bindings
         // Either within a function or within a module
         if self.function_depth > 0 || self.module_depth > 0 {
-            // Assume a late bound global
-            let error = self.deferred_error(UndeclaredIdentifier(name.clone()));
-            let binding = LateBinding::new(self.late_binding_next_index, name, self.functions.len() - 1, self.next_opcode(), error);
+            let binding = LateBinding::new(self.late_binding_next_index, name, self.functions.len() - 1, self.next_opcode(), self.prev_location(), !self.error_recovery);
 
             self.late_binding_next_index += 1;
             return LValueReference::LateBinding(binding);
@@ -980,7 +1039,8 @@ impl<'a> Parser<'a> {
         let offset = methods.len();
 
         methods.insert(name.clone(), function_id);
-        self.declare_field_offset(name, type_index, offset);
+        self.declare_field_offset(name.clone(), type_index, offset);
+        self.resolve_late_bindings(name, LateBound::Method(function_id));
     }
 
     fn declare_field_offset(&mut self, name: String, type_index: u32, field_offset: usize) {

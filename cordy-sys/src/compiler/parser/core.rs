@@ -322,6 +322,7 @@ impl<'a> Parser<'a> {
                 self.push_with(Noop, loc); // Will be fixed when the global is declared, or caught at EoF as an error
             }
             LValueReference::UpValue(index) => self.push_with(PushUpValue(index), loc),
+            LValueReference::Method(index) => self.push_with(Constant(index), loc),
             LValueReference::Invalid => {},
             LValueReference::NativeFunction(native) => self.push_with(NativeFunction(native), loc),
             _ => panic!("Invalid load: {:?}", lvalue),
@@ -374,6 +375,10 @@ impl<'a> Parser<'a> {
         self.do_error(self.next_location(), error, true)
     }
 
+    pub fn error_at(&mut self, loc: Location, error: ParserErrorType) {
+        self.do_error(loc, error, true)
+    }
+
     /// Pushes a new error token into the output error stream, but does not initiate error recovery.
     /// This is useful for semantic errors which are valid lexically, but still need to report errors.
     pub fn semantic_error(&mut self, error: ParserErrorType) {
@@ -397,15 +402,6 @@ impl<'a> Parser<'a> {
         }
         if error_recovery {
             self.error_recovery = true;
-        }
-    }
-
-    /// Creates an optional error, which will be deferred until later to be emitted
-    pub fn deferred_error(&self, error: ParserErrorType) -> Option<ParserError> {
-        if self.error_recovery {
-            None
-        } else {
-            Some(ParserError::new(error, self.prev_location()))
         }
     }
 

@@ -1,0 +1,8 @@
+module Util {
+    fn sub(x, y) {
+        add(x, -y)
+    }
+    fn add(x, y) -> x + y
+}
+
+print(Util->add(1, 2), Util->sub(6, 3))
