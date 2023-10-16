@@ -247,9 +247,8 @@ impl Parser<'_> {
             self.baked_patterns.push(pattern.map(&mut |op| {
                 match op {
                     ParserStoreOp::Bound(op) => op,
-                    // Just need to insert a dummy value here
-                    // Errors will be emitted below
-                    ParserStoreOp::LateBoundGlobal(_) => StoreOp::Local(0)
+                    // Errors will be emitted below (for late bindings) or have already been emitted (for invalid)
+                    ParserStoreOp::LateBoundGlobal(_) | ParserStoreOp::Invalid => StoreOp::Local(0)
                 }
             }));
         }
@@ -261,7 +260,7 @@ impl Parser<'_> {
 
         // Errors due to late bound globals that were never fixed
         for global in self.late_bindings.drain(..) {
-            if let Some(error) = global.error() {
+            if let Some(error) = global.to_error() {
                 self.errors.insert(error);
             }
         }
@@ -1099,7 +1098,7 @@ impl Parser<'_> {
             Some(Identifier(_)) => {
                 let name: String = self.advance_identifier();
                 let loc: Location = self.prev_location();
-                let lvalue: LValueReference = self.resolve_identifier(name);
+                let lvalue: LValueReference = self.resolve_reference(name);
                 Expr::lvalue(loc, lvalue)
             },
             Some(OpenParen) => {
@@ -1950,7 +1949,7 @@ impl Parser<'_> {
                         lhs.set_field(loc, field_index, rhs)
                     },
                     _ => {
-                        self.error(InvalidAssignmentTarget);
+                        self.error_at(loc, InvalidAssignmentTarget);
                         Expr::nil()
                     },
                 }
@@ -1974,7 +1973,7 @@ impl Parser<'_> {
                         lhs.swap_field(loc, field_index, rhs, op)
                     },
                     _ => {
-                        self.error(InvalidAssignmentTarget);
+                        self.error_at(loc, InvalidAssignmentTarget);
                         Expr::nil()
                     },
                 }
@@ -1999,7 +1998,7 @@ impl Parser<'_> {
                         // We have a nontrivial `<lvalue>`, followed by an assignment statement, so this must be a pattern assignment.
                         let loc = self.advance_with(); // Accept `=`
                         self.accept(); // First and foremost, accept the query.
-                        lvalue.resolve_locals(self); // Resolve each local, raising an error if need be.
+                        lvalue.resolve_locals(loc, self); // Resolve each local, raising an error if need be.
                         let expr: Expr = self.parse_expr_10(); // Recursively parse, since this is left associative, call <expr-10>
                         return Expr::assign_pattern(loc, lvalue, expr); // And exit this rule
                     }
@@ -2108,9 +2107,9 @@ mod tests {
     #[test] fn test_let_no_identifier() { run_err("let =", "Expected a variable binding, either a name, '_', or pattern, got '=' token instead\n  at: line 1 (<test>)\n\n1 | let =\n2 |     ^\n"); }
     #[test] fn test_let_expression_eof() { run_err("let x =", "Expected an expression terminal, got end of input instead\n  at: line 1 (<test>)\n\n1 | let x =\n2 |        ^^^\n"); }
     #[test] fn test_let_no_expression() { run_err("let x = &", "Expected an expression terminal, got '&' token instead\n  at: line 1 (<test>)\n\n1 | let x = &\n2 |         ^\n"); }
-    #[test] fn test_let_no_expression_with_empty() { run_err("let _ ;", "'let' with a pattern variable must be followed by an expression if the pattern contains nontrivial pattern elements.\n  at: line 1 (<test>)\n\n1 | let _ ;\n2 |     ^\n") }
-    #[test] fn test_let_no_expression_with_variadic() { run_err("let a, *b ;", "'let' with a pattern variable must be followed by an expression if the pattern contains nontrivial pattern elements.\n  at: line 1 (<test>)\n\n1 | let a, *b ;\n2 |     ^^^^^\n") }
-    #[test] fn test_let_no_expression_with_nested() { run_err("let (a, b) ;", "'let' with a pattern variable must be followed by an expression if the pattern contains nontrivial pattern elements.\n  at: line 1 (<test>)\n\n1 | let (a, b) ;\n2 |     ^^^^^^\n") }
+    #[test] fn test_let_no_expression_with_empty() { run_err("let _ ;", "'let' with a pattern variable must be followed by an expression if the pattern contains nontrivial pattern elements\n  at: line 1 (<test>)\n\n1 | let _ ;\n2 |     ^\n") }
+    #[test] fn test_let_no_expression_with_variadic() { run_err("let a, *b ;", "'let' with a pattern variable must be followed by an expression if the pattern contains nontrivial pattern elements\n  at: line 1 (<test>)\n\n1 | let a, *b ;\n2 |     ^^^^^\n") }
+    #[test] fn test_let_no_expression_with_nested() { run_err("let (a, b) ;", "'let' with a pattern variable must be followed by an expression if the pattern contains nontrivial pattern elements\n  at: line 1 (<test>)\n\n1 | let (a, b) ;\n2 |     ^^^^^^\n") }
     #[test] fn test_expression_function_with_name() { run_err("(fn hello() {})", "Expected a '(' token, got identifier 'hello' instead\n  at: line 1 (<test>)\n\n1 | (fn hello() {})\n2 |     ^^^^^\n"); }
     #[test] fn test_top_level_function_in_error_recovery_mode() { run_err("+ fn hello() {}", "Expected an expression terminal, got '+' token instead\n  at: line 1 (<test>)\n\n1 | + fn hello() {}\n2 | ^\n"); }
     #[test] fn test_partial_binary_op_implicit_unroll_error_left() { run_err("print (... + 3)", "Expected an expression terminal, got '+' token instead\n  at: line 1 (<test>)\n\n1 | print (... + 3)\n2 |            ^\n") }
@@ -2119,6 +2118,9 @@ mod tests {
     #[test] fn test_late_bound_global_in_store() { run_err("fn foo() { y = x + 1 } let y", "Undeclared identifier: 'x'\n  at: line 1 (<test>)\n\n1 | fn foo() { y = x + 1 } let y\n2 |                ^\n") }
     #[test] fn test_late_bound_global_in_load_store_duplicate_error() { run_err("fn foo() { x += 1 }", "Undeclared identifier: 'x'\n  at: line 1 (<test>)\n\n1 | fn foo() { x += 1 }\n2 |            ^\n") }
     #[test] fn test_late_bound_global_in_pattern() { run_err("fn foo() { x, y = nil }", "Undeclared identifier: 'x'\n  at: line 1 (<test>)\n\n1 | fn foo() { x, y = nil }\n2 |                 ^\n\nUndeclared identifier: 'y'\n  at: line 1 (<test>)\n\n1 | fn foo() { x, y = nil }\n2 |                 ^\n") }
+    #[test] fn test_native_in_assignment() { run_err("map = nil", "The left hand side is not a valid assignment target\n  at: line 1 (<test>)\n\n1 | map = nil\n2 |     ^\n") }
+    #[test] fn test_native_in_operator_assignment() { run_err("map += nil", "The left hand side is not a valid assignment target\n  at: line 1 (<test>)\n\n1 | map += nil\n2 |     ^^\n") }
+    #[test] fn test_native_in_pattern_assignment() { run_err("(map, _) = nil", "The left hand side is not a valid assignment target\n  at: line 1 (<test>)\n\n1 | (map, _) = nil\n2 |          ^\n") }
     #[test] fn test_line_with_weird_indentation_1() { run_err("  \t    \t&", "Expected an expression terminal, got '&' token instead\n  at: line 1 (<test>)\n\n1 |   \t    \t&\n2 |   \t    \t^\n") }
     #[test] fn test_line_with_weird_indentation_2() { run_err("\t\t  &", "Expected an expression terminal, got '&' token instead\n  at: line 1 (<test>)\n\n1 | \t\t  &\n2 | \t\t  ^\n") }
     #[test] fn test_line_with_weird_indentation_3() { run_err("\t  \t     &", "Expected an expression terminal, got '&' token instead\n  at: line 1 (<test>)\n\n1 | \t  \t     &\n2 | \t  \t     ^\n") }
@@ -2126,6 +2128,11 @@ mod tests {
     #[test] fn test_struct_with_duplicate_method() { run_err("struct A(a) { fn b() {} fn b() {} }", "Duplicate field name: 'b'\n  at: line 1 (<test>)\n\n1 | struct A(a) { fn b() {} fn b() {} }\n2 |                            ^\n") }
     #[test] fn test_struct_with_duplicate_both() { run_err("struct A(a, b) { fn a() {} }", "Duplicate field name: 'a'\n  at: line 1 (<test>)\n\n1 | struct A(a, b) { fn a() {} }\n2 |                     ^\n") }
     #[test] fn test_module_with_duplicate_method() { run_err("module A { fn a() {} fn a() {} }", "Duplicate field name: 'a'\n  at: line 1 (<test>)\n\n1 | module A { fn a() {} fn a() {} }\n2 |                         ^\n") }
+    #[test] fn test_module_late_bound_missing() { run_err("module A { fn a() { b } }", "Undeclared identifier: 'b'\n  at: line 1 (<test>)\n\n1 | module A { fn a() { b } }\n2 |                     ^\n") }
+    #[test] fn test_module_late_bound_store() { run_err("module A { fn a() { b = 1 } }", "Undeclared identifier: 'b'\n  at: line 1 (<test>)\n\n1 | module A { fn a() { b = 1 } }\n2 |                     ^\n") }
+    #[test] fn test_module_late_bound_store_pattern() { run_err("module A { fn a() { (b, _) = nil } }", "Undeclared identifier: 'b'\n  at: line 1 (<test>)\n\n1 | module A { fn a() { (b, _) = nil } }\n2 |                            ^\n") }
+    #[test] fn test_module_bind_to_store() { run_err("module A { fn b() {} fn a() { b = 1 } }", "The left hand side is not a valid assignment target\n  at: line 1 (<test>)\n\n1 | module A { fn b() {} fn a() { b = 1 } }\n2 |                                 ^\n") }
+    #[test] fn test_module_bind_to_store_pattern() { run_err("module A { fn b() {} fn a() { (_, a) = nil } }", "The left hand side is not a valid assignment target\n  at: line 1 (<test>)\n\n1 | module A { fn b() {} fn a() { (_, a) = nil } }\n2 |                                      ^\n") }
 
     #[test] fn test_array_access_after_newline() { run("array_access_after_newline"); }
     #[test] fn test_array_access_no_newline() { run("array_access_no_newline"); }
@@ -2166,6 +2173,8 @@ mod tests {
     #[test] fn test_loop_3() { run("loop_3"); }
     #[test] fn test_loop_4() { run("loop_4"); }
     #[test] fn test_modules() { run("modules"); }
+    #[test] fn test_modules_method_binding() { run("modules_method_binding"); }
+    #[test] fn test_modules_method_late_binding() { run("modules_method_late_binding"); }
     #[test] fn test_multiple_undeclared_variables() { run("multiple_undeclared_variables"); }
     #[test] fn test_pattern_expression() { run("pattern_expression"); }
     #[test] fn test_pattern_expression_nested() { run("pattern_expression_nested"); }

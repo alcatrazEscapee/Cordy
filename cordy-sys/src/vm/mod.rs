@@ -1055,6 +1055,11 @@ mod tests {
     #[test] fn test_module_field_not_found() { run_str("module A { fn a() {} } module B { fn b() -> 1 } A->b() . print", "TypeError: Cannot get field 'b' on module A\n  at: line 1 (<test>)\n\n1 | module A { fn a() {} } module B { fn b() -> 1 } A->b() . print\n2 |                                                  ^^^\n"); }
     #[test] fn test_module_cannot_construct() { run_str("module Foo {} ; Foo()", "Tried to evaluate module Foo but it is not a function.\n  at: line 1 (<test>)\n\n1 | module Foo {} ; Foo()\n2 |                    ^^\n"); }
     #[test] fn test_module_cannot_construct_with_args() { run_str("module Foo {} ; Foo(1, 2, 3)", "Tried to evaluate module Foo but it is not a function.\n  at: line 1 (<test>)\n\n1 | module Foo {} ; Foo(1, 2, 3)\n2 |                    ^^^^^^^^^\n"); }
+    #[test] fn test_module_method_bound() { run_str("module A { fn a() { 123 } fn b() { a() } } ; A->b().print", "123\n"); }
+    #[test] fn test_module_method_bound_late() { run_str("module A { fn a() { b() } fn b() { 123 } } ; A->a().print", "123\n"); }
+    #[test] fn test_module_can_be_replaced() { run_str("module A { fn a() { 'yes' } } ; struct X(a) ; A = X(fn() -> 'no') ; A->a().print", "no\n"); }
+    #[test] fn test_module_method_bound_cannot_be_replaced() { run_str("module A { fn a() { 'yes' } fn b() { a() } } ; struct X(a) ; let A1 = A ; A = X(fn() -> 'no') ; A1->b().print", "yes\n"); }
+    #[test] fn test_module_method_lazy_bound_can_be_replaced() { run_str("module A { fn a() { 'yes' } fn b() { A->a() } } ; struct X(a) ; let A1 = A ; A = X(fn() -> 'no') ; A1->b().print", "no\n"); }
     #[test] fn test_local_vars_01() { run_str("let x=0 do { x.print }", "0\n"); }
     #[test] fn test_local_vars_02() { run_str("let x=0 do { let x=1; x.print }", "1\n"); }
     #[test] fn test_local_vars_03() { run_str("let x=0 do { x.print let x=1 }", "0\n"); }
