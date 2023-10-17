@@ -1,3 +1,5 @@
+#![feature(vec_into_raw_parts)]
+
 use std::{fs, io};
 use std::collections::HashSet;
 use std::io::Write;
@@ -46,7 +48,6 @@ const FORMAT_COLORS: &str = "\
     span.cordy-type { color: #2aa; }
     span.cordy-number { color: #385; }
     span.cordy-string { color: #b10; }
-    span.cordy-syntax { }
     span.cordy-comment { color: #aaa; }
 </style>
 ";
@@ -111,8 +112,10 @@ fn parse_args(args: Vec<String>) -> Result<Options, String> {
             "-l" | "--link" => {
                 let target = iter.next().ok_or(String::from("Missing argument after --link"))?;
                 let (module, library) = target.split_once('=').ok_or(format!("Missing '=' in --link argument {}", target))?;
-                // todo: duplicate module?
-                options.links.insert(String::from(module), String::from(library));
+                match options.links.entry(String::from(module)) {
+                    indexmap::map::Entry::Occupied(_) => return Err(format!("Duplicate --link for module '{}'", module)),
+                    indexmap::map::Entry::Vacant(it) => it.insert(String::from(library)),
+                };
             }
             a if a.starts_with("--format-no=") => {
                 for key in a.strip_prefix("--format-no=")

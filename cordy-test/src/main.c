@@ -43,3 +43,20 @@ CORDY_EXTERN(substring) {
 
     return ret;
 }
+
+CORDY_EXTERN(partial_sums) {
+    ASSERT(n == 1);
+    AS_VEC(cordy_vec_t vec, args[0]);
+
+    cordy_value_t new_vec = VEC(vec.len);
+
+    int sum = 0, value;
+    for (int i = 0; i < vec.len; i++) {
+        AS_INT(value, vec.ptr[i]);
+        sum += value;
+        new_vec.vec_value.ptr[i] = INT(sum);
+        new_vec.vec_value.len++;
+    }
+
+    return new_vec;
+}

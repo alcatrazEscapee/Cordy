@@ -1,3 +1,7 @@
 struct EmptyStruct() ;
 struct EmptyStructWithImpl() {}
 module EmptyMod {}
+
+native module ModWithWeirdParams {
+    fn a(x, _, y, z?, _?, *q)
+}

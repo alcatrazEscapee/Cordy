@@ -316,7 +316,7 @@ impl LValue {
         match self {
             LValue::Named(it) | LValue::VarNamed(it) => {
                 let name: String = it.as_named();
-                if let Some(local) = parser.declare_local(name) {
+                if let Some(local) = parser.declare_local(name, false) {
                     *it = LValueReference::Local(local as u32);
                 }
             },
@@ -651,6 +651,46 @@ impl<'a> Parser<'a> {
         (self.constants.len() - 1) as u32
     }
 
+    // ===== Structs / Modules ===== //
+
+    pub fn begin_module(&mut self, is_module: bool) -> String {
+        // Structs can only be declared in global scope (function and scope depth)
+        // Scoped structs or modules introduce a couple issues and have better existing solutions:
+        // 1. Scoped structs -> struct and module methods are allowed to be closures.
+        //    This is just weird, and better served by a struct declared globally with fields that are referenced (via `self` methods) in the struct
+        // 2. Nested structs + modules are still possible, but only within module scope depth:
+        // ```
+        // module outer {
+        //     module inner { // we can support this, and both are still ""global""
+        // ```
+        // 3. Instances of structs, and the module itself, can always escape an inner scope, so the object must be known globally anyway.
+        //    In these cases, it makes more sense to restrict them to only being available in global scope.
+        if self.function_depth != 0 || self.scope_depth != 0 {
+            self.semantic_error(StructNotInGlobalScope);
+        }
+
+        let module_name: String = self.expect_identifier(|t| ExpectedStructNameAfterStruct(t, is_module));
+
+        // Declare a local for the struct in the global scope
+        self.declare_local(module_name.clone(), true);
+
+        // Increment module depth, after initial checks, now we know we are definitely parsing a module.
+        self.module_depth += 1;
+        self.modules.push(Module::new(module_name.clone(), is_module));
+
+        module_name
+    }
+
+    pub fn end_module(&mut self, instance_type: u32, constructor_type: u32) {
+        let module = self.modules.pop().unwrap().bake(instance_type, constructor_type);
+        let id: u32 = self.declare_const(module);
+
+        self.push(Constant(id));
+
+        // Decrement module depth
+        self.module_depth -= 1;
+    }
+
     /// Declares a function with a given name and arguments.
     /// Returns the constant identifier for this function, however the function itself is currently located in `self.functions`, not `self.constants`.
     /// Instead, we push a dummy `Nil` into the constants array, and store the constant index on our parser function. During teardown, we inject these into the right spots.
@@ -683,8 +723,8 @@ impl<'a> Parser<'a> {
     /// Returns the index of the local variable in `self.current_locals().locals`, or `None` if the variable could not be declared.
     /// Note that if `None` is returned, a semantic error will already have been raised.
     ///
-    /// - If `is_const` is true, this variable will not be able to be reassigned. This is the case for modules and structs.
-    pub fn declare_local(&mut self, name: String) -> Option<usize> {
+    /// - If `init` is true, this local will be immediately initialized (if declared) afterwards.
+    pub fn declare_local(&mut self, name: String, init: bool) -> Option<usize> {
 
         // Lookup the name as a binding - if it is, it will be denied as we don't allow shadowing global native functions
         if core::NativeFunction::find(&name).is_some() {
@@ -709,6 +749,10 @@ impl<'a> Parser<'a> {
 
             // Declare this global variable's name
             self.globals_reference.push(name);
+        }
+
+        if init {
+            self.init_local(index);
         }
 
         Some(index)

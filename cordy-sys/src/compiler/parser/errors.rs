@@ -41,15 +41,17 @@ impl ParserError {
             ExpectedUnderscoreOrVariableNameAfterVariadicInPattern(it) |
             ExpectedUnderscoreOrVariableNameOrPattern(it) |
             ExpectedAnnotationOrNamedFunction(it) |
-            ExpectedStructNameAfterStruct(it) |
-            ExpectedFieldNameAfterArrow(it) => it.is_none(),
+            ExpectedStructNameAfterStruct(it, _) |
+            ExpectedFieldNameAfterArrow(it) |
+            ExpectedFieldNameInStruct(it) |
+            ExpectedFunctionInStruct(it, _) => it.is_none(),
 
             LocalVariableConflict(_) |
             LocalVariableConflictWithNativeFunction(_) |
             UndeclaredIdentifier(_) |
             DuplicateFieldName(_) |
             InvalidFieldName(_) |
-            InvalidLValue(_) => false,
+            InvalidLValue(_, _) => false,
 
             InvalidAssignmentTarget |
             MultipleVariadicTermsInPattern |
@@ -97,15 +99,17 @@ pub enum ParserErrorType {
     ExpectedUnderscoreOrVariableNameAfterVariadicInPattern(Option<ScanToken>),
     ExpectedUnderscoreOrVariableNameOrPattern(Option<ScanToken>),
     ExpectedAnnotationOrNamedFunction(Option<ScanToken>),
-    ExpectedStructNameAfterStruct(Option<ScanToken>),
+    ExpectedStructNameAfterStruct(Option<ScanToken>, bool), // is_module
     ExpectedFieldNameAfterArrow(Option<ScanToken>),
+    ExpectedFieldNameInStruct(Option<ScanToken>),
+    ExpectedFunctionInStruct(Option<ScanToken>, bool), // is_module
 
     LocalVariableConflict(String),
     LocalVariableConflictWithNativeFunction(String),
     UndeclaredIdentifier(String),
     DuplicateFieldName(String),
     InvalidFieldName(String),
-    InvalidLValue(String),
+    InvalidLValue(String, bool), // parameter, native
 
     InvalidAssignmentTarget,
     MultipleVariadicTermsInPattern,
