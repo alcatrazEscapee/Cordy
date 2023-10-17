@@ -4,6 +4,7 @@
 /// The functions declared in this module are public to be used by `parser/mod.rs`, but the module `semantic` is not exported itself.
 
 use std::collections::HashMap;
+use std::ffi::CString;
 use std::fmt::Debug;
 use fxhash::FxBuildHasher;
 use indexmap::IndexMap;
@@ -11,12 +12,12 @@ use itertools::Itertools;
 
 use crate::compiler::parser::{Parser, ParserError, ParserErrorType};
 use crate::core;
+use crate::core::Pattern;
 use crate::reporting::Location;
 use crate::vm::{FunctionImpl, IntoValue, Opcode, StoreOp, StructTypeImpl, ValuePtr};
 
 use Opcode::{*};
 use ParserErrorType::{*};
-use crate::core::Pattern;
 
 
 #[derive(Eq, PartialEq, Debug, Clone)]
@@ -506,6 +507,9 @@ pub struct ParserFunctionImpl {
     /// If the last argument in this function is a variadic argument, meaning it needs special behavior when invoked with >= `max_args()`
     var_arg: bool,
 
+    /// If the function is a FFI native function
+    native: bool,
+
     /// Bytecode for the function body itself
     code: Vec<(Location, Opcode)>,
 
@@ -530,12 +534,16 @@ impl ParserFunctionImpl {
     /// Bakes this parser function into an immutable `FunctionImpl`.
     /// The `head` and `tail` pointers are computed based on the surrounding code.
     pub(super) fn bake(self, constants: &mut [ValuePtr], head: usize, tail: usize) {
-        constants[self.constant_id as usize] = FunctionImpl::new(head, tail, self.name, self.args, self.default_args, self.var_arg).to_value();
+        constants[self.constant_id as usize] = FunctionImpl::new(head, tail, self.name, self.args, self.default_args, self.var_arg, self.native).to_value();
     }
 
     /// Marks a default argument as finished.
     pub(super) fn mark_default_arg(&mut self) {
         self.default_args.push(self.code.len());
+    }
+
+    pub(super) fn set_native(&mut self) {
+        self.native = true;
     }
 }
 
@@ -564,6 +572,53 @@ impl Module {
 enum LateBound {
     Local(u32),
     Method(u32)
+}
+
+#[derive(Debug, Clone)]
+pub struct FunctionLibrary {
+    modules: Vec<String>,
+    methods: Vec<FunctionLibraryEntry>,
+}
+
+impl FunctionLibrary {
+    pub fn new() -> FunctionLibrary {
+        FunctionLibrary { modules: Vec::new(), methods: Vec::new() }
+    }
+
+    /// Returns, for a given known `handle_id`, the pair of `(module_name, method_name)`
+    pub fn lookup(&self, handle_id: u32) -> &FunctionLibraryEntry {
+        &self.methods[handle_id as usize]
+    }
+
+    pub fn len(&self) -> (usize, usize) {
+        (self.modules.len(), self.methods.len())
+    }
+
+    pub fn truncate(&mut self, len: (usize, usize)) {
+        self.modules.truncate(len.0);
+        self.methods.truncate(len.1);
+    }
+}
+
+
+#[derive(Debug, Clone)]
+pub struct FunctionLibraryEntry {
+    pub module_id: u32,
+    pub module_name: String,
+    pub nargs: usize,
+
+    pub method_name: String,
+    method_cname: CString,
+}
+
+impl FunctionLibraryEntry {
+    fn new(module_id: u32, module_name: String, method_name: String, nargs: usize) -> FunctionLibraryEntry {
+        let method_cname = CString::new(method_name.as_bytes()).unwrap(); // Safe because we know method names cannot contain '\0'
+        FunctionLibraryEntry { module_id, module_name, nargs, method_name, method_cname }
+    }
+    pub fn symbol(&self) -> &[u8] {
+        self.method_cname.as_bytes_with_nul()
+    }
 }
 
 
@@ -608,6 +663,7 @@ impl<'a> Parser<'a> {
             args: args.iter().map(|u| u.to_code_str()).collect(),
             default_args: Vec::new(),
             var_arg,
+            native: false,
             code: Vec::new(),
             locals_reference: Vec::new(),
             constant_id,
@@ -1056,6 +1112,18 @@ impl<'a> Parser<'a> {
     pub fn declare_type(&mut self) -> u32 {
         self.fields.types += 1;
         self.fields.types - 1
+    }
+
+    pub fn declare_native(&mut self, module_name: String, method_name: String, nargs: usize) -> u32 {
+        let module_index = self.library.modules.iter()
+            .position(|v| v == &module_name)
+            .unwrap_or_else(|| {
+                self.library.modules.push(module_name.clone());
+                self.library.modules.len() - 1
+            });
+
+        self.library.methods.push(FunctionLibraryEntry::new(module_index as u32, module_name, method_name, nargs));
+        (self.library.methods.len() - 1) as u32
     }
 
     /// Resolves a field name to a specific field index. If the field is not present, raises a parse error.

@@ -984,11 +984,12 @@ pub struct FunctionImpl {
     args: Vec<String>, // Names of the arguments
     default_args: Vec<usize>, // Jump offsets for each default argument
     var_arg: bool, // If the last argument in this function is variadic
+    native: bool, // If the function is a native FFI function
 }
 
 impl FunctionImpl {
-    pub fn new(head: usize, tail: usize, name: String, args: Vec<String>, default_args: Vec<usize>, var_arg: bool) -> FunctionImpl {
-        FunctionImpl { head, tail, name, args, default_args, var_arg, }
+    pub fn new(head: usize, tail: usize, name: String, args: Vec<String>, default_args: Vec<usize>, var_arg: bool, native: bool) -> FunctionImpl {
+        FunctionImpl { head, tail, name, args, default_args, var_arg, native }
     }
 
     /// The minimum number of required arguments, inclusive.
@@ -1028,7 +1029,7 @@ impl FunctionImpl {
     }
 
     pub fn repr(&self) -> String {
-        format!("fn {}({})", self.name, self.args.join(", "))
+        format!("{}fn {}({})", if self.native { "native " } else { "" }, self.name, self.args.join(", "))
     }
 }
 

@@ -13,7 +13,7 @@ use crate::vm::{Opcode, StoreOp, ValuePtr};
 use crate::vm::operator::{BinaryOp, CompareOp, UnaryOp};
 
 pub use crate::compiler::parser::errors::{ParserError, ParserErrorType};
-pub use crate::compiler::parser::semantic::{Fields, Locals};
+pub use crate::compiler::parser::semantic::{Fields, Locals, FunctionLibrary};
 
 use NativeFunction::{*};
 use Opcode::{*};
@@ -46,7 +46,7 @@ pub(super) fn parse(enable_optimization: bool, scan_result: ScanResult) -> Compi
 pub(super) fn parse_incremental(scan_result: ScanResult, params: &mut CompileParameters, rule: ParseRule) -> IndexSet<ParserError> {
     let mut errors: IndexSet<ParserError> = IndexSet::new();
 
-    rule(&mut Parser::new(params.enable_optimization, scan_result.tokens, params.code, &mut errors, params.constants, params.patterns, params.globals, params.locations, params.fields, params.locals, &mut Vec::new()));
+    rule(&mut Parser::new(params.enable_optimization, scan_result.tokens, params.code, &mut errors, params.constants, params.patterns, params.globals, params.locations, params.fields, params.functions, params.locals, &mut Vec::new()));
 
     errors
 }
@@ -62,11 +62,12 @@ fn parse_rule(enable_optimization: bool, tokens: Vec<(Location, ScanToken)>, rul
         globals: Vec::new(),
         locations: Vec::new(),
         fields: Fields::new(),
+        functions: FunctionLibrary::new(),
 
         locals: Vec::new(),
     };
 
-    rule(&mut Parser::new(enable_optimization, tokens, &mut result.code, &mut result.errors, &mut result.constants, &mut result.patterns, &mut result.globals, &mut result.locations, &mut result.fields, &mut Locals::empty(), &mut result.locals));
+    rule(&mut Parser::new(enable_optimization, tokens, &mut result.code, &mut result.errors, &mut result.constants, &mut result.patterns, &mut result.globals, &mut result.locations, &mut result.fields, &mut result.functions, &mut Locals::empty(), &mut result.locals));
 
     result
 }
@@ -109,6 +110,8 @@ pub(super) struct Parser<'a> {
     /// A table of all struct fields and types. This is used to resolve `-> <name>` references at compile time, to a `field index`. At runtime it is used as a lookup to resolve a `(type index, field index)` into a `field offset`, which is used to access the underlying field.
     fields: &'a mut Fields,
 
+    library: &'a mut FunctionLibrary,
+
     /// Vector of all current outstanding late bindings. This will get filtered as the binding is declared.
     /// At the end of the compile, any unresolved late bindings are promoted to full errors.
     late_bindings: Vec<LateBinding>,
@@ -149,6 +152,7 @@ impl Parser<'_> {
         globals_reference: &'b mut Vec<String>,
         locations: &'b mut Vec<Location>,
         fields: &'b mut Fields,
+        library: &'b mut FunctionLibrary,
 
         locals: &'b mut Vec<Locals>,
         locals_reference: &'b mut Vec<String>,
@@ -173,6 +177,7 @@ impl Parser<'_> {
 
             locals,
             fields,
+            library,
 
             late_bindings: Vec::new(),
             late_binding_next_index: 0,
@@ -285,6 +290,7 @@ impl Parser<'_> {
                 Some(KeywordAssert) => self.parse_assert_statement(),
                 Some(KeywordStruct) => self.parse_struct_or_module(false),
                 Some(KeywordModule) => self.parse_struct_or_module(true),
+                Some(KeywordNative) => self.parse_native_module(),
                 Some(CloseBrace) => break,
                 Some(Semicolon) => {
                     self.push_delayed_pop();
@@ -308,39 +314,10 @@ impl Parser<'_> {
     }
 
     fn parse_struct_or_module(&mut self, is_module: bool) {
-        self.push_delayed_pop();
-        self.advance(); // Consume `struct`
-
-        // Structs can only be declared in global scope (function and scope depth)
-        // Scoped structs or modules introduce a couple issues and have better existing solutions:
-        // 1. Scoped structs -> struct and module methods are allowed to be closures.
-        //    This is just weird, and better served by a struct declared globally with fields that are referenced (via `self` methods) in the struct
-        // 2. Nested structs + modules are still possible, but only within module scope depth:
-        // ```
-        // module outer {
-        //     module inner { // we can support this, and both are still ""global""
-        // ```
-        // 3. Instances of structs, and the module itself, can always escape an inner scope, so the object must be known globally anyway.
-        //    In these cases, it makes more sense to restrict them to only being available in global scope.
-        if self.function_depth != 0 || self.scope_depth != 0 {
-            self.semantic_error(StructNotInGlobalScope);
-            return;
-        }
-
-        let type_name: String = match self.peek() {
-            Some(Identifier(_)) => self.advance_identifier(),
+        match self.parse_struct_or_module_prefix(is_module) {
+            Some(_) => {},
             _ => return,
         };
-
-        // Declare a local for the struct in the global scope
-        match self.declare_local(type_name.clone()) {
-            Some(local) => self.init_local(local),
-            _ => return,
-        }
-
-        // Increment module depth, after initial checks, now we know we are definitely parsing a module.
-        self.module_depth += 1;
-        self.modules.push(Module::new(type_name, is_module));
 
         // Declare two types - one for the instance, and one for the constructor
         // - Fields are members of the instance, whereas methods are members of the constructor
@@ -396,7 +373,119 @@ impl Parser<'_> {
             }
             self.expect_resync(CloseBrace);
         }
+        self.parse_struct_or_module_suffix(instance_type, constructor_type);
+    }
 
+    fn parse_native_module(&mut self) {
+        // Native modules are a slim subset of normal modules. They can only contain abstract function declarations, with restrictions and required type signatures.
+        self.push_delayed_pop();
+        self.advance(); // Consume `native`
+
+        let module_name = match self.parse_struct_or_module_prefix(true) {
+            Some(it) => it,
+            None => return
+        };
+
+        let constructor_type = self.declare_type();
+
+        self.expect(OpenBrace); // Implementation block is required
+
+        while let Some(KeywordFn) = self.peek() {
+            self.advance(); // Consume `fn`
+
+            let loc_start = self.prev_location();
+            if let Some(Identifier(_)) = self.peek() {
+                let method_name = self.advance_identifier();
+                let mut params = Vec::new();
+
+                self.expect(OpenParen);
+
+                // Parse parameters, just counting them for now
+                // todo: handle identically named parameters
+                loop {
+                    if let Some(Identifier(_)) = self.peek() {
+                        let param = self.advance_identifier();
+                        if params.contains(&param) {
+                            // todo: error here?
+                            // todo: are duplicate parameter errors never raised???
+                            //self.semantic_error(DuplicateParameterName)
+                        }
+                        params.push(param);
+                    }
+                    if self.parse_optional_trailing_comma(CloseParen, ExpectedCommaOrEndOfParameters) {
+                        break
+                    }
+                }
+
+                self.expect_resync(CloseParen);
+
+                let lvalues: Vec<LValue> = params.into_iter().map(|u| LValue::Named(LValueReference::Named(u))).collect();
+                let loc = loc_start | self.prev_location();
+
+                self.declare_method(constructor_type, method_name.clone(), loc, &lvalues, false);
+
+                let function_id = self.functions.len() - 1;
+                let handle_id = self.declare_native(module_name.clone(), method_name, lvalues.len());
+
+                self.locals.push(Locals::new(Some(function_id)));
+                self.current_function_impl().set_native();
+                self.push_with(CallNative(handle_id), loc);
+                self.push(Return);
+                self.locals.pop(); // Pop directly, because native functions don't interact with locals at all.
+
+            } else {
+                self.error_with(ExpectedFunctionNameAfterFn);
+            }
+        }
+        self.parse_struct_or_module_suffix(u32::MAX, constructor_type);
+        self.expect_resync(CloseBrace);
+    }
+
+    fn parse_struct_or_module_prefix(&mut self, is_module: bool) -> Option<String> {
+        self.push_delayed_pop();
+        self.expect(if is_module { KeywordModule } else { KeywordStruct }); // Consume `struct` or `module`
+
+        // Structs can only be declared in global scope (function and scope depth)
+        // Scoped structs or modules introduce a couple issues and have better existing solutions:
+        // 1. Scoped structs -> struct and module methods are allowed to be closures.
+        //    This is just weird, and better served by a struct declared globally with fields that are referenced (via `self` methods) in the struct
+        // 2. Nested structs + modules are still possible, but only within module scope depth:
+        // ```
+        // module outer {
+        //     module inner { // we can support this, and both are still ""global""
+        // ```
+        // 3. Instances of structs, and the module itself, can always escape an inner scope, so the object must be known globally anyway.
+        //    In these cases, it makes more sense to restrict them to only being available in global scope.
+        if self.function_depth != 0 || self.scope_depth != 0 {
+            self.semantic_error(StructNotInGlobalScope);
+            return None;
+        }
+
+        let type_name: String = match self.peek() {
+            Some(Identifier(_)) => self.advance_identifier(),
+            _ => {
+                // todo: raise an error
+                return None
+            },
+        };
+
+        // Declare a local for the struct in the global scope
+        match self.declare_local(type_name.clone()) {
+            Some(local) => self.init_local(local),
+            _ => {
+                // todo: raise an error
+                return None
+            },
+        }
+
+        // Increment module depth, after initial checks, now we know we are definitely parsing a module.
+        self.module_depth += 1;
+        self.modules.push(Module::new(type_name.clone(), is_module));
+
+        Some(type_name)
+    }
+
+    fn parse_struct_or_module_suffix(&mut self, instance_type: u32, constructor_type: u32) {
         let module = self.modules.pop().unwrap().bake(instance_type, constructor_type);
         let id: u32 = self.declare_const(module);
 
@@ -2133,6 +2222,9 @@ mod tests {
     #[test] fn test_module_late_bound_store_pattern() { run_err("module A { fn a() { (b, _) = nil } }", "Undeclared identifier: 'b'\n  at: line 1 (<test>)\n\n1 | module A { fn a() { (b, _) = nil } }\n2 |                            ^\n") }
     #[test] fn test_module_bind_to_store() { run_err("module A { fn b() {} fn a() { b = 1 } }", "The left hand side is not a valid assignment target\n  at: line 1 (<test>)\n\n1 | module A { fn b() {} fn a() { b = 1 } }\n2 |                                 ^\n") }
     #[test] fn test_module_bind_to_store_pattern() { run_err("module A { fn b() {} fn a() { (_, a) = nil } }", "The left hand side is not a valid assignment target\n  at: line 1 (<test>)\n\n1 | module A { fn b() {} fn a() { (_, a) = nil } }\n2 |                                      ^\n") }
+    #[test] fn test_method_with_duplicate_arg_name() { run_err("fn foo(a, a) {}", "Duplicate definition of variable 'a' in the same scope\n  at: line 1 (<test>)\n\n1 | fn foo(a, a) {}\n2 |            ^\n") }
+    #[test] fn test_method_in_module_with_duplicate_arg_name() { run_err("module A { fn foo(a, a) {} }", "Duplicate definition of variable 'a' in the same scope\n  at: line 1 (<test>)\n\n1 | module A { fn foo(a, a) {} }\n2 |                       ^\n") }
+    #[test] fn test_method_in_native_module_with_duplicate_arg_name() { run_err("native module A { fn foo(a, a) }", "") }
 
     #[test] fn test_array_access_after_newline() { run("array_access_after_newline"); }
     #[test] fn test_array_access_no_newline() { run("array_access_no_newline"); }
@@ -2176,6 +2268,7 @@ mod tests {
     #[test] fn test_modules_method_binding() { run("modules_method_binding"); }
     #[test] fn test_modules_method_late_binding() { run("modules_method_late_binding"); }
     #[test] fn test_multiple_undeclared_variables() { run("multiple_undeclared_variables"); }
+    #[test] fn test_native_modules() { run("native_modules") }
     #[test] fn test_pattern_expression() { run("pattern_expression"); }
     #[test] fn test_pattern_expression_nested() { run("pattern_expression_nested"); }
     #[test] fn test_struct_with_methods() { run("struct_with_methods"); }

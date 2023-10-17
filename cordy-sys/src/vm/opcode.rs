@@ -111,6 +111,9 @@ pub enum Opcode {
     /// - `unroll: bool` : If any unrolls are present in the call and need to be accounted for.
     Call(u32, bool),
 
+    /// Invokes a native function through the FFI interface. The parameter is a FFI `handle_id`
+    CallNative(u32),
+
     /// Unrolls an iterable on the stack. Used in combination with `OpFuncEvalUnrolled` to call functions with `...`. Also can be used with list, vector, and dict initializations.
     /// The argument is if this unroll is the first one we've seen in the *current function invocation*. If so, it pushes a new counter onto the stack.
     Unroll(bool),

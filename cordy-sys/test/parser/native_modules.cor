@@ -1,0 +1,5 @@
+native module Foo {
+    fn no_arg()
+    fn one_arg(a)
+    fn many_args(a, b, c, d)
+}

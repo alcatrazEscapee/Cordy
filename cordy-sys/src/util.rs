@@ -59,13 +59,13 @@ macro_rules! impl_partial_ord {
 pub(crate) use impl_partial_ord;
 
 
-pub struct EmptyRead;
+pub struct Noop;
 
-impl Read for EmptyRead {
+impl Read for Noop {
     fn read(&mut self, _: &mut [u8]) -> io::Result<usize> { Ok(0) }
 }
 
-impl BufRead for EmptyRead {
+impl BufRead for Noop {
     fn fill_buf(&mut self) -> io::Result<&[u8]> { Ok(&[]) }
     fn consume(&mut self, _: usize) {}
 }
@@ -76,7 +76,6 @@ impl BufRead for EmptyRead {
 #[cfg(test)] use crate::SourceView;
 
 /// Version of `assert_eq` with explicit actual and expected parameters, that prints the entire thing including newlines.
-#[cfg(test)]
 pub fn assert_eq(actual: String, expected: String) {
     assert_eq!(actual, expected, "\n=== Expected ===\n{}\n=== Actual ===\n{}\n", expected, actual);
 }

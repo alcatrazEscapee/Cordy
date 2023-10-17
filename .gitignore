@@ -13,7 +13,11 @@
 !/cordy*/test/**/*.cor
 !/cordy*/test/**/*.cor.trace
 
+!/cordy*/build.rs
 !/cordy*/src/**/*.rs
 !/cordy*/benches/**/*.rs
+
+!/cordy*/cordy.h
+!/cordy*/src/**/*.c
 
 !/docs/**/*.md

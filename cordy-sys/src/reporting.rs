@@ -288,6 +288,7 @@ impl AsError for RuntimeError {
             RuntimeError::IncorrectArgumentsStruct(s, n) => format!("Incorrect number of arguments for {}, got {}", s, n),
 
             RuntimeError::IOError(e) => format!("IOError: {}", e),
+            RuntimeError::OSError(e) => format!("OsError: {}", e),
             RuntimeError::MonitorError(e) => format!("MonitorError: Illegal monitor command '{}'", e),
 
             RuntimeError::ValueErrorIndexOutOfBounds(i, ln) => format!("Index '{}' is out of bounds for list of length [0, {})", i, ln),
@@ -429,7 +430,7 @@ impl AsError for ParserError {
             ParserErrorType::ExpectedStructNameAfterStruct(e) => format!("Expected a struct name after 'struct' keyword, got {} instead", e.as_error()),
             ParserErrorType::ExpectedFieldNameAfterArrow(e) => format!("Expected a field name after '->', got {} instead", e.as_error()),
 
-            ParserErrorType::LocalVariableConflict(e) => format!("Multiple declarations for 'let {}' in the same scope", e),
+            ParserErrorType::LocalVariableConflict(e) => format!("Duplicate definition of variable '{}' in the same scope", e),
             ParserErrorType::LocalVariableConflictWithNativeFunction(e) => format!("Name for variable '{}' conflicts with the native function by the same name", e),
             ParserErrorType::UndeclaredIdentifier(e) => format!("Undeclared identifier: '{}'", e),
             ParserErrorType::DuplicateFieldName(e) => format!("Duplicate field name: '{}'", e),

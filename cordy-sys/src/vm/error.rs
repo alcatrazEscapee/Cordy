@@ -19,6 +19,7 @@ pub enum RuntimeError {
     IncorrectArgumentsGetField(String, u32),
     IncorrectArgumentsStruct(String, u32),
 
+    OSError(String),
     IOError(String),
     MonitorError(String),
 
