@@ -135,6 +135,9 @@ pub(super) struct Parser<'a> {
     patterns: Vec<Pattern<ParserStoreOp>>,
     /// List of baked patterns already known to the parser.
     baked_patterns: &'a mut Vec<Pattern<StoreOp>>,
+
+    /// This is a counter for generating fake, "invalid" names as we parse. This prevents us from generating duplicate identifiers, while also keeping parser structure linear.
+    invalid_id: u32,
 }
 
 
@@ -192,6 +195,8 @@ impl Parser<'_> {
             functions: Vec::new(),
             patterns: Vec::new(),
             baked_patterns: patterns,
+
+            invalid_id: 0,
         }
     }
 
@@ -314,10 +319,11 @@ impl Parser<'_> {
     }
 
     fn parse_struct_or_module(&mut self, is_module: bool) {
-        match self.parse_struct_or_module_prefix(is_module) {
-            Some(_) => {},
-            _ => return,
-        };
+        trace::trace_parser!("rule <struct-or-module>");
+
+        self.push_delayed_pop();
+        self.advance(); // Consume `struct` or `module`
+        self.begin_module(is_module); // Consumes name
 
         // Declare two types - one for the instance, and one for the constructor
         // - Fields are members of the instance, whereas methods are members of the constructor
@@ -329,8 +335,8 @@ impl Parser<'_> {
         if !is_module {
             self.expect(OpenParen);
 
-            while let Some(Identifier(_)) = self.peek() {
-                let name = self.advance_identifier();
+            while self.peek() != Some(&CloseParen) {
+                let name = self.expect_identifier(ExpectedFieldNameInStruct);
 
                 self.declare_field(instance_type, name);
 
@@ -348,151 +354,91 @@ impl Parser<'_> {
             self.advance(); // Consume `{`
 
             // The only thing that can be contained in struct/module implementations is methods
-            // todo: support native functions here
             loop {
                 match self.peek() {
+                    Some(CloseBrace) => break,
                     Some(KeywordFn) => {
                         self.advance(); // Consume `fn`
 
-                        if let Some(Identifier(_)) = self.peek() {
-                            let name = self.advance_identifier();
-                            let loc = self.prev_location();
+                        let name = self.expect_identifier(ExpectedFunctionNameAfterFn);
+                        let loc = self.prev_location();
+                        let (args, default_args, var_arg) = self.parse_function_parameters(false);
 
-                            let (args, default_args, var_arg) = self.parse_function_parameters();
-
-                            self.declare_method(constructor_type, name, loc, &args, var_arg);
-
-                            let closed_locals = self.parse_function_body(args, default_args);
-                            self.emit_closure_and_closed_locals(closed_locals);
-                        } else {
-                            self.error_with(ExpectedFunctionNameAfterFn);
-                        }
-                    },
-                    _ => break
+                        self.declare_method(constructor_type, name, loc, &args, var_arg);
+                        self.parse_function_body_and_emit(args, default_args);
+                    }
+                    _ => {
+                        self.error_with(|t| ExpectedFunctionInStruct(t, is_module));
+                        break
+                    }
                 }
             }
             self.expect_resync(CloseBrace);
         }
-        self.parse_struct_or_module_suffix(instance_type, constructor_type);
+        self.end_module(instance_type, constructor_type);
     }
 
     fn parse_native_module(&mut self) {
         // Native modules are a slim subset of normal modules. They can only contain abstract function declarations, with restrictions and required type signatures.
         self.push_delayed_pop();
         self.advance(); // Consume `native`
-
-        let module_name = match self.parse_struct_or_module_prefix(true) {
-            Some(it) => it,
-            None => return
-        };
+        self.expect(KeywordModule);
 
         let constructor_type = self.declare_type();
+        let module_name = self.begin_module(true); // Consumes name
 
-        self.expect(OpenBrace); // Implementation block is required
-
-        while let Some(KeywordFn) = self.peek() {
-            self.advance(); // Consume `fn`
-
-            let loc_start = self.prev_location();
-            if let Some(Identifier(_)) = self.peek() {
-                let method_name = self.advance_identifier();
-                let mut params = Vec::new();
-
-                self.expect(OpenParen);
-
-                // Parse parameters, just counting them for now
-                // todo: handle identically named parameters
-                loop {
-                    if let Some(Identifier(_)) = self.peek() {
-                        let param = self.advance_identifier();
-                        if params.contains(&param) {
-                            // todo: error here?
-                            // todo: are duplicate parameter errors never raised???
-                            //self.semantic_error(DuplicateParameterName)
-                        }
-                        params.push(param);
-                    }
-                    if self.parse_optional_trailing_comma(CloseParen, ExpectedCommaOrEndOfParameters) {
-                        break
-                    }
+        self.expect(OpenBrace);
+        loop {
+            match self.peek() {
+                Some(CloseBrace) => break,
+                Some(KeywordFn) => {
+                    self.advance(); // Consume `fn`
+                    self.parse_native_module_function(constructor_type, &module_name);
                 }
-
-                self.expect_resync(CloseParen);
-
-                let lvalues: Vec<LValue> = params.into_iter().map(|u| LValue::Named(LValueReference::Named(u))).collect();
-                let loc = loc_start | self.prev_location();
-
-                self.declare_method(constructor_type, method_name.clone(), loc, &lvalues, false);
-
-                let function_id = self.functions.len() - 1;
-                let handle_id = self.declare_native(module_name.clone(), method_name, lvalues.len());
-
-                self.locals.push(Locals::new(Some(function_id)));
-                self.current_function_impl().set_native();
-                self.push_with(CallNative(handle_id), loc);
-                self.push(Return);
-                self.locals.pop(); // Pop directly, because native functions don't interact with locals at all.
-
-            } else {
-                self.error_with(ExpectedFunctionNameAfterFn);
+                _ => {
+                    self.error_with(|t| ExpectedFunctionInStruct(t, true));
+                    break;
+                }
             }
         }
-        self.parse_struct_or_module_suffix(u32::MAX, constructor_type);
         self.expect_resync(CloseBrace);
+        self.end_module(u32::MAX, constructor_type);
     }
 
-    fn parse_struct_or_module_prefix(&mut self, is_module: bool) -> Option<String> {
-        self.push_delayed_pop();
-        self.expect(if is_module { KeywordModule } else { KeywordStruct }); // Consume `struct` or `module`
+    fn parse_native_module_function(&mut self, constructor_type: u32, module_name: &String) {
+        let loc_start = self.prev_location();
+        let method_name = self.expect_identifier(ExpectedFunctionNameAfterFn);
 
-        // Structs can only be declared in global scope (function and scope depth)
-        // Scoped structs or modules introduce a couple issues and have better existing solutions:
-        // 1. Scoped structs -> struct and module methods are allowed to be closures.
-        //    This is just weird, and better served by a struct declared globally with fields that are referenced (via `self` methods) in the struct
-        // 2. Nested structs + modules are still possible, but only within module scope depth:
-        // ```
-        // module outer {
-        //     module inner { // we can support this, and both are still ""global""
-        // ```
-        // 3. Instances of structs, and the module itself, can always escape an inner scope, so the object must be known globally anyway.
-        //    In these cases, it makes more sense to restrict them to only being available in global scope.
-        if self.function_depth != 0 || self.scope_depth != 0 {
-            self.semantic_error(StructNotInGlobalScope);
-            return None;
+        let (args, default_args, var_arg) = self.parse_function_parameters(true);
+        let loc = loc_start | self.prev_location();
+
+        self.declare_method(constructor_type, method_name.clone(), loc, &args, var_arg);
+
+        let function_id = self.functions.len() - 1;
+        let handle_id = self.declare_native(module_name.clone(), method_name, args.len());
+
+        self.locals.push(Locals::new(Some(function_id)));
+        self.function_depth += 1;
+        self.scope_depth += 1;
+
+        for arg in default_args {
+            self.emit_optimized_expr(arg);
+            self.current_function_impl().mark_default_arg();
         }
 
-        let type_name: String = match self.peek() {
-            Some(Identifier(_)) => self.advance_identifier(),
-            _ => {
-                // todo: raise an error
-                return None
-            },
-        };
-
-        // Declare a local for the struct in the global scope
-        match self.declare_local(type_name.clone()) {
-            Some(local) => self.init_local(local),
-            _ => {
-                // todo: raise an error
-                return None
-            },
+        for mut arg in args {
+            arg.declare_single_local(self); // Handles resolving locals + name conflicts
         }
 
-        // Increment module depth, after initial checks, now we know we are definitely parsing a module.
-        self.module_depth += 1;
-        self.modules.push(Module::new(type_name.clone(), is_module));
+        self.current_function_impl().set_native();
+        self.push_with(CallNative(handle_id), loc);
+        self.push(Return);
 
-        Some(type_name)
-    }
+        self.pop_locals(Some(self.scope_depth), true, false, false);
 
-    fn parse_struct_or_module_suffix(&mut self, instance_type: u32, constructor_type: u32) {
-        let module = self.modules.pop().unwrap().bake(instance_type, constructor_type);
-        let id: u32 = self.declare_const(module);
-
-        self.push(Constant(id));
-
-        // Decrement module depth
-        self.module_depth -= 1;
+        self.function_depth -= 1;
+        self.scope_depth -= 1;
+        self.locals.pop(); // Pop directly, because native functions don't interact with locals at all.
     }
 
     fn parse_annotated_named_function(&mut self) {
@@ -523,32 +469,18 @@ impl Parser<'_> {
         self.push_delayed_pop();
         self.advance();
 
-        let name = match self.peek() {
-            Some(Identifier(_)) => Some(self.advance_identifier()),
-            _ => {
-                self.error_with(ExpectedFunctionNameAfterFn);
-                None
-            }
-        };
-        let (args, default_args, var_arg) = self.parse_function_parameters();
+        let name = self.expect_identifier(ExpectedFunctionNameAfterFn);
+        let (args, default_args, var_arg) = self.parse_function_parameters(false);
 
         // Named functions are a complicated local variable, and needs to be declared as such
         // Note that we always declare the function here, to preserve parser operation in the event of a parse error
-        let name = name
-            .map(|name| {
-                if let Some(index) = self.declare_local(name.clone()) {
-                    self.init_local(index);
-                }
-                name
-            })
-            .unwrap_or_else(|| String::from("<invalid>"));
+        self.declare_local(name.clone(), true);
 
         let func: u32 = self.declare_function(name, &args, var_arg);
         self.push(Constant(func));
 
         // Emit the closed locals from the function body right away, because we are not in an expression context
-        let closed_locals = self.parse_function_body(args, default_args);
-        self.emit_closure_and_closed_locals(closed_locals);
+        self.parse_function_body_and_emit(args, default_args);
     }
 
     fn parse_expression_function(&mut self) -> Expr {
@@ -556,7 +488,7 @@ impl Parser<'_> {
 
         // Function header - `fn` (<arg>, ...)
         self.advance();
-        let (args, default_args, var_arg) = self.parse_function_parameters();
+        let (args, default_args, var_arg) = self.parse_function_parameters(false);
 
         // Expression functions don't declare themselves as a local variable that can be referenced.
         // Instead, as they're part of an expression, they just push a single function instance onto the stack
@@ -565,8 +497,18 @@ impl Parser<'_> {
         Expr::function(func, closed_locals)
     }
 
-    /// Returns the pair of `lvalue` parameters, and `Expr` default values, if present.
-    fn parse_function_parameters(&mut self) -> (Vec<LValue>, Vec<Expr>, bool) {
+    /// Parses the `(...)` function parameter declaration.
+    ///
+    /// If `restrict` is true, this restricts to parameters in native function declarations. That is:
+    /// - Variadic (`*x`) and default parameters are allowed
+    /// - No complex `LValue`s are allowed.
+    /// - Empty (`_`) parameters _are_ allowed (unlike in normal functions)
+    ///
+    /// Returns the triple `(args, default_args, var_arg)` where:
+    /// - `args` contains the `LValue` parameters
+    /// - `default_args` contains the `Expr` default values
+    /// - `var_arg` is `true` if this function has a last-argument variadic argument.
+    fn parse_function_parameters(&mut self, restrict: bool) -> (Vec<LValue>, Vec<Expr>, bool) {
         trace::trace_parser!("rule <function-parameters>");
 
         self.expect(OpenParen);
@@ -581,19 +523,32 @@ impl Parser<'_> {
 
         loop {
             match self.parse_lvalue() {
-                Some(lvalue @ (LValue::VarEmpty | LValue::Empty)) => self.semantic_error(InvalidLValue(lvalue.to_code_str())),
+                Some(LValue::Empty) if restrict => { // Only allowed in restricted mode
+                    args.push(LValue::Empty)
+                }
                 Some(LValue::VarNamed(reference)) => {
                     // A `*<name>` argument gets treated as a default argument value of an empty vector, and we set the `var_arg` flag
                     args.push(LValue::Named(reference)); // Convert to a `Named()`
                     default_args.push(Expr::vector(Location::empty(), Vec::new()));
                     var_arg = true;
                 }
-                Some(lvalue) => {
+                Some(lvalue @ LValue::Named(_)) => { // Named are allowed in both modes
                     if var_arg {
                         self.semantic_error(ParameterAfterVarParameter);
                     }
                     args.push(lvalue)
-                },
+                }
+                Some(lvalue) => {
+                    // Other parameters are only allowed in unrestricted mode
+                    if !restrict {
+                        if var_arg {
+                            self.semantic_error(ParameterAfterVarParameter);
+                        }
+                        args.push(lvalue)
+                    } else {
+                        self.semantic_error(InvalidLValue(lvalue.to_code_str(), restrict))
+                    }
+                }
                 _ => self.error_with(ExpectedParameterOrEndOfList),
             }
 
@@ -619,6 +574,11 @@ impl Parser<'_> {
         }
         self.expect_resync(CloseParen);
         (args, default_args, var_arg)
+    }
+
+    fn parse_function_body_and_emit(&mut self, args: Vec<LValue>, default_args: Vec<Expr>) {
+        let closed_locals = self.parse_function_body(args, default_args);
+        self.emit_closure_and_closed_locals(closed_locals);
     }
 
     fn parse_function_body(&mut self, args: Vec<LValue>, default_args: Vec<Expr>) -> Vec<Opcode> {
@@ -1766,16 +1726,13 @@ impl Parser<'_> {
         trace::trace_parser!("rule <expr-2-field-access>");
 
         let loc_start = self.advance_with(); // Consume `->`
-        match self.peek() {
-            Some(Identifier(_)) => {
-                let field: String = self.advance_identifier();
-                match self.resolve_field(&field) {
-                    Some(field_index) => return Some((loc_start | self.prev_location(), field_index)),
-                    None => self.semantic_error(InvalidFieldName(field))
-                }
-            },
-            _ => self.error_with(ExpectedFieldNameAfterArrow)
+        let field_name = self.expect_identifier(ExpectedFieldNameAfterArrow);
+
+        match self.resolve_field(&field_name) {
+            Some(field_index) => return Some((loc_start | self.prev_location(), field_index)),
+            None => self.semantic_error(InvalidFieldName(field_name))
         }
+
         None
     }
 
@@ -2224,7 +2181,13 @@ mod tests {
     #[test] fn test_module_bind_to_store_pattern() { run_err("module A { fn b() {} fn a() { (_, a) = nil } }", "The left hand side is not a valid assignment target\n  at: line 1 (<test>)\n\n1 | module A { fn b() {} fn a() { (_, a) = nil } }\n2 |                                      ^\n") }
     #[test] fn test_method_with_duplicate_arg_name() { run_err("fn foo(a, a) {}", "Duplicate definition of variable 'a' in the same scope\n  at: line 1 (<test>)\n\n1 | fn foo(a, a) {}\n2 |            ^\n") }
     #[test] fn test_method_in_module_with_duplicate_arg_name() { run_err("module A { fn foo(a, a) {} }", "Duplicate definition of variable 'a' in the same scope\n  at: line 1 (<test>)\n\n1 | module A { fn foo(a, a) {} }\n2 |                       ^\n") }
-    #[test] fn test_method_in_native_module_with_duplicate_arg_name() { run_err("native module A { fn foo(a, a) }", "") }
+    #[test] fn test_method_in_native_module_with_duplicate_arg_name() { run_err("native module A { fn foo(a, a) }", "Duplicate definition of variable 'a' in the same scope\n  at: line 1 (<test>)\n\n1 | native module A { fn foo(a, a) }\n2 |                              ^\n") }
+    #[test] fn test_module_with_no_name() { run_err("module { fn boo() {} }", "Expected a name after 'module' keyword, got '{' token instead\n  at: line 1 (<test>)\n\n1 | module { fn boo() {} }\n2 |        ^\n") }
+    #[test] fn test_module_with_no_functions() { run_err("module Foo { let x = 3 }", "Expected a function within module body, got 'let' keyword instead\n  at: line 1 (<test>)\n\n1 | module Foo { let x = 3 }\n2 |              ^^^\n") }
+    #[test] fn test_module_with_duplicate_name() { run_err("let Foo ; module Foo {}", "Duplicate definition of variable 'Foo' in the same scope\n  at: line 1 (<test>)\n\n1 | let Foo ; module Foo {}\n2 |                  ^^^\n") }
+    #[test] fn test_native_module_with_no_name() { run_err("native module { fn boo() }", "Expected a name after 'module' keyword, got '{' token instead\n  at: line 1 (<test>)\n\n1 | native module { fn boo() }\n2 |               ^\n") }
+    #[test] fn test_native_module_with_function_impl() { run_err("native module Foo { fn boo() -> nil }", "Expected a function within module body, got '->' token instead\n  at: line 1 (<test>)\n\n1 | native module Foo { fn boo() -> nil }\n2 |                              ^^\n") }
+    #[test] fn test_native_module_with_function_impl_mismatching_braces() { run_err("native module Foo { fn boo() {}", "Expected a function within module body, got '{' token instead\n  at: line 1 (<test>)\n\n1 | native module Foo { fn boo() {}\n2 |                              ^\n") }
 
     #[test] fn test_array_access_after_newline() { run("array_access_after_newline"); }
     #[test] fn test_array_access_no_newline() { run("array_access_no_newline"); }

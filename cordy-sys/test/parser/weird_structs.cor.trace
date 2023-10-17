@@ -4,5 +4,13 @@ L2: 0002 InitGlobal
     0003 StructType(struct EmptyStructWithImpl())
 L3: 0004 InitGlobal
     0005 StructType(module EmptyMod)
-    0006 PopN(3)
-    0007 Exit
+L5: 0006 InitGlobal
+L7: 0007 StructType(module ModWithWeirdParams)
+    0008 PopN(4)
+    0009 Exit
+L6: 0010 Nil
+    0011 Nil
+    0012 LiteralBegin(Vector, 0)
+    0013 LiteralEnd
+    0014 CallNative(0)
+    0015 Return

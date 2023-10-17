@@ -7,10 +7,12 @@
 // Injected API Calls
 // When Cordy first initializes a dynamic library it will inject these as function calls back into Cordy API code
 static void* _cordy_api_str = 0;
+static void* _cordy_api_vec = 0;
 static void* _cordy_api_free = 0;
 
-void _cordy_api_init(void* str, void* free) {
+void _cordy_api_init(void* str, void* vec, void* free) {
     _cordy_api_str = str;
+    _cordy_api_vec = vec;
     _cordy_api_free = free;
 }
 
@@ -28,7 +30,8 @@ enum {
     TY_NIL = 1,
     TY_BOOL = 2,
     TY_INT = 3,
-    TY_STR = 4
+    TY_STR = 4,
+    TY_ARRAY = 5,
 };
 
 
@@ -36,7 +39,21 @@ enum {
 extern "C" {
 #endif
 
+struct cordy_value_s;
+
 typedef const char* str_t;
+
+/**
+ * A vector type exposed to C FFI code. This is a deconstructed `Vec<>` from Rust.
+ * - The pointer, capacity must not be changed
+ * - The user must manage everything about the vec themselves
+ */
+typedef struct {
+    struct cordy_value_s * ptr;
+    size_t len;
+    size_t capacity;
+} cordy_vec_t;
+
 
 /**
  * The Cordy FFI value type. All values passed from Cordy to C/C++ code and vice versa must be of this type.
@@ -47,16 +64,19 @@ typedef const char* str_t;
  * Where `args` is a pointer to an array of `n` arguments to the FFI function.
  * **Important**: The FFI function **must not** attempt to free the `args` pointer.
  */
-typedef struct {
+typedef struct cordy_value_s {
     cordy_type_t ty;
     union {
         bool bool_value;
         int64_t int_value;
         str_t str_value;
+        cordy_vec_t vec_value;
     };
 } cordy_value_t;
 
 
+// Macro that defines the API for possible Cordy FFI functions.
+// The first argument is a pointer to the function arguments, and `n` is the number of arguments.
 #define CORDY_EXTERN(name) cordy_value_t name(cordy_value_t* args, size_t n)
 
 #define _VALUE(type, value_field, value) ((cordy_value_t) { .ty = type, .value_field = value })
@@ -68,6 +88,7 @@ typedef struct {
 #define BOOL(x) _VALUE(TY_BOOL, bool_value, x)
 #define INT(x) _VALUE(TY_INT, int_value, x)
 #define STR(x) (((cordy_value_t (*) ( const char* )) _cordy_api_str)(x))
+#define VEC(n) (((cordy_value_t (*) ( size_t )) _cordy_api_vec)(n))
 
 #define FREE(x) (((void (*) ( cordy_value_t )) _cordy_api_free) (x))
 
@@ -88,6 +109,7 @@ typedef struct {
 /**
  * Used to call other methods which return a `cordy_value_t` and check the result for errors.
  * - `name` may be either `cordy_value_t <name>`, in which case this will declare the variable, or `<name>` to reuse an existing variable.
+ *
  * Usage:
  * ```
  * TRY(cordy_value_t ret, some_other_method()); // declares and assigns to `ret`
@@ -129,17 +151,21 @@ do {                                                \
 #define AS_BOOL(name, x) _AS(TY_BOOL, bool_value, name, x)
 #define AS_INT(name, x) _AS(TY_INT, int_value, name, x)
 #define AS_STR(name, x) _AS(TY_STR, str_value, name, x)
+#define AS_VEC(name, x) _AS(TY_ARRAY, vec_value, name, x)
 
 
 // where xy is a `cordy_value_t <name>`, should return just `<name>
 // where xy is just `<name>`, return input unaltered
-#define STRIP_DECL(xy) _REFLECT(_ARG2, DECL_ ## xy , xy)
-#define ONLY_DECL(xy) _REFLECT(_ARG3, DECL_ ## xy , xy ,)
+#define STRIP_DECL(xy) _REFLECT(_ARG2, _DECL_ ## xy , xy)
+#define ONLY_DECL(xy) _REFLECT(_ARG3, _DECL_ ## xy , xy ,)
 
-#define DECL_cordy_value_t ~ ,
-#define DECL_bool ~ ,
-#define DECL_int64_t ~ ,
-#define DECL_str_t ~ ,
+#define _DECL_cordy_value_t _DECL_
+#define _DECL_cordy_vec_t _DECL_
+#define _DECL_bool _DECL_
+#define _DECL_int64_t _DECL_
+#define _DECL_str_t _DECL_
+
+#define _DECL_ ~ ,
 
 // Internal Macro Helpers
 #define _ARG2(x1, x2, ...) x2

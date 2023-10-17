@@ -114,7 +114,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Acts as a resynchronization point for error mode
+    /// Acts as a resynchronization point for error mode.
     /// Accepts tokens from the input (ignoring the current state of error recovery mode), until we reach the expected token or an empty input.
     /// If we reach the expected token, it is consumed and error mode is unset.
     pub fn expect_resync(&mut self, token: ScanToken) {
@@ -162,6 +162,21 @@ impl<'a> Parser<'a> {
         match self.advance() {
             Some(StringLiteral(s)) => s,
             t => panic!("Token mismatch in advance_str() -> expected a Some(StringLiteral(String)), got a {:?} instead", t)
+        }
+    }
+
+    /// Expects an identifier token, consumes it, and returns the name. If an identifier was not present, then raises the provided error, and returns a procedurally generated ID.
+    pub fn expect_identifier<F : FnOnce(Option<ScanToken>) -> ParserErrorType>(&mut self, err: F) -> String {
+        match self.peek() {
+            Some(Identifier(_)) => match self.advance() {
+                Some(Identifier(it)) => it,
+                _ => panic!()
+            },
+            _ => {
+                self.error_with(err);
+                self.invalid_id += 1;
+                format!("${}", self.invalid_id)
+            }
         }
     }
 

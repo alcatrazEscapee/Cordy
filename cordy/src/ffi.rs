@@ -13,7 +13,7 @@ use RuntimeError::OSError;
 /// - First argument is a pointer to the function arguments, as an array.
 /// - Second argument is the number of arguments invoked with.
 type ExternFunc = unsafe extern "C" fn(*const CordyValue, usize) -> CordyValue;
-type InitFunc = unsafe extern "C" fn(*mut c_void, *mut c_void);
+type InitFunc = unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void);
 
 #[repr(u32)]
 #[allow(dead_code)] // Since this is primarily constructed by external code
@@ -23,12 +23,22 @@ enum CordyType {
     Bool = 2,
     Int = 3,
     Str = 4,
+    Array = 5,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct CordyValueArray {
+    ptr: *mut CordyValue,
+    len: usize,
+    capacity: usize,
 }
 
 #[repr(C)]
 union CordyValueUnion {
     int: i64,
     str: *const c_char,
+    vec: CordyValueArray
 }
 
 #[repr(C)]
@@ -96,9 +106,11 @@ impl FunctionInterface for ExternalLibraryInterface {
 
 /// Performs first-time initialization of a library, which provides Cordy API function pointers to the library
 fn init(f: InitFunc) {
-    unsafe {
-        f(cordy_api_str as *mut c_void, cordy_api_free as *mut c_void)
-    }
+    unsafe { f(
+        cordy_api_str as *mut c_void,
+        cordy_api_vec as *mut c_void,
+        cordy_api_free as *mut c_void
+    ) }
 }
 
 
@@ -128,7 +140,9 @@ fn to_value(ptr: ValuePtr) -> Result<CordyValue, String> {
                 Ok(it) => Ok(to_value_str(it)),
                 Err(e) => Err(format!("String is not FFI compatible : {}", e))
             }
-        }
+        },
+        Type::Vector => to_value_array(ptr.as_vector().borrow().vector.iter().cloned()),
+        Type::List => to_value_array(ptr.as_list().borrow().list.iter().cloned()),
         _ => Err(String::from("FFI Type must be a primitive nil, bool, or int")),
     }
 }
@@ -139,6 +153,12 @@ fn to_value_int(ty: CordyType, int: i64) -> Result<CordyValue, String> {
 
 fn to_value_str(str: CString) -> CordyValue {
     CordyValue { ty: CordyType::Str, value: CordyValueUnion { str: str.into_raw() }}
+}
+
+fn to_value_array<I : Iterator<Item=ValuePtr>>(iter: I) -> Result<CordyValue, String> {
+    let vec: Vec<CordyValue> = iter.map(to_value).collect::<Result<Vec<CordyValue>, String>>()?;
+    let (ptr, len, capacity) = vec.into_raw_parts();
+    Ok(CordyValue { ty: CordyType::Array, value: CordyValueUnion { vec: CordyValueArray { ptr, len, capacity } }})
 }
 
 fn from_value(value: CordyValue) -> ValueResult {
@@ -162,6 +182,14 @@ fn from_value(value: CordyValue) -> ValueResult {
                     Ok(it) => it.to_value().ok(),
                     Err(e) => OSError(format!("During handling of another error: {}", e)).err()
                 }
+            },
+            CordyType::Array => {
+                let old = value.value.vec;
+                let mut new = Vec::with_capacity(old.capacity);
+                for value in Vec::from_raw_parts(old.ptr, old.len, old.capacity) {
+                    new.push(from_value(value)?);
+                }
+                new.to_value().ok()
             }
         }
     }
@@ -183,6 +211,12 @@ fn cordy_api_str(str: *const c_char) -> CordyValue {
     }
 }
 
+fn cordy_api_vec(capacity: usize) -> CordyValue {
+    let vec = Vec::with_capacity(capacity);
+    let (ptr, len, capacity) = vec.into_raw_parts();
+    CordyValue { ty: CordyType::Array, value: CordyValueUnion { vec: CordyValueArray { ptr, len, capacity } }}
+}
+
 /// Frees a `cordy_value_t`. The value should not be used after this.
 fn cordy_api_free(value: CordyValue) {
     match value.ty {
@@ -198,6 +232,7 @@ fn cordy_api_free(value: CordyValue) {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::VecDeque;
     use std::ffi::c_void;
     use cordy_sys::AsError;
     use cordy_sys::util::assert_eq;
@@ -205,6 +240,7 @@ mod tests {
 
     use crate::ffi;
     use crate::ffi::{CordyValue, ExternFunc};
+
 
     #[test] fn test_to_value_nil() { run(ValuePtr::nil()) }
     #[test] fn test_to_value_true() { run(true.to_value()) }
@@ -229,8 +265,9 @@ mod tests {
         fn add2(args: *const CordyValue, n: usize) -> CordyValue;
         fn is_nil(args: *const CordyValue, n: usize) -> CordyValue;
         fn substring(args: *const CordyValue, n: usize) -> CordyValue;
+        fn partial_sums(args: *const CordyValue, n: usize) -> CordyValue;
 
-        fn _cordy_api_init(str: *mut c_void, free: *mut c_void);
+        fn _cordy_api_init(str: *mut c_void, array: *mut c_void, free: *mut c_void);
     }
 
     #[test] fn test_ffi_get_42() { run_ffi(get_42, vec![], 42_i64.to_value()) }
@@ -239,11 +276,17 @@ mod tests {
     #[test] fn test_ffi_is_nil_no_bool() { run_ffi(is_nil, vec![false.to_value()], false.to_value()) }
     #[test] fn test_ffi_is_nil_no_int() { run_ffi(is_nil, vec![123_i64.to_value()], false.to_value()) }
     #[test] fn test_ffi_substring() { run_ffi(substring, vec!["substring time".to_value(), 3_i64.to_value(), 6_i64.to_value()], "string".to_value()) }
+    #[test] fn test_ffi_partial_sums_empty_vector() { run_ffi(partial_sums, vec![Vec::new().to_value()], vec![].to_value()) }
+    #[test] fn test_ffi_partial_sums_empty_list() { run_ffi(partial_sums, vec![VecDeque::new().to_value()], vec![].to_value()) }
+    #[test] fn test_ffi_partial_sums_some() { run_ffi(partial_sums, vec![vec![10_i64.to_value(), 25_i64.to_value(), 3_i64.to_value()].to_value()], vec![10_i64.to_value(), 35_i64.to_value(), 38_i64.to_value()].to_value()) }
 
     #[test] fn test_err_add2_too_few_args() { run_err(add2, vec![], "OsError: n == 2\n  at: line 11 (external: src/main.c)") }
     #[test] fn test_err_add2_first_arg_not_int() { run_err(add2, vec![ValuePtr::nil(), 456_i64.to_value()], "OsError: args[0].ty == TY_INT\n  at: line 12 (external: src/main.c)") }
     #[test] fn test_err_add2_second_arg_not_int() { run_err(add2, vec![123_i64.to_value(), false.to_value()], "OsError: args[1].ty == TY_INT\n  at: line 14 (external: src/main.c)") }
-    #[test] fn test_is_nil_too_few_args() { run_err(is_nil, vec![], "OsError: n == 1\n  at: line 19 (external: src/main.c)") }
+    #[test] fn test_err_is_nil_too_few_args() { run_err(is_nil, vec![], "OsError: n == 1\n  at: line 19 (external: src/main.c)") }
+    #[test] fn test_err_partial_sums_no_args() { run_err(partial_sums, vec![], "OsError: n == 1\n  at: line 48 (external: src/main.c)") }
+    #[test] fn test_err_partial_sums_not_a_vector() { run_err(partial_sums, vec![123_i64.to_value()], "OsError: args[0].ty == TY_ARRAY\n  at: line 49 (external: src/main.c)") }
+    #[test] fn test_err_partial_sums_vector_contains_bool() { run_err(partial_sums, vec![vec![10_i64.to_value(), true.to_value()].to_value()], "OsError: vec.ptr[i].ty == TY_INT\n  at: line 55 (external: src/main.c)") }
 
 
     fn run_ffi(f: ExternFunc, args: Vec<ValuePtr>, expected: ValuePtr) {
