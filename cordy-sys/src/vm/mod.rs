@@ -5,15 +5,16 @@ use std::rc::Rc;
 use fxhash::FxBuildHasher;
 
 use crate::{compiler, core, trace, util};
-use crate::compiler::{CompileParameters, CompileResult, Fields, IncrementalCompileResult, Locals};
+use crate::compiler::{CompileParameters, CompileResult, Fields, FunctionLibrary, IncrementalCompileResult, Locals};
 use crate::reporting::{Location, SourceView};
-use crate::util::{EmptyRead, OffsetAdd};
+use crate::util::{Noop, OffsetAdd};
 use crate::vm::value::{Literal, UpValue};
 use crate::core::Pattern;
 
 pub use crate::vm::error::{DetailRuntimeError, RuntimeError};
 pub use crate::vm::opcode::{Opcode, StoreOp};
 pub use crate::vm::value::{AnyResult, C64, ErrorResult, FunctionImpl, guard_recursive_hash, IntoDictValue, IntoIterableValue, IntoValue, Iterable, LiteralType, MAX_INT, MIN_INT, Prefix, StructTypeImpl, Type, ValueOption, ValuePtr, ValueResult};
+pub use crate::vm::ffi::FunctionInterface;
 
 use Opcode::{*};
 use RuntimeError::{*};
@@ -23,6 +24,7 @@ pub mod operator;
 mod opcode;
 mod value;
 mod error;
+mod ffi;
 
 /// Per-test, how many instructions should be allowed to execute.
 /// This primarily prevents infinite-loop tests from causing tests to hang, allowing easier debugging.
@@ -30,7 +32,7 @@ mod error;
 const TEST_EXECUTION_LIMIT: usize = 1000;
 
 
-pub struct VirtualMachine<R, W> {
+pub struct VirtualMachine<R, W, F> {
     ip: usize,
     code: Vec<Opcode>,
     stack: Vec<ValuePtr>,
@@ -48,10 +50,12 @@ pub struct VirtualMachine<R, W> {
     globals: Vec<String>,
     locations: Vec<Location>,
     fields: Fields,
+    functions: FunctionLibrary,
 
     view: SourceView,
     read: R,
     write: W,
+    ffi: F,
     args: ValuePtr,
 }
 
@@ -70,7 +74,7 @@ impl ExitType {
         matches!(self, ExitType::Exit | ExitType::Error(_))
     }
 
-    fn of<R: BufRead, W: Write>(vm: &VirtualMachine<R, W>, result: AnyResult) -> ExitType {
+    fn of<R: BufRead, W: Write, F : FunctionInterface>(vm: &VirtualMachine<R, W, F>, result: AnyResult) -> ExitType {
         match result.map_err(|e| e.value) {
             Ok(_) => ExitType::Return,
             Err(RuntimeExit) => ExitType::Exit,
@@ -129,24 +133,24 @@ pub struct CallFrame {
 }
 
 
-impl VirtualMachine<EmptyRead, Vec<u8>> {
+impl VirtualMachine<Noop, Vec<u8>, Noop> {
     /// Creates a new `VirtualMachine` with empty external read/write capabilities.
-    pub fn default(result: CompileResult, view: SourceView) -> VirtualMachine<EmptyRead, Vec<u8>> {
-        VirtualMachine::new(result, view, EmptyRead, vec![])
+    pub fn default(result: CompileResult, view: SourceView) -> VirtualMachine<Noop, Vec<u8>, Noop> {
+        VirtualMachine::new(result, view, Noop, vec![], Noop)
     }
 }
 
-impl<W : Write> VirtualMachine<EmptyRead, W> {
+impl<W : Write> VirtualMachine<Noop, W, Noop> {
     /// Creates a new `VirtualMachine` with the given write capability but an empty read capability.
-    pub fn with(result: CompileResult, view: SourceView, write: W) -> VirtualMachine<EmptyRead, W> {
-        VirtualMachine::new(result, view, EmptyRead, write)
+    pub fn with(result: CompileResult, view: SourceView, write: W) -> VirtualMachine<Noop, W, Noop> {
+        VirtualMachine::new(result, view, Noop, write, Noop)
     }
 }
 
 
-impl<R : BufRead, W : Write> VirtualMachine<R, W> {
+impl<R : BufRead, W : Write, F : FunctionInterface> VirtualMachine<R, W, F> {
     /// Creates a new `VirtualMachine` with the given read and write capabilities.
-    pub fn new(result: CompileResult, view: SourceView, read: R, write: W) -> VirtualMachine<R, W> {
+    pub fn new(result: CompileResult, view: SourceView, read: R, write: W, ffi: F) -> VirtualMachine<R, W, F> {
         VirtualMachine {
             ip: 0,
             code: result.code,
@@ -162,10 +166,12 @@ impl<R : BufRead, W : Write> VirtualMachine<R, W> {
             globals: result.globals,
             locations: result.locations,
             fields: result.fields,
+            functions: result.functions,
 
             view,
             read,
             write,
+            ffi,
             args: ValuePtr::nil(),
         }
     }
@@ -194,7 +200,7 @@ impl<R : BufRead, W : Write> VirtualMachine<R, W> {
     }
 
     fn as_compile_parameters<'a, 'b: 'a, 'c: 'a>(&'b mut self, enable_optimization: bool, locals: &'c mut Vec<Locals>) -> CompileParameters<'a> {
-        CompileParameters::new(enable_optimization, &mut self.code, &mut self.constants, &mut self.patterns, &mut self.globals, &mut self.locations, &mut self.fields, locals, &mut self.view)
+        CompileParameters::new(enable_optimization, &mut self.code, &mut self.constants, &mut self.patterns, &mut self.globals, &mut self.locations, &mut self.fields, &mut self.functions, locals, &mut self.view)
     }
 
     pub fn run_until_completion(&mut self) -> ExitType {
@@ -235,7 +241,7 @@ impl<R : BufRead, W : Write> VirtualMachine<R, W> {
     fn run_instruction(&mut self, op: Opcode) -> AnyResult {
         trace::trace_interpreter!("vm::run op={:?}", op);
         match op {
-            Noop => panic!("Noop should only be emitted as a temporary instruction"),
+            Opcode::Noop => panic!("Noop should only be emitted as a temporary instruction"),
 
             // Flow Control
             JumpIfFalse(ip) => {
@@ -474,6 +480,13 @@ impl<R : BufRead, W : Write> VirtualMachine<R, W> {
                 }
                 self.invoke(nargs)?;
             },
+
+            CallNative(handle_id) => {
+                let nargs = self.functions.lookup(handle_id).nargs;
+                let args = self.popn(nargs as u32);
+                let ret = self.ffi.handle(&self.functions, handle_id, args)?;
+                self.push(ret);
+            }
 
             OpIndex => {
                 let a2: ValuePtr = self.pop();
@@ -808,9 +821,7 @@ impl<R : BufRead, W : Write> VirtualMachine<R, W> {
 }
 
 
-impl <R, W> VirtualInterface for VirtualMachine<R, W> where
-    R : BufRead,
-    W : Write
+impl <R : BufRead, W : Write, F : FunctionInterface> VirtualInterface for VirtualMachine<R, W, F>
 {
     // ===== Calling Functions External Interface ===== //
 
@@ -1060,6 +1071,7 @@ mod tests {
     #[test] fn test_module_can_be_replaced() { run_str("module A { fn a() { 'yes' } } ; struct X(a) ; A = X(fn() -> 'no') ; A->a().print", "no\n"); }
     #[test] fn test_module_method_bound_cannot_be_replaced() { run_str("module A { fn a() { 'yes' } fn b() { a() } } ; struct X(a) ; let A1 = A ; A = X(fn() -> 'no') ; A1->b().print", "yes\n"); }
     #[test] fn test_module_method_lazy_bound_can_be_replaced() { run_str("module A { fn a() { 'yes' } fn b() { A->a() } } ; struct X(a) ; let A1 = A ; A = X(fn() -> 'no') ; A1->b().print", "no\n"); }
+    #[test] fn test_module_native_fn_repr() { run_str("native module Foo { fn a() } ; Foo->a . repr . print", "native fn a()\n"); }
     #[test] fn test_local_vars_01() { run_str("let x=0 do { x.print }", "0\n"); }
     #[test] fn test_local_vars_02() { run_str("let x=0 do { let x=1; x.print }", "1\n"); }
     #[test] fn test_local_vars_03() { run_str("let x=0 do { x.print let x=1 }", "0\n"); }

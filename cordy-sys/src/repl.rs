@@ -2,7 +2,7 @@ use std::io::{Write};
 
 use crate::{compiler, SourceView};
 use crate::compiler::{IncrementalCompileResult, Locals};
-use crate::util::EmptyRead;
+use crate::util::Noop;
 use crate::vm::{ExitType, VirtualInterface, VirtualMachine};
 
 
@@ -23,7 +23,7 @@ pub struct Repl<W: Write> {
     repeat_input: bool,
     continuation: bool,
     locals: Vec<Locals>,
-    vm: VirtualMachine<EmptyRead, W>
+    vm: VirtualMachine<Noop, W, Noop>
 }
 
 

@@ -1,6 +1,8 @@
 use std::{fs, io};
 use std::collections::HashSet;
 use std::io::Write;
+use fxhash::FxBuildHasher;
+use indexmap::IndexMap;
 use rustyline::{DefaultEditor, Editor};
 use rustyline::error::ReadlineError;
 use mimalloc::MiMalloc;
@@ -10,7 +12,10 @@ use cordy_sys::compiler::CompileResult;
 use cordy_sys::repl::{Reader, ReadResult};
 use cordy_sys::syntax::{BlockingFormatter, Formatter};
 use cordy_sys::vm::{ExitType, VirtualMachine};
+use crate::ffi::ExternalLibraryInterface;
 
+
+mod ffi;
 
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
@@ -23,12 +28,13 @@ Options:
   -h --help             : Show this message, then exit.
   -v --version          : Print the version, then exit.
   -d --disassembly      : Dump the disassembly view. Does nothing in REPL mode.
-     --no-line-numbers  : In disassembly view, omits the leading '0001' style line numbers
+     --no-line-numbers  : In disassembly view, omits the leading '0001' style line numbers.
   -o --optimize         : Enables compiler optimizations and transformations.
-  -f --format           : Outputs a formatted view HTML view of the code
-     --format-no-style  : Omits the <style> tag containing color definitions for the formatted code
+  -f --format           : Outputs a formatted view HTML view of the code.
+     --format-no-style  : Omits the <style> tag containing color definitions for the formatted code.
      --format-no=...    : Omits any of the <span> tags for the given categories (comma seperated) of token.
-                          Categories are any of [keyword, constant, native, type, number, string, syntax, comment]
+                          Categories are any of [keyword, constant, native, type, number, string, syntax, comment].
+  -l --link mod=lib     : Links the native module `mod` to the binary `lib`.
 ";
 
 const FORMAT_COLORS: &str = "\
@@ -84,15 +90,16 @@ fn parse_args(args: Vec<String>) -> Result<Options, String> {
         mode: Mode::Default,
         optimize: false,
         no_line_numbers: false,
+        links: IndexMap::with_hasher(FxBuildHasher::default()),
         format_no_style: false,
-        format_no: HashSet::new(),
+        format_no: HashSet::with_hasher(FxBuildHasher::default()),
     };
 
     if iter.next().is_none() {
         panic!("Unexpected first argument");
     }
 
-    for arg in iter.by_ref() {
+    while let Some(arg) = iter.next() {
         match arg.as_str() {
             "-h" | "--help" => options.mode.set(Mode::Help)?,
             "-v" | "--version" => options.mode.set(Mode::Version)?,
@@ -101,6 +108,12 @@ fn parse_args(args: Vec<String>) -> Result<Options, String> {
             "-o" | "--optimize" => options.optimize = true,
             "--no-line-numbers" => options.no_line_numbers = true,
             "--format-no-style" => options.format_no_style = true,
+            "-l" | "--link" => {
+                let target = iter.next().ok_or(String::from("Missing argument after --link"))?;
+                let (module, library) = target.split_once('=').ok_or(format!("Missing '=' in --link argument {}", target))?;
+                // todo: duplicate module?
+                options.links.insert(String::from(module), String::from(library));
+            }
             a if a.starts_with("--format-no=") => {
                 for key in a.strip_prefix("--format-no=")
                     .unwrap()
@@ -160,15 +173,16 @@ fn run_main(name: String, options: Options) -> Result<(), String> {
             }
             Ok(())
         },
-        Mode::Default => run_vm(compiled, options.args, view),
+        Mode::Default => run_vm(compiled, options.links, options.args, view),
         _ => panic!("Unsupported mode"),
     }
 }
 
-fn run_vm(compiled: CompileResult, program_args: Vec<String>, view: SourceView) -> Result<(), String> {
+fn run_vm(compiled: CompileResult, links: IndexMap<String, String, FxBuildHasher>, program_args: Vec<String>, view: SourceView) -> Result<(), String> {
     let stdin = io::stdin().lock();
     let stdout = io::stdout();
-    let mut vm = VirtualMachine::new(compiled, view, stdin, stdout);
+    let eli = ExternalLibraryInterface::new(links);
+    let mut vm = VirtualMachine::new(compiled, view, stdin, stdout, eli);
 
     vm.with_args(program_args);
     match vm.run_until_completion() {
@@ -207,8 +221,9 @@ struct Options {
     mode: Mode,
     optimize: bool,
     no_line_numbers: bool,
+    links: IndexMap<String, String, FxBuildHasher>,
     format_no_style: bool,
-    format_no: HashSet<ScanTokenType>,
+    format_no: HashSet<ScanTokenType, FxBuildHasher>,
 }
 
 #[derive(Eq, PartialEq)]
@@ -227,7 +242,7 @@ impl Mode {
 
 struct RenderedFormatter {
     inner: String,
-    skip: HashSet<ScanTokenType>
+    skip: HashSet<ScanTokenType, FxBuildHasher>
 }
 
 impl Formatter for RenderedFormatter {

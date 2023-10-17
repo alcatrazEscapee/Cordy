@@ -1,0 +1,10 @@
+L1: 0000 InitGlobal
+L4: 0001 StructType(module Foo)
+L5: 0002 Pop
+    0003 Exit
+L2: 0004 CallNative(0)
+    0005 Return
+L3: 0006 CallNative(1)
+    0007 Return
+L4: 0008 CallNative(2)
+    0009 Return

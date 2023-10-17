@@ -5,8 +5,9 @@ use crate::reporting::{Location, SourceView};
 use crate::vm::{AnyResult, Opcode, RuntimeError, StoreOp, ValuePtr};
 use crate::core::Pattern;
 
-pub use crate::compiler::parser::{default, Fields, Locals, ParserError, ParserErrorType};
+pub use crate::compiler::parser::{default, Fields, FunctionLibrary, Locals, ParserError, ParserErrorType};
 pub use crate::compiler::scanner::{ScanError, ScanErrorType, ScanToken, ScanTokenType};
+
 
 mod scanner;
 mod parser;
@@ -112,6 +113,7 @@ pub struct CompileParameters<'a> {
     globals: &'a mut Vec<String>,
     locations: &'a mut Vec<Location>,
     fields: &'a mut Fields,
+    functions: &'a mut FunctionLibrary,
 
     locals: &'a mut Vec<Locals>,
     view: &'a mut SourceView,
@@ -130,6 +132,7 @@ struct CompileState {
     globals: usize,
     locations: usize,
     fields: Fields,
+    functions: (usize, usize),
 
     locals: Vec<Locals>,
 }
@@ -144,10 +147,11 @@ impl<'a> CompileParameters<'a> {
         globals: &'a mut Vec<String>,
         locations: &'a mut Vec<Location>,
         fields: &'a mut Fields,
+        functions: &'a mut FunctionLibrary,
         locals: &'a mut Vec<Locals>,
         view: &'a mut SourceView,
     ) -> CompileParameters<'a> {
-        CompileParameters { enable_optimization, code, constants, patterns, globals, locations, fields, locals, view }
+        CompileParameters { enable_optimization, code, constants, patterns, globals, locations, fields, functions, locals, view }
     }
 
     fn save(&self) -> CompileState {
@@ -158,6 +162,7 @@ impl<'a> CompileParameters<'a> {
             globals: self.globals.len(),
             locations: self.locations.len(),
             fields: self.fields.clone(),
+            functions: self.functions.len(),
             locals: self.locals.clone(),
         }
     }
@@ -169,6 +174,7 @@ impl<'a> CompileParameters<'a> {
         self.globals.truncate(state.globals);
         self.locations.truncate(state.locations);
         *self.fields = state.fields;
+        self.functions.truncate(state.functions);
         *self.locals = state.locals;
     }
 }
@@ -188,6 +194,7 @@ pub struct CompileResult {
     pub globals: Vec<String>,
     pub locations: Vec<Location>,
     pub fields: Fields,
+    pub functions: FunctionLibrary,
 
     /// Local variable names, by order of access (either `Push` or `Store` local/global opcodes) in the output code.
     /// This is only used for the decompiler to report local variable names. Otherwise these are discarded before passing to the VM
