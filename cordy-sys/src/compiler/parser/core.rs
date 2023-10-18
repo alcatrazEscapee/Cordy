@@ -179,8 +179,7 @@ impl<'a> Parser<'a> {
             },
             _ => {
                 self.error_with(err);
-                self.invalid_id += 1;
-                format!("${}", self.invalid_id)
+                self.synthetic_name()
             }
         }
     }
@@ -433,5 +432,10 @@ impl<'a> Parser<'a> {
     /// Returns the source location of the next token, aka the one in `peek()`
     pub fn next_location(&self) -> Location {
         self.input.front().map(|&(loc, _)| loc).unwrap_or_else(Location::empty)
+    }
+
+    pub fn synthetic_name(&mut self) -> String {
+        self.synthetic_id += 1;
+        format!("${}", self.synthetic_id)
     }
 }
