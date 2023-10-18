@@ -13,7 +13,7 @@ use crate::core::Pattern;
 
 pub use crate::vm::error::{DetailRuntimeError, RuntimeError};
 pub use crate::vm::opcode::{Opcode, StoreOp};
-pub use crate::vm::value::{AnyResult, C64, ErrorResult, FunctionImpl, guard_recursive_hash, IntoDictValue, IntoIterableValue, IntoValue, Iterable, LiteralType, MAX_INT, MIN_INT, Prefix, StructTypeImpl, Type, ValueOption, ValuePtr, ValueResult};
+pub use crate::vm::value::{AnyResult, C64, ErrorResult, FunctionImpl, guard_recursive_hash, IntoDictValue, IntoIterableValue, IntoValue, Iterable, LiteralType, MAX_INT, MIN_INT, Prefix, StructTypeImpl, Type, ValueOption, ValuePtr, ValueResult, Method};
 pub use crate::vm::ffi::FunctionInterface;
 
 use Opcode::{*};
@@ -772,7 +772,7 @@ impl<R : BufRead, W : Write, F : FunctionInterface> VirtualMachine<R, W, F> {
             Type::GetField => {
                 let field_index = f.as_field();
                 if nargs != 1 {
-                    return IncorrectArgumentsGetField(self.fields.get_field_name(field_index), nargs).err()
+                    return IncorrectArgumentsGetField(self.fields.get_name(field_index), nargs).err()
                 }
 
                 let arg: ValuePtr = self.pop();
@@ -1052,6 +1052,15 @@ mod tests {
     #[test] fn test_struct_construct_not_enough_arguments() { run_str("struct Foo(a, b, c) ; Foo(1)(2) . print ; ", "Incorrect number of arguments for struct Foo(a, b, c), got 1\n  at: line 1 (<test>)\n\n1 | struct Foo(a, b, c) ; Foo(1)(2) . print ; \n2 |                          ^^^\n"); }
     #[test] fn test_struct_construct_too_many_arguments() { run_str("struct Foo(a, b, c) ; Foo(1, 2, 3, 4) . print", "Incorrect number of arguments for struct Foo(a, b, c), got 4\n  at: line 1 (<test>)\n\n1 | struct Foo(a, b, c) ; Foo(1, 2, 3, 4) . print\n2 |                          ^^^^^^^^^^^^\n"); }
     #[test] fn test_struct_with_method() { run_str("struct Square(side) { fn area(sq) -> sq->side ** 2 } let x = Square(3) ; Square->area(x) . print", "9\n"); }
+    #[test] fn test_struct_instance_method_no_arg() { run_str("struct A() { fn f(self) -> 123 } ; A()->f() . print", "123\n"); }
+    #[test] fn test_struct_instance_method_no_arg_repr() { run_str("struct A() { fn f(self) -> 123 } ; A()->f . repr . print", "fn f(self)\n"); }
+    #[test] fn test_struct_instance_method_no_arg_repr_of_static() { run_str("struct A() { fn f(self) -> 123 } ; A->f . repr . print", "fn f(self)\n"); }
+    #[test] fn test_struct_instance_method_no_arg_call_from_static() { run_str("struct A() { fn f(self) -> 123 } ; A->f(A()) . print", "123\n"); }
+    #[test] fn test_struct_instance_method_one_arg() { run_str("struct A() { fn f(self, x) -> 123 } ; A()->f(456) . print", "123\n"); }
+    #[test] fn test_struct_instance_method_one_arg_repr() { run_str("struct A() { fn f(self, x) -> 123 } ; A()->f . repr . print", "fn f(self, x)\n"); }
+    #[test] fn test_struct_instance_method_one_arg_repr_of_static() { run_str("struct A() { fn f(self, x) -> 123 } ; A->f . repr . print", "fn f(self, x)\n"); }
+    #[test] fn test_struct_instance_method_one_arg_call_from_static() { run_str("struct A() { fn f(self, x) -> 123 } ; A->f(A(), 456) . print", "123\n"); }
+    #[test] fn test_struct_instance_method_one_arg_call_from_static_partial() { run_str("struct A() { fn f(self, x) -> 123 } ; A->f(A()) . repr . print", "fn f(self, x)\n"); }
     #[test] fn test_module_empty() { run_str("module Foo module Bar ; (Foo, Bar) . print", "(module Foo, module Bar)\n"); }
     #[test] fn test_module_with_method() { run_str("module Foo { fn bar() -> 123 } ; Foo->bar() . print", "123\n"); }
     #[test] fn test_modules_with_same_method() { run_str("module A { fn a() -> 1 } module B { fn a() -> 2 } ; (A->a(), B->a()) . print", "(1, 2)\n"); }

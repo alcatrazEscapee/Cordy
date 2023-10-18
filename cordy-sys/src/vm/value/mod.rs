@@ -669,15 +669,30 @@ impl ValuePtr {
         match self.ty() {
             Type::Struct => {
                 let it = self.as_struct().borrow_mut();
-                match fields.get_field_offset(it.get_type(), field_index) {
-                    Some(field_offset) => it.get_field(field_offset).ok(),
-                    None => err_field_not_found(it.get_constructor(), fields, field_index, true, true)
+                let owner = it.get_owner();
+
+                match fields.get_offset(owner.instance_type, field_index) {
+                    Some(offset) => return it.get_field(offset).ok(),
+                    _ => {}
+                }
+
+                // Try with the constructor type - here we are accessing instance methods, as opposed to fields
+                match fields.get_offset(owner.constructor_type, field_index) {
+                    Some(offset) if owner.is_instance_method(offset) => {
+                        // Method was an instance method, so we can access it
+                        // We need to bind the self instance to the method in a partial eval
+                        ValuePtr::partial(
+                            owner.get_method(offset, constants),
+                            vec![self.clone()]
+                        ).ok()
+                    }
+                    _ => err_field_not_found(it.get_constructor(), fields, field_index, true, true)
                 }
             }
             Type::StructType => {
                 let it = self.as_struct_type().borrow_const();
-                match fields.get_field_offset(it.constructor_type, field_index) {
-                    Some(field_offset) => it.get_method(field_offset, constants).ptr.ok(),
+                match fields.get_offset(it.constructor_type, field_index) {
+                    Some(field_offset) => it.get_method(field_offset, constants).ok(),
                     None => err_field_not_found(it.clone().to_value(), fields, field_index, true, true)
                 }
             }
@@ -689,7 +704,7 @@ impl ValuePtr {
         match self.ty() {
             Type::Struct => {
                 let mut it = self.as_struct().borrow_mut();
-                match fields.get_field_offset(it.get_type(), field_index) {
+                match fields.get_offset(it.get_owner().instance_type, field_index) {
                     Some(field_offset) => {
                         it.set_field(field_offset, value.clone());
                         value.ok()
@@ -760,7 +775,7 @@ impl ValuePtr {
 
 #[cold]
 fn err_field_not_found(value: ValuePtr, fields: &Fields, field_index: u32, repr: bool, access: bool) -> ValueResult {
-    TypeErrorFieldNotPresentOnValue { value, field: fields.get_field_name(field_index), repr, access }.err()
+    TypeErrorFieldNotPresentOnValue { value, field: fields.get_name(field_index), repr, access }.err()
 }
 
 /// A type used to prevent recursive `repr()` and `str()` calls.
@@ -983,13 +998,14 @@ pub struct FunctionImpl {
     name: String, // The name of the function, useful to show in stack traces
     args: Vec<String>, // Names of the arguments
     default_args: Vec<usize>, // Jump offsets for each default argument
-    var_arg: bool, // If the last argument in this function is variadic
+    variadic: bool, // If the last argument in this function is variadic
     native: bool, // If the function is a native FFI function
+    is_self: bool, // If the function is a instance function on a struct
 }
 
 impl FunctionImpl {
-    pub fn new(head: usize, tail: usize, name: String, args: Vec<String>, default_args: Vec<usize>, var_arg: bool, native: bool) -> FunctionImpl {
-        FunctionImpl { head, tail, name, args, default_args, var_arg, native }
+    pub fn new(head: usize, tail: usize, name: String, args: Vec<String>, default_args: Vec<usize>, variadic: bool, native: bool, is_self: bool) -> FunctionImpl {
+        FunctionImpl { head, tail, name, args, default_args, variadic, native, is_self }
     }
 
     /// The minimum number of required arguments, inclusive.
@@ -1003,12 +1019,12 @@ impl FunctionImpl {
     }
 
     pub fn in_range(&self, nargs: u32) -> bool {
-        self.min_args() <= nargs && (self.var_arg || nargs <= self.max_args())
+        self.min_args() <= nargs && (self.variadic || nargs <= self.max_args())
     }
 
     /// Returns the number of variadic arguments that need to be collected, before invoking the function, if needed.
     pub fn num_var_args(&self, nargs: u32) -> Option<u32> {
-        if self.var_arg && nargs >= self.max_args() {
+        if self.variadic && nargs >= self.max_args() {
             Some(nargs + 1 - self.max_args())
         } else {
             None
@@ -1021,7 +1037,7 @@ impl FunctionImpl {
     pub fn jump_offset(&self, nargs: u32) -> usize {
         self.head + if nargs == self.min_args() {
             0
-        } else if self.var_arg && nargs >= self.max_args() {
+        } else if self.variadic && nargs >= self.max_args() {
             *self.default_args.last().unwrap()
         } else {
             self.default_args[(nargs - self.min_args() - 1) as usize]
@@ -1300,12 +1316,7 @@ impl StructImpl {
 
     /// Returns `true` if the current struct instance is of the provided constructor type.
     pub fn is_instance_of(&self, other: &StructTypeImpl) -> bool {
-        self.get_type() == other.instance_type
-    }
-
-    /// Returns the `u32` type index of the struct **instance type**. This is the type index used to reference fields.
-    pub fn get_type(&self) -> u32 {
-        self.get_owner().instance_type
+        self.get_owner().instance_type == other.instance_type
     }
 
     /// Returns a cloned (owned) copy of the constructor of this struct type.
@@ -1343,7 +1354,7 @@ pub struct StructTypeImpl {
     name: String,
     fields: Vec<String>,
     /// Methods are references to constant indices, and so accessing a method involves going (type, field) -> offset -> constant -> `ValuePtr`
-    methods: Vec<u32>,
+    methods: Vec<Method>,
 
     /// The `u32` type index of the instances created by this owner / constructor object.
     /// This is the type used to reference fields.
@@ -1359,7 +1370,7 @@ pub struct StructTypeImpl {
 }
 
 impl StructTypeImpl {
-    pub fn new(name: String, fields: Vec<String>, methods: Vec<u32>, instance_type: u32, constructor_type: u32, module: bool) -> StructTypeImpl {
+    pub fn new(name: String, fields: Vec<String>, methods: Vec<Method>, instance_type: u32, constructor_type: u32, module: bool) -> StructTypeImpl {
         StructTypeImpl { name, fields, methods, instance_type, constructor_type, module }
     }
 
@@ -1372,9 +1383,13 @@ impl StructTypeImpl {
     }
 
     /// Returns the method associated with this constructor / owner type.
-    /// Unlike fields, methods only have an accessor and cannot be mutated. They also will return the derived type here (which will be a user function)
-    fn get_method(&self, method_offset: usize, constants: &Vec<ValuePtr>) -> ValueFunction {
-        ValueFunction::new(constants[self.methods[method_offset] as usize].clone())
+    fn get_method(&self, method_offset: usize, constants: &Vec<ValuePtr>) -> ValuePtr {
+        constants[self.methods[method_offset].function_id() as usize].clone()
+    }
+
+    /// Returns `true` if the method at the given offset is an instance / self method.
+    fn is_instance_method(&self, method_offset: usize) -> bool {
+        self.methods[method_offset].instance()
     }
 
     /// Returns the canonical representation of a struct/module in Cordy form, i.e. `Foo(a, b, c)`
@@ -1396,6 +1411,22 @@ impl Hash for StructTypeImpl {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.instance_type.hash(state);
     }
+}
+
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Method(u32, bool);
+
+impl Method {
+    pub fn new(function_id: u32, instance: bool) -> Method {
+        Method(function_id, instance)
+    }
+
+    /// The index into the constants array of the corresponding function.
+    pub fn function_id(&self) -> u32 { self.0 }
+
+    /// If `true`, this method is a instance method with a leading `self` parameter.
+    pub fn instance(&self) -> bool { self.1 }
 }
 
 

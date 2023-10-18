@@ -4,7 +4,7 @@ use indexmap::IndexSet;
 use crate::compiler::{CompileParameters, CompileResult};
 use crate::compiler::parser::core::ParserState;
 use crate::compiler::parser::expr::{Expr, ExprType};
-use crate::compiler::parser::semantic::{LateBinding, LValue, LValueReference, Module, ParserFunctionImpl, ParserStoreOp};
+use crate::compiler::parser::semantic::{LateBinding, LValue, LValueReference, Module, ParserFunctionImpl, ParserFunctionParameters, ParserStoreOp};
 use crate::compiler::scanner::{ScanResult, ScanToken};
 use crate::core::{NativeFunction, Pattern};
 use crate::reporting::Location;
@@ -334,15 +334,23 @@ impl Parser<'_> {
         // Only structs can have fields, because they are constructable and modules are not
         if !is_module {
             self.expect(OpenParen);
+            loop {
+                match self.peek() {
+                    Some(Identifier(_)) => {
+                        let name = self.advance_identifier();
 
-            while self.peek() != Some(&CloseParen) {
-                let name = self.expect_identifier(ExpectedFieldNameInStruct);
+                        self.declare_field(instance_type, name);
 
-                self.declare_field(instance_type, name);
-
-                // Consume `,` and allow trailing comma
-                if let Some(Comma) = self.peek() {
-                    self.skip();
+                        // Consume `,` and allow trailing comma
+                        if let Some(Comma) = self.peek() {
+                            self.skip();
+                        }
+                    }
+                    Some(CloseParen) => break,
+                    _ => {
+                        self.error_with(ExpectedFieldNameInStruct);
+                        break
+                    }
                 }
             }
             self.expect_resync(CloseParen);
@@ -362,10 +370,10 @@ impl Parser<'_> {
 
                         let name = self.expect_identifier(ExpectedFunctionNameAfterFn);
                         let loc = self.prev_location();
-                        let (args, default_args, var_arg) = self.parse_function_parameters(false);
+                        let params = self.parse_function_parameters(!is_module, false);
 
-                        self.declare_method(constructor_type, name, loc, &args, var_arg);
-                        self.parse_function_body_and_emit(args, default_args);
+                        self.declare_method(constructor_type, name, loc, &params);
+                        self.parse_function_body_and_emit(params);
                     }
                     _ => {
                         self.error_with(|t| ExpectedFunctionInStruct(t, is_module));
@@ -409,24 +417,24 @@ impl Parser<'_> {
         let loc_start = self.prev_location();
         let method_name = self.expect_identifier(ExpectedFunctionNameAfterFn);
 
-        let (args, default_args, var_arg) = self.parse_function_parameters(true);
+        let params = self.parse_function_parameters(false, true);
         let loc = loc_start | self.prev_location();
 
-        self.declare_method(constructor_type, method_name.clone(), loc, &args, var_arg);
+        self.declare_method(constructor_type, method_name.clone(), loc, &params);
 
         let function_id = self.functions.len() - 1;
-        let handle_id = self.declare_native(module_name.clone(), method_name, args.len());
+        let handle_id = self.declare_native(module_name.clone(), method_name, params.args.len());
 
         self.locals.push(Locals::new(Some(function_id)));
         self.function_depth += 1;
         self.scope_depth += 1;
 
-        for arg in default_args {
+        for arg in params.default_args {
             self.emit_optimized_expr(arg);
             self.current_function_impl().mark_default_arg();
         }
 
-        for mut arg in args {
+        for mut arg in params.args {
             arg.declare_single_local(self); // Handles resolving locals + name conflicts
         }
 
@@ -470,17 +478,17 @@ impl Parser<'_> {
         self.advance();
 
         let name = self.expect_identifier(ExpectedFunctionNameAfterFn);
-        let (args, default_args, var_arg) = self.parse_function_parameters(false);
+        let params = self.parse_function_parameters(false, false);
 
         // Named functions are a complicated local variable, and needs to be declared as such
         // Note that we always declare the function here, to preserve parser operation in the event of a parse error
         self.declare_local(name.clone(), true);
 
-        let func: u32 = self.declare_function(name, &args, var_arg);
+        let func: u32 = self.declare_function(name, &params);
         self.push(Constant(func));
 
         // Emit the closed locals from the function body right away, because we are not in an expression context
-        self.parse_function_body_and_emit(args, default_args);
+        self.parse_function_body_and_emit(params);
     }
 
     fn parse_expression_function(&mut self) -> Expr {
@@ -488,12 +496,12 @@ impl Parser<'_> {
 
         // Function header - `fn` (<arg>, ...)
         self.advance();
-        let (args, default_args, var_arg) = self.parse_function_parameters(false);
+        let params = self.parse_function_parameters(false, false);
 
         // Expression functions don't declare themselves as a local variable that can be referenced.
         // Instead, as they're part of an expression, they just push a single function instance onto the stack
-        let func: u32 = self.declare_function(String::from("_"), &args, var_arg);
-        let closed_locals = self.parse_function_body(args, default_args);
+        let func: u32 = self.declare_function(String::from("_"), &params);
+        let closed_locals = self.parse_function_body(params);
         Expr::function(func, closed_locals)
     }
 
@@ -504,47 +512,74 @@ impl Parser<'_> {
     /// - No complex `LValue`s are allowed.
     /// - Empty (`_`) parameters _are_ allowed (unlike in normal functions)
     ///
+    /// if `allow_self` is `true`, then the first parameter of this function may be a `self` keyword, and `is_self` will be `true`
+    ///
     /// Returns the triple `(args, default_args, var_arg)` where:
     /// - `args` contains the `LValue` parameters
     /// - `default_args` contains the `Expr` default values
     /// - `var_arg` is `true` if this function has a last-argument variadic argument.
-    fn parse_function_parameters(&mut self, restrict: bool) -> (Vec<LValue>, Vec<Expr>, bool) {
+    /// - `is_self` is `true` if this function has a `self` first argument.
+    fn parse_function_parameters(&mut self, allow_self: bool, restrict: bool) -> ParserFunctionParameters {
         trace::trace_parser!("rule <function-parameters>");
+
+        let mut params = ParserFunctionParameters {
+            args: Vec::new(),
+            default_args: Vec::new(),
+            variadic: false,
+            instance: false
+        };
 
         self.expect(OpenParen);
         if let Some(CloseParen) = self.peek() {
             self.advance(); // Consume `)`
-            return (Vec::new(), Vec::new(), false)
+            return params;
         }
 
-        let mut args: Vec<LValue> = Vec::new();
-        let mut default_args: Vec<Expr> = Vec::new();
-        let mut var_arg: bool = false;
+        // `self` may be the first parameter provided, and only the first
+        if allow_self {
+            match self.peek() {
+                Some(KeywordSelf) => {
+                    self.advance(); // Consume `self`
+
+                    // This counts as a real function for argument purposes
+                    // It only is used separately when the field access is made through an instance
+                    params.instance = true;
+                    params.args.push(LValue::Named(LValueReference::This));
+
+                    // Handle `( self )` and `( self , )` case
+                    if self.parse_optional_trailing_comma(CloseParen, ExpectedCommaOrEndOfParameters) {
+                        self.advance(); // Consume `)`
+                        return params;
+                    }
+                },
+                _ => {}
+            };
+        }
 
         loop {
             match self.parse_lvalue() {
                 Some(LValue::Empty) if restrict => { // Only allowed in restricted mode
-                    args.push(LValue::Empty)
+                    params.args.push(LValue::Empty)
                 }
                 Some(LValue::VarNamed(reference)) => {
                     // A `*<name>` argument gets treated as a default argument value of an empty vector, and we set the `var_arg` flag
-                    args.push(LValue::Named(reference)); // Convert to a `Named()`
-                    default_args.push(Expr::vector(Location::empty(), Vec::new()));
-                    var_arg = true;
+                    params.args.push(LValue::Named(reference)); // Convert to a `Named()`
+                    params.default_args.push(Expr::vector(Location::empty(), Vec::new()));
+                    params.variadic = true;
                 }
                 Some(lvalue @ LValue::Named(_)) => { // Named are allowed in both modes
-                    if var_arg {
+                    if params.variadic {
                         self.semantic_error(ParameterAfterVarParameter);
                     }
-                    args.push(lvalue)
+                    params.args.push(lvalue)
                 }
                 Some(lvalue) => {
                     // Other parameters are only allowed in unrestricted mode
                     if !restrict {
-                        if var_arg {
+                        if params.variadic {
                             self.semantic_error(ParameterAfterVarParameter);
                         }
-                        args.push(lvalue)
+                        params.args.push(lvalue)
                     } else {
                         self.semantic_error(InvalidLValue(lvalue.to_code_str(), restrict))
                     }
@@ -557,13 +592,13 @@ impl Parser<'_> {
                 // Sugar for `= nil`, so mark this as a default argument
                 Some(QuestionMark) => {
                     self.skip(); // Consume `?`
-                    default_args.push(Expr(Location::empty(), ExprType::Nil));
+                    params.default_args.push(Expr(Location::empty(), ExprType::Nil));
                 },
                 Some(Equals) => {
                     self.skip(); // Consume `=`
-                    default_args.push(self.parse_expr_top_level()); // Parse an expression
+                    params.default_args.push(self.parse_expr_top_level()); // Parse an expression
                 },
-                _ => if !var_arg && !default_args.is_empty() {
+                _ => if !params.variadic && !params.default_args.is_empty() {
                     self.semantic_error(NonDefaultParameterAfterDefaultParameter);
                 },
             }
@@ -573,15 +608,15 @@ impl Parser<'_> {
             }
         }
         self.expect_resync(CloseParen);
-        (args, default_args, var_arg)
+        params
     }
 
-    fn parse_function_body_and_emit(&mut self, args: Vec<LValue>, default_args: Vec<Expr>) {
-        let closed_locals = self.parse_function_body(args, default_args);
+    fn parse_function_body_and_emit(&mut self, params: ParserFunctionParameters) {
+        let closed_locals = self.parse_function_body(params);
         self.emit_closure_and_closed_locals(closed_locals);
     }
 
-    fn parse_function_body(&mut self, args: Vec<LValue>, default_args: Vec<Expr>) -> Vec<Opcode> {
+    fn parse_function_body(&mut self, params: ParserFunctionParameters) -> Vec<Opcode> {
         trace::trace_parser!("rule <function-body>");
         let prev_pop_status: bool = self.delay_pop_from_expression_statement; // Stack semantics for the delayed pop
 
@@ -595,13 +630,13 @@ impl Parser<'_> {
 
         // After the locals have been pushed, we now can push function code
         // Before the body of the function, we emit code for each default argument, and mark it as such.
-        for arg in default_args {
+        for arg in params.default_args {
             self.emit_optimized_expr(arg);
             self.current_function_impl().mark_default_arg();
         }
 
         // Collect arguments into pairs of the lvalue, and associated synthetic
-        let mut args_with_synthetics: Vec<(LValue, Option<usize>)> = args.into_iter()
+        let mut args_with_synthetics: Vec<(LValue, Option<usize>)> = params.args.into_iter()
             .map(|mut arg| {
                 let local = arg.declare_single_local(self);
                 (arg, local)
@@ -2173,6 +2208,7 @@ mod tests {
     #[test] fn test_struct_with_duplicate_field() { run_err("struct A(a, b, a)", "Duplicate field name: 'a'\n  at: line 1 (<test>)\n\n1 | struct A(a, b, a)\n2 |                ^\n") }
     #[test] fn test_struct_with_duplicate_method() { run_err("struct A(a) { fn b() {} fn b() {} }", "Duplicate field name: 'b'\n  at: line 1 (<test>)\n\n1 | struct A(a) { fn b() {} fn b() {} }\n2 |                            ^\n") }
     #[test] fn test_struct_with_duplicate_both() { run_err("struct A(a, b) { fn a() {} }", "Duplicate field name: 'a'\n  at: line 1 (<test>)\n\n1 | struct A(a, b) { fn a() {} }\n2 |                     ^\n") }
+    #[test] fn test_struct_with_no_fields() { run_err("struct Foo {}", "Expected a '(' token, got '{' token instead\n  at: line 1 (<test>)\n\n1 | struct Foo {}\n2 |            ^\n") }
     #[test] fn test_module_with_duplicate_method() { run_err("module A { fn a() {} fn a() {} }", "Duplicate field name: 'a'\n  at: line 1 (<test>)\n\n1 | module A { fn a() {} fn a() {} }\n2 |                         ^\n") }
     #[test] fn test_module_late_bound_missing() { run_err("module A { fn a() { b } }", "Undeclared identifier: 'b'\n  at: line 1 (<test>)\n\n1 | module A { fn a() { b } }\n2 |                     ^\n") }
     #[test] fn test_module_late_bound_store() { run_err("module A { fn a() { b = 1 } }", "Undeclared identifier: 'b'\n  at: line 1 (<test>)\n\n1 | module A { fn a() { b = 1 } }\n2 |                     ^\n") }

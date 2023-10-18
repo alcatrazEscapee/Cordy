@@ -187,7 +187,7 @@ impl Opcode {
                     None => format!("{}({})", op, id),
                 }
             },
-            GetField(fid) | SetField(fid) | GetFieldFunction(fid) => format!("{:?} -> {}", self, fields.get_field_name(*fid)),
+            GetField(fid) | SetField(fid) | GetFieldFunction(fid) => format!("{:?} -> {}", self, fields.get_name(*fid)),
             JumpIfFalse(offset) | JumpIfFalsePop(offset) | JumpIfTrue(offset) | JumpIfTruePop(offset) | Jump(offset) | TestIterable(offset) => format!("{}({})", match self {
                 JumpIfFalse(_) => "JumpIfFalse",
                 JumpIfFalsePop(_) => "JumpIfFalsePop",

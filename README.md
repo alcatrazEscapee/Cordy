@@ -77,7 +77,7 @@ Options:
   --no-line-numbers : In disassembly view, omits the leading '0001' style line numbers
 ```
  
-For additional debugging information, compile with optional trace features enabled, i.e. `--feature "trace_parser,trace_interpreter,trace_interpreter_stack"`
+For additional debugging information, compile with optional trace features enabled, i.e. `--features "trace_parser,trace_interpreter,trace_interpreter_stack"`
 
 - `trace_parser` traces the parser execution, logging tokens accepted, pushed, and rules entered.
 - `trace_interpreter` traces the virtual machine execution, logging instructions, and key events such as function invocations.
