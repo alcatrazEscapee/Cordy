@@ -1077,6 +1077,8 @@ mod tests {
     #[test] fn test_struct_self_method_box_set_call() { run_str("struct A(x) { fn get(self) { self->x } fn set(self, y) { self->x = y } } let a = A(123) ; a->set() . print ; a.print", "set\nA(x=123)\n"); }
     #[test] fn test_struct_self_method_box_set_call_arg() { run_str("struct A(x) { fn get(self) { self->x } fn set(self, y) { self->x = y } } let a = A(123) ; a->set(456) . print ; a.print", "456\nA(x=456)\n"); }
     #[test] fn test_struct_self_method_box_set_call_merge() { run_str("struct A(x) { fn get(self) { self->x } fn set(self, y) { self->x = y } } let a = A(123) ; a->set()(456) . print ; a.print", "456\nA(x=456)\n"); }
+    #[test] fn test_struct_self_method_in_function() { run_str("struct A(x) { fn get(self) { (fn() -> self)() } } A(123)->get() . print", "A(x=123)\n"); }
+    #[test] fn test_struct_self_method_in_closure() { run_str("struct A(x) { fn get(self) { (fn() -> self) } } A(123)->get()() . print", "A(x=123)\n"); }
     #[test] fn test_module_empty() { run_str("module Foo module Bar ; (Foo, Bar) . print", "(module Foo, module Bar)\n"); }
     #[test] fn test_module_with_method() { run_str("module Foo { fn bar() -> 123 } ; Foo->bar() . print", "123\n"); }
     #[test] fn test_modules_with_same_method() { run_str("module A { fn a() -> 1 } module B { fn a() -> 2 } ; (A->a(), B->a()) . print", "(1, 2)\n"); }
@@ -1097,6 +1099,14 @@ mod tests {
     #[test] fn test_module_method_bound_cannot_be_replaced() { run_str("module A { fn a() { 'yes' } fn b() { a() } } ; struct X(a) ; let A1 = A ; A = X(fn() -> 'no') ; A1->b().print", "yes\n"); }
     #[test] fn test_module_method_lazy_bound_can_be_replaced() { run_str("module A { fn a() { 'yes' } fn b() { A->a() } } ; struct X(a) ; let A1 = A ; A = X(fn() -> 'no') ; A1->b().print", "no\n"); }
     #[test] fn test_module_native_fn_repr() { run_str("native module Foo { fn a() } ; Foo->a . repr . print", "native fn a()\n"); }
+    #[test] fn test_module_method_over_global() { run_str("fn x() { 1 } module A { fn x() { 2 } fn y() { x() } } ; A->y() . print", "2\n"); }
+    #[test] fn test_module_late_method_over_global() { run_str("fn x() { 1 } module A { fn y() { x() } fn x() { 2 } } ; A->y() . print", "2\n"); }
+    #[test] fn test_module_method_over_late_global() { run_str("module A { fn x() { 2 } fn y() { x() } } fn x() { 1 } ; A->y() . print", "2\n"); }
+    #[test] fn test_module_late_method_over_late_global() { run_str("module A { fn y() { x() } fn x() { 2 } } fn x() { 1 } ; A->y() . print", "2\n"); }
+    #[test] fn test_module_method_only() { run_str("module A { fn x() { 1 } fn y() { x() } } ; A->y() . print", "1\n"); }
+    #[test] fn test_module_late_method_only() { run_str("module A { fn y() { x() } fn x() { 1 } } ; A->y() . print", "1\n"); }
+    #[test] fn test_module_global_only() { run_str("fn x() { 1 } module A { fn y() { x() } } ; A->y() . print", "1\n"); }
+    #[test] fn test_module_late_global_only() { run_str("module A { fn y() { x() } } fn x() { 1 } ; A->y() . print", "1\n"); }
     #[test] fn test_local_vars_01() { run_str("let x=0 do { x.print }", "0\n"); }
     #[test] fn test_local_vars_02() { run_str("let x=0 do { let x=1; x.print }", "1\n"); }
     #[test] fn test_local_vars_03() { run_str("let x=0 do { x.print let x=1 }", "0\n"); }

@@ -183,32 +183,36 @@ pub struct LateBinding {
     /// The reference type of this late bound global, for fixing later
     ty: ReferenceType,
     loc: Location,
+    /// A fallback binding. If this is present, an error should never be raised, and the fallback should be used instead.
+    /// The fallback here will always be a global, and this will be the index
+    fallback: Option<u32>,
     /// If true, an error should be raised. Represents the state of the error recovery mode when hit
     error: bool,
 }
 
 impl LateBinding {
-    pub fn new(index: usize, name: String, ordinal: usize, opcode: usize, loc: Location, error: bool) -> LateBinding {
-        LateBinding {
-            index,
-            name,
-            opcode: (ordinal, opcode),
-            ty: ReferenceType::Invalid,
-            loc,
-            error,
-        }
+    fn with_fallback(name: String, fallback: u32, parser: &mut Parser) -> LateBinding {
+        LateBinding::new(name, Some(fallback), parser)
+    }
+
+    fn with_error(name: String, parser: &mut Parser) -> LateBinding {
+        LateBinding::new(name, None, parser)
+    }
+
+    fn new(name: String, fallback: Option<u32>, parser: &mut Parser) -> LateBinding {
+        let index = parser.late_binding_next_index;
+        let opcode = (parser.functions.len() - 1, parser.next_opcode());
+        let loc = parser.prev_location();
+        let error = !parser.error_recovery;
+
+        parser.late_binding_next_index += 1;
+
+        LateBinding { index, name, opcode, ty: ReferenceType::Invalid, loc, fallback, error }
     }
 
     pub(super) fn update(&mut self, ty: ReferenceType, parser: &Parser) {
         self.opcode = (parser.functions.len() - 1, parser.next_opcode());
         self.ty = ty;
-    }
-
-    pub fn to_error(self) -> Option<ParserError> {
-        match self.error {
-            true => Some(ParserError::new(UndeclaredIdentifier(self.name), self.loc)),
-            false => None
-        }
     }
 }
 
@@ -867,6 +871,25 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Resolves any outstanding late bindings present at teardown, by either falling back to a global, or raises an error.
+    pub fn resolve_remaining_late_bindings(&mut self) {
+        for binding in self.late_bindings.drain(..) {
+            if let Some(fallback) = binding.fallback {
+                let (func_index, code_index) = binding.opcode;
+                let (_, opcode) = &mut self.functions[func_index].code[code_index];
+
+                // Update the binding if possible
+                match binding.ty {
+                    ReferenceType::Load => *opcode = PushGlobal(fallback),
+                    ReferenceType::Store => *opcode = StoreGlobal(fallback, false),
+                    _ => panic!()
+                }
+            } else if binding.error {
+                self.errors.insert(ParserError::new(UndeclaredIdentifier(binding.name), binding.loc));
+            }
+        }
+    }
+
     /// Manages popping local variables and upvalues. Does a number of tasks, based on what is requested.
     ///
     /// 1. Pops local variables from the parser's local variable stack.
@@ -1027,26 +1050,15 @@ impl<'a> Parser<'a> {
         }
 
         // 2. If we are in function depth > 0, we search in enclosing functions (and global scope), for values that can be captured by this function.
-        //   - Globals that are not true globals can be captured in the same manner as upvalues (these are fairly uncommon in practice)
-        //   - Locals in an enclosing function can be captured.
+        // 3. Locals in an enclosing function can be captured.
         if self.function_depth > 0 {
             for depth in (0..self.function_depth).rev() { // Iterate through the range of [function_depth - 1, ... 0]
                 for local in self.locals[depth as usize].locals.iter().rev() { // In reverse, as we go inner -> outer scopes
-                    if local.name == name && local.initialized && !local.is_global() { // Note that it must **not** be a true global, anything else can be captured as an upvalue
+                    if local.name == name && local.initialized && !local.is_global() { // Note that it must **not** be a global, anything else can be captured as an upvalue
                         let index = local.index;
                         self.locals[depth as usize].locals[index as usize].captured = true;
                         return self.resolve_upvalue(depth, index);
                     }
-                }
-            }
-        }
-
-        // 3. If we are in a function depth > 0, then we can also resolve true globals
-        // If we are in function depth == 0, any true globals will be caught and resolved as locals by (1.) (but the opcodes for global load/store will still be emitted)
-        if self.function_depth > 0 {
-            for local in self.locals[0].locals.iter().rev() {
-                if local.name == name && local.initialized && local.is_global() {
-                    return LValueReference::Global(local.index)
                 }
             }
         }
@@ -1083,14 +1095,27 @@ impl<'a> Parser<'a> {
             //         fn b() { a }  <-- does this raise an error because `self->a` is not accessible? or bind to `Outer->a` ?
         }
 
-        // 4. / 5. Late Bindings
+        // 5. If we are in a function depth > 0, then we can also resolve true globals
+        // If we are in function depth == 0, any true globals will be caught and resolved as locals by (1.) (but the opcodes for global load/store will still be emitted)
+        if self.function_depth > 0 {
+            for local in self.locals[0].locals.iter().rev() {
+                if local.name.is_same(&name) && local.initialized && local.is_global() {
+                    if self.module_depth > 0 {
+                        // Note that module methods should take priority over globals, and both can be late bound
+                        // In order to handle this, we create a late binding here, but with a fallback instead of an error
+                        // If unbound, this will default to assuming the fallback
+                        return LValueReference::LateBinding(LateBinding::with_fallback(name, local.index, self));
+                    }
+                    return LValueReference::Global(local.index)
+                }
+            }
+        }
+
+        // Late Bindings
         // Either within a function or within a module
         // N.B. `self` can never be late bound, as it is always declared up front in a function parameter
         if self.function_depth > 0 || self.module_depth > 0 {
-            let binding = LateBinding::new(self.late_binding_next_index, name, self.functions.len() - 1, self.next_opcode(), self.prev_location(), !self.error_recovery);
-
-            self.late_binding_next_index += 1;
-            return LValueReference::LateBinding(binding);
+            return LValueReference::LateBinding(LateBinding::with_error(name, self));
         }
 
         // In global scope if we still could not resolve a variable, we return `None`
