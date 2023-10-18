@@ -4,7 +4,7 @@ use indexmap::IndexSet;
 use crate::compiler::{CompileParameters, CompileResult};
 use crate::compiler::parser::core::ParserState;
 use crate::compiler::parser::expr::{Expr, ExprType};
-use crate::compiler::parser::semantic::{LateBinding, LValue, LValueReference, Module, ParserFunctionImpl, ParserFunctionParameters, ParserStoreOp};
+use crate::compiler::parser::semantic::{LateBinding, LValue, LValueReference, Module, ParserFunctionImpl, ParserFunctionParameters, ParserStoreOp, Reference};
 use crate::compiler::scanner::{ScanResult, ScanToken};
 use crate::core::{NativeFunction, Pattern};
 use crate::reporting::Location;
@@ -119,7 +119,6 @@ pub(super) struct Parser<'a> {
     /// This is incremented and always represents the next available index.
     late_binding_next_index: usize,
 
-    synthetic_local_index: usize, // A counter for unique synthetic local variables (`$1`, `$2`, etc.)
     scope_depth: u32, // Current scope depth
     function_depth: u32, // Current depth of nested / enclosing functions
     module_depth: u32, // Current depth of nested modules / structs
@@ -136,8 +135,10 @@ pub(super) struct Parser<'a> {
     /// List of baked patterns already known to the parser.
     baked_patterns: &'a mut Vec<Pattern<StoreOp>>,
 
-    /// This is a counter for generating fake, "invalid" names as we parse. This prevents us from generating duplicate identifiers, while also keeping parser structure linear.
-    invalid_id: u32,
+    /// This is a counter for generating synthetic names as we parse.
+    /// - Parse errors (i.e. a module missing a name) will generate one to preserve correct parser structure
+    /// - Synthetic local variables will create one
+    synthetic_id: u32,
 }
 
 
@@ -185,7 +186,6 @@ impl Parser<'_> {
             late_bindings: Vec::new(),
             late_binding_next_index: 0,
 
-            synthetic_local_index: 0,
             scope_depth: 0,
             function_depth: 0,
             module_depth: 0,
@@ -196,7 +196,7 @@ impl Parser<'_> {
             patterns: Vec::new(),
             baked_patterns: patterns,
 
-            invalid_id: 0,
+            synthetic_id: 0,
         }
     }
 
@@ -1182,9 +1182,15 @@ impl Parser<'_> {
             Some(Identifier(_)) => {
                 let name: String = self.advance_identifier();
                 let loc: Location = self.prev_location();
-                let lvalue: LValueReference = self.resolve_reference(name);
+                let lvalue: LValueReference = self.resolve_reference(Reference::Named(name));
                 Expr::lvalue(loc, lvalue)
-            },
+            }
+            Some(KeywordSelf) => {
+                self.advance(); // Consume `self`
+                let loc: Location = self.prev_location();
+                let lvalue: LValueReference = self.resolve_reference(Reference::This);
+                Expr::lvalue(loc, lvalue)
+            }
             Some(OpenParen) => {
                 let loc_start = self.advance_with(); // Consume the `(`
                 if let Some(expr) = self.parse_expr_1_partial_operator_left() {

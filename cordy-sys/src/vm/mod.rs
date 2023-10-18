@@ -1052,15 +1052,31 @@ mod tests {
     #[test] fn test_struct_construct_not_enough_arguments() { run_str("struct Foo(a, b, c) ; Foo(1)(2) . print ; ", "Incorrect number of arguments for struct Foo(a, b, c), got 1\n  at: line 1 (<test>)\n\n1 | struct Foo(a, b, c) ; Foo(1)(2) . print ; \n2 |                          ^^^\n"); }
     #[test] fn test_struct_construct_too_many_arguments() { run_str("struct Foo(a, b, c) ; Foo(1, 2, 3, 4) . print", "Incorrect number of arguments for struct Foo(a, b, c), got 4\n  at: line 1 (<test>)\n\n1 | struct Foo(a, b, c) ; Foo(1, 2, 3, 4) . print\n2 |                          ^^^^^^^^^^^^\n"); }
     #[test] fn test_struct_with_method() { run_str("struct Square(side) { fn area(sq) -> sq->side ** 2 } let x = Square(3) ; Square->area(x) . print", "9\n"); }
-    #[test] fn test_struct_instance_method_no_arg() { run_str("struct A() { fn f(self) -> 123 } ; A()->f() . print", "123\n"); }
-    #[test] fn test_struct_instance_method_no_arg_repr() { run_str("struct A() { fn f(self) -> 123 } ; A()->f . repr . print", "fn f(self)\n"); }
-    #[test] fn test_struct_instance_method_no_arg_repr_of_static() { run_str("struct A() { fn f(self) -> 123 } ; A->f . repr . print", "fn f(self)\n"); }
-    #[test] fn test_struct_instance_method_no_arg_call_from_static() { run_str("struct A() { fn f(self) -> 123 } ; A->f(A()) . print", "123\n"); }
-    #[test] fn test_struct_instance_method_one_arg() { run_str("struct A() { fn f(self, x) -> 123 } ; A()->f(456) . print", "123\n"); }
-    #[test] fn test_struct_instance_method_one_arg_repr() { run_str("struct A() { fn f(self, x) -> 123 } ; A()->f . repr . print", "fn f(self, x)\n"); }
-    #[test] fn test_struct_instance_method_one_arg_repr_of_static() { run_str("struct A() { fn f(self, x) -> 123 } ; A->f . repr . print", "fn f(self, x)\n"); }
-    #[test] fn test_struct_instance_method_one_arg_call_from_static() { run_str("struct A() { fn f(self, x) -> 123 } ; A->f(A(), 456) . print", "123\n"); }
-    #[test] fn test_struct_instance_method_one_arg_call_from_static_partial() { run_str("struct A() { fn f(self, x) -> 123 } ; A->f(A()) . repr . print", "fn f(self, x)\n"); }
+    #[test] fn test_struct_self_method_const_no_arg() { run_str("struct A() { fn f(self) -> 123 } ; A()->f() . print", "123\n"); }
+    #[test] fn test_struct_self_method_const_no_arg_repr() { run_str("struct A() { fn f(self) -> 123 } ; A()->f . repr . print", "fn f(self)\n"); }
+    #[test] fn test_struct_self_method_const_no_arg_repr_of_static() { run_str("struct A() { fn f(self) -> 123 } ; A->f . repr . print", "fn f(self)\n"); }
+    #[test] fn test_struct_self_method_const_no_arg_call_from_static() { run_str("struct A() { fn f(self) -> 123 } ; A->f(A()) . print", "123\n"); }
+    #[test] fn test_struct_self_method_const_one_arg() { run_str("struct A() { fn f(self, x) -> 123 } ; A()->f(456) . print", "123\n"); }
+    #[test] fn test_struct_self_method_const_one_arg_repr() { run_str("struct A() { fn f(self, x) -> 123 } ; A()->f . repr . print", "fn f(self, x)\n"); }
+    #[test] fn test_struct_self_method_const_one_arg_repr_of_static() { run_str("struct A() { fn f(self, x) -> 123 } ; A->f . repr . print", "fn f(self, x)\n"); }
+    #[test] fn test_struct_self_method_const_one_arg_call_from_static() { run_str("struct A() { fn f(self, x) -> 123 } ; A->f(A(), 456) . print", "123\n"); }
+    #[test] fn test_struct_self_method_const_one_arg_call_from_static_partial() { run_str("struct A() { fn f(self, x) -> 123 } ; A->f(A()) . repr . print", "fn f(self, x)\n"); }
+    #[test] fn test_struct_self_method_this_no_arg() { run_str("struct A(a) { fn f(self) -> self } ; A(123)->f() . print", "A(a=123)\n"); }
+    #[test] fn test_struct_self_method_this_no_arg_call_from_static() { run_str("struct A(a) { fn f(self) -> self } ; A->f(A(123)) . print", "A(a=123)\n"); }
+    #[test] fn test_struct_self_method_this_one_arg() { run_str("struct A(a) { fn f(self, a) -> self } ; A(123)->f(456) . print", "A(a=123)\n"); }
+    #[test] fn test_struct_self_method_this_one_arg_call_from_static() { run_str("struct A(a) { fn f(self, x) -> self } ; A->f(A(123), 456) . print", "A(a=123)\n"); }
+    #[test] fn test_struct_self_method_this_one_arg_call_from_static_partial() { run_str("struct A(a) { fn f(self, x) -> self } ; A->f(A(123)) . repr . print", "fn f(self, x)\n"); }
+    #[test] fn test_struct_self_method_get_field() { run_str("struct A(a) { fn f(self) -> self->a } ; A(123)->f() . print", "123\n"); }
+    #[test] fn test_struct_self_method_get_field_repr() { run_str("struct A(a) { fn f(self) -> self->a } ; A(123)->f . repr . print", "fn f(self)\n"); }
+    #[test] fn test_struct_self_method_get_field_repr_of_static() { run_str("struct A(a) { fn f(self) -> self->a } ; A->f . repr . print", "fn f(self)\n"); }
+    #[test] fn test_struct_self_method_get_field_call_from_static() { run_str("struct A(a) { fn f(self) -> self->a } ; A->f(A(123)) . print", "123\n"); }
+    #[test] fn test_struct_self_method_get_field_method_ref() { run_str("struct A(a) { fn f(self) -> self->a } ; let q = A(123)->f ; q() . print", "123\n"); }
+    #[test] fn test_struct_self_method_box_get_repr() { run_str("struct A(x) { fn get(self) { self->x } fn set(self, y) { self->x = y } } let a = A(123) ; a->get . print", "get\n"); }
+    #[test] fn test_struct_self_method_box_get_call() { run_str("struct A(x) { fn get(self) { self->x } fn set(self, y) { self->x = y } } let a = A(123) ; a->get() . print", "123\n"); }
+    #[test] fn test_struct_self_method_box_set_repr() { run_str("struct A(x) { fn get(self) { self->x } fn set(self, y) { self->x = y } } let a = A(123) ; a->set . print", "set\n"); }
+    #[test] fn test_struct_self_method_box_set_call() { run_str("struct A(x) { fn get(self) { self->x } fn set(self, y) { self->x = y } } let a = A(123) ; a->set() . print ; a.print", "set\nA(x=123)\n"); }
+    #[test] fn test_struct_self_method_box_set_call_arg() { run_str("struct A(x) { fn get(self) { self->x } fn set(self, y) { self->x = y } } let a = A(123) ; a->set(456) . print ; a.print", "456\nA(x=456)\n"); }
+    #[test] fn test_struct_self_method_box_set_call_merge() { run_str("struct A(x) { fn get(self) { self->x } fn set(self, y) { self->x = y } } let a = A(123) ; a->set()(456) . print ; a.print", "456\nA(x=456)\n"); }
     #[test] fn test_module_empty() { run_str("module Foo module Bar ; (Foo, Bar) . print", "(module Foo, module Bar)\n"); }
     #[test] fn test_module_with_method() { run_str("module Foo { fn bar() -> 123 } ; Foo->bar() . print", "123\n"); }
     #[test] fn test_modules_with_same_method() { run_str("module A { fn a() -> 1 } module B { fn a() -> 2 } ; (A->a(), B->a()) . print", "(1, 2)\n"); }

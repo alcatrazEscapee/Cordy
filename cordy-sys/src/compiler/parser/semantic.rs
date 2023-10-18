@@ -74,7 +74,7 @@ impl Locals {
 
     /// Returns the name of a local with the given `index`.
     pub(super) fn get_name(&self, index: usize) -> String {
-        self.locals[index].name.clone()
+        self.locals[index].name.clone().to_named()
     }
 
     /// Returns the topmost `Loop` statement on the stack, or `None` if the stack is empty.
@@ -148,8 +148,8 @@ impl UpValue {
 
 #[derive(Eq, PartialEq, Debug, Clone)]
 struct Local {
-    /// The local variable name
-    name: String,
+    /// The local variable name - either a string name or the `self` keyword
+    name: Reference,
     /// The index of the local variable within it's `Locals` array.
     /// - At runtime, this matches the stack offset of this variable.
     /// - At compile time, this is used to index into `Parser.locals`
@@ -162,7 +162,7 @@ struct Local {
 }
 
 impl Local {
-    fn new(name: String, index: usize, scope_depth: u32, function_depth: u32) -> Local {
+    fn new(name: Reference, index: usize, scope_depth: u32, function_depth: u32) -> Local {
         Local { name, index: index as u32, scope_depth, function_depth, initialized: false, captured: false }
     }
 
@@ -301,8 +301,7 @@ impl LValue {
     pub(super) fn resolve_locals(&mut self, loc: Location, parser: &mut Parser) {
         match self {
             LValue::Named(it) | LValue::VarNamed(it) => {
-                let name: String = it.as_named();
-                *it = parser.resolve_mutable_reference(loc, name);
+                *it = parser.resolve_mutable_reference(loc, it.into_reference());
             },
             LValue::Terms(lvalue) => {
                 for term in lvalue {
@@ -318,8 +317,7 @@ impl LValue {
     pub(super) fn declare_locals(&mut self, parser: &mut Parser) {
         match self {
             LValue::Named(LValueReference::This) => {
-                // Declares a synthetic local to occupy the slot
-                parser.declare_synthetic_local();
+                parser.declare_self_local();
             },
             LValue::Named(it) | LValue::VarNamed(it) => {
                 let name: String = it.as_named();
@@ -470,6 +468,15 @@ impl LValueReference {
         match std::mem::take(self) {
             LValueReference::Named(it) => it,
             _ => panic!("at LValueReference::as_named()"),
+        }
+    }
+
+    /// Unwraps this `LValueReference` into a pure `Reference` which can then be resolved as a local variable.
+    fn into_reference(&mut self) -> Reference {
+        match std::mem::take(self) {
+            LValueReference::Named(it) => Reference::Named(it),
+            LValueReference::This => Reference::This,
+            _ => panic!("at LValueReference::into_reference()"),
         }
     }
 
@@ -635,6 +642,28 @@ impl FunctionLibraryEntry {
 }
 
 
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub enum Reference {
+    Named(String),
+    This
+}
+
+impl Reference {
+    fn is_same(&self, other: &String) -> bool {
+        match self {
+            Reference::Named(name) => name == other,
+            Reference::This => false,
+        }
+    }
+
+    fn to_named(self) -> String {
+        match self {
+            Reference::Named(name) => name,
+            Reference::This => String::from("self")
+        }
+    }
+}
+
 impl<'a> Parser<'a> {
 
     // ===== Loops ===== //
@@ -748,13 +777,13 @@ impl<'a> Parser<'a> {
 
         // Ensure there are no conflicts within the current scope, as we don't allow shadowing in the same scope.
         for local in &self.locals.last().unwrap().locals {
-            if local.scope_depth == self.scope_depth && local.name == name {
+            if local.scope_depth == self.scope_depth && local.name.is_same(&name) {
                 self.semantic_error(LocalVariableConflict(name.clone()));
                 return None
             }
         }
 
-        let index = self.declare_local_internal(name.clone());
+        let index = self.declare_local_internal(Reference::Named(name.clone()));
         let local = &self.locals.last().unwrap().locals[index];
 
         if local.is_global() {
@@ -770,6 +799,26 @@ impl<'a> Parser<'a> {
         }
 
         Some(index)
+    }
+
+    /// Declares and initializes the local variable for a `self` keyword.
+    pub fn declare_self_local(&mut self) {
+        let local = self.declare_local_internal(Reference::This);
+        self.init_local(local);
+    }
+
+    /// Declares a synthetic local variable. Unlike `declare_local()`, this can never fail.
+    /// Returns the index of the local variable in `locals`.
+    pub fn declare_synthetic_local(&mut self) -> usize {
+        let name = Reference::Named(self.synthetic_name());
+        self.declare_local_internal(name)
+    }
+
+    /// Declares a local variable by the name `name` in the current scope.
+    fn declare_local_internal(&mut self, name: Reference) -> usize {
+        let local: Local = Local::new(name, self.locals.last().unwrap().locals.len(), self.scope_depth, self.function_depth);
+        self.locals.last_mut().unwrap().locals.push(local);
+        self.locals.last().unwrap().locals.len() - 1
     }
 
     /// Upon declaring a global variable, struct field or method, this will resolve any references to this variable if they exist.
@@ -816,20 +865,6 @@ impl<'a> Parser<'a> {
 
             i += 1;
         }
-    }
-
-    /// Declares a synthetic local variable. Unlike `declare_local()`, this can never fail.
-    /// Returns the index of the local variable in `locals`.
-    pub fn declare_synthetic_local(&mut self) -> usize {
-        self.synthetic_local_index += 1;
-        self.declare_local_internal(format!("${}", self.synthetic_local_index - 1))
-    }
-
-    /// Declares a local variable by the name `name` in the current scope.
-    fn declare_local_internal(&mut self, name: String) -> usize {
-        let local: Local = Local::new(name, self.locals.last().unwrap().locals.len(), self.scope_depth, self.function_depth);
-        self.locals.last_mut().unwrap().locals.push(local);
-        self.locals.last().unwrap().locals.len() - 1
     }
 
     /// Manages popping local variables and upvalues. Does a number of tasks, based on what is requested.
@@ -939,7 +974,7 @@ impl<'a> Parser<'a> {
     ///
     /// - Native Functions cannot be assigned to as they cannot be shadowed
     /// - Methods in enclosing modules are not assignable
-    pub fn resolve_mutable_reference(&mut self, loc: Location, name: String) -> LValueReference {
+    pub fn resolve_mutable_reference(&mut self, loc: Location, name: Reference) -> LValueReference {
         match self.resolve_reference(name) {
             LValueReference::NativeFunction(_) |
             LValueReference::Method(_) => {
@@ -972,9 +1007,11 @@ impl<'a> Parser<'a> {
     /// In the event that late binding may be possible, we return a special 'late bound' `LValueReference`, which holds an error or information to be replaced when the variable is later bound.
     ///
     /// Finally, if no valid identifier can be found (i.e. in global scope, with no matching native function, local, or global), this will return `LValueReference::Invalid`. In this case, a semantic error will have already been raised.
-    pub fn resolve_reference(&mut self, name: String) -> LValueReference {
-        if let Some(b) = core::NativeFunction::find(&name) {
-            return LValueReference::NativeFunction(b);
+    pub fn resolve_reference(&mut self, name: Reference) -> LValueReference {
+        if let Reference::Named(ref name) = name {
+            if let Some(b) = core::NativeFunction::find(name) {
+                return LValueReference::NativeFunction(b);
+            }
         }
 
         // 1. Search for locals in the current function. This may return `Local`, or `Global` based on the scope of the variable.
@@ -1014,7 +1051,17 @@ impl<'a> Parser<'a> {
             }
         }
 
+        // The rest of the resolution methods will not use a `self` reference, so we discard that possibility here
+        let name = match name {
+            Reference::Named(name) => name,
+            Reference::This => {
+                self.semantic_error(UndeclaredIdentifier(String::from("self")));
+                return LValueReference::Invalid
+            }
+        };
+
         // 4. If we are within a function and module, we may bind to functions defined on this, or enclosing modules
+        // Note that we can only bind to named references via this mechanism, `self` is only present as a local
         if self.function_depth > 0 && self.module_depth > 0 {
 
             // Search modules from top-down to find matching methods, then fields
@@ -1038,6 +1085,7 @@ impl<'a> Parser<'a> {
 
         // 4. / 5. Late Bindings
         // Either within a function or within a module
+        // N.B. `self` can never be late bound, as it is always declared up front in a function parameter
         if self.function_depth > 0 || self.module_depth > 0 {
             let binding = LateBinding::new(self.late_binding_next_index, name, self.functions.len() - 1, self.next_opcode(), self.prev_location(), !self.error_recovery);
 
