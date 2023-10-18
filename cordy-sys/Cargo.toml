@@ -7,6 +7,7 @@
     trace_parser = []
     trace_interpreter = []
     trace_interpreter_stack = []
+    test_parser_verification = []
 
 [dependencies]
     num-integer = "0.1.45"
