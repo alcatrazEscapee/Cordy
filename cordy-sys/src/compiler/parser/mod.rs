@@ -236,6 +236,9 @@ impl Parser<'_> {
             self.locations.push(loc);
         }
 
+        // Resolve late bindings, which may emit code to functions (fallbacks)
+        self.resolve_remaining_late_bindings();
+
         // Emit functions
         for mut func in self.functions.drain(..) {
             let head: usize = self.raw_output.len();
@@ -266,13 +269,6 @@ impl Parser<'_> {
         if let Some(t) = self.peek() {
             let token: ScanToken = t.clone();
             self.error(UnexpectedTokenAfterEoF(token));
-        }
-
-        // Errors due to late bound globals that were never fixed
-        for global in self.late_bindings.drain(..) {
-            if let Some(error) = global.to_error() {
-                self.errors.insert(error);
-            }
         }
     }
 
