@@ -978,7 +978,9 @@ impl Parser<'_> {
         // `if x {} else { throw an exception with description `y` }
         let mut loc = self.next_location();
         self.parse_expression();
-        loc |= self.prev_location();
+        if !self.error_recovery {
+            loc |= self.prev_location();
+        }
         let jump_if_true = self.reserve();
         match self.peek() {
             Some(Colon) => {
@@ -2226,6 +2228,7 @@ mod tests {
     #[test] fn test_native_module_with_no_name() { run_err("native module { fn boo() }", "Expected a name after 'module' keyword, got '{' token instead\n  at: line 1 (<test>)\n\n1 | native module { fn boo() }\n2 |               ^\n") }
     #[test] fn test_native_module_with_function_impl() { run_err("native module Foo { fn boo() -> nil }", "Expected a function within module body, got '->' token instead\n  at: line 1 (<test>)\n\n1 | native module Foo { fn boo() -> nil }\n2 |                              ^^\n") }
     #[test] fn test_native_module_with_function_impl_mismatching_braces() { run_err("native module Foo { fn boo() {}", "Expected a function within module body, got '{' token instead\n  at: line 1 (<test>)\n\n1 | native module Foo { fn boo() {}\n2 |                              ^\n") }
+    #[test] fn test_assert_eof() { run_err("assert", "Expected an expression terminal, got end of input instead\n  at: line 1 (<test>)\n\n1 | assert\n2 |       ^^^\n"); }
 
     #[test] fn test_array_access_after_newline() { run("array_access_after_newline"); }
     #[test] fn test_array_access_no_newline() { run("array_access_no_newline"); }

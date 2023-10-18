@@ -19,7 +19,23 @@ pub fn scan(view: &SourceView) -> Vec<(Location, ScanTokenType)> {
         .collect()
 }
 
+#[cfg(feature = "test_parser_verification")]
 pub fn compile(enable_optimization: bool, view: &SourceView) -> Result<CompileResult, Vec<String>> {
+    let mut buffer = String::new();
+    for c in view.text().chars() {
+        buffer.push(c); // Insert one character
+        let view = SourceView::new(view.name().clone(), buffer.clone());
+        let _ = compile_internal(enable_optimization, &view); // And then just prove that the compile passes
+    }
+    compile_internal(enable_optimization, view)
+}
+
+#[cfg(not(feature = "test_parser_verification"))]
+pub fn compile(enable_optimization: bool, view: &SourceView) -> Result<CompileResult, Vec<String>> {
+    compile_internal(enable_optimization, view)
+}
+
+fn compile_internal(enable_optimization: bool, view: &SourceView) -> Result<CompileResult, Vec<String>> {
     let mut errors: Vec<String> = Vec::new();
 
     // Scan
@@ -32,16 +48,16 @@ pub fn compile(enable_optimization: bool, view: &SourceView) -> Result<CompileRe
     }
 
     // Parse
-    let compile_result: CompileResult = parser::parse(enable_optimization, scan_result);
-    if !compile_result.errors.is_empty() {
-        for error in &compile_result.errors {
+    let compile: CompileResult = parser::parse(enable_optimization, scan_result);
+    if !compile.errors.is_empty() {
+        for error in &compile.errors {
             errors.push(view.format(error));
         }
         return Err(errors);
     }
 
     // Compilation Successful
-    Ok(compile_result)
+    Ok(compile)
 }
 
 /// Performs an incremental compile, given the following input parameters.
