@@ -14,10 +14,11 @@ use crate::compiler::parser::{Parser, ParserError, ParserErrorType};
 use crate::core;
 use crate::core::Pattern;
 use crate::reporting::Location;
-use crate::vm::{FunctionImpl, IntoValue, Opcode, StoreOp, StructTypeImpl, ValuePtr};
+use crate::vm::{FunctionImpl, IntoValue, Method, Opcode, StoreOp, StructTypeImpl, ValuePtr};
 
 use Opcode::{*};
 use ParserErrorType::{*};
+use crate::compiler::parser::expr::Expr;
 
 
 #[derive(Eq, PartialEq, Debug, Clone)]
@@ -114,11 +115,11 @@ impl Fields {
         }
     }
 
-    pub fn get_field_offset(&self, type_index: u32, field_index: u32) -> Option<usize> {
+    pub fn get_offset(&self, type_index: u32, field_index: u32) -> Option<usize> {
         self.lookup.get(&(type_index, field_index)).copied()
     }
 
-    pub fn get_field_name(&self, field_index: u32) -> String {
+    pub fn get_name(&self, field_index: u32) -> String {
         self.fields.iter()
             .find(|(_, v)| field_index == **v)
             .unwrap()
@@ -245,6 +246,7 @@ pub enum LValue {
 pub enum LValueReference {
     #[default]
     Invalid,
+    This, // The `self` type in instance methods
     Named(String),
     Local(u32),
     Global(u32),
@@ -286,6 +288,7 @@ impl LValue {
         match self {
             LValue::Empty => String::from("_"),
             LValue::VarEmpty => String::from("*_"),
+            LValue::Named(LValueReference::This) => String::from("self"),
             LValue::Named(LValueReference::Named(it)) => it.clone(),
             LValue::VarNamed(LValueReference::Named(it)) => format!("*{}", it),
             LValue::Terms(it) => format!("({})", it.iter().map(|u| u.to_code_str()).join(", ")),
@@ -314,6 +317,10 @@ impl LValue {
     /// Will panic if the `LValue` has terms which are not `LValueReference::Named`.
     pub(super) fn declare_locals(&mut self, parser: &mut Parser) {
         match self {
+            LValue::Named(LValueReference::This) => {
+                // Declares a synthetic local to occupy the slot
+                parser.declare_synthetic_local();
+            },
             LValue::Named(it) | LValue::VarNamed(it) => {
                 let name: String = it.as_named();
                 if let Some(local) = parser.declare_local(name, false) {
@@ -462,7 +469,7 @@ impl LValueReference {
     fn as_named(&mut self) -> String {
         match std::mem::take(self) {
             LValueReference::Named(it) => it,
-            _ => panic!("Expected LValueReference::Named"),
+            _ => panic!("at LValueReference::as_named()"),
         }
     }
 
@@ -505,10 +512,11 @@ pub struct ParserFunctionImpl {
     default_args: Vec<usize>,
 
     /// If the last argument in this function is a variadic argument, meaning it needs special behavior when invoked with >= `max_args()`
-    var_arg: bool,
-
+    variadic: bool,
     /// If the function is a FFI native function
     native: bool,
+    /// If the function is a instance method on a struct
+    instance: bool,
 
     /// Bytecode for the function body itself
     code: Vec<(Location, Opcode)>,
@@ -534,7 +542,7 @@ impl ParserFunctionImpl {
     /// Bakes this parser function into an immutable `FunctionImpl`.
     /// The `head` and `tail` pointers are computed based on the surrounding code.
     pub(super) fn bake(self, constants: &mut [ValuePtr], head: usize, tail: usize) {
-        constants[self.constant_id as usize] = FunctionImpl::new(head, tail, self.name, self.args, self.default_args, self.var_arg, self.native).to_value();
+        constants[self.constant_id as usize] = FunctionImpl::new(head, tail, self.name, self.args, self.default_args, self.variadic, self.native, self.instance).to_value();
     }
 
     /// Marks a default argument as finished.
@@ -547,14 +555,20 @@ impl ParserFunctionImpl {
     }
 }
 
+pub struct ParserFunctionParameters {
+    pub args: Vec<LValue>,
+    pub default_args: Vec<Expr>,
+    pub variadic: bool,
+    pub instance: bool,
+}
+
 
 /// A representation of a module (or struct) which may expose methods and fields that can be bound.
 pub struct Module {
     name: String,
     is_module: bool,
 
-    /// A map of method names to function indices. When resolving module methods, they don't do a `GetField` and rather bind directly to the method at compile-time.
-    methods: IndexMap<String, u32>,
+    methods: IndexMap<String, Method>,
     fields: Vec<String>,
 }
 
@@ -564,8 +578,7 @@ impl Module {
     }
 
     pub fn bake(self, instance_type: u32, constructor_type: u32) -> StructTypeImpl {
-        let methods: Vec<u32> = self.methods.into_values().collect();
-        StructTypeImpl::new(self.name, self.fields, methods, instance_type, constructor_type, self.is_module)
+        StructTypeImpl::new(self.name, self.fields, self.methods.into_values().collect(), instance_type, constructor_type, self.is_module)
     }
 }
 
@@ -694,16 +707,17 @@ impl<'a> Parser<'a> {
     /// Declares a function with a given name and arguments.
     /// Returns the constant identifier for this function, however the function itself is currently located in `self.functions`, not `self.constants`.
     /// Instead, we push a dummy `Nil` into the constants array, and store the constant index on our parser function. During teardown, we inject these into the right spots.
-    pub fn declare_function(&mut self, name: String, args: &[LValue], var_arg: bool) -> u32 {
+    pub fn declare_function(&mut self, name: String, params: &ParserFunctionParameters) -> u32 {
         let constant_id: u32 = self.constants.len() as u32;
 
         self.constants.push(ValuePtr::nil());
         self.functions.push(ParserFunctionImpl {
             name,
-            args: args.iter().map(|u| u.to_code_str()).collect(),
+            args: params.args.iter().map(|u| u.to_code_str()).collect(),
             default_args: Vec::new(),
-            var_arg,
+            variadic: params.variadic,
             native: false,
+            instance: params.instance,
             code: Vec::new(),
             locals_reference: Vec::new(),
             constant_id,
@@ -1008,7 +1022,7 @@ impl<'a> Parser<'a> {
             for module in self.modules.iter().rev() {
                 match module.methods.get(&name) {
                     Some(function_id) => {
-                        return LValueReference::Method(*function_id)
+                        return LValueReference::Method(function_id.function_id())
                     }
                     None => {}
                 }
@@ -1110,7 +1124,7 @@ impl<'a> Parser<'a> {
     /// Declares a method as part of the current module. If the method name is already in use (either via a field or method), raises a semantic error.
     ///
     /// Returns `true` if the declaration was successful.
-    pub fn declare_method(&mut self, type_index: u32, name: String, loc: Location, args: &[LValue], var_arg: bool) {
+    pub fn declare_method(&mut self, type_index: u32, name: String, loc: Location, params: &ParserFunctionParameters) {
         let module: &mut Module = self.modules.last_mut().unwrap();
 
         // Need to also check conflicts with fields
@@ -1134,11 +1148,11 @@ impl<'a> Parser<'a> {
         }
 
         // Always declare the function, it will be cleaned up later
-        let function_id: u32 = self.declare_function(name.clone(), &args, var_arg);
+        let function_id: u32 = self.declare_function(name.clone(), params);
         let methods = &mut self.modules.last_mut().unwrap().methods;
         let offset = methods.len();
 
-        methods.insert(name.clone(), function_id);
+        methods.insert(name.clone(), Method::new(function_id, params.instance));
         self.declare_field_offset(name.clone(), type_index, offset);
         self.resolve_late_bindings(name, LateBound::Method(function_id));
     }

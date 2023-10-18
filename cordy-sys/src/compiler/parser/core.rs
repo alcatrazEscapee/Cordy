@@ -125,8 +125,10 @@ impl<'a> Parser<'a> {
                 return;
             }
         }
+
+        // Then if we fail, start resync. Initially set error recovery `false`, so we can peek ahead at the input.
+        let error_recovery = self.error_recovery;
         loop {
-            // Then if we fail, start resync. Initially set error recovery `false`, so we can peek ahead at the input.
             self.error_recovery = false;
             match self.peek() {
                 Some(t) if *t == token => {
@@ -140,7 +142,10 @@ impl<'a> Parser<'a> {
                 },
                 None => {
                     // Error recovery failed - we reached end of input
-                    self.error(ExpectedToken(token, None));
+                    // If we were already in an error and trying to resync, then don't raise an additional error
+                    if !error_recovery {
+                        self.error(ExpectedToken(token, None));
+                    }
                     break
                 }
             }
