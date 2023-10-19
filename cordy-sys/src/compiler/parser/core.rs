@@ -565,7 +565,7 @@ impl<'a> Parser<'a> {
 
             LValueReference::LateBinding(mut binding) => {
                 binding.update(ReferenceType::Load(self.next_opcode()));
-                self.late_bindings.push(binding);
+                self.late_bindings.push(*binding);
             }
 
             LValueReference::Invalid => {},
@@ -591,7 +591,7 @@ impl<'a> Parser<'a> {
 
             LValueReference::LateBinding(mut binding) => {
                 binding.update(ReferenceType::Store(self.next_opcode()));
-                self.late_bindings.push(binding);
+                self.late_bindings.push(*binding);
             }
 
             LValueReference::Invalid => {},
