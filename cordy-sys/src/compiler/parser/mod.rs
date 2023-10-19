@@ -2213,6 +2213,14 @@ mod tests {
     #[test] fn test_struct_with_duplicate_method() { run_err("struct A(a) { fn b() {} fn b() {} }", "Duplicate field name: 'b'\n  at: line 1 (<test>)\n\n1 | struct A(a) { fn b() {} fn b() {} }\n2 |                            ^\n") }
     #[test] fn test_struct_with_duplicate_both() { run_err("struct A(a, b) { fn a() {} }", "Duplicate field name: 'a'\n  at: line 1 (<test>)\n\n1 | struct A(a, b) { fn a() {} }\n2 |                     ^\n") }
     #[test] fn test_struct_with_no_fields() { run_err("struct Foo {}", "Expected a '(' token, got '{' token instead\n  at: line 1 (<test>)\n\n1 | struct Foo {}\n2 |            ^\n") }
+    #[test] fn test_struct_cannot_assign_to_self() { run_err("struct Foo() { fn foo(self) { self = 3 } }", "The left hand side is not a valid assignment target\n  at: line 1 (<test>)\n\n1 | struct Foo() { fn foo(self) { self = 3 } }\n2 |                                    ^\n") }
+    #[test] fn test_struct_cannot_operator_assign_to_self() { run_err("struct Foo() { fn foo(self) { self += 3 } }", "The left hand side is not a valid assignment target\n  at: line 1 (<test>)\n\n1 | struct Foo() { fn foo(self) { self += 3 } }\n2 |                                    ^^\n") }
+    #[test] fn test_struct_cannot_pattern_assign_to_self() { run_err("struct Foo() { fn foo(self) { (_, self) = 3 } }", "Expected an expression terminal, got '_' token instead\n  at: line 1 (<test>)\n\n1 | struct Foo() { fn foo(self) { (_, self) = 3 } }\n2 |                                ^\n") }
+    #[test] fn test_struct_cannot_upvalue_assign_to_self() { run_err("struct Foo() { fn foo(self) { fn f() { self = 1 } f } }", "The left hand side is not a valid assignment target\n  at: line 1 (<test>)\n\n1 | struct Foo() { fn foo(self) { fn f() { self = 1 } f } }\n2 |                                             ^\n") }
+    #[test] fn test_struct_self_method_from_non_self_method() { run_err("struct A() { fn a(self) {123} fn b() { a() } }", "Undeclared identifier: 'self'\n  at: line 1 (<test>)\n\n1 | struct A() { fn a(self) {123} fn b() { a() } }\n2 |                                        ^\n") }
+    // todo: enable this test
+    //#[test] fn test_struct_self_method_from_non_self_method_late() { run_err("struct A() { fn b() { a() } fn a(self) {123} }", "") }
+    #[test] fn test_struct_field_from_non_self_method() { run_err("struct A(a) { fn b() { a } }", "Undeclared identifier: 'self'\n  at: line 1 (<test>)\n\n1 | struct A(a) { fn b() { a } }\n2 |                        ^\n") }
     #[test] fn test_module_with_duplicate_method() { run_err("module A { fn a() {} fn a() {} }", "Duplicate field name: 'a'\n  at: line 1 (<test>)\n\n1 | module A { fn a() {} fn a() {} }\n2 |                         ^\n") }
     #[test] fn test_module_late_bound_missing() { run_err("module A { fn a() { b } }", "Undeclared identifier: 'b'\n  at: line 1 (<test>)\n\n1 | module A { fn a() { b } }\n2 |                     ^\n") }
     #[test] fn test_module_late_bound_store() { run_err("module A { fn a() { b = 1 } }", "Undeclared identifier: 'b'\n  at: line 1 (<test>)\n\n1 | module A { fn a() { b = 1 } }\n2 |                     ^\n") }
@@ -2276,6 +2284,7 @@ mod tests {
     #[test] fn test_pattern_expression() { run("pattern_expression"); }
     #[test] fn test_pattern_expression_nested() { run("pattern_expression_nested"); }
     #[test] fn test_struct_with_methods() { run("struct_with_methods"); }
+    #[test] fn test_struct_with_self_methods() { run("struct_with_self_methods"); }
     #[test] fn test_trailing_commas() { run("trailing_commas"); }
     #[test] fn test_weird_expression_statements() { run("weird_expression_statements"); }
     #[test] fn test_weird_closure_not_a_closure() { run("weird_closure_not_a_closure"); }

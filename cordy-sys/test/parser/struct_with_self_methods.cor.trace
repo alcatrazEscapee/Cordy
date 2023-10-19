@@ -1,0 +1,48 @@
+L01: 0000 InitGlobal
+L07: 0001 StructType(struct Pos(x, y))
+L09: 0002 InitGlobal
+     0003 Function(fn of(x, y) -> L[43, 47])
+L11: 0004 PushGlobal(1) -> of
+     0005 Int(1)
+     0006 Int(2)
+     0007 Call(2)
+     0008 InitGlobal
+L12: 0009 PushGlobal(2) -> p1
+     0010 GetField(2) -> norm1
+     0011 Call(0)
+     0012 Pop
+L13: 0013 PushGlobal(2) -> p1
+     0014 GetField(3) -> gt
+     0015 Int(3)
+     0016 Call(1)
+     0017 Pop
+L14: 0018 PushGlobal(2) -> p1
+     0019 GetField(4) -> lt
+     0020 Int(5)
+     0021 Call(1)
+     0022 Pop
+     0023 PopN(3)
+     0024 Exit
+L02: 0025 PushLocal(0) -> self
+     0026 GetField(0) -> x
+     0027 PushLocal(0) -> self
+     0028 GetField(1) -> y
+     0029 Add
+     0030 Return
+L05: 0031 PushLocal(0) -> self
+     0032 GetField(2) -> norm1
+     0033 Call(0)
+     0034 PushLocal(1) -> n
+     0035 GreaterThan
+     0036 Return
+L06: 0037 PushLocal(0) -> self
+     0038 GetMethod(0) -> fn norm1(self)
+     0039 Call(0)
+     0040 PushLocal(1) -> n
+     0041 GreaterThan
+     0042 Return
+L09: 0043 PushGlobal(0) -> Pos
+     0044 PushLocal(0) -> x
+     0045 PushLocal(1) -> y
+     0046 Call(2)
+     0047 Return

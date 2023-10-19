@@ -333,33 +333,58 @@ impl<'a> Parser<'a> {
 
     pub fn push_load_lvalue(&mut self, loc: Location, lvalue: LValueReference) {
         match lvalue {
-            LValueReference::Local(index) => self.push_with(PushLocal(index), loc),
+            LValueReference::Local(index) |
+            LValueReference::LocalThis(index) => self.push_with(PushLocal(index), loc),
             LValueReference::Global(index) => self.push_with(PushGlobal(index), loc),
+            LValueReference::UpValue(index) |
+            LValueReference::UpValueThis(index) => self.push_with(PushUpValue(index), loc),
+            LValueReference::ThisField { upvalue, index, field_index } => {
+                self.push_with(if upvalue { PushUpValue(index) } else { PushLocal(index) }, loc);
+                self.push_with(GetField(field_index), loc);
+            }
+
+            LValueReference::Method(index) => self.push_with(Constant(index), loc),
+            LValueReference::ThisMethod { upvalue, index, function_id } => {
+                self.push_with(if upvalue { PushUpValue(index) } else { PushLocal(index) }, loc);
+                self.push_with(GetMethod(function_id), loc);
+            }
+            LValueReference::NativeFunction(native) => self.push_with(NativeFunction(native), loc),
+
             LValueReference::LateBinding(mut binding) => {
                 binding.update(ReferenceType::Load, self);
                 self.late_bindings.push(binding);
                 self.push_with(Noop, loc); // Will be fixed when the global is declared, or caught at EoF as an error
             }
-            LValueReference::UpValue(index) => self.push_with(PushUpValue(index), loc),
-            LValueReference::Method(index) => self.push_with(Constant(index), loc),
+
             LValueReference::Invalid => {},
-            LValueReference::NativeFunction(native) => self.push_with(NativeFunction(native), loc),
-            _ => panic!("Invalid load: {:?}", lvalue),
+            LValueReference::Named(_) | LValueReference::This => panic!("Invalid load"),
         }
     }
 
-    pub fn push_store_lvalue(&mut self, lvalue: LValueReference) {
+    pub fn push_store_lvalue(&mut self, lvalue: LValueReference, loc: Location) {
         match lvalue {
-            LValueReference::Local(index) => self.push(StoreLocal(index, false)),
-            LValueReference::Global(index) => self.push(StoreGlobal(index, false)),
+            LValueReference::Local(index) => self.push_with(StoreLocal(index, false), loc),
+            LValueReference::Global(index) => self.push_with(StoreGlobal(index, false), loc),
+            LValueReference::UpValue(index) => self.push_with(StoreUpValue(index), loc),
+            LValueReference::ThisField { upvalue, index, field_index } => {
+                self.push_with(if upvalue { PushUpValue(index) } else { PushLocal(index) }, loc);
+                self.push_with(GetField(field_index), loc);
+            }
+
+            LValueReference::LocalThis(_) |
+            LValueReference::UpValueThis(_) |
+            LValueReference::Method(_) |
+            LValueReference::ThisMethod { .. } |
+            LValueReference::NativeFunction(_) => self.error(InvalidAssignmentTarget),
+
             LValueReference::LateBinding(mut binding) => {
                 binding.update(ReferenceType::Store, self);
                 self.late_bindings.push(binding);
-                self.push(Noop); // Will be fixed when the global is declared, or caught at EoF as an error
+                self.push_with(Noop, loc); // Will be fixed when the global is declared, or caught at EoF as an error
             }
-            LValueReference::UpValue(index) => self.push(StoreUpValue(index)),
+
             LValueReference::Invalid => {},
-            _ => panic!("Invalid store: {:?}", lvalue),
+            LValueReference::Named(_) | LValueReference::This => panic!("Invalid store"),
         }
     }
 

@@ -169,6 +169,16 @@ impl Local {
     fn is_global(&self) -> bool {
         self.function_depth == 0 && self.scope_depth == 0
     }
+
+    fn as_reference(&self) -> LValueReference {
+        if self.is_global() {
+            return LValueReference::Global(self.index)
+        }
+        match self.name {
+            Reference::Named(_) => LValueReference::Local(self.index),
+            Reference::This => LValueReference::LocalThis(self.index),
+        }
+    }
 }
 
 
@@ -248,16 +258,38 @@ pub enum LValue {
 
 #[derive(Debug, Clone, Default)]
 pub enum LValueReference {
+    /// `Invalid` is used as a the default type of an invalid reference. Either initializing default references, or when continuing in the site of an error, this is used.
     #[default]
     Invalid,
+
+    /// `This` and `Named` are used when parsing `LValue`s that are resolved later due to backtracking.
+    /// This is used, for example in function parameters, or in pattern assignment statements.
     This, // The `self` type in instance methods
     Named(String),
+
+    /// The below cases are _assignable_ `LValueReference`s. These are used when an `LValue` is directly constructed, i.e. within an expression.
+    /// They can be converted from a load to a store reference without mutating the underlying functionality.
     Local(u32),
     Global(u32),
-    LateBinding(LateBinding),
     UpValue(u32),
+    /// `ThisField` represents a bound self field.
+    /// - `self` is loaded either by a `Local(index)` or a `UpValue(index)`
+    /// - The field is accessed via a `GetField(field_index)` or `SetField(field_index)`
+    ThisField { upvalue: bool, index: u32, field_index: u32 },
+
+    /// The below cases are _not assignable_ `LValueReference`s. These are used similarly in expressions, but forbid themselves from being used as an assignment target.
+    /// `LocalThis` and `UpValueThis` are variants of `Local` and `UpValue` respectively, which are not assignable, as they represent `self`
+    LocalThis(u32),
+    UpValueThis(u32),
     Method(u32),
+    /// `ThisMethod` represents a bound self method.
+    /// - `self` is loaded either by a `Local(index)` or a `UpValue(index)`
+    /// - The method is accessed via a `GetMethod(function_id)`
+    ThisMethod { upvalue: bool, index: u32, function_id: u32 },
     NativeFunction(core::NativeFunction),
+
+    /// Late Bindings can be either methods or globals - their assignability is unknown. This is resolved when the binding is resolved by checking the `ReferenceType` field on the binding.
+    LateBinding(LateBinding),
 }
 
 
@@ -411,7 +443,7 @@ impl LValue {
             },
             LValue::Named(local) | LValue::VarNamed(local) => {
                 if !in_place {
-                    parser.push_store_lvalue(local);
+                    parser.push_store_lvalue(local, parser.prev_location());
                     if !in_expression {
                         parser.push(Pop);
                     }
@@ -595,7 +627,7 @@ impl Module {
 
 enum LateBound {
     Local(u32),
-    Method(u32)
+    Method { function_id: u32, instance: bool }
 }
 
 #[derive(Debug, Clone)]
@@ -653,6 +685,10 @@ pub enum Reference {
 }
 
 impl Reference {
+    fn is_self(&self) -> bool {
+        matches!(self, Reference::This)
+    }
+
     fn is_same(&self, other: &String) -> bool {
         match self {
             Reference::Named(name) => name == other,
@@ -843,7 +879,6 @@ impl<'a> Parser<'a> {
                 // Update the binding if possible
                 match (binding.ty, &result) {
                     (ReferenceType::Load, LateBound::Local(index)) => *opcode = PushGlobal(*index),
-                    (ReferenceType::Load, LateBound::Method(index)) => *opcode = Constant(*index),
                     (ReferenceType::Store, LateBound::Local(index)) => *opcode = StoreGlobal(*index, false),
                     (ReferenceType::StorePattern, LateBound::Local(local)) => {
                         // Need to update all the matching late bound globals in the pattern, which should be referred to by `ExecPattern`
@@ -861,8 +896,13 @@ impl<'a> Parser<'a> {
                             }
                         });
                     },
-                    (ReferenceType::Invalid, _) => panic!("Invalid reference type set!"),
-                    (_, LateBound::Method(_)) => self.error_at(binding.loc, InvalidAssignmentTarget),
+                    (ReferenceType::Load, LateBound::Method { function_id, instance }) => {
+                        // todo: if `instance` is true we actually need to create a self load somehow? that also means inserting TWO opcodes
+                        // todo: this will break EVERYTHING that tracks "opcodes that need filling in later", and jump offsets
+                        *opcode = Constant(*function_id)
+                    },
+                    (ReferenceType::Store, LateBound::Method { .. }) => self.error_at(binding.loc, InvalidAssignmentTarget),
+                    (_, _) => panic!("Invalid reference type set!"),
                 }
                 continue; // Skip the below i += 1, since this binding got swap-removed
             }
@@ -1000,7 +1040,8 @@ impl<'a> Parser<'a> {
     pub fn resolve_mutable_reference(&mut self, loc: Location, name: Reference) -> LValueReference {
         match self.resolve_reference(name) {
             LValueReference::NativeFunction(_) |
-            LValueReference::Method(_) => {
+            LValueReference::Method(_) |
+            LValueReference::LocalThis(_) => {
                 self.error_at(loc, InvalidAssignmentTarget);
                 LValueReference::Invalid
             }
@@ -1018,8 +1059,15 @@ impl<'a> Parser<'a> {
     ///    - Upvalues are also shadowed by locals in higher (nested) scopes, and by ones in higher (nested) enclosing functions.
     /// 4. Functions defined in enclosing modules.
     ///    - Functions can be referenced directly (without need to emit a `Module->method` `GetField` opcode) by name, while in a function defined on that module.
-    ///    - todo: with `self` methods on modules, this also introduces more complexity here with binding to `self->` methods
+    ///    - `self` method and fields can be referenced by a combination of referencing `self`, plus a reference to a `GetField` or `GetMethod` opcode.
+    ///    - This is indicated by the `ThisField` and `ThisMethod` references.
     /// 5. Global Variables (with both function depth == 0 and scope depth == 0)
+    ///
+    /// ### `self` References
+    ///
+    /// Note that when `Reference::This` is provided, the return types are limited to:
+    /// - `LValueReference::LocalThis` -> indicating the `self` parameter is present in a local
+    /// - `LValueReference::UpValueThis` -> indicating the `self` parameter is present in an upvalue
     ///
     /// ### Late Binding
     /// We also allow late binding for two explicit scenarios:
@@ -1041,11 +1089,7 @@ impl<'a> Parser<'a> {
         //   - Locals that are captured as upvalues, but are now being referenced as locals again, emit upvalue references, as the stack stops getting updated after a value is lifted into an upvalue.
         for local in self.current_locals().locals.iter().rev() {
             if local.name == name && local.initialized {
-                return if local.is_global() {
-                    LValueReference::Global(local.index)
-                } else {
-                    LValueReference::Local(local.index)
-                }
+                return local.as_reference();
             }
         }
 
@@ -1056,8 +1100,9 @@ impl<'a> Parser<'a> {
                 for local in self.locals[depth as usize].locals.iter().rev() { // In reverse, as we go inner -> outer scopes
                     if local.name == name && local.initialized && !local.is_global() { // Note that it must **not** be a global, anything else can be captured as an upvalue
                         let index = local.index;
+                        let is_self = local.name.is_self();
                         self.locals[depth as usize].locals[index as usize].captured = true;
-                        return self.resolve_upvalue(depth, index);
+                        return self.resolve_upvalue(depth, index, is_self);
                     }
                 }
             }
@@ -1075,24 +1120,63 @@ impl<'a> Parser<'a> {
         // 4. If we are within a function and module, we may bind to functions defined on this, or enclosing modules
         // Note that we can only bind to named references via this mechanism, `self` is only present as a local
         if self.function_depth > 0 && self.module_depth > 0 {
-
-            // Search modules from top-down to find matching methods, then fields
-            // Field and method names are unique on a single module so we don't need to worry about conflicts
-            for module in self.modules.iter().rev() {
-                match module.methods.get(&name) {
-                    Some(function_id) => {
-                        return LValueReference::Method(function_id.function_id())
-                    }
-                    None => {}
-                }
-            }
-
-            // todo: bind to fields, which requires a `self->` reference
-            // todo: consider case of binding to parent module with self:
+            // Resolve reference to fields or other `self` methods
+            //
+            // 1. A reference to a field or `self` method, without an explicit `self` is different than a non-self method, in that it cannot fully elide the `self`.
+            //    That is to say, in `fn f(self) { g() }`, we _must_ interpret `g()` as `self->g()`
+            // 2. Fields or `self` methods can only be resolved on the immediate enclosing struct. Parent enclosing structs are unrelated.
+            //    To use the analogy from Java, inner structs are "static" inner classes, and don't have a reference to their parent.
+            // 3. In the case where a field or `self` method is in a higher nested struct than a non-self method in an outer struct, we consider it hidden,
+            //    even if this is illegal to reference (i.e. via a non-self method):
+            // ```
             // module Outer {
             //     fn a() {}
             //     struct Inner(a) {
-            //         fn b() { a }  <-- does this raise an error because `self->a` is not accessible? or bind to `Outer->a` ?
+            //         fn b() { a }  <- this raises an error because 'self' is not accessible (3.)
+            // ```
+            //
+            // - In practice, (1.) means if we first detect we may resolve a field or `self` method (on the immediately enclosing struct, see (2.)), we then have to resolve `self` _as a local variable_.
+            // - Then, we can insert said local variable reference (which may error - i.e. if this is not a `self` method), and emit the `GetField` corresponding to this reference.
+            // - This necessitates a new kind of `LValueReference`, which combines the `self` reference (a `Local`), the method reference (a `Method`), and will emit the corresponding `GetField`
+
+            let module = self.modules.last().unwrap(); // Only search the top module for self methods and fields
+            if !module.is_module { // fields and `self` are only allowed on structs
+
+                // We can check fields and methods in any order because they are required to be disjoint already
+                if let Some(method) = module.methods.get(&name) {
+                    if method.instance() { // Only check for instance methods here - other methods will be resolved below
+                        let function_id = method.function_id();
+                        return match self.resolve_reference(Reference::This) {
+                            // `self` was successful, so we can create the composite reference
+                            LValueReference::LocalThis(index) => LValueReference::ThisMethod { upvalue: false, index, function_id },
+                            LValueReference::UpValueThis(index) => LValueReference::ThisMethod { upvalue: true, index, function_id },
+
+                            LValueReference::Invalid => LValueReference::Invalid,
+                            lvalue => panic!("Invalid `self` for method load {:?}", lvalue),
+                        }
+                    }
+                }
+
+                if let Some(field_index) = module.fields.iter().position(|field| field == &name) {
+                    return match self.resolve_reference(Reference::This) {
+                        // `self` was successful, so we can create the composite reference
+                        LValueReference::LocalThis(index) => LValueReference::ThisField { upvalue: false, index, field_index: field_index as u32 },
+                        LValueReference::UpValueThis(index) => LValueReference::ThisField { upvalue: true, index, field_index: field_index as u32 },
+
+                        LValueReference::Invalid => LValueReference::Invalid,
+                        lvalue => panic!("Invalid `self` for field load {:?}", lvalue)
+                    }
+                }
+            }
+
+            // Search for method next - this maintains (3.) from above, since we would've errored above
+            for module in self.modules.iter().rev() {
+                if let Some(method) = module.methods.get(&name) {
+                    if !method.instance() { // Don't allow binding to instance methods here
+                        return LValueReference::Method(method.function_id())
+                    }
+                }
+            }
         }
 
         // 5. If we are in a function depth > 0, then we can also resolve true globals
@@ -1126,7 +1210,7 @@ impl<'a> Parser<'a> {
     /// Resolves an `UpValue` reference.
     /// For a given reference to a local, defined at a function depth `local_depth` at index `local_index`, this will
     /// bubble up the upvalue through each of the enclosing functions between here and `self.function_depth`, and ensure the variable is added as an `UpValue`.
-    fn resolve_upvalue(&mut self, local_depth: u32, local_index: u32) -> LValueReference {
+    fn resolve_upvalue(&mut self, local_depth: u32, local_index: u32, is_self: bool) -> LValueReference {
 
         // Capture the local at index `local_index` in the function at `local_depth`
         // If it already exists (is `is_local` and has the same `index` as the target), just grab the upvalue index, otherwise add it and bubble up
@@ -1169,7 +1253,7 @@ impl<'a> Parser<'a> {
 
         // Finally, the last value of `index` will be one set from the directly enclosing function
         // We can thus return a `UpValue` reference, which contains the index of the upvalue in the enclosing function
-        LValueReference::UpValue(index)
+        if is_self { LValueReference::UpValueThis(index) } else { LValueReference::UpValue(index) }
     }
 
     /// Initializes a local, so it can be referenced.
@@ -1227,7 +1311,7 @@ impl<'a> Parser<'a> {
 
         methods.insert(name.clone(), Method::new(function_id, params.instance));
         self.declare_field_offset(name.clone(), type_index, offset);
-        self.resolve_late_bindings(name, LateBound::Method(function_id));
+        self.resolve_late_bindings(name, LateBound::Method { function_id, instance: params.instance });
     }
 
     fn declare_field_offset(&mut self, name: String, type_index: u32, field_offset: usize) {

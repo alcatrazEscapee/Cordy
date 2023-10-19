@@ -536,6 +536,12 @@ impl<R : BufRead, W : Write, F : FunctionInterface> VirtualMachine<R, W, F> {
                 self.push(ret);
             },
 
+            GetMethod(index) => {
+                let a1: ValuePtr = self.pop();
+                let ret: ValuePtr = ValuePtr::partial(self.constants[index as usize].clone(), vec![a1]);
+                self.push(ret);
+            }
+
             Unary(op) => {
                 let arg: ValuePtr = self.pop();
                 let ret: ValuePtr = op.apply(arg)?;
@@ -1079,6 +1085,11 @@ mod tests {
     #[test] fn test_struct_self_method_box_set_call_merge() { run_str("struct A(x) { fn get(self) { self->x } fn set(self, y) { self->x = y } } let a = A(123) ; a->set()(456) . print ; a.print", "456\nA(x=456)\n"); }
     #[test] fn test_struct_self_method_in_function() { run_str("struct A(x) { fn get(self) { (fn() -> self)() } } A(123)->get() . print", "A(x=123)\n"); }
     #[test] fn test_struct_self_method_in_closure() { run_str("struct A(x) { fn get(self) { (fn() -> self) } } A(123)->get()() . print", "A(x=123)\n"); }
+    #[test] fn test_struct_self_method_bind_to_self_method_1() { run_str("struct A() { fn a(self) { 123 } fn b(self) { a() } } A()->b() . print", "123\n"); }
+    #[test] fn test_struct_self_method_bind_to_self_method_2() { run_str("fn x() {} struct A() { fn a(self) { 123 } fn b(self) { a() } } A()->b() . print", "123\n"); }
+    #[test] fn test_struct_self_method_bind_to_self_method_in_upvalue() { run_str("struct A() { fn a(self) { 123 } fn b(self) { fn c() { a() } c } } A()->b()() . print", "123\n"); }
+    #[test] fn test_struct_self_field_bind_to_self_field_1() { run_str("struct A(x, y, z) { fn a(self) { x } fn b(self) { a() + y } } ; A(1, 3, 7)->a() . print", "1\n"); }
+    #[test] fn test_struct_self_field_bind_to_self_field_2() { run_str("struct A(x, y, z) { fn a(self) { x } fn b(self) { a() + y } } ; A(1, 3, 7)->b() . print", "4\n"); }
     #[test] fn test_module_empty() { run_str("module Foo module Bar ; (Foo, Bar) . print", "(module Foo, module Bar)\n"); }
     #[test] fn test_module_with_method() { run_str("module Foo { fn bar() -> 123 } ; Foo->bar() . print", "123\n"); }
     #[test] fn test_modules_with_same_method() { run_str("module A { fn a() -> 1 } module B { fn a() -> 2 } ; (A->a(), B->a()) . print", "(1, 2)\n"); }
