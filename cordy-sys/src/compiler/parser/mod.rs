@@ -2021,7 +2021,13 @@ impl Parser<'_> {
             if let Some(BinaryOp::Equal) = maybe_op { // // Direct assignment statement
                 self.advance();
                 expr = match expr {
-                    Expr(_, ExprType::LValue(lvalue @ (LValueReference::Local(_) | LValueReference::UpValue(_) | LValueReference::Global(_) | LValueReference::LateBinding(_)))) => {
+                    Expr(_, ExprType::LValue(lvalue @ (
+                        LValueReference::Local(_) |
+                        LValueReference::UpValue(_) |
+                        LValueReference::Global(_) |
+                        LValueReference::LateBinding(_) |
+                        LValueReference::ThisField { .. }
+                    ))) => {
                         let rhs = self.parse_expr_10();
                         Expr::assign_lvalue(loc, lvalue, rhs)
                     },
@@ -2041,7 +2047,13 @@ impl Parser<'_> {
             } else if let Some(op) = maybe_op {
                 self.advance();
                 expr = match expr {
-                    Expr(lvalue_loc, ExprType::LValue(lvalue @ (LValueReference::Local(_) | LValueReference::UpValue(_) | LValueReference::Global(_) | LValueReference::LateBinding(_)))) => {
+                    Expr(lvalue_loc, ExprType::LValue(lvalue @ (
+                        LValueReference::Local(_) |
+                        LValueReference::UpValue(_) |
+                        LValueReference::Global(_) |
+                        LValueReference::LateBinding(_) |
+                        LValueReference::ThisField { .. }
+                    ))) => {
                         let lhs = Expr::lvalue(lvalue_loc, lvalue.clone());
                         let rhs = self.parse_expr_10();
                         Expr::assign_lvalue(loc, lvalue, match op {
@@ -2226,6 +2238,8 @@ mod tests {
     #[test] fn test_struct_raw_method_type_self() { run_err("struct A() { fn b(self) { 9 } fn a() { b() } }", "Undeclared identifier: 'self'\n  at: line 1 (<test>)\n\n1 | struct A() { fn b(self) { 9 } fn a() { b() } }\n2 |                                        ^\n"); }
     #[test] fn test_struct_self_field_type() { run_err("struct A(c) { fn a() { self->c } }", "Undeclared identifier: 'self'\n  at: line 1 (<test>)\n\n1 | struct A(c) { fn a() { self->c } }\n2 |                        ^^^^\n") }
     #[test] fn test_struct_raw_field_type() { run_err("struct A(c) { fn a() { c } }", "Undeclared identifier: 'self'\n  at: line 1 (<test>)\n\n1 | struct A(c) { fn a() { c } }\n2 |                        ^\n") }
+    #[test] fn test_struct_set_field_type() { run_err("struct A(c) { fn a() { c = 1 } }", "Undeclared identifier: 'self'\n  at: line 1 (<test>)\n\n1 | struct A(c) { fn a() { c = 1 } }\n2 |                        ^\n\nThe left hand side is not a valid assignment target\n  at: line 1 (<test>)\n\n1 | struct A(c) { fn a() { c = 1 } }\n2 |                          ^\n"); }
+    #[test] fn test_struct_operator_set_field_type() { run_err("struct A(c) { fn a() { c += 1 } }", "Undeclared identifier: 'self'\n  at: line 1 (<test>)\n\n1 | struct A(c) { fn a() { c += 1 } }\n2 |                        ^\n\nThe left hand side is not a valid assignment target\n  at: line 1 (<test>)\n\n1 | struct A(c) { fn a() { c += 1 } }\n2 |                          ^^\n"); }
     #[test] fn test_module_with_duplicate_method() { run_err("module A { fn a() {} fn a() {} }", "Duplicate field name: 'a'\n  at: line 1 (<test>)\n\n1 | module A { fn a() {} fn a() {} }\n2 |                         ^\n") }
     #[test] fn test_module_late_bound_missing() { run_err("module A { fn a() { b } }", "Undeclared identifier: 'b'\n  at: line 1 (<test>)\n\n1 | module A { fn a() { b } }\n2 |                     ^\n") }
     #[test] fn test_module_late_bound_store() { run_err("module A { fn a() { b = 1 } }", "Undeclared identifier: 'b'\n  at: line 1 (<test>)\n\n1 | module A { fn a() { b = 1 } }\n2 |                     ^\n") }
