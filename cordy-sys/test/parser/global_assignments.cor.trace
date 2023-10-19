@@ -22,5 +22,7 @@ L5: 0019 PushGlobal(0) -> x
     0021 Sub
     0022 StoreGlobal(0) -> x
     0023 Pop
-    0024 PopN(3)
-    0025 Exit
+    0024 Pop
+    0025 Pop
+    0026 Pop
+    0027 Exit

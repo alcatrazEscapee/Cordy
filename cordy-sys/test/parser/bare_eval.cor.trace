@@ -44,5 +44,7 @@ L10: 0038 PushGlobal(0) -> a
      0043 Int(0)
      0044 Call(1)
      0045 Pop
-     0046 PopN(3)
-     0047 Exit
+     0046 Pop
+     0047 Pop
+     0048 Pop
+     0049 Exit

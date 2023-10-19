@@ -2,8 +2,8 @@ use std::collections::VecDeque;
 use indexmap::IndexSet;
 
 use crate::compiler::{CompileParameters, CompileResult};
-use crate::compiler::parser::core::ParserState;
-use crate::compiler::parser::expr::{Expr, ExprType};
+use crate::compiler::optimizer::Optimize;
+use crate::compiler::parser::core::{BranchType, ParserState};
 use crate::compiler::parser::semantic::{LateBinding, LValue, LValueReference, Module, ParserFunctionImpl, ParserFunctionParameters, ParserStoreOp, Reference};
 use crate::compiler::scanner::{ScanResult, ScanToken};
 use crate::core::{NativeFunction, Pattern};
@@ -12,8 +12,10 @@ use crate::trace;
 use crate::vm::{Opcode, StoreOp, ValuePtr};
 use crate::vm::operator::{BinaryOp, CompareOp, UnaryOp};
 
+pub use crate::compiler::parser::core::{Block, Code};
 pub use crate::compiler::parser::errors::{ParserError, ParserErrorType};
 pub use crate::compiler::parser::semantic::{Fields, Locals, FunctionLibrary};
+pub use crate::compiler::parser::expr::{Expr, ExprType};
 
 use NativeFunction::{*};
 use Opcode::{*};
@@ -28,7 +30,6 @@ mod expr;
 mod errors;
 mod codegen;
 mod semantic;
-mod optimizer;
 
 
 /// Create a default empty `CompileResult`. This is semantically equivalent to parsing an empty program, but will output nothing.
@@ -82,7 +83,7 @@ pub(super) struct Parser<'a> {
     /// Output for this invocation of the parser is accumulated in `output`, and in the `code` field of `functions`.
     /// It is then baked, emitting into `raw_output` and `locations`
     raw_output: &'a mut Vec<Opcode>,
-    output: Vec<(Location, Opcode)>,
+    output: Code,
     /// Use an `IndexSet` to keep consistent (insertion order) iteration, and also enforce strict uniqueness of errors
     errors: &'a mut IndexSet<ParserError>,
 
@@ -166,7 +167,7 @@ impl Parser<'_> {
 
             input: tokens.into_iter().collect::<VecDeque<(Location, ScanToken)>>(),
             raw_output: output,
-            output: Vec::new(),
+            output: Code::new(),
             errors,
 
             locations,
@@ -231,28 +232,33 @@ impl Parser<'_> {
 
     fn teardown(&mut self) {
         // Emit code from output -> (raw_output, locations)
-        for (loc, op) in self.output.drain(..) {
-            self.raw_output.push(op);
-            self.locations.push(loc);
+        if self.enable_optimization {
+            self.output.optimize();
         }
+        self.output.emit(&mut self.raw_output, &mut self.locations);
 
         // Resolve late bindings, which may emit code to functions (fallbacks)
         self.resolve_remaining_late_bindings();
 
         // Emit functions
         for mut func in self.functions.drain(..) {
-            let head: usize = self.raw_output.len();
-            for (loc, op) in func.emit_code() {
-                self.raw_output.push(op);
-                self.locations.push(loc);
+            if self.enable_optimization {
+                func.code.optimize();
             }
+
+            let head: usize = self.raw_output.len();
+            let starts = func.code.emit(&mut self.raw_output, &mut self.locations);
+            let default_args = func.default_args.iter()
+                .map(|block_id| starts[block_id.0] - head)
+                .collect::<Vec<usize>>();
+
             for local in func.emit_locals() {
                 self.locals_reference.push(local);
             }
 
             let tail: usize = self.raw_output.len() - 1;
 
-            func.bake(self.constants, head, tail);
+            func.bake(self.constants, default_args, head, tail);
         }
 
         // Emit patterns
@@ -427,14 +433,15 @@ impl Parser<'_> {
 
         for arg in params.default_args {
             self.emit_optimized_expr(arg);
-            self.current_function_impl().mark_default_arg();
+            let branch = self.branch_reverse();
+            self.current_function_mut().default_args.push(branch);
         }
 
         for mut arg in params.args {
             arg.declare_single_local(self); // Handles resolving locals + name conflicts
         }
 
-        self.current_function_impl().set_native();
+        self.current_function_mut().set_native();
         self.push_with(CallNative(handle_id), loc);
         self.push(Return);
 
@@ -628,7 +635,8 @@ impl Parser<'_> {
         // Before the body of the function, we emit code for each default argument, and mark it as such.
         for arg in params.default_args {
             self.emit_optimized_expr(arg);
-            self.current_function_impl().mark_default_arg();
+            let branch = self.branch_reverse();
+            self.current_function_mut().default_args.push(branch);
         }
 
         // Collect arguments into pairs of the lvalue, and associated synthetic
@@ -767,7 +775,7 @@ impl Parser<'_> {
         }
 
         self.emit_optimized_expr(condition); // Emit the expression we held earlier
-        let jump_if_false = self.reserve(); // placeholder for jump to the beginning of an if branch, if it exists
+        let jump_if_false = self.branch_forward(); // placeholder for jump to the beginning of an if branch, if it exists
         self.parse_block_statement();
         self.push_delayed_pop();
 
@@ -777,23 +785,23 @@ impl Parser<'_> {
         match self.peek() {
             Some(KeywordElif) => {
                 // Don't advance, as `parse_if_statement()` will advance the first token
-                let jump = self.reserve();
-                self.fix_jump(jump_if_false, JumpIfFalsePop);
+                let jump = self.branch_forward();
+                self.join_forward(jump_if_false, BranchType::JumpIfFalsePop);
                 self.parse_if_statement();
-                self.fix_jump(jump, Jump);
+                self.join_forward(jump, BranchType::Jump);
             },
             Some(KeywordElse) => {
                 // `else` is present, so we first insert an unconditional jump, parse the next block, then fix the first jump
                 self.advance();
-                let jump = self.reserve();
-                self.fix_jump(jump_if_false, JumpIfFalsePop);
+                let jump = self.branch_forward();
+                self.join_forward(jump_if_false, BranchType::JumpIfFalsePop);
                 self.parse_block_statement();
                 self.push_delayed_pop();
-                self.fix_jump(jump, Jump);
+                self.join_forward(jump, BranchType::Jump);
             },
             _ => {
                 // No `else`, but we still need to fix the initial jump
-                self.fix_jump(jump_if_false, JumpIfFalsePop);
+                self.join_forward(jump_if_false, BranchType::JumpIfFalsePop);
             },
         }
     }
@@ -812,14 +820,14 @@ impl Parser<'_> {
         self.push_delayed_pop();
         self.advance();
 
-        let jump: usize = self.begin_loop();
+        let jump = self.begin_loop();
 
         self.parse_expression(); // While condition
-        let jump_if_false = self.reserve(); // Jump to the end
+        let branch = self.branch_forward(); // Jump to the end
         self.parse_block_statement(); // Inner loop statements, and jump back to front
         self.push_delayed_pop(); // Inner loop expressions cannot yield out of the loop
-        self.push_jump(jump, Jump);
-        self.fix_jump(jump_if_false, JumpIfFalsePop); // Fix the initial conditional jump
+        self.join_reverse(jump, BranchType::Jump);
+        self.join_forward(branch, BranchType::JumpIfFalsePop); // Fix the initial conditional jump
 
         if let Some(KeywordElse) = self.peek() { // Parse `while {} else {}`
             self.advance();
@@ -834,7 +842,7 @@ impl Parser<'_> {
     fn parse_do_while_statement(&mut self) {
         self.advance(); // Consume `do`
 
-        let jump: usize = self.begin_loop();
+        let jump = self.begin_loop();
 
         self.parse_block_statement(); // The statements
         self.push_delayed_pop(); // Inner loop expressions cannot yield out of the loop
@@ -842,7 +850,7 @@ impl Parser<'_> {
         if let Some(KeywordWhile) = self.peek() {
             self.advance(); // Consume `while`
             self.parse_expression(); // While condition
-            self.push_jump(jump, JumpIfTruePop); // Jump back to origin
+            self.join_reverse(jump, BranchType::JumpIfTruePop); // Jump back to origin
         }
 
         if let Some(KeywordElse) = self.peek() { // Parse do { } while <expr> else { }
@@ -868,11 +876,11 @@ impl Parser<'_> {
         self.push_delayed_pop();
         self.advance();
 
-        let jump: usize = self.begin_loop(); // Top of the loop
+        let jump = self.begin_loop(); // Top of the loop
 
         self.parse_block_statement(); // Inner loop statements, and jump back to front
         self.push_delayed_pop(); // Loops can't return a value
-        self.push_jump(jump, Jump);
+        self.join_reverse(jump, BranchType::Jump);
 
         self.end_loop();
     }
@@ -905,8 +913,8 @@ impl Parser<'_> {
         self.push(InitIterable);
 
         // Test
-        let jump: usize = self.begin_loop();
-        let test_iterable = self.reserve();
+        let jump = self.begin_loop();
+        let test = self.branch_forward();
 
         // Initialize locals
         lvalue.emit_destructuring(self, false, false);
@@ -921,10 +929,8 @@ impl Parser<'_> {
         // In order to do this, we just need to emit the proper `LiftUpValue` opcodes each iteration of the loop
         self.pop_locals(Some(self.scope_depth), false, false, true);
 
-        self.push_jump(jump, Jump);
-
-        // Fix the jump
-        self.fix_jump(test_iterable, TestIterable);
+        self.join_reverse(jump, BranchType::Jump);
+        self.join_forward(test, BranchType::TestIterable);
 
         // Cleanup the `for` loop locals, but don't emit lifts as we do them per-iteration.
         self.pop_locals(Some(self.scope_depth), true, true, false);
@@ -947,8 +953,8 @@ impl Parser<'_> {
             Some(loop_stmt) => {
                 let depth: u32 = loop_stmt.scope_depth + 1;
                 self.pop_locals(Some(depth), false, true, true);
-                let jump = self.reserve();
-                self.current_locals_mut().top_loop().unwrap().break_statements.push(jump);
+                let jump = self.branch_forward();
+                self.current_locals_mut().top_loop().unwrap().break_ids.push(jump);
             },
             None => self.semantic_error(BreakOutsideOfLoop),
         }
@@ -960,10 +966,10 @@ impl Parser<'_> {
         self.advance();
         match self.current_locals_mut().top_loop() {
             Some(loop_stmt) => {
-                let jump_to: usize = loop_stmt.start_index;
+                let jump = loop_stmt.start_id;
                 let depth: u32 = loop_stmt.scope_depth + 1;
                 self.pop_locals(Some(depth), false, true, true);
-                self.push_jump(jump_to, Jump);
+                self.join_reverse(jump, BranchType::Jump);
             },
             None => self.semantic_error(ContinueOutsideOfLoop),
         }
@@ -981,7 +987,7 @@ impl Parser<'_> {
         if !self.error_recovery {
             loc |= self.prev_location();
         }
-        let jump_if_true = self.reserve();
+        let branch = self.branch_forward();
         match self.peek() {
             Some(Colon) => {
                 // Optional error message, that is lazily evaluated
@@ -995,7 +1001,7 @@ impl Parser<'_> {
         }
 
         self.push_with(AssertFailed, loc); // Make sure the `AssertFailed` token has the same location as the original expression that failed
-        self.fix_jump(jump_if_true, JumpIfTruePop)
+        self.join_forward(branch, BranchType::JumpIfTruePop)
     }
 
     // ===== Variables + Expressions ===== //

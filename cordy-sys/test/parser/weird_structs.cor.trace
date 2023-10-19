@@ -6,11 +6,14 @@ L3: 0004 InitGlobal
     0005 StructType(module EmptyMod)
 L5: 0006 InitGlobal
 L7: 0007 StructType(module ModWithWeirdParams)
-    0008 PopN(4)
-    0009 Exit
-L6: 0010 Nil
-    0011 Nil
-    0012 LiteralBegin(Vector, 0)
-    0013 LiteralEnd
-    0014 CallNative(0)
-    0015 Return
+    0008 Pop
+    0009 Pop
+    0010 Pop
+    0011 Pop
+    0012 Exit
+L6: 0013 Nil
+    0014 Nil
+    0015 LiteralBegin(Vector, 0)
+    0016 LiteralEnd
+    0017 CallNative(0)
+    0018 Return

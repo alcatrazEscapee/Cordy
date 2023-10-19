@@ -13,5 +13,6 @@ L2: 0009 PushLocal(0) -> x
     0012 Call(1)
 L3: 0013 Pop
     0014 Jump(6)
-    0015 PopN(2)
-    0016 Exit
+    0015 Pop
+    0016 Pop
+    0017 Exit

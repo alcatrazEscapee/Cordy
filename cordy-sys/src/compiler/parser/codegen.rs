@@ -1,9 +1,9 @@
 use crate::compiler::parser::expr::{Expr, ExprType};
-use crate::compiler::parser::optimizer::Optimize;
 use crate::compiler::parser::Parser;
-use crate::reporting::Location;
 use crate::vm::Opcode;
 use crate::vm::operator::{BinaryOp, CompareOp};
+use crate::compiler::parser::core::{BranchType, ForwardBlockId};
+use crate::compiler::optimizer::Optimize;
 
 use Opcode::{*};
 
@@ -80,10 +80,10 @@ impl<'a> Parser<'a> {
                 // We reserve the compare now, and fix it later, at the top-level compare op
                 self.emit_expr(*lhs);
 
-                let mut compare_ops: Vec<(CompareOp, usize)> = Vec::new();
-                for (loc, op, rhs) in ops.drain(..ops.len() - 1) {
+                let mut compare_ops: Vec<(CompareOp, ForwardBlockId)> = Vec::new();
+                for (_, op, rhs) in ops.drain(..ops.len() - 1) {
                     self.emit_expr(rhs);
-                    compare_ops.push((op, self.reserve_with(loc)));
+                    compare_ops.push((op, self.branch_forward()));
                 }
 
                 // Last op
@@ -96,7 +96,7 @@ impl<'a> Parser<'a> {
                 self.push_with(Binary(op.to_binary()), loc);
 
                 for (op, cmp) in compare_ops {
-                    self.fix_jump(cmp, |offset| Compare(op, offset));
+                    self.join_forward(cmp, BranchType::Compare(op));
                 }
             },
             Expr(loc, ExprType::Literal(op, args)) => {
@@ -146,17 +146,17 @@ impl<'a> Parser<'a> {
             },
             Expr(_, ExprType::LogicalAnd(lhs, rhs)) => {
                 self.emit_expr(*lhs);
-                let jump_if_false = self.reserve();
+                let branch = self.branch_forward();
                 self.push(Pop);
                 self.emit_expr(*rhs);
-                self.fix_jump(jump_if_false, JumpIfFalse)
+                self.join_forward(branch, BranchType::JumpIfFalse);
             },
             Expr(_, ExprType::LogicalOr(lhs, rhs)) => {
                 self.emit_expr(*lhs);
-                let jump_if_true = self.reserve();
+                let branch = self.branch_forward();
                 self.push(Pop);
                 self.emit_expr(*rhs);
-                self.fix_jump(jump_if_true, JumpIfTrue);
+                self.join_forward(branch, BranchType::JumpIfTrue);
             },
             Expr(loc, ExprType::Index(array, index)) => {
                 self.emit_expr(*array);
@@ -178,12 +178,12 @@ impl<'a> Parser<'a> {
             },
             Expr(_, ExprType::IfThenElse(condition, if_true, if_false)) => {
                 self.emit_expr(*condition);
-                let jump_if_false_pop = self.reserve_with(Location::empty());
+                let branch1 = self.branch_forward();
                 self.emit_expr(*if_true);
-                let jump = self.reserve_with(Location::empty());
-                self.fix_jump(jump_if_false_pop, JumpIfFalsePop);
+                let branch2 = self.branch_forward();
+                self.join_forward(branch1, BranchType::JumpIfFalsePop);
                 self.emit_expr(*if_false);
-                self.fix_jump(jump, Jump);
+                self.join_forward(branch2, BranchType::Jump);
             },
             Expr(loc, ExprType::GetField(lhs, field_index)) => {
                 self.emit_expr(*lhs);

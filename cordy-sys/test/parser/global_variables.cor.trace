@@ -20,5 +20,14 @@ L7: 0016 Nil
     0019 InitGlobal
     0020 False
     0021 InitGlobal
-    0022 PopN(10)
-    0023 Exit
+    0022 Pop
+    0023 Pop
+    0024 Pop
+    0025 Pop
+    0026 Pop
+    0027 Pop
+    0028 Pop
+    0029 Pop
+    0030 Pop
+    0031 Pop
+    0032 Exit

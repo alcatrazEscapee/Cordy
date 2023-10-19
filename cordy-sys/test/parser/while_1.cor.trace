@@ -1,5 +1,5 @@
 L1: 0000 True
     0001 JumpIfFalsePop(4)
-L2: 0002 Jump(4)
-L3: 0003 Jump(0)
-    0004 Exit
+    0002 Jump(4)
+    0003 Jump(0)
+L3: 0004 Exit
