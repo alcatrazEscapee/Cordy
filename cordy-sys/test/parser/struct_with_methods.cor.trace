@@ -12,11 +12,12 @@ L6: 0007 Print
     0011 Call(1)
     0012 Call(1)
     0013 Pop
-    0014 PopN(2)
-    0015 Exit
-L2: 0016 PushLocal(0) -> p
-    0017 GetField(0) -> x
-    0018 PushLocal(0) -> p
-    0019 GetField(1) -> y
-    0020 Add
-    0021 Return
+    0014 Pop
+    0015 Pop
+    0016 Exit
+L2: 0017 PushLocal(0) -> p
+    0018 GetField(0) -> x
+    0019 PushLocal(0) -> p
+    0020 GetField(1) -> y
+    0021 Add
+    0022 Return

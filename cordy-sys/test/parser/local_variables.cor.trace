@@ -5,7 +5,8 @@ L05: 0003 Nil
 L06: 0004 Nil
 L08: 0005 Nil
      0006 Pop
-L09: 0007 PopN(2)
-L10: 0008 Pop
-L11: 0009 Pop
-     0010 Exit
+L09: 0007 Pop
+     0008 Pop
+L10: 0009 Pop
+L11: 0010 Pop
+     0011 Exit

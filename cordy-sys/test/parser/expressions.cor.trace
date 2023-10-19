@@ -57,5 +57,11 @@ L4: 0043 PushGlobal(4) -> three
     0056 GreaterThanEqual
     0057 StoreGlobal(0) -> x
     0058 Pop
-    0059 PopN(7)
-    0060 Exit
+    0059 Pop
+    0060 Pop
+    0061 Pop
+    0062 Pop
+    0063 Pop
+    0064 Pop
+    0065 Pop
+    0066 Exit

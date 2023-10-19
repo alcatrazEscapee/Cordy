@@ -10,5 +10,6 @@ L2: 0006 PushLocal(0) -> letter
     0009 Call(1)
 L3: 0010 Pop
     0011 Jump(3)
-    0012 PopN(2)
-    0013 Exit
+    0012 Pop
+    0013 Pop
+    0014 Exit

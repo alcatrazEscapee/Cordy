@@ -1660,7 +1660,7 @@ mod tests {
     #[test] fn test_assert_messages_are_lazy() { run_str("assert true : exit ; print('should reach here')", "should reach here\n"); }
     #[test] fn test_monitor_stack() { run_str("let x = 1, b = [], c ; monitor 'stack' . print", "[1, [], nil, fn print(...), fn monitor(cmd)]\n") }
     #[test] fn test_monitor_stack_modification() { run_str("let x = [false] ; ( monitor 'stack' )[0][0] = true ; x . print", "[true]\n") }
-    #[test] fn test_monitor_call_stack() { run_str("fn foo() { bar() } fn bar() { monitor 'call-stack' . print } foo()", "[(0, 0), (3, 6), (4, 11)]\n") }
+    #[test] fn test_monitor_call_stack() { run_str("fn foo() { bar() } fn bar() { monitor 'call-stack' . print } foo()", "[(0, 0), (3, 6), (4, 10)]\n") }
     #[test] fn test_monitor_code() { run_str("monitor 'code' . print", "['Print', 'Monitor', 'Str('code')', 'Call(1)', 'Call(1)', 'Pop', 'Exit']\n") }
     #[test] fn test_monitor_error() { run_str("monitor 'foobar'", "MonitorError: Illegal monitor command 'foobar'\n  at: line 1 (<test>)\n\n1 | monitor 'foobar'\n2 |         ^^^^^^^^\n") }
     #[test] fn test_len_list() { run_str("[1, 2, 3] . len . print", "3\n"); }

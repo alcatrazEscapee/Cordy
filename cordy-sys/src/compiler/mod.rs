@@ -9,8 +9,10 @@ pub use crate::compiler::parser::{default, Fields, FunctionLibrary, Locals, Pars
 pub use crate::compiler::scanner::{ScanError, ScanErrorType, ScanToken, ScanTokenType};
 
 
-mod scanner;
 mod parser;
+mod scanner;
+mod optimizer;
+
 
 pub fn scan(view: &SourceView) -> Vec<(Location, ScanTokenType)> {
     scanner::scan(view).tokens

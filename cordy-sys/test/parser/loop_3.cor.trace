@@ -10,6 +10,6 @@ L4: 0006 Pop
     0009 GreaterThan
     0010 JumpIfFalsePop(12)
     0011 Jump(13)
-L5: 0012 Jump(2)
-    0013 Pop
+    0012 Jump(2)
+L5: 0013 Pop
     0014 Exit

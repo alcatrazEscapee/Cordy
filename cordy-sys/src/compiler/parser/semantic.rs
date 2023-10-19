@@ -15,22 +15,23 @@ use crate::core;
 use crate::core::Pattern;
 use crate::reporting::Location;
 use crate::vm::{FunctionImpl, IntoValue, Method, Opcode, StoreOp, StructTypeImpl, ValuePtr};
+use crate::compiler::parser::core::{BranchType, Code, ForwardBlockId, OpcodeId, ReverseBlockId};
+use crate::compiler::parser::expr::Expr;
 
 use Opcode::{*};
 use ParserErrorType::{*};
-use crate::compiler::parser::expr::Expr;
 
 
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub struct Loop {
-    pub(super) start_index: usize,
+    pub(super) start_id: ReverseBlockId,
+    pub(super) break_ids: Vec<ForwardBlockId>,
     pub(super) scope_depth: u32,
-    pub(super) break_statements: Vec<usize>
 }
 
 impl Loop {
-    fn new(start_index: usize, depth: u32) -> Loop {
-        Loop { start_index, scope_depth: depth, break_statements: Vec::new() }
+    fn new(start_id: ReverseBlockId, depth: u32) -> Loop {
+        Loop { start_id, break_ids: Vec::new(), scope_depth: depth }
     }
 }
 
@@ -52,7 +53,7 @@ pub struct Locals {
     /// Ordinal into `self.functions` to access `self.functions[func].code`
     /// If not present, it is assumed to be global code.
     /// Note this is not quite the same as the function ID, as if there are baked functions present, this will differ by the amount of baked functions
-    func: Option<usize>,
+    pub(super) func: Option<usize>,
 }
 
 impl Locals {
@@ -184,13 +185,10 @@ impl Local {
 
 #[derive(Debug, Clone)]
 pub struct LateBinding {
-    /// A unique index for every late bound global.
+    /// A unique index for every late binding, along with the name (not unique).
     index: usize,
     name: String,
-    /// This is a pair of (function ordinal, code ordinal)
-    /// Note that the function ordinal is an index into `self.functions`, not an absolute function ID (and is thus a `usize` not a `u32`)
-    opcode: (usize, usize),
-    /// The reference type of this late bound global, for fixing later
+    /// The type of the reference. This indicates what needs to be updated later (either an opcode location, or a pattern).
     ty: ReferenceType,
     loc: Location,
     /// A fallback binding. If this is present, an error should never be raised, and the fallback should be used instead.
@@ -211,17 +209,15 @@ impl LateBinding {
 
     fn new(name: String, fallback: Option<u32>, parser: &mut Parser) -> LateBinding {
         let index = parser.late_binding_next_index;
-        let opcode = (parser.functions.len() - 1, parser.next_opcode());
         let loc = parser.prev_location();
         let error = !parser.error_recovery;
 
         parser.late_binding_next_index += 1;
 
-        LateBinding { index, name, opcode, ty: ReferenceType::Invalid, loc, fallback, error }
+        LateBinding { index, name, ty: ReferenceType::Invalid, loc, fallback, error }
     }
 
-    pub(super) fn update(&mut self, ty: ReferenceType, parser: &Parser) {
-        self.opcode = (parser.functions.len() - 1, parser.next_opcode());
+    pub fn update(&mut self, ty: ReferenceType) {
         self.ty = ty;
     }
 }
@@ -293,9 +289,13 @@ pub enum LValueReference {
 }
 
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum ReferenceType {
-    Invalid, Load, Store, StorePattern
+    Invalid,
+    Load(OpcodeId),
+    Store(OpcodeId),
+    /// The index is an index into `Parser.patterns`, not the actual pattern ID.
+    StorePattern(usize)
 }
 
 
@@ -450,7 +450,8 @@ impl LValue {
                 }
             }
             LValue::Terms(_) => {
-                let pattern = self.build_pattern(parser);
+                let index = parser.patterns.len();
+                let pattern = self.build_pattern(parser, index);
                 parser.declare_pattern(pattern);
                 if !in_expression {
                     parser.push(Pop); // Push the final pop
@@ -459,7 +460,7 @@ impl LValue {
         }
     }
 
-    fn build_pattern(self, parser: &mut Parser) -> Pattern<ParserStoreOp> {
+    fn build_pattern(self, parser: &mut Parser, pattern_index: usize) -> Pattern<ParserStoreOp> {
         let terms = self.into_terms();
         let is_variadic = terms.iter().any(|t| t.is_variadic_term());
         let len = if is_variadic { terms.len() - 1 } else { terms.len() };
@@ -478,7 +479,7 @@ impl LValue {
                     index = -(len as i64 - index);
                 },
                 LValue::Named(lvalue) => {
-                    pattern.push_index(index, lvalue.as_store_op(parser));
+                    pattern.push_index(index, lvalue.as_store_op(parser, pattern_index));
                     index += 1;
                 },
                 LValue::VarNamed(lvalue) => {
@@ -486,10 +487,10 @@ impl LValue {
                     index = -(len as i64 - index);
                     let high = index;
 
-                    pattern.push_slice(low, high, lvalue.as_store_op(parser));
+                    pattern.push_slice(low, high, lvalue.as_store_op(parser, pattern_index));
                 },
                 terms @ LValue::Terms(_) => {
-                    pattern.push_pattern(index, terms.build_pattern(parser));
+                    pattern.push_pattern(index, terms.build_pattern(parser, pattern_index));
                     index += 1;
                 },
             }
@@ -516,14 +517,14 @@ impl LValueReference {
         }
     }
 
-    fn as_store_op(self, parser: &mut Parser) -> ParserStoreOp {
+    fn as_store_op(self, parser: &mut Parser, pattern_index: usize) -> ParserStoreOp {
         match self {
             LValueReference::Local(index) => ParserStoreOp::Bound(StoreOp::Local(index)),
             LValueReference::Global(index) => ParserStoreOp::Bound(StoreOp::Global(index)),
             LValueReference::LateBinding(mut global) => {
                 let index = global.index;
 
-                global.update(ReferenceType::StorePattern, parser);
+                global.update(ReferenceType::StorePattern(pattern_index));
                 parser.late_bindings.push(global);
 
                 ParserStoreOp::LateBoundGlobal(index)
@@ -552,7 +553,15 @@ pub struct ParserFunctionImpl {
     /// These are indexes into the function code, where the function call position should jump to.
     /// They are indexed from the first function call (zero default arguments), increasing.
     /// So `[Nil, Int(1), Int(2), Plus, ...]` would have entries `[1, 4]` as it's argument set, and length is the number of default arguments.
-    default_args: Vec<usize>,
+    ///
+    /// These are the block IDs corresponding to the initial default arguments. Each entry matches where the function call position should start from:
+    ///
+    /// <pre>
+    /// default_args[0] --+                     default_args[1] --+
+    ///                   |                                       |
+    /// [ Nil : Next ] ---+---&gt; [ Int(1) Int(2) Plus : Next ] ----+---&gt; [ ... function body ... ]
+    /// </pre>
+    pub(super) default_args: Vec<ReverseBlockId>,
 
     /// If the last argument in this function is a variadic argument, meaning it needs special behavior when invoked with >= `max_args()`
     variadic: bool,
@@ -562,7 +571,7 @@ pub struct ParserFunctionImpl {
     instance: bool,
 
     /// Bytecode for the function body itself
-    code: Vec<(Location, Opcode)>,
+    pub(super) code: Code,
 
     /// Entries for `locals_reference`, that need to be held until the function code is emitted
     locals_reference: Vec<String>,
@@ -572,11 +581,6 @@ pub struct ParserFunctionImpl {
 }
 
 impl ParserFunctionImpl {
-    /// Empties and returns the source code for this parser function.
-    pub(super) fn emit_code(&mut self) -> std::vec::Drain<'_, (Location, Opcode)> {
-        self.code.drain(..)
-    }
-
     /// Empties and returns the local references for this parser function.
     pub(super) fn emit_locals(&mut self) -> std::vec::Drain<'_, String> {
         self.locals_reference.drain(..)
@@ -584,13 +588,8 @@ impl ParserFunctionImpl {
 
     /// Bakes this parser function into an immutable `FunctionImpl`.
     /// The `head` and `tail` pointers are computed based on the surrounding code.
-    pub(super) fn bake(self, constants: &mut [ValuePtr], head: usize, tail: usize) {
-        constants[self.constant_id as usize] = FunctionImpl::new(head, tail, self.name, self.args, self.default_args, self.variadic, self.native, self.instance).to_value();
-    }
-
-    /// Marks a default argument as finished.
-    pub(super) fn mark_default_arg(&mut self) {
-        self.default_args.push(self.code.len());
+    pub(super) fn bake(self, constants: &mut [ValuePtr], default_args: Vec<usize>, head: usize, tail: usize) {
+        constants[self.constant_id as usize] = FunctionImpl::new(head, tail, self.name, self.args, default_args, self.variadic, self.native, self.instance).to_value();
     }
 
     pub(super) fn set_native(&mut self) {
@@ -709,8 +708,8 @@ impl<'a> Parser<'a> {
     // ===== Loops ===== //
 
     /// Marks the beginning of a loop type statement, for the purposes of tracking `break` and `continue` statements.
-    pub fn begin_loop(&mut self) -> usize {
-        let loop_start: usize = self.next_opcode(); // Top of the loop, push onto the loop stack
+    pub fn begin_loop(&mut self) -> ReverseBlockId {
+        let loop_start = self.branch_reverse(); // Top of the loop, push onto the loop stack
         let loop_depth: u32 = self.scope_depth;
         self.current_locals_mut().loops.push(Loop::new(loop_start, loop_depth));
         loop_start
@@ -718,9 +717,8 @@ impl<'a> Parser<'a> {
 
     /// Marks the end of a loop, at the point where `break` statements should jump to (so after any `else` statements attached to the loop)
     pub fn end_loop(&mut self) {
-        let break_opcodes: Vec<usize> = self.current_locals_mut().loops.pop().unwrap().break_statements;
-        for break_opcode in break_opcodes {
-            self.fix_jump(break_opcode, Jump);
+        for jump in self.current_locals_mut().loops.pop().unwrap().break_ids {
+            self.join_forward(jump, BranchType::Jump);
         }
     }
 
@@ -787,7 +785,7 @@ impl<'a> Parser<'a> {
             variadic: params.variadic,
             native: false,
             instance: params.instance,
-            code: Vec::new(),
+            code: Code::new(),
             locals_reference: Vec::new(),
             constant_id,
         });
@@ -872,36 +870,27 @@ impl<'a> Parser<'a> {
             // The first declaration is always the matching one, as the precedence for methods/fields -> globals is always maintained
             if binding.name == name {
                 let binding = self.late_bindings.swap_remove(i); // Remove this binding - this drops the borrow on self.bindings
-                let (func_index, code_index) = binding.opcode;
-                let binding_index = binding.index;
-                let (_, opcode) = &mut self.functions[func_index].code[code_index];
 
                 // Update the binding if possible
                 match (binding.ty, &result) {
-                    (ReferenceType::Load, LateBound::Local(index)) => *opcode = PushGlobal(*index),
-                    (ReferenceType::Store, LateBound::Local(index)) => *opcode = StoreGlobal(*index, false),
-                    (ReferenceType::StorePattern, LateBound::Local(local)) => {
-                        // Need to update all the matching late bound globals in the pattern, which should be referred to by `ExecPattern`
-                        let pattern_index: usize = match opcode {
-                            ExecPattern(index) => *index as usize - self.baked_patterns.len(),
-                            _ => panic!("LoadPattern should find a ExecPattern to update"),
-                        };
-
+                    (ReferenceType::Load(at), LateBound::Local(index)) => self.insert(at, binding.loc, PushGlobal(*index)),
+                    (ReferenceType::Store(at), LateBound::Local(index)) => self.insert(at, binding.loc, StoreGlobal(*index, false)),
+                    (ReferenceType::StorePattern(pattern_index), LateBound::Local(local)) => {
+                        // Need to update all the matching late bound globals in the pattern
                         let pattern = &mut self.patterns[pattern_index];
                         pattern.visit(&mut |op| {
                             if let ParserStoreOp::LateBoundGlobal(index) = op {
-                                if *index == binding_index {
+                                if *index == binding.index {
                                     *op = ParserStoreOp::Bound(StoreOp::Global(*local))
                                 }
                             }
                         });
                     },
-                    (ReferenceType::Load, LateBound::Method { function_id, instance }) => {
+                    (ReferenceType::Load(at), LateBound::Method { function_id, instance }) => {
                         // todo: if `instance` is true we actually need to create a self load somehow? that also means inserting TWO opcodes
-                        // todo: this will break EVERYTHING that tracks "opcodes that need filling in later", and jump offsets
-                        *opcode = Constant(*function_id)
+                        self.insert(at, binding.loc, Constant(*function_id));
                     },
-                    (ReferenceType::Store, LateBound::Method { .. }) => self.error_at(binding.loc, InvalidAssignmentTarget),
+                    (ReferenceType::Store(at), LateBound::Method { .. }) => self.error_at(binding.loc, InvalidAssignmentTarget),
                     (_, _) => panic!("Invalid reference type set!"),
                 }
                 continue; // Skip the below i += 1, since this binding got swap-removed
@@ -913,15 +902,15 @@ impl<'a> Parser<'a> {
 
     /// Resolves any outstanding late bindings present at teardown, by either falling back to a global, or raises an error.
     pub fn resolve_remaining_late_bindings(&mut self) {
-        for binding in self.late_bindings.drain(..) {
+        let bindings = std::mem::take(&mut self.late_bindings);
+
+        for binding in bindings {
             if let Some(fallback) = binding.fallback {
-                let (func_index, code_index) = binding.opcode;
-                let (_, opcode) = &mut self.functions[func_index].code[code_index];
 
                 // Update the binding if possible
                 match binding.ty {
-                    ReferenceType::Load => *opcode = PushGlobal(fallback),
-                    ReferenceType::Store => *opcode = StoreGlobal(fallback, false),
+                    ReferenceType::Load(at) => self.insert(at, binding.loc, PushGlobal(fallback)),
+                    ReferenceType::Store(at) => self.insert(at, binding.loc, StoreGlobal(fallback, false)),
                     _ => panic!()
                 }
             } else if binding.error {
@@ -1002,24 +991,8 @@ impl<'a> Parser<'a> {
         self.locals.last_mut().unwrap()
     }
 
-    /// Returns the output code of the current function
-    pub fn current_function(&self) -> &Vec<(Location, Opcode)> {
-        match &self.current_locals().func {
-            Some(func) => &self.functions[*func].code,
-            None => &self.output
-        }
-    }
-
-    /// Returns the output code of the current function
-    pub fn current_function_mut(&mut self) -> &mut Vec<(Location, Opcode)> {
-        match self.current_locals().func {
-            Some(func) => &mut self.functions[func].code,
-            None => &mut self.output
-        }
-    }
-
     /// Returns a mutable reference to the current `ParserFunctionImpl`. Will panic if a function is currently not being parsed.
-    pub fn current_function_impl(&mut self) -> &mut ParserFunctionImpl {
+    pub fn current_function_mut(&mut self) -> &mut ParserFunctionImpl {
         let func: usize = self.current_locals().func.unwrap();
         &mut self.functions[func]
     }

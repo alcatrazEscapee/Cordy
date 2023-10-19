@@ -6,9 +6,10 @@ L1: 0000 Nil
     0005 Pop
 L2: 0006 Str('hello')
     0007 Pop
-L3: 0008 Jump(13)
-L4: 0009 Jump(3)
-    0010 PopN(2)
-L5: 0011 Str('world')
-L6: 0012 Pop
-    0013 Exit
+    0008 Jump(14)
+    0009 Jump(3)
+L4: 0010 Pop
+    0011 Pop
+L5: 0012 Str('world')
+L6: 0013 Pop
+    0014 Exit

@@ -1,26 +1,30 @@
 L2: 0000 Nil
     0001 Nil
-L3: 0002 Function(fn trigger() -> L[18, 23])
+L3: 0002 Function(fn trigger() -> L[22, 27])
     0003 Closure
     0004 CloseLocal(0)
     0005 CloseLocal(1)
 L4: 0006 LiftUpValue(1)
     0007 LiftUpValue(0)
-    0008 PopN(3)
-    0009 Jump(14)
-    0010 LiftUpValue(1)
-    0011 LiftUpValue(0)
-    0012 PopN(3)
-L5: 0013 Jump(0)
-L7: 0014 InitGlobal
-    0015 Function(fn bomb() -> L[24, 25])
+    0008 Pop
+    0009 Pop
+    0010 Pop
+    0011 Jump(18)
+    0012 LiftUpValue(1)
+    0013 LiftUpValue(0)
+    0014 Pop
+    0015 Pop
     0016 Pop
-    0017 Exit
-L3: 0018 LiteralBegin(Vector, 2)
-    0019 PushUpValue(0)
-    0020 PushUpValue(1)
-    0021 LiteralAcc(2)
-    0022 LiteralEnd
-    0023 Return
-L7: 0024 Nil
-    0025 Return
+    0017 Jump(0)
+L7: 0018 InitGlobal
+    0019 Function(fn bomb() -> L[28, 29])
+    0020 Pop
+    0021 Exit
+L3: 0022 LiteralBegin(Vector, 2)
+    0023 PushUpValue(0)
+    0024 PushUpValue(1)
+    0025 LiteralAcc(2)
+    0026 LiteralEnd
+    0027 Return
+L7: 0028 Nil
+    0029 Return

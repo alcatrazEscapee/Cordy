@@ -12,5 +12,7 @@ L2: 0006 LiteralBegin(Vector, 2)
     0011 ExecPattern(0)
     0012 StoreGlobal(0) -> x
     0013 Pop
-    0014 PopN(3)
-    0015 Exit
+    0014 Pop
+    0015 Pop
+    0016 Pop
+    0017 Exit
