@@ -1136,6 +1136,10 @@ mod tests {
     #[test] fn test_struct_func_field_self_call_instance() { run_str("struct A(c) { fn a(self) { (->c) } }  A(9)->a() . repr . print", "(->)\n"); }
     #[test] fn test_struct_raw_field_self_call_type() { run_str("struct A(c) { fn a(self) { c } } A->a() . repr . print", "fn a(self)\n"); }
     #[test] fn test_struct_raw_field_self_call_instance() { run_str("struct A(c) { fn a(self) { c } }  A(9)->a() . repr . print", "9\n"); }
+    #[test] fn test_struct_set_field_self_call_type() { run_str("struct A(c) { fn a(self) { c = 1 } } A->a() . repr . print", "fn a(self)\n"); }
+    #[test] fn test_struct_set_field_self_call_instance() { run_str("struct A(c) { fn a(self) { c = 1 } } A(9)->a() . repr . print", "1\n"); }
+    #[test] fn test_struct_operator_set_field_self_call_type() { run_str("struct A(c) { fn a(self) { c += 1 } } A->a() . repr . print", "fn a(self)\n"); }
+    #[test] fn test_struct_operator_set_field_self_call_instance() { run_str("struct A(c) { fn a(self) { c += 1 } } A(9)->a() . repr . print", "10\n"); }
     #[test] fn test_module_empty() { run_str("module Foo module Bar ; (Foo, Bar) . print", "(module Foo, module Bar)\n"); }
     #[test] fn test_module_with_method() { run_str("module Foo { fn bar() -> 123 } ; Foo->bar() . print", "123\n"); }
     #[test] fn test_modules_with_same_method() { run_str("module A { fn a() -> 1 } module B { fn a() -> 2 } ; (A->a(), B->a()) . print", "(1, 2)\n"); }

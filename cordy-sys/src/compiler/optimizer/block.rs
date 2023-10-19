@@ -32,7 +32,7 @@ impl<'a> Optimize for &'a mut Code {
             //
             // Open Issues:
             // - Removing any `Store` / `Push` opcodes breaks the continuity of local references visible in the disassembly.
-            //merge_store_pop_load(cursor);
+            if false { merge_store_pop_load(cursor); }
             merge_store_global_pop(cursor);
             merge_pops(cursor);
         }

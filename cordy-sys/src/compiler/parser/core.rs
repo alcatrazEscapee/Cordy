@@ -580,7 +580,8 @@ impl<'a> Parser<'a> {
             LValueReference::UpValue(index) => self.push_with(StoreUpValue(index), loc),
             LValueReference::ThisField { upvalue, index, field_index } => {
                 self.push_with(if upvalue { PushUpValue(index) } else { PushLocal(index) }, loc);
-                self.push_with(GetField(field_index), loc);
+                self.push_with(Swap, loc); // Need the `self` to be below the field to be assigned
+                self.push_with(SetField(field_index), loc);
             }
 
             LValueReference::LocalThis(_) |
