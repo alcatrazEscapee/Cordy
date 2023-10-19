@@ -1,0 +1,14 @@
+struct Pos(x, y) {
+    fn norm1(self) -> self->x + self->y
+    //fn norm2(self) -> x ** 2 + y ** 2
+
+    fn gt(self, n) -> self->norm1() > n
+    fn lt(self, n) -> norm1() > n
+}
+
+fn of(x, y) -> Pos(x, y)
+
+let p1 = of(1, 2)
+p1->norm1()
+p1->gt(3)
+p1->lt(5)

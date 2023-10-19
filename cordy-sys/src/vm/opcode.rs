@@ -131,6 +131,9 @@ pub enum Opcode {
     GetFieldFunction(u32),
     SetField(u32),
 
+    /// Takes an index into `constants` - which should return a user function - and evaluates it in a `self->f` expression with the top of the stack.
+    GetMethod(u32),
+
     Unary(UnaryOp),
     Binary(BinaryOp),
     Compare(CompareOp, i32),
@@ -188,6 +191,7 @@ impl Opcode {
                 }
             },
             GetField(fid) | SetField(fid) | GetFieldFunction(fid) => format!("{:?} -> {}", self, fields.get_name(*fid)),
+            GetMethod(cid) => format!("{:?} -> {}", self, constants[*cid as usize].as_function().borrow_const().repr()),
             JumpIfFalse(offset) | JumpIfFalsePop(offset) | JumpIfTrue(offset) | JumpIfTruePop(offset) | Jump(offset) | TestIterable(offset) => format!("{}({})", match self {
                 JumpIfFalse(_) => "JumpIfFalse",
                 JumpIfFalsePop(_) => "JumpIfFalsePop",

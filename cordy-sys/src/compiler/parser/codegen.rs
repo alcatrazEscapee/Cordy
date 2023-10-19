@@ -204,9 +204,9 @@ impl<'a> Parser<'a> {
             Expr(loc, ExprType::GetFieldFunction(field_index)) => {
                 self.push_with(GetFieldFunction(field_index), loc);
             },
-            Expr(_, ExprType::Assignment(lvalue, rhs)) => {
+            Expr(loc, ExprType::Assignment(lvalue, rhs)) => {
                 self.emit_expr(*rhs);
-                self.push_store_lvalue(lvalue);
+                self.push_store_lvalue(lvalue, loc);
             },
             Expr(loc, ExprType::ArrayAssignment(array, index, rhs)) => {
                 self.emit_expr(*array);
