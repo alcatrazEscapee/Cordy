@@ -1281,10 +1281,9 @@ impl Parser<'_> {
             // It also involves a unique operator, as it cannot be evaluated as a normal native operator (since again, it takes a field index, not a expression)
             // This operator also cannot stand alone: `(->)` is not valid, but `(->x)` is, presuming a field `x` exists.
             Some(Arrow) => {
-                if let Some((loc, field_index)) = self.parse_expr_2_field_access() {
-                    self.expect(CloseParen);
-                    return Some(Expr::get_field_function(loc, field_index))
-                }
+                let (loc, field_index) = self.parse_expr_2_field_access();
+                self.expect(CloseParen);
+                return Some(Expr::get_field_function(loc, field_index));
             },
 
             _ => {},
@@ -1707,9 +1706,8 @@ impl Parser<'_> {
 
                 _ => match self.peek() { // Re-match, since this is allowed to break over newlines
                     Some(Arrow) => {
-                        if let Some((loc, field_index)) = self.parse_expr_2_field_access() {
-                            expr = expr.get_field(loc, field_index);
-                        }
+                        let (loc, field_index) = self.parse_expr_2_field_access();
+                        expr = expr.get_field(loc, field_index);
                     },
                     _ => break
                 }
@@ -1766,19 +1764,15 @@ impl Parser<'_> {
         expr.eval(loc_start | self.prev_location(), args, any_unroll)
     }
 
-    /// Parses a `-> <field>` - either returns a `(Location, field_index)` pairing, or `None` and raises a parse error.
-    fn parse_expr_2_field_access(&mut self) -> Option<(Location, u32)> {
+    /// Parses a `-> <field>` - returns a `(Location, field_index: u32)`
+    fn parse_expr_2_field_access(&mut self) -> (Location, u32) {
         trace::trace_parser!("rule <expr-2-field-access>");
 
         let loc_start = self.advance_with(); // Consume `->`
         let field_name = self.expect_identifier(ExpectedFieldNameAfterArrow);
+        let field_index = self.resolve_field(field_name);
 
-        match self.resolve_field(&field_name) {
-            Some(field_index) => return Some((loc_start | self.prev_location(), field_index)),
-            None => self.semantic_error(InvalidFieldName(field_name))
-        }
-
-        None
+        (loc_start | self.prev_location(), field_index)
     }
 
     fn parse_expr_3(&mut self) -> Expr {
@@ -2219,6 +2213,7 @@ mod tests {
     #[test] fn test_struct_with_duplicate_method() { run_err("struct A(a) { fn b() {} fn b() {} }", "Duplicate field name: 'b'\n  at: line 1 (<test>)\n\n1 | struct A(a) { fn b() {} fn b() {} }\n2 |                            ^\n") }
     #[test] fn test_struct_with_duplicate_both() { run_err("struct A(a, b) { fn a() {} }", "Duplicate field name: 'a'\n  at: line 1 (<test>)\n\n1 | struct A(a, b) { fn a() {} }\n2 |                     ^\n") }
     #[test] fn test_struct_with_no_fields() { run_err("struct Foo {}", "Expected a '(' token, got '{' token instead\n  at: line 1 (<test>)\n\n1 | struct Foo {}\n2 |            ^\n") }
+    #[test] fn test_struct_field_not_declared() { run_err("nil->a->b", "Invalid or unknown field name: 'b'\n  at: line 1 (<test>)\n\n1 | nil->a->b\n2 |         ^\n\nInvalid or unknown field name: 'a'\n  at: line 1 (<test>)\n\n1 | nil->a->b\n2 |      ^\n") }
     #[test] fn test_struct_cannot_assign_to_self() { run_err("struct Foo() { fn foo(self) { self = 3 } }", "The left hand side is not a valid assignment target\n  at: line 1 (<test>)\n\n1 | struct Foo() { fn foo(self) { self = 3 } }\n2 |                                    ^\n") }
     #[test] fn test_struct_cannot_operator_assign_to_self() { run_err("struct Foo() { fn foo(self) { self += 3 } }", "The left hand side is not a valid assignment target\n  at: line 1 (<test>)\n\n1 | struct Foo() { fn foo(self) { self += 3 } }\n2 |                                    ^^\n") }
     #[test] fn test_struct_cannot_pattern_assign_to_self() { run_err("struct Foo() { fn foo(self) { (_, self) = 3 } }", "Expected an expression terminal, got '_' token instead\n  at: line 1 (<test>)\n\n1 | struct Foo() { fn foo(self) { (_, self) = 3 } }\n2 |                                ^\n") }
@@ -2227,7 +2222,7 @@ mod tests {
     #[test] fn test_struct_self_method_type_type() { run_err("struct A() { fn b() { 9 } fn a() { self->b() } }", "Undeclared identifier: 'self'\n  at: line 1 (<test>)\n\n1 | struct A() { fn b() { 9 } fn a() { self->b() } }\n2 |                                    ^^^^\n") }
     #[test] fn test_struct_self_method_type_self_late() { run_err("struct A() { fn a() { self->b() } fn b(self) { 9 } }", "Undeclared identifier: 'self'\n  at: line 1 (<test>)\n\n1 | struct A() { fn a() { self->b() } fn b(self) { 9 } }\n2 |                       ^^^^\n") }
     #[test] fn test_struct_self_method_type_self() { run_err("struct A() { fn b(self) { 9 } fn a() { self->b() } }", "Undeclared identifier: 'self'\n  at: line 1 (<test>)\n\n1 | struct A() { fn b(self) { 9 } fn a() { self->b() } }\n2 |                                        ^^^^\n") }
-    #[test] fn test_struct_raw_method_type_self_late() { run_err("struct A() { fn a() { b() } fn b(self) { 9 } }", "err"); }
+    #[test] fn test_struct_raw_method_type_self_late() { run_err("struct A() { fn a() { b() } fn b(self) { 9 } }", "Undeclared identifier: 'self'\n  at: line 1 (<test>)\n\n1 | struct A() { fn a() { b() } fn b(self) { 9 } }\n2 |                       ^\n"); }
     #[test] fn test_struct_raw_method_type_self() { run_err("struct A() { fn b(self) { 9 } fn a() { b() } }", "Undeclared identifier: 'self'\n  at: line 1 (<test>)\n\n1 | struct A() { fn b(self) { 9 } fn a() { b() } }\n2 |                                        ^\n"); }
     #[test] fn test_struct_self_field_type() { run_err("struct A(c) { fn a() { self->c } }", "Undeclared identifier: 'self'\n  at: line 1 (<test>)\n\n1 | struct A(c) { fn a() { self->c } }\n2 |                        ^^^^\n") }
     #[test] fn test_struct_raw_field_type() { run_err("struct A(c) { fn a() { c } }", "Undeclared identifier: 'self'\n  at: line 1 (<test>)\n\n1 | struct A(c) { fn a() { c } }\n2 |                        ^\n") }

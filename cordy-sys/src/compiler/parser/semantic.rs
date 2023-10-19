@@ -4,6 +4,7 @@
 /// The functions declared in this module are public to be used by `parser/mod.rs`, but the module `semantic` is not exported itself.
 
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::ffi::CString;
 use std::fmt::Debug;
 use fxhash::FxBuildHasher;
@@ -95,16 +96,24 @@ impl Locals {
 pub struct Fields {
     /// A mapping of `field name` to `field index`. This is used to record unique fields.
     /// For example, `struct Foo(a, b, c)` would generate the fields `"a"`, `"b"`, and `"c"` at index `0`, `1`, and `2`, respectively.
-    fields: HashMap<String, u32, FxBuildHasher>,
+    fields: HashMap<String, FieldReference, FxBuildHasher>,
 
     /// A table which maps pairs of `(type index, field index)` to a `field offset`
     /// The `type index` is known at runtime, based on the runtime type of the struct in use.
     /// The `field index` is known at compile time, based on the identifier that it resolves to.
-    /// The resultant `field offset` is a index into a specific struct object's `Vec<Value>` of fields.
+    /// The resultant `field offset` is a index into a specific struct object's `Vec<ValuePtr>` of fields.
     lookup: HashMap<(u32, u32), usize, FxBuildHasher>,
 
     /// The next available `type_index`
     types: u32,
+}
+
+#[derive(Debug, Clone)]
+struct FieldReference {
+    field_index: u32,
+    /// If `None`, this field has been declared.
+    /// If `Some(loc)`, this is the location of the first place where this field was referenced, but it has not been declared yet.
+    loc: Option<Location>,
 }
 
 impl Fields {
@@ -122,7 +131,7 @@ impl Fields {
 
     pub fn get_name(&self, field_index: u32) -> String {
         self.fields.iter()
-            .find(|(_, v)| field_index == **v)
+            .find(|(_, v)| field_index == v.field_index)
             .unwrap()
             .0
             .clone()
@@ -147,7 +156,7 @@ impl UpValue {
 
 
 
-#[derive(Eq, PartialEq, Debug, Clone)]
+#[derive(Debug, Clone)]
 struct Local {
     /// The local variable name - either a string name or the `self` keyword
     name: Reference,
@@ -177,7 +186,7 @@ impl Local {
         }
         match self.name {
             Reference::Named(_) => LValueReference::Local(self.index),
-            Reference::This => LValueReference::LocalThis(self.index),
+            Reference::This | Reference::LateThis => LValueReference::LocalThis(self.index),
         }
     }
 }
@@ -188,6 +197,9 @@ pub struct LateBinding {
     /// A unique index for every late binding, along with the name (not unique).
     index: usize,
     name: String,
+    /// This is a late-bound reference to `self`, which is required when the late binding is later declared as a `self` method.
+    /// If the binding didn't have a `self` available, this will be `Invalid`, which needs to raise an error upon trying to bind to a `self` method.
+    this: LValueReference,
     /// The type of the reference. This indicates what needs to be updated later (either an opcode location, or a pattern).
     ty: ReferenceType,
     loc: Location,
@@ -199,22 +211,23 @@ pub struct LateBinding {
 }
 
 impl LateBinding {
-    fn with_fallback(name: String, fallback: u32, parser: &mut Parser) -> LateBinding {
+    fn with_fallback(name: String, fallback: u32, parser: &mut Parser) -> Box<LateBinding> {
         LateBinding::new(name, Some(fallback), parser)
     }
 
-    fn with_error(name: String, parser: &mut Parser) -> LateBinding {
+    fn with_error(name: String, parser: &mut Parser) -> Box<LateBinding> {
         LateBinding::new(name, None, parser)
     }
 
-    fn new(name: String, fallback: Option<u32>, parser: &mut Parser) -> LateBinding {
+    fn new(name: String, fallback: Option<u32>, parser: &mut Parser) -> Box<LateBinding> {
         let index = parser.late_binding_next_index;
         let loc = parser.prev_location();
         let error = !parser.error_recovery;
+        let this = parser.resolve_reference(Reference::LateThis);
 
         parser.late_binding_next_index += 1;
 
-        LateBinding { index, name, ty: ReferenceType::Invalid, loc, fallback, error }
+        Box::new(LateBinding { index, name, this, ty: ReferenceType::Invalid, loc, fallback, error })
     }
 
     pub fn update(&mut self, ty: ReferenceType) {
@@ -285,7 +298,7 @@ pub enum LValueReference {
     NativeFunction(core::NativeFunction),
 
     /// Late Bindings can be either methods or globals - their assignability is unknown. This is resolved when the binding is resolved by checking the `ReferenceType` field on the binding.
-    LateBinding(LateBinding),
+    LateBinding(Box<LateBinding>),
 }
 
 
@@ -521,17 +534,20 @@ impl LValueReference {
         match self {
             LValueReference::Local(index) => ParserStoreOp::Bound(StoreOp::Local(index)),
             LValueReference::Global(index) => ParserStoreOp::Bound(StoreOp::Global(index)),
-            LValueReference::LateBinding(mut global) => {
-                let index = global.index;
+            LValueReference::UpValue(index) => ParserStoreOp::Bound(StoreOp::UpValue(index)),
 
-                global.update(ReferenceType::StorePattern(pattern_index));
-                parser.late_bindings.push(global);
+            LValueReference::LateBinding(mut binding) => {
+                let index = binding.index;
+
+                binding.update(ReferenceType::StorePattern(pattern_index));
+                parser.late_bindings.push(*binding);
 
                 ParserStoreOp::LateBoundGlobal(index)
-            },
-            LValueReference::UpValue(index) => ParserStoreOp::Bound(StoreOp::UpValue(index)),
+            }
+
             LValueReference::Invalid => ParserStoreOp::Invalid, // Error has already been raised
-            _ => panic!("Invalid store: {:?}", self),
+            _ => panic!("Invalid store from within pattern: {:?}", self),
+
         }
     }
 }
@@ -677,28 +693,41 @@ impl FunctionLibraryEntry {
 }
 
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+/// A type to query `resolve_reference()` with, which includes both named variables and keyword `self`.
+///
+/// N.B. Intentionally does not implement `Eq` as we want `This` and `LateThis` to be equivalent (see `is_equivalent`) in almost all scenarios.
+#[derive(Debug, Clone)]
 pub enum Reference {
     Named(String),
-    This
+    This,
+    /// This is identical to `This` in all respects, except in the case of an error, querying `LateThis` will return `Invalid` **without** raising a semantic error.
+    /// It is necessary to check if we can bind to `self` for the purposes of late-bound methods.
+    LateThis,
 }
 
 impl Reference {
     fn is_self(&self) -> bool {
-        matches!(self, Reference::This)
+        matches!(self, Reference::This | Reference::LateThis)
+    }
+
+    fn is_equivalent(&self, other: &Reference) -> bool {
+        match other {
+            Reference::Named(name) => self.is_same(name),
+            Reference::This | Reference::LateThis => self.is_self(),
+        }
     }
 
     fn is_same(&self, other: &String) -> bool {
         match self {
             Reference::Named(name) => name == other,
-            Reference::This => false,
+            Reference::This | Reference::LateThis => false,
         }
     }
 
     fn to_named(self) -> String {
         match self {
             Reference::Named(name) => name,
-            Reference::This => String::from("self")
+            Reference::This | Reference::LateThis => String::from("self")
         }
     }
 }
@@ -861,6 +890,9 @@ impl<'a> Parser<'a> {
 
     /// Upon declaring a global variable, struct field or method, this will resolve any references to this variable if they exist.
     /// It may raise errors due to the variable not being assignable (i.e. a module method).
+    ///
+    /// - `name` is the name of the newly declared variable.
+    /// - `result` is the type of the newly declared variable.
     fn resolve_late_bindings(&mut self, name: String, result: LateBound) {
         let mut i = 0;
         while i < self.late_bindings.len() {
@@ -887,10 +919,32 @@ impl<'a> Parser<'a> {
                         });
                     },
                     (ReferenceType::Load(at), LateBound::Method { function_id, instance }) => {
-                        // todo: if `instance` is true we actually need to create a self load somehow? that also means inserting TWO opcodes
-                        self.insert(at, binding.loc, Constant(*function_id));
+                        if *instance {
+                            // If the current method is a self method, it can only be called through other self methods, and they need to do a `GetMethod` to do so
+                            // Otherwise, it needs to raise a parser error
+                            match binding.this {
+                                LValueReference::Invalid => self.error_at(binding.loc, UndeclaredIdentifier(String::from("self"))),
+
+                                // Since we have a single reference point for insert, we need to insert in reverse order from the same point
+                                // Slightly different opcodes for `LocalThis` vs. `UpValueThis`
+                                LValueReference::LocalThis(index) => {
+                                    self.insert(at.clone(), binding.loc, GetMethod(*function_id));
+                                    self.insert(at, binding.loc, PushLocal(index))
+                                }
+                                LValueReference::UpValueThis(index) => {
+                                    self.insert(at.clone(), binding.loc, GetMethod(*function_id));
+                                    self.insert(at, binding.loc, PushUpValue(index))
+                                },
+
+                                lvalue => panic!("`self` should not be bound to {:?}", lvalue)
+                            }
+                        } else {
+                            // If the current method is a non-self method, then references to it just use the function ID
+                            // Both self methods and non-self methods can call it this way.
+                            self.insert(at, binding.loc, Constant(*function_id));
+                        }
                     },
-                    (ReferenceType::Store(at), LateBound::Method { .. }) => self.error_at(binding.loc, InvalidAssignmentTarget),
+                    (ReferenceType::Store(_), LateBound::Method { .. }) => self.error_at(binding.loc, InvalidAssignmentTarget),
                     (_, _) => panic!("Invalid reference type set!"),
                 }
                 continue; // Skip the below i += 1, since this binding got swap-removed
@@ -902,7 +956,7 @@ impl<'a> Parser<'a> {
 
     /// Resolves any outstanding late bindings present at teardown, by either falling back to a global, or raises an error.
     pub fn resolve_remaining_late_bindings(&mut self) {
-        let bindings = std::mem::take(&mut self.late_bindings);
+        let bindings = std::mem::take(&mut self.late_bindings); // using `take()` here to clear without borrowing, unlike `drain(..)`
 
         for binding in bindings {
             if let Some(fallback) = binding.fallback {
@@ -916,6 +970,17 @@ impl<'a> Parser<'a> {
             } else if binding.error {
                 self.errors.insert(ParserError::new(UndeclaredIdentifier(binding.name), binding.loc));
             }
+        }
+
+        // Also emit errors for any missing used-but-not-declared fields
+        let mut errors: Vec<(Location, String)> = Vec::new(); // Indirection is again needed due to borrow annoyances
+        for (field_name, field) in &self.fields.fields {
+            if let Some(loc) = field.loc {
+                errors.push((loc, field_name.clone()));
+            }
+        }
+        for (loc, field_name) in errors {
+            self.semantic_error_at(loc, InvalidFieldName(field_name));
         }
     }
 
@@ -1061,7 +1126,7 @@ impl<'a> Parser<'a> {
         // 1. Search for locals in the current function. This may return `Local`, or `Global` based on the scope of the variable.
         //   - Locals that are captured as upvalues, but are now being referenced as locals again, emit upvalue references, as the stack stops getting updated after a value is lifted into an upvalue.
         for local in self.current_locals().locals.iter().rev() {
-            if local.name == name && local.initialized {
+            if local.name.is_equivalent(&name) && local.initialized {
                 return local.as_reference();
             }
         }
@@ -1071,7 +1136,7 @@ impl<'a> Parser<'a> {
         if self.function_depth > 0 {
             for depth in (0..self.function_depth).rev() { // Iterate through the range of [function_depth - 1, ... 0]
                 for local in self.locals[depth as usize].locals.iter().rev() { // In reverse, as we go inner -> outer scopes
-                    if local.name == name && local.initialized && !local.is_global() { // Note that it must **not** be a global, anything else can be captured as an upvalue
+                    if local.name.is_equivalent(&name) && local.initialized && !local.is_global() { // Note that it must **not** be a global, anything else can be captured as an upvalue
                         let index = local.index;
                         let is_self = local.name.is_self();
                         self.locals[depth as usize].locals[index as usize].captured = true;
@@ -1088,6 +1153,8 @@ impl<'a> Parser<'a> {
                 self.semantic_error(UndeclaredIdentifier(String::from("self")));
                 return LValueReference::Invalid
             }
+            // Return `Invalid` without raising an error
+            Reference::LateThis => return LValueReference::Invalid,
         };
 
         // 4. If we are within a function and module, we may bind to functions defined on this, or enclosing modules
@@ -1166,12 +1233,8 @@ impl<'a> Parser<'a> {
                     return LValueReference::Global(local.index)
                 }
             }
-        }
 
-        // Late Bindings
-        // Either within a function or within a module
-        // N.B. `self` can never be late bound, as it is always declared up front in a function parameter
-        if self.function_depth > 0 || self.module_depth > 0 {
+            // Late Bindings, but with an error
             return LValueReference::LateBinding(LateBinding::with_error(name, self));
         }
 
@@ -1289,9 +1352,17 @@ impl<'a> Parser<'a> {
 
     fn declare_field_offset(&mut self, name: String, type_index: u32, field_offset: usize) {
         let next_field_index: u32 = self.fields.fields.len() as u32;
-        let field_index: u32 = *self.fields.fields
-            .entry(name)
-            .or_insert(next_field_index);
+        let field_index: u32 = match self.fields.fields.entry(name) {
+            Entry::Occupied(it) => {
+                let it = it.into_mut();
+                it.loc = None; // The field has been used, so clear the possible error
+                it.field_index
+            }
+            Entry::Vacant(it) => {
+                it.insert(FieldReference { loc: None, field_index: next_field_index });
+                next_field_index
+            }
+        };
 
         self.fields.lookup.insert((type_index, field_index), field_offset);
     }
@@ -1314,9 +1385,20 @@ impl<'a> Parser<'a> {
         (self.library.methods.len() - 1) as u32
     }
 
-    /// Resolves a field name to a specific field index. If the field is not present, raises a parse error.
-    /// Returns the `field_index`, if one was found, or `None` if not.
-    pub fn resolve_field(&self, name: &String) -> Option<u32> {
-        self.fields.fields.get(name).copied()
+    /// Resolves a field name to a specific field index.
+    ///
+    /// Note that while this always returns a `field_index`, it records the field as not-declared, and an error will be raised at teardown.
+    pub fn resolve_field(&mut self, name: String) -> u32 {
+        let loc = if self.error_recovery { None } else { Some(self.prev_location()) };
+        let next_field_index: u32 = self.fields.fields.len() as u32;
+
+        match self.fields.fields.entry(name) {
+            Entry::Occupied(it) => it.into_mut().field_index,
+            Entry::Vacant(it) => {
+                // Insert a new field reference, but with a `Some(loc)` to flag the possible error
+                it.insert(FieldReference { loc, field_index: next_field_index });
+                next_field_index
+            }
+        }
     }
 }
