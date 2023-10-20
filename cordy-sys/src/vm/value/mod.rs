@@ -671,9 +671,8 @@ impl ValuePtr {
                 let it = self.as_struct().borrow_mut();
                 let owner = it.get_owner();
 
-                match fields.get_offset(owner.instance_type, field_index) {
-                    Some(offset) => return it.get_field(offset).ok(),
-                    _ => {}
+                if let Some(offset) = fields.get_offset(owner.instance_type, field_index) {
+                    return it.get_field(offset).ok();
                 }
 
                 // Try with the constructor type - here we are accessing instance methods, as opposed to fields
@@ -691,9 +690,16 @@ impl ValuePtr {
             }
             Type::StructType => {
                 let it = self.as_struct_type().borrow_const();
-                match fields.get_offset(it.constructor_type, field_index) {
-                    Some(field_offset) => it.get_method(field_offset, constants).ok(),
-                    None => err_field_not_found(it.clone().to_value(), fields, field_index, true, true)
+                if let Some(offset) = fields.get_offset(it.constructor_type, field_index) {
+                    return it.get_method(offset, constants).ok();
+                }
+
+                // Try with a field of the instance type, in which case return the get field function (partially evaluated field access)
+                // This will mimic an auto-generated accessor, but everything is already implemented!
+                match fields.get_offset(it.instance_type, field_index) {
+                    // This is similar to `(->x)` but it checks that the field `x` exists on the type `A->x` first.
+                    Some(_) => ValuePtr::field(field_index).ok(),
+                    _ => err_field_not_found(it.clone().to_value(), fields, field_index, true, true)
                 }
             }
             _ => err_field_not_found(self.clone(), fields, field_index, false, true)
@@ -705,8 +711,8 @@ impl ValuePtr {
             Type::Struct => {
                 let mut it = self.as_struct().borrow_mut();
                 match fields.get_offset(it.get_owner().instance_type, field_index) {
-                    Some(field_offset) => {
-                        it.set_field(field_offset, value.clone());
+                    Some(offset) => {
+                        it.set_field(offset, value.clone());
                         value.ok()
                     }
                     None => err_field_not_found(it.get_constructor(), fields, field_index, true, false)

@@ -43,7 +43,7 @@ union CordyValueUnion {
 }
 
 #[repr(C)]
-pub struct CordyValue {
+struct CordyValue {
     ty: CordyType,
     value: CordyValueUnion
 }

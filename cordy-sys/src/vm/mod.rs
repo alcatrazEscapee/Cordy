@@ -1137,10 +1137,12 @@ mod tests {
     #[test] fn test_struct_raw_method_self_self_call_instance() { run_str("struct A() { fn b(self) { 9 } fn a(self) { b() } } A()->a() . repr . print", "9\n"); }
     #[test] fn test_struct_self_field_self_call_type() { run_str("struct A(c) { fn a(self) { self->c } } A->a() . repr . print", "fn a(self)\n"); }
     #[test] fn test_struct_self_field_self_call_instance() { run_str("struct A(c) { fn a(self) { self->c } } A(9)->a() . repr . print", "9\n"); }
-    #[test] fn test_struct_type_field_type_call_type() { run_str("struct A(c) { fn a() { A->c } } A->a() . repr . print", "TypeError: Cannot get field 'c' on struct A(c)\n  at: line 1 (<test>)\n  at: `fn a()` (line 1)\n\n1 | struct A(c) { fn a() { A->c } } A->a() . repr . print\n2 |                         ^^^\n"); }
+    #[test] fn test_struct_type_field_type_call_type() { run_str("struct A(c) { fn a() { A->c } } A->a() . repr . print", "(->)\n"); }
+    #[test] fn test_struct_type_field_type_call_type_then_eval() { run_str("struct A(c) { fn a() { A->c } } A->a()(A(5)) . repr . print", "5\n"); }
     #[test] fn test_struct_type_field_type_call_instance() { run_str("struct A(c) { fn a() { A->c } }  A(9)->a() . repr . print", "TypeError: Cannot get field 'a' on struct A(c)\n  at: line 1 (<test>)\n\n1 | struct A(c) { fn a() { A->c } }  A(9)->a() . repr . print\n2 |                                      ^^^\n"); }
     #[test] fn test_struct_type_field_self_call_type() { run_str("struct A(c) { fn a(self) { A->c } } A->a() . repr . print", "fn a(self)\n"); }
-    #[test] fn test_struct_type_field_self_call_instance() { run_str("struct A(c) { fn a(self) { A->c } }  A(9)->a() . repr . print", "TypeError: Cannot get field 'c' on struct A(c)\n  at: line 1 (<test>)\n  at: `fn a(self)` (line 1)\n\n1 | struct A(c) { fn a(self) { A->c } }  A(9)->a() . repr . print\n2 |                             ^^^\n"); }
+    #[test] fn test_struct_type_field_self_call_instance() { run_str("struct A(c) { fn a(self) { A->c } }  A(9)->a() . repr . print", "(->)\n"); }
+    #[test] fn test_struct_type_field_self_call_instance_then_eval() { run_str("struct A(c) { fn a(self) { A->c } }  A(9)->a()(A(5)) . repr . print", "5\n"); }
     #[test] fn test_struct_func_field_type_call_type() { run_str("struct A(c) { fn a() { (->c) } } A->a() . repr . print", "(->)\n"); }
     #[test] fn test_struct_func_field_type_call_instance() { run_str("struct A(c) { fn a() { (->c) } }  A(9)->a() . repr . print", "TypeError: Cannot get field 'a' on struct A(c)\n  at: line 1 (<test>)\n\n1 | struct A(c) { fn a() { (->c) } }  A(9)->a() . repr . print\n2 |                                       ^^^\n"); }
     #[test] fn test_struct_func_field_self_call_type() { run_str("struct A(c) { fn a(self) { (->c) } } A->a() . repr . print", "fn a(self)\n"); }
