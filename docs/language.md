@@ -1,48 +1,129 @@
 # Cordy Language
 
-Cordy is a dynamically typed, interpreted, semi-functional / semi-procedural language, designed to be fast to write for scripting and solving puzzles. Its design is inspired by parts of Python, Rust, Haskell, Java, Haskell, and JavaScript.
+Cordy is a dynamically typed, interpreted, semi-functional / semi-procedural language, designed to be fast to write for scripting and solving puzzles. Its design is inspired by parts of Python, Rust, Haskell, Java, Haskell, and JavaScript. This document assumes some prior programming experience.
 
-This document should give a comprehensive overview of how the language of Cordy is defined, from a perspective of some prior programming experience.
+## Contents
 
+1. [Introduction](#introduction)
+2. [Expressions](#expressions)
+    1. [Collections](#collections)
+    2. [Operators](#operators)
+    3. [Precedence And Associativity](#precedence-and-associativity)
+3. [Variables](#variables)
+4. [Functions](#functions)
+    1. [Partial Functions](#partial-functions)
+    2. [Operator Functions](#operator-functions)
+    3. [User Functions](#user-functions)
+    4. [Closures](#closures)
+5. [Control Flow](#control-flow)
+6. [Advanced Cordy](#advanced-cordy)
+    1. [Slicing](#slicing)
+    2. [Pattern Matching](#pattern-matching)
+    3. [Decorators](#decorators)
+    4. [Assertions](#assertions)
+    5. [Structs and Modules](#structs-and-modules)
+    6. [Native Modules and FFI](#native-modules-and-ffi)
 
-### Types
+<hr>
 
-The primitive types in Cordy are:
+### Introduction
 
-- `nil` (The absence of a value)
-- A boolean (`bool`), which can take the values `true` and `false`.
-- `int`, which is a 63-bit integer. It can be expressed as decimal numbers (`5`), binary (`0b101`), or hexadecimal (`0x5`).
-- `complex`, which is a pair of 64-bit integers, with a real and imaginary part. Imaginary int literals can be expressed as any integer literal followed by an `i` or `j`.
-- `str`, which is a UTF-8 string. Like Python, there is no separate `char` data type, instead a string is a sequence of single element strings.
+```
+>>> print 'hello world'
+hello world
+```
 
-All primitive types are **immutable**. In addition to these, Cordy has a number of [Collection Types](#collection-types), and allows the creation of basic user defined types in the form of [Structs](#structs).
+Cordy is a dynamically typed, interpreted language. A cordy program is compiled into a _bytecode_, and then the bytecode is _interpreted_. Cordy programs are made up of statements and expressions, similar to most procedural languages.
+
+Cordy can be used in two basic modes:
+
+1. REPL (Read-Evaluate-Print Loop) Mode. When the `cordy` executable is invoked with no arguments, it opens a interactive session where individual expressions (or statements) may be entered, immediately executed, and the result printed back to the console. The symbol `>>>` indicates this line is an input in REPL mode.
+2. Compile Mode. When `cordy my_first_program.cor` is invoked, it will attempt to compile, then immediately execute the file `my_first_program.cor`.
+
+A web-based REPL can be found [here](https://alcatrazescapee.com/cordy/).
+
+With that basic introduction, it's time to explore the basics of expressions...
 
 ### Expressions
 
-Expressions in Cordy are similar to C style languages. Cordy has a number of mathematical operators:
+Expressions in Cordy are similar to expressions in many other procedural languages. They are a composition of _values_ and _operators_. The basic types of values are:
+
+- Nil: `nil`. This is the null/None/empty value, and is the default value of any uninitialized variable.
+- Boolean: `bool`. This is a type which can take the values `true` or `false`.
+- Integers: `int`. Integers in Cordy are 63-bit, 2's compliment signed integers. They can be expressed as decimal numbers (e.g. `13`), binary with a `0b` prefix (e.g. `0b1101`), or hexadecimal with a `0x` prefix (e.g. `0xD`).
+- Complex Integers: `complex`. These are a pair of a 64-bit, 2's compliment signed integer, with one real and one imaginary component.
+- Strings: `str`. These are a sequence of characters encoded in UTF-8. Like in Python, there is no separate single-character data type. Strings can be declared using either `'single quotes'` or `"double quotes"` Strings can also include newlines:
+
+```
+'this is a string
+with a newline in the middle'
+```
+
+- Strings can also contain the escape sequences `\'`, `\"`, `\\`, `\r`, `\n` and `\t`.
+
+#### Collections
+
+Cordy also contains a number of _collection types_. These are mutable data structures which can contain other values:
+
+- `list` is a dequeue. It supports O(1) insertion on both ends, and O(1) access by index.
+  - Lists can be declared with comma-separated values within `[` square brackets `]`.
+  - Accessing a list can also be done with `[` square brackets `]`.
+- `vector` is a fixed-size sequence of values. It supports O(1) access by index, but more importantly all operators on `vector` act element-wise.
+  - Expressions involving a vector and a scalar will apply the operator to each element of the vector, i.e. `(1, 2, 3) * 4` produces `(4, 8, 12)`
+  - Vectors can be declared with comma-separated values within `(` parenthesis `)`.
+  - Accessing a vector can be done with `[` square brackets `]`.
+- `set` is a hash-backed set of elements. It supports O(1) contains checks, and enforces strict uniqueness of its elements. It also maintains insertion order for iteration over its elements.
+  - Sets can be declared with comma-separated values within `{` curly brackets `}`.
+  - Checking if a value is in a set can be done with the `in` operator.
+- `dict` is a hash-backed key-value mapping. It supports O(1) contains and value access, and enforces strict uniqueness of its keys. It also maintains insertion order for iteration over its elements.
+  - Dictionaries can be declared with colon-delimited key value pairs, comma-separated, within `{` curly brackets `}`
+  - Accessing a value by key can be done with `[` square brackets `]`.
+  - Note that `{}` declares an empty set, **not** an empty dictionary.
+
+**Examples:**
+
+```rust
+>>> [1, 2, 3] // a list
+[1, 2, 3]
+>>> (4, 5, 6) // a vector
+(4, 5, 6)
+>>> {1, 3, 5} // a set
+{1, 3, 5}
+>>> {1: 10, 2: 20, 3: 30} // a dictionary
+{1: 10, 2: 20, 3: 30}
+```
+
+Cordy also allows the creation of user-defined structs and modules. But more on them [later](#structs-and-modules).
+
+#### Operators
+
+Operators in Cordy are similar to procedural languages, with all operators being **infix** operators by default. Cordy supports the following basic operators:
 
 - `+`, `-`, `*`, `/`: Addition, Subtraction, Multiplication, and Division.
-  - Note: multiplying a `str` and an `int` repeats the string by the int number of times, as in Python.
-  - Note: addition with `str` will convert other arguments to a string and concatenate them.
+  - Multiplying a `str` and an `int` repeats the string by the int number of times, as in Python.
+  - Addition with `str` will convert other arguments to a string and concatenate them.
   - `/` for integers and complex numbers is floor division, rounding to negative infinity.
-- `a ** b` computes a raised to the power of b.
-- `a % b` computes the mathematical modulo `a mod b`, and will always return a value in `[0, b)`.
+- `**`: Exponentiation
+  - With integral arguments, `a ** b` computes `a` raised to the power of `b`.
+- `%`: Modulo / String formatting.
+  - With integer arguments, `a % b` computes the mathematical modulo `a mod b` and will always return a value in `[0, b)`.
   - When `a` is a string, this behaves like Python's string formatting `%` operator.
-- `&`, `|`, and `^` are bitwise AND, OR, and XOR, respectively. `<<` and `>>` are left and right shifts.
-  - Shifts be negative values shift in reverse, so `1 >> -3` is `8`.
+- `&`, `|`, and `^` are bitwise AND, OR, and XOR, respectively. `<<` and `>>` are bitwise arithmetic left and right shifts.
+  - Shifts of negative values are shifts in reverse, so `(a << b) == (a >> (-b))` for all a, b.
 - `!` computes a logical not of boolean inputs, or a bitwise not of integer inputs.
 - `and` and `or` are short-circuiting, logical operators.
-- `<`, `>`, `>=`, `<=`, `==`, and `!=` compare values. Any values, regardless of types, can be compared for equality or ordering.
-  - Note: different types will always compare as equal ordering.
+- `<`, `>`, `>=`, `<=`, `==`, and `!=`: Comparison operators.
+  - Every value in Cordy can be compared for equality or ordering. However, objects of different type will always order as equal.
   - Chained comparison operators behave intuitively like in Python: `a < b < c` is equivalent to `(a < b) and (b < c)` (without evaluating `b` twice).
 - `if condition then value_if_true else value_if_false` is a short-circuiting ternary operator.
-  - Note that all boolean comparisons will take the truthy value of its argument. `nil`, `0`, `false`, `''`, empty collections, and empty `range` and `enumerate` types are the only falsy values, everything else is truthy.
 - `is` (along with `is not`) is an operator used to check if a value (left hand operand) is of a given type (right hand operand).
-- `in` (along with `not in`) is a special operator used for checking membership in collections, or substrings.
-- `max=` and `min=` are special cases of the builtin functions `max` and `min`, expressed as an assignment operator. `a max= b` is semantically equivalent to `a = if b > a then b else a`, similar for `min=`.
+- `in` (along with `not in`) is used for checking if the left hand side is _contained in_ the right hand side.
+  - When the right hand side is a string, this performs a substring check.
+  - When the right hand side is a collection, this checks if the value is contained in the collection.
+- Almost all operators can be used as assignment operators by suffixing them with an `=`, i.e. `+=`, `-=`, `/=`, etc.
+  - In addition, `max=` and `min=` can be used as assignment operators, which assign if the right hand side is larger or smaller, respectively.
 
-
-All the above binary operators come in operator-equals variants: `+=`, `-=`, `*=`, `/=`, etc.
+#### Precedence and Associativity
 
 All operators are left associative (except `=` for assigning variables). Their precedence is noted as below, where higher entries are higher precedence:
 
@@ -54,7 +135,7 @@ All operators are left associative (except `=` for assigning variables). Their p
 | 4          | `+`, `-`                                                                                       | Addition, Subtraction                                                                  |
 | 5          | `<<`, `>>`                                                                                     | Left Shift, Right Shift                                                                |
 | 6          | `&`, `∣`, `^`                                                                                  | Bitwise AND, Bitwise OR, Bitwise XOR                                                   |
-| 7          | `.`                                                                                            | [Function Composition](#function-evaluation)                                           |
+| 7          | `.`                                                                                            | Function Composition                                                                   |
 | 8          | `<`, `<=`, `>`, `>=`, `==`, `!=`                                                               | Less Than, Less Than or Equal, Greater Than, Greater Than or Equal, Equals, Not Equals |
 | 9          | `and`, `or`                                                                                    | Logical And, Logical Or                                                                |
 | 10         | `=`, `+=`, `-=`, `*=`, `/=`, `&=`, `∣=`, `^=`, `<<=`, `>>=`, `%=`, `**=`, `.=`, `max=`, `min=` | Assignment, and Operator Assignment                                                    |
@@ -83,24 +164,148 @@ Even with assignments:
 let x = 1, y = 2, z = 3
 ```
 
-### Functions
-
-Cordy has functions as a first class type, so they can be declared anywhere. It also supports anonymous (lambda) functions which can be used as part of expressions. A function begins with `fn`, followed by a name (if it is not an anonymous function), and then the function body:
+Variables with the same name may not be re-declared within the same scope:
 
 ```rust
-// the most basic function, `foo`, which does nothing
-fn foo() {}
-
-// this is an anonymous function, assigned to the variable `f`
-let f = fn() {}
-
-// this is a function which is immediately evaluated
-(fn() { ... })()
+let x = 1
+let x = 2 // Compile Error!
 ```
 
-The body of a function can either be a block statement (a series of statements wrapped in `{` curly `}` brackets), or it can be an arrow `->` followed by a single expression.
+However, variables in outer scopes may be shadowed by variables in inner scopes:
 
-A function will return the last expression present in the function, or whenever a `return` keyword is reached.
+```rust
+let x = 1
+if x > 0 {
+    let x = 2
+    print x // prints 2
+}
+print x // prints 1
+```
+
+Variable names are mostly unrestricted - they may be any alphanumeric identifier that starts with a alphabetic character. However they may _not_ share the name with a native function, of which the full list is found in the [library](https://alcatrazescapee.com/cordy/library/) documentation.
+
+```rust
+let map // Compile Error!
+```
+
+### Functions
+
+Functions in Cordy come in many different types. First, Cordy has a number of _native functions_ which are provided by the Cordy standard library. These take the form of a few reserved keywords, like `print`, `map` and `int`.
+
+Functions can be _called_ in three different ways:
+
+- C-style, with the function arguments in `(` parenthesis `)` following the function name.
+- Haskell-style, with the `.` operator, where the function name comes _after_ the function.
+- C-style-with-less-typing, where if the arguments are simply space separated after the function name, they are treated (in most cases) as a function call.
+
+```java
+>>> print('hello') // calls 'print' with the argument 'hello'
+hello
+>>> 'world' . print // calls 'print' with the argument 'world'
+world
+>>> print 'goodbye' // calls 'print' with the argument 'goodbye'
+goodbye
+```
+
+Note that the last type of evaluation is not always possible, and if it would be ambiguous with some other syntax, that is universally preferred. For example:
+
+```rust
+foo [1] // Evaluates to `foo[1]`, not `foo([1])`
+```
+
+Also note that when placed this way, arguments are evaluated _one by one_, meaning `foo 1 2 3` will be interpreted as `foo(1)(2)(3)`. This may be not an issue however, due to the presence of _partial functions_...
+
+#### Partial Functions
+
+Some native functions, and all user-defined functions, can be _partially evaluated_. This means that a function can be invoked with less than the required number of arguments, and it will return a new function which only needs to be invoked with the remaining arguments. One such example from the Cordy standard library is `map`:
+
+```rust
+let my_list = [1, -2, 3, -4, 5]
+
+map(abs, my_list) // returns [1, 2, 3, 4, 5]
+
+// We can partially evaluate `map(abs)` and then invoke that as a function
+let f = map(abs)
+f(my_list) // returns [1, 2, 3, 4, 5]
+
+// Due to ( ) evaluation having higher precedence than . evaluation, we can also chain these two:
+my_list . map(abs) // returns [1, 2, 3, 4, 5]
+
+// This is also equivalent to the above
+my_list . map abs // returns [1, 2, 3, 4, 5]
+```
+
+This mixing of the function composition operator (`.`) and regular function calls means that long sequential statements in Cordy can be written in a very functional style:
+
+```java
+'123456789' . map(int) . filter(>3) . sum . print // Prints 39
+```
+
+#### Operator Functions
+
+In addition to the Cordy standard library, which provides a number of _native functions_, every operator in Cordy can also be used as a function by surrounding it in `(` parenthesis `)`. For example:
+
+```rust
+let add = (+)
+
+add(2, 3) // returns 5
+```
+
+Note in some cases the additional parenthesis can be omitted, for instance if passing an operator to a function:
+
+```python
+>>> print(+)
+(+)
+```
+
+Operators can be partially evaluated by placing the partial argument either to the left, or right, of the operator. The placement affects which side of the operator is treated as partially evaluated:
+
+```rust
+let divide_3_left = (/6)
+let divide_3_right = (6/)
+
+divide_3_left(18) // same as 18/6 = 3
+divide_3_right(3) // same as 6/3 = 2
+```
+
+Note that the parenthesis can also be omitted in the partial-evaluated operator when passing to a function:
+
+```rust
+[1, 2, 3, 4, 5] . filter(>3) // returns [4, 5]
+```
+
+#### User Functions
+
+In addition to native and operator functions, Cordy allows the user to declare their own functions. These are variables, declared with the `fn` keyword.
+
+- Functions can either be _named_, or _anonymous_. Named functions declare themselves as a variable and are statements, while anonymous functions do not declare a variable, and are part of expressions.
+- Functions can define _parameters_, including both default parameters and variadic parameters, which affect the arguments passed to the function.
+- The body of a function can either be an _expression_ (indicated by a `->`) or a series of statements (indicated by `{ }`).
+- Functions always return a value: either the last expression in the function, or `nil` if no such expression was present, or via an explicit `return` keyword.
+- All user functions are _partial_ when evaluated with less than their required number of arguments.
+
+**Examples:**
+
+```rust
+// A function named 'foo' which is followed by a statement body. It prints 'hello' and then returns 'world'
+fn foo() {
+    print('hello')
+    return 'world'
+}
+
+// An anonymous function, which is stored in the variable 'f'. It takes one argument, and returns that argument plus three
+let f = fn(x) -> x + 3
+
+// A function named 'norm1' which takes two arguments, and returns the 1-norm of (x, y).
+fn norm1(x, y) -> abs(x) + abs(y)
+
+// A function named 'goodbye' which prints 'goodbye' and then returns nil.
+fn goodbye() {
+    print('goodbye')
+}
+```
+
+As above, functions will return the last expression present in the function, or one specified via a `return` keyword. If no expression is given, they will return `nil`:
 
 ```rust
 // these functions are semantically equivalent
@@ -115,104 +320,17 @@ fn three() {
 fn three() -> 3
 ```
 
-#### Native and Operator Functions
-
-Cordy has a number of [Native Functions](./stdlib.md), which can be used as normal functions. In addition to these, each operator is also a function, which can be referenced by placing it in `(` parentheses `)`.
-
-```rust
-let addition = (+)
-```
-
-Note in some cases the additional parenthesis can be omitted, for instance if passing an operator to a function:
-
-```python
->>> print(+)
-(+)
-```
-
-One such important native function is `print`, which prints all arguments, space separated, to standard out, followed by a newline:
-
-```rust
-// rite of passage!
-print('hello world!')
-```
-
-In addition, special types can be written for writing indexing and slicing. A list with one integral element can be used as a function to index with that element, and slice literals can be written, which can be used as functions to perform slicing operations:
-
-```rust
-// Indexes 'foo' at index 'bar'
-foo . [bar]
-
-// Slices 'foo' with the given slice
-foo . [2:4]
-```
-
-#### Function Evaluation
-
-Functions can be invoked in two ways. First, in a C-style function invocation, the function name and passing arguments within brackets:
-
-```rust
-// calls the function foo with the arguments 1, 2
-foo(1, 2)
-```
-
-Alternatively, single-argument functions can be invoked with the `.` operator, which reverses the order of function and argument:
-
-```rust
-// same as writing foo('hello')
-'hello' . foo
-```
-
-Finally, functions can also be evaluated, one argument at a time, left associatively, simply by adjacent whitespace (but not newline!) separated arguments after the function:
-
-```rust
-// same as writing `foo(1)(2)(3)`, which is the same as `foo(1, 2, 3)` if `foo` returns partial functions for the first two arguments
-foo 1 2 3
-```
-
-Note that this is not always possible, and if it would be ambiguous with some other syntax, that is universally preferred. For example:
-
-```rust
-foo [1] // Evaluates to `foo[1]`, not `foo([1])`
-foo [1, 2] // Syntax error - not a valid index or slice.
-```
-
-#### Partial Functions
-
-Functions can be *partially evaluated*, that is, if a function is evaluated with less than the required number of arguments, it returns a new function which can be evaluated with the remaining arguments:
+User functions can be _partially evaluated_:
 
 ```rust
 // foo takes three arguments
-fn foo(a, b, c) {}
+fn foo(a, b, c) {
+    a + ' and ' + b + ' or ' + c
+}
 
-// this creates a partial function...
 let partial_foo = foo(1, 2)
-
-// ...which only needs the third argument
-partial_foo(3)
+partial_foo(3) // returns '1 and 2 or 3'
 ```
-
-Operators can also be partially evaluated, and like above, the parenthesis can be omitted around the operator:
-
-```rust
-let add3 = (+3)
-add3(4) // returns 7
-```
-
-Note that function evaluation with `()` is high precedence, whereas function evaluation with `.` is low precedence. This can be used alongside partial functions to great effect:
-
-```cpp
-// Note that
-input . map(int)
-
-// is the same as
-map(int, input)
-
-// but the former is more readable in long statements, for example:
-input . map(int) . filter(>0) . reduce(+) . print
-```
-
-#### More Function Syntax
 
 Functions can define optional and default arguments. All optional and default arguments must come after all other arguments in the function. Functions can be invoked with or without their optional or default arguments, which will take the default value `nil` (for optional arguments), or the default value (for default arguments).
 
@@ -257,28 +375,15 @@ foo(...[1, 2], 3) // they can be used with normal arguments, in any order
 foo(...[], 1, ...[2], 3, ...[]) // An empty iterable is treated as adding no new arguments
 ```
 
-Finally, in addition to argument unrolling in function calls, function declarations support [pattern matching](#pattern-matching) as arguments. An argument can be directly defined as a pattern variable, for example:
+In addition to this, they support variadic arguments (via a `*` like in Python). These must be the last argument in the function, and they collect all arguments into a vector when called:
 
 ```rust
-fn(pair) {
-    let x, y = pair
-}
-// is identical to
-fn ((x, y)) {
-    //...
-}
-```
+// Note that `b` will be a vector of all arguments excluding the first. It may be empty.
+fn foo(a, *b) -> print(b)
 
-In addition to this, they support bare `*` arguments like in Python. These must be the last argument in the function, and they collect all arguments into a vector when called:
-
-```rust
-// Note that `b` will be a vector of all arguments excluding the first
-// It may be empty
-fn foo(a, *b) -> print(a, ...b)
-
-foo('hello') // prints 'hello'
-foo('hello', 'world') // prints 'hello world'
-foo('hello', 'world', 'and', 'others') // prints 'hello world and others'
+foo('hello') // prints ()
+foo('hello', 'world') // prints ('world')
+foo('hello', 'world', 'and', 'others') // prints ('world', 'and', 'others')
 ```
 
 #### Closures
@@ -312,7 +417,7 @@ numbers . map(fn(f) -> f()) . print
 Will print the sequence `[1, 2, 3, 4, 5]`, as intuitively expected.
 
 
-### Control Structures
+### Control Flow
 
 Cordy has a number of procedural style control structures, some familiar from C, Python, or Rust.
 
@@ -324,7 +429,7 @@ loop {
 }
 ```
 
-`while` is a conditional loop which evaluates so long as the expression returns truthy:
+`while` is a conditional loop which evaluates so long as the expression returns a truthy value (N.B. `false`, `0`, `nil`, `''`, and empty collections are all falsey values - everything else is truthy.):
 
 ```rust
 while condition {
@@ -387,50 +492,57 @@ if condition1 {
 
 Note that `if`, `else` with `{` curly brackets `}` are **not** expressions, and thus don't produce a value, however the `if`, `then`, `else` block is, and so **does** produce a value.
 
-### Collection Types
+### Advanced Cordy
 
-In addition to primitive types, Cordy supports a number of mutable collection types. These are:
+The below series of features are arbitrarily deemed advanced. 
 
-- `list`: A list of arbitrary type objects. It is implemented with a ring buffer, and so supports O(1) push front and back.
-  - List literals can be declared with `[` square `]` brackets.
-  - Lists can be accessed using array syntax, i.e. `my_list[1]`
-  - Negative indexes wrap to the end of the list, i.e. `my_list[-1]` is the last element in the list
-  - Lists (and strings) can also be sliced via `list[start:stop:step]`, using Python-like slicing mechanics, i.e. `my_list[2:]` takes everything after the first two elements.
+#### Slicing
 
-```rust
-let my_list = [1, 2, 3, 4]
-```
+List, vector, and string indexing works identically to Python:
 
-- `set`: A hash set with unique elements, and O(1) `in` checks.
-- `dict`: A hash map, with O(1) element lookup, and optional support for default values.
-  - Accessing and mutating the `dict` can be done with array-like syntax:
+- All indexing is zero-based, with `0` being the first index, and `len(x) - 1` being the last.
+- Indexing can be _negative_, counting backwards from the last index, so `-1` is the last index, `-2` is the second last index, and `-len(x)` is the first.
 
 ```rust
-let my_dict = dict()
-my_dict['hello'] = 'world'
-my_dict['hello'] . print
+>>> let my_list = [1, 2, 3, 4, 5]
+>>> my_list[0]
+1
+>>> my_list[len(my_list) - 1]
+5
+>>> my_list[-1]
+5
+>>> my_list[-3]
+3
 ```
 
-- `heap`: A min-heap, implemented as a binary heap, with O(log n) access to the minimum element.
-- `vector`: A `list` like data type, but with a fixed length, and where all operations behave in an element-wise fashion.
-  - Operating on a vector and a constant will apply the constant to each element of the vector:
-  - Vectors can be declared in literals like lists, but with `(` parenthesis `)`.
-  - Single argument vectors require a trailing comma (i.e. `(1,)`, not `(1)`)
+Lists, vectors, and strings can also be _sliced_ like in Python. A slice takes the form `[ <start> : <stop> : <step> ]` or `[ <start> : <stop> ]`.
 
+- Any argument can be omitted (or `nil`), in which case it will be treated as slicing to the start or end, inclusive.
+- `<step>` indicates what direction the slice will take, and by how much. If it is not present, the slice will step by 1.
+- Slices support negative indices in the same manner as above.
+
+**Examples**
+
+```python
+>>> [1, 2, 3, 4] [:]
+[1, 2, 3, 4]
+>>> [1, 2, 3, 4] [1:]
+[2, 3, 4]
+>>> [1, 2, 3, 4] [:2]
+[1, 2]
+>>> [1, 2, 3, 4] [:-2]
+[1, 2]
+>>> [1, 2, 3, 4] [1::2]
+[2, 4]
+>>> [1, 2, 3, 4] [1:-1:3]
+[2]
+>>> [1, 2, 3, 4] [3:1:-1]
+[4, 3]
 ```
->>> (1,)
-(1)
->>> (1, 2, 3)
-(1, 2, 3)
->>> (1, 2, 3) * (2, 4, 6)
-(2, 8, 18)
->>> (1, 2, 3) * 3
-(3, 6, 9)
-```
 
-### Pattern Matching
+#### Pattern Matching
 
-Variable declarations, both in `let` statements, and in the declaration of a `for-in` loop, support pattern matching / destructuring. This takes the form of mirroring the iterable-like structure, like Python:
+Variable declarations support pattern matching / destructuring. This takes the form of mirroring the iterable-like structure, like Python.
 
 ```rust
 // multiple variables 'unpack' the list
@@ -449,28 +561,28 @@ let a, (b, c), d = [[1, 2], [3, 4], [5, 6]]
 let _, _, x, _ = [1, 2, 3, 4]
 ```
 
-Pattern matching is also supported within function arguments:
+Pattern matching is supported in:
+
+- Variable declarations (`let` statements)
+- Expressions, if all the variables are already declared
+- The variable declaration in a `for` loop
+- Function arguments (when surrounded with parenthesis)
+
 
 ```rust
-// This function:
-fn flip((x, y)) -> (y, x)
-
-// Is semantically identical to this one
-fn flip(pair) {
-    let x, y = pair
-    return (y, x)
-}
-```
-
-And within expressions, if all the variables are declared:
-
-```rust
+// In expressions
 let a, b, c
 
 a = b, c = (1, 2) // assigns a = (1, 2), b = 1, c = 2
+
+// In 'for' loops
+for x, y in 'hello' . enumerate {}
+
+// In function arguments
+fn flip((x, y)) -> (y, x)
 ```
 
-### Decorators
+#### Decorators
 
 Named functions can optionally be *decorated*, which is a way to modify the function in-place, without having to reassign to it. A decorator consists of a `@` followed by an expression, before the function is declared:
 
@@ -495,7 +607,7 @@ fn run(f) -> f()
 fn do_stuff() { print('hello world') } // prints 'hello world' immediately, and assigns `do_stuff` to `nil`
 ```
 
-### Assertions
+#### Assertions
 
 The `assert` keyword can be used to raise an error, or assert a condition is true. Note that runtime errors in cordy are **unrecoverable**, meaning if this assertion fails, the program will effectively call `exit`. An assert statement consists of `assert <expression>`, optionally followed by `: <expression>`, where the second expression will be used in the error message.
 
@@ -515,40 +627,136 @@ Assertion Failed: message goes here
 2 |        ^^^^^
 ```
 
-### Structs
+#### Structs and Modules
 
-A `struct` is a user definable type which is able to have named fields. It can be declared much like a function, with the keyword `struct`, followed by the struct name, and then the field names in `(` parenthesis `)`. Structs have a few important properties:
+Cordy can allow the user to define their own type via _structs_. These are a type with a fixed set of values that can be accessed with the field access operator `->`. They can be used to program in an object-oriented style within Cordy.
 
-- A struct can only be declared as a global variable, and thus can be referenced from anywhere in the program.
-- The struct name can be invoked as a function, which creates a new instance of the struct with the provided default values for each field.
-- Structs `typeof`, `is`, and `==` operators treat different structs as entirely different types.
-
-Examples:
+A struct is declared with the `struct` keyword, a struct name, and a list of field names. These names - unlike variable declarations - may shadow native function names or other variable names:
 
 ```rust
-// An empty struct with no fields.
-struct Empty()
-
-// The only instance of Empty() that can be created
-let empty = Empty()
-
-// A struct with two fields `x` and `y`
-struct Point2D(x, y)
-
-// prints `Point2D(x=3, y=4)`
-let pos_3_4 = Point2D(3, 4)
-pos_3_4 . print
+>>> struct Point(x, y)
 ```
 
-In order to access the field of a struct, the `->` operator can be used. This *can* be partially right evaluated, i.e. `->foo`. Note that the name of a field must be declared before it can be used, but unlike variables and functions, the name of a field can shadow other variables and native function names.
+New instances of a struct can be created by invoking the struct name as a function:
 
 ```rust
-struct Foo(bar, baz)
+>>> let p = Point(2, 3)
+>>> p
+Point(x=2, y=3)
+```
 
-let foo = Foo('bar', 'baz')
+Fields can be individually accessed or mutated with the `->` operator:
 
-foo->bar . print // prints 'bar'
+```rust
+>>> p->x
+2
+>>> p->x = 5
+5
+>>> p
+Point(x=2, y=3)
+```
 
-let get_baz = (->baz)
-get_baz(foo) . print // prints 'baz'
+When declaring a struct, it can be optionally followed by an _implementation_ block. This block of code can define functions which are local to the struct - called _struct methods_.
+
+```rust
+struct Point(x, y) {
+    fn zero() -> Point(0, 0)
+}
+```
+
+These functions can be invoked as fields on the _struct name_ itself:
+
+```rust
+>>> Point->zero()
+Point(x=0, y=0)
+```
+
+Note that struct methods can optionally take a `self` keyword as their first parameter. This creates _instance methods_, which can be invoked on instances of the struct. These have a few important properties:
+
+- The `self` keyword is a local variable which accesses the instance itself. It can be used to access fields, or call other instance methods on the struct.
+- Within an instance method, fields and other instance methods can be referenced _without_ a field access - these will be bound at compile time to the correct method.
+- When calling an instance method, the `self` parameter is automatically filled from the instance - it does not need to be provided explicitly.
+- Instance methods can be accessed from the struct type itself, in which case they are treated as normal methods that take the instance as their first parameter.
+
+**Examples:**
+
+```rust
+struct Point(x, y) {
+    fn norm1(self) {
+        abs(self->x) + abs(y) // Fields can be accessed with or without 'self->'
+    }
+
+    fn is_norm1_smaller_than(self, d) {
+        norm1() < d // Methods can be called, where 'self->' is implicit.
+    }
+}
+
+let p = Point(3, 5)
+
+p->norm1() // Returns 8
+Point->norm1(p) // Returns 8
+
+p->is_norm1_smaller_than(10) // Returns 'true'
+```
+
+**Modules** are like structs, but with a few key differences:
+
+- They do not have fields.
+- They are not able to be constructed into instances.
+- They cannot have `self` methods.
+
+```rust
+module Powers {
+    fn square(x) -> x ** 2
+    fn cube(x) -> x ** 3
+}
+
+Powers->square(3) // Returns 9
+Powers->cube(4) // Returns 64
+```
+
+#### Native Modules and FFI
+
+Cordy has a basic FFI (Foreign Function Interface) that can be used to interface with external C-compatible libraries. In order to do this, _native modules_ are required. A native module is like a normal module with a few differences:
+
+- The keyword `native` comes before `module`
+- Any functions may **not** have implementations - either block statements or expressions
+- Function parameters are restricted - pattern matching is not supported (although optional, default, and variadic arguments are).
+
+```rust
+// In a file my_ffi_test.cor
+native module my_ffi_module {
+    fn hello_world()
+}
+
+my_ffi_module->hello_world()
+```
+
+When compiling `cordy`, for each native module present in the Cordy code, it will need to provide a `--link` (or `-l`) argument in order to link the native module, with a compile shared object library:
+
+```bash
+$ cordy --link my_ffi_module=my_ffi_lib.so 
+```
+
+This native module must then export the symbol `hello_world` as a function - compatible with C. In order to do this, and facilitate the passing of values to and from native code, there is a [header](https://github.com/alcatrazEscapee/Cordy/blob/main/cordy/cordy.h) which can be used to create a C-compatible function. This provides a number of types and macros to make writing Cordy FFI functions easier.
+
+**Example:**
+
+```c
+// In a file my_ffi_lib.c
+#include <stdio.h>
+#include "cordy.h"
+
+CORDY_EXTERN(hello_world) {
+    printf("Hello World!\n");
+    return NIL()
+}
+```
+
+This can then be compiled and invoked with the `--link` parameter mentioned above:
+
+```bash
+$ gcc -shared -o my_ffi_lib.so my_ffi_lib.c
+$ cordy --link my_ffi_module=my_ffi_lib.so my_ffi_test.cor
+Hello World!
 ```

@@ -60,7 +60,7 @@ print(answer)
 
 ```
 
-For a more comprehensive documentation, see the [language documentation](./docs/language.md) or the [standard library](./docs/stdlib.md).
+For a more comprehensive documentation, see the [language documentation](https://alcatrazescapee.com/cordy/language/) or the [standard library](https://alcatrazescapee.com/cordy/library/).
 
 ### Usage
 
