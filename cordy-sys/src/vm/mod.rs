@@ -14,7 +14,6 @@ use crate::core::Pattern;
 pub use crate::vm::error::{DetailRuntimeError, RuntimeError};
 pub use crate::vm::opcode::{Opcode, StoreOp};
 pub use crate::vm::value::{AnyResult, C64, ErrorResult, FunctionImpl, guard_recursive_hash, IntoDictValue, IntoIterableValue, IntoValue, Iterable, LiteralType, MAX_INT, MIN_INT, Prefix, StructTypeImpl, Type, ValueOption, ValuePtr, ValueResult, Method};
-pub use crate::vm::ffi::FunctionInterface;
 
 use Opcode::{*};
 use RuntimeError::{*};
@@ -24,7 +23,6 @@ pub mod operator;
 mod opcode;
 mod value;
 mod error;
-mod ffi;
 
 /// Per-test, how many instructions should be allowed to execute.
 /// This primarily prevents infinite-loop tests from causing tests to hang, allowing easier debugging.
@@ -81,6 +79,19 @@ impl ExitType {
             Err(RuntimeYield) => ExitType::Yield,
             Err(error) => ExitType::Error(error.with_stacktrace(vm.ip - 1, &vm.call_stack, &vm.constants, &vm.locations)),
         }
+    }
+}
+
+
+pub trait FunctionInterface {
+
+    /// Handles a foreign function call from the given ID.
+    fn handle(&mut self, functions: &FunctionLibrary, handle_id: u32, args: Vec<ValuePtr>) -> ValueResult;
+}
+
+impl FunctionInterface for Noop {
+    fn handle(&mut self, _ : &FunctionLibrary, _: u32, _: Vec<ValuePtr>) -> ValueResult {
+        panic!("Natives are not supported for Noop");
     }
 }
 

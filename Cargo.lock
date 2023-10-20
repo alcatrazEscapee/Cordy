@@ -170,7 +170,6 @@ dependencies = [
  "cordy-test",
  "criterion",
  "fxhash",
- "indexmap",
  "libloading",
  "mimalloc",
  "rustyline",
