@@ -573,14 +573,27 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn push_store_lvalue(&mut self, lvalue: LValueReference, loc: Location) {
+    pub fn push_store_lvalue_prefix(&mut self, lvalue: &LValueReference, loc: Location) {
+        match lvalue {
+            LValueReference::ThisField { upvalue, index, .. } => {
+                self.push_with(if *upvalue { PushUpValue(*index) } else { PushLocal(*index) }, loc);
+            },
+            _ => {}, // No-op
+        }
+    }
+
+    pub fn push_store_lvalue(&mut self, lvalue: LValueReference, loc: Location, prefix: bool) {
         match lvalue {
             LValueReference::Local(index) => self.push_with(StoreLocal(index, false), loc),
             LValueReference::Global(index) => self.push_with(StoreGlobal(index, false), loc),
             LValueReference::UpValue(index) => self.push_with(StoreUpValue(index), loc),
-            LValueReference::ThisField { upvalue, index, field_index } => {
-                self.push_with(if upvalue { PushUpValue(index) } else { PushLocal(index) }, loc);
-                self.push_with(Swap, loc); // Need the `self` to be below the field to be assigned
+
+            ref lvalue @ LValueReference::ThisField { field_index, .. } => {
+                // If the prefix was not pushed, we have to push `self` and then swap so `self` is below the target value
+                if !prefix {
+                    self.push_store_lvalue_prefix(lvalue, loc);
+                    self.push_with(Swap, loc); // Need the `self` to be below the field to be assigned
+                }
                 self.push_with(SetField(field_index), loc);
             }
 

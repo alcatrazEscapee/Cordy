@@ -456,7 +456,7 @@ impl LValue {
             },
             LValue::Named(local) | LValue::VarNamed(local) => {
                 if !in_place {
-                    parser.push_store_lvalue(local, parser.prev_location());
+                    parser.push_store_lvalue(local, parser.prev_location(), false);
                     if !in_expression {
                         parser.push(Pop);
                     }

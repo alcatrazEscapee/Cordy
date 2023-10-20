@@ -78,12 +78,14 @@ mod tests {
     #[test] fn test_partial_function_call_merge_two_arg_unroll_3() { run("map(...1)()", "Map Int(1) Unroll Call...(1) Call(0) Pop") }
     #[test] fn test_store_global_pop_is_merged() { run("let x; x = 1", "InitGlobal Nil Int(1) StoreGlobalPop(0)->x Pop") }
     #[test] fn test_store_global_is_not_pop() { run("let x; print(x = 1)", "InitGlobal Nil Print Int(1) StoreGlobal(0)->x Call(1) PopN(2)") }
+    #[test] fn test_struct_assign_field_has_no_swap() { run("struct A(a) { fn b(self) { a = 1 } }", "InitGlobal StructType(structA(a)) Pop PushLocal(0)->self Int(1) SetField(0)->a Return") }
 
     fn run(text: &'static str, expected: &'static str) {
-        let expected: String = format!("{}\nExit", expected.replace(" ", "\n"));
+        let expected: String = expected.replace(" ", "\n");
         let actual: String = compiler::compile(true, &SourceView::new(String::new(), String::from(text)))
             .expect("Failed to compile")
-            .raw_disassembly();
+            .raw_disassembly()
+            .replace("\nExit", "");
 
         util::assert_eq(actual, expected);
     }
