@@ -3,7 +3,7 @@ use std::io::{Write};
 use crate::{compiler, SourceView};
 use crate::compiler::{IncrementalCompileResult, Locals};
 use crate::util::Noop;
-use crate::vm::{ExitType, VirtualInterface, VirtualMachine};
+use crate::vm::{ExitType, FunctionInterface, VirtualInterface, VirtualMachine};
 
 
 /// A trait implementing a predictable, callback-based reader. This is the implementation used by the executable REPL
@@ -17,13 +17,13 @@ pub trait Reader {
     fn read(&mut self, prompt: &'static str) -> ReadResult;
 }
 
-pub struct Repl<W: Write> {
+pub struct Repl<W: Write, F : FunctionInterface> {
     /// If `repeat_input` is true, everything written to input will be written directly back to output via the VM's `println` functions
     /// This is used for testing purposes, as the `writer` must be given solely to the VM for output purposes.
     repeat_input: bool,
     continuation: bool,
     locals: Vec<Locals>,
-    vm: VirtualMachine<Noop, W, Noop>
+    vm: VirtualMachine<Noop, W, F>
 }
 
 
@@ -46,8 +46,8 @@ pub enum RunResult {
 }
 
 /// Create a new REPL, and invoke it in a loop with the given `Reader` until it is exhausted.
-pub fn run<R : Reader, W: Write>(mut reader: R, writer: W, repeat_input: bool) -> Result<(), String> {
-    let mut repl: Repl<W> = Repl::new(writer, repeat_input);
+pub fn run<R : Reader, W: Write, F: FunctionInterface>(mut reader: R, writer: W, ffi: F, repeat_input: bool) -> Result<(), String> {
+    let mut repl: Repl<W, F> = Repl::new(writer, ffi, repeat_input);
     loop {
         let read = reader.read(repl.prompt());
         match repl.run(read) {
@@ -58,9 +58,9 @@ pub fn run<R : Reader, W: Write>(mut reader: R, writer: W, repeat_input: bool) -
     }
 }
 
-impl<W: Write> Repl<W> {
+impl<W: Write, F : FunctionInterface> Repl<W, F> {
 
-    pub fn new(writer: W, repeat_input: bool) -> Repl<W> {
+    pub fn new(writer: W, ffi: F, repeat_input: bool) -> Repl<W, F> {
         let compile = compiler::default();
         let view = SourceView::new(String::from("<stdin>"), String::new());
 
@@ -68,7 +68,7 @@ impl<W: Write> Repl<W> {
             repeat_input,
             continuation: false,
             locals: Locals::empty(),
-            vm: VirtualMachine::with(compile, view, writer)
+            vm: VirtualMachine::new(compile, view, Noop, writer, ffi)
         }
     }
 
@@ -135,6 +135,7 @@ impl<W: Write> Repl<W> {
 mod tests {
     use crate::{repl, util};
     use crate::repl::{Reader, ReadResult};
+    use crate::util::Noop;
 
     impl Reader for Vec<String> {
         fn read(self: &mut Self, _: &'static str) -> ReadResult {
@@ -296,7 +297,7 @@ string
             .map(String::from)
             .collect();
         let mut buf: Vec<u8> = Vec::new();
-        let result = repl::run(repl, &mut buf, true);
+        let result = repl::run(repl, &mut buf, Noop, true);
 
         assert!(result.is_ok());
         util::assert_eq(String::from_utf8(buf).unwrap(), String::from(outputs));

@@ -1,10 +1,10 @@
 #![feature(vec_into_raw_parts)]
 
 use std::{fs, io};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::collections::hash_map::Entry;
 use std::io::Write;
 use fxhash::FxBuildHasher;
-use indexmap::IndexMap;
 use rustyline::{DefaultEditor, Editor};
 use rustyline::error::ReadlineError;
 use mimalloc::MiMalloc;
@@ -75,7 +75,7 @@ fn main() {
     }
     let result = match options.file.take() {
         Some(name) => run_main(name, options),
-        None => run_repl()
+        None => run_repl(options)
     };
     match result {
         Ok(()) => {},
@@ -91,7 +91,7 @@ fn parse_args(args: Vec<String>) -> Result<Options, String> {
         mode: Mode::Default,
         optimize: false,
         no_line_numbers: false,
-        links: IndexMap::with_hasher(FxBuildHasher::default()),
+        links: HashMap::with_hasher(FxBuildHasher::default()),
         format_no_style: false,
         format_no: HashSet::with_hasher(FxBuildHasher::default()),
     };
@@ -113,8 +113,8 @@ fn parse_args(args: Vec<String>) -> Result<Options, String> {
                 let target = iter.next().ok_or(String::from("Missing argument after --link"))?;
                 let (module, library) = target.split_once('=').ok_or(format!("Missing '=' in --link argument {}", target))?;
                 match options.links.entry(String::from(module)) {
-                    indexmap::map::Entry::Occupied(_) => return Err(format!("Duplicate --link for module '{}'", module)),
-                    indexmap::map::Entry::Vacant(it) => it.insert(String::from(library)),
+                    Entry::Occupied(_) => return Err(format!("Duplicate --link for module '{}'", module)),
+                    Entry::Vacant(it) => it.insert(String::from(library)),
                 };
             }
             a if a.starts_with("--format-no=") => {
@@ -181,7 +181,7 @@ fn run_main(name: String, options: Options) -> Result<(), String> {
     }
 }
 
-fn run_vm(compiled: CompileResult, links: IndexMap<String, String, FxBuildHasher>, program_args: Vec<String>, view: SourceView) -> Result<(), String> {
+fn run_vm(compiled: CompileResult, links: HashMap<String, String, FxBuildHasher>, program_args: Vec<String>, view: SourceView) -> Result<(), String> {
     let stdin = io::stdin().lock();
     let stdout = io::stdout();
     let eli = ExternalLibraryInterface::new(links);
@@ -194,9 +194,9 @@ fn run_vm(compiled: CompileResult, links: IndexMap<String, String, FxBuildHasher
     }
 }
 
-pub fn run_repl() -> Result<(), String> {
+fn run_repl(options: Options) -> Result<(), String> {
     println!("Welcome to Cordy v{}! (exit with 'exit' or Ctrl-C)", SYS_VERSION);
-    repl::run(EditorRepl { editor: Editor::new().unwrap() }, io::stdout(), false)
+    repl::run(EditorRepl { editor: Editor::new().unwrap() }, io::stdout(), ExternalLibraryInterface::new(options.links), false)
 }
 
 
@@ -224,7 +224,7 @@ struct Options {
     mode: Mode,
     optimize: bool,
     no_line_numbers: bool,
-    links: IndexMap<String, String, FxBuildHasher>,
+    links: HashMap<String, String, FxBuildHasher>,
     format_no_style: bool,
     format_no: HashSet<ScanTokenType, FxBuildHasher>,
 }

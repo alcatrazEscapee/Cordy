@@ -1,6 +1,6 @@
 # Cordy Language
 
-Cordy is a dynamically typed, interpreted, semi-functional / semi-procedural language, designed to be fast to write for scripting and solving puzzles. Its design is inspired by parts of Python, Rust, Haskell, Java, Haskell, and JavaScript. This document assumes some prior programming experience.
+Cordy is a dynamically typed, interpreted, semi-functional / semi-procedural language, designed to be fast to write for scripting and solving puzzles. Its design is inspired primarily by Python, Rust, and Haskell. This document assumes some prior programming experience.
 
 ## Contents
 
@@ -8,7 +8,7 @@ Cordy is a dynamically typed, interpreted, semi-functional / semi-procedural lan
 2. [Expressions](#expressions)
     1. [Collections](#collections)
     2. [Operators](#operators)
-    3. [Precedence And Associativity](#precedence-and-associativity)
+    3. [Precedence and Associativity](#precedence-and-associativity)
 3. [Variables](#variables)
 4. [Functions](#functions)
     1. [Partial Functions](#partial-functions)
@@ -23,8 +23,6 @@ Cordy is a dynamically typed, interpreted, semi-functional / semi-procedural lan
     4. [Assertions](#assertions)
     5. [Structs and Modules](#structs-and-modules)
     6. [Native Modules and FFI](#native-modules-and-ffi)
-
-<hr>
 
 ### Introduction
 

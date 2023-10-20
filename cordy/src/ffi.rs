@@ -1,6 +1,7 @@
+use std::collections::hash_map::Entry;
+use std::collections::HashMap;
 use std::ffi::{c_char, c_void, CStr, CString};
 use fxhash::FxBuildHasher;
-use indexmap::IndexMap;
 use libloading::{Library, Symbol};
 use cordy_sys::compiler::FunctionLibrary;
 use cordy_sys::vm::{FunctionInterface, IntoValue, Type, ValuePtr, ValueResult};
@@ -51,14 +52,14 @@ pub struct CordyValue {
 /// The FFI instance type that is used in the VM.
 pub struct ExternalLibraryInterface {
     /// A map, provided by command line arguments, of module names -> file paths used for native modules.
-    links: IndexMap<String, String, FxBuildHasher>,
+    links: HashMap<String, String, FxBuildHasher>,
     /// A map of `library_id` to loaded `Library`
-    libraries: IndexMap<u32, Library, FxBuildHasher>,
+    libraries: HashMap<u32, Library, FxBuildHasher>,
 }
 
 impl ExternalLibraryInterface {
-    pub fn new(links: IndexMap<String, String, FxBuildHasher>) -> ExternalLibraryInterface {
-        ExternalLibraryInterface { links, libraries: IndexMap::with_hasher(FxBuildHasher::default()) }
+    pub fn new(links: HashMap<String, String, FxBuildHasher>) -> ExternalLibraryInterface {
+        ExternalLibraryInterface { links, libraries: HashMap::with_hasher(FxBuildHasher::default()) }
     }
 }
 
@@ -69,8 +70,8 @@ impl FunctionInterface for ExternalLibraryInterface {
 
         // Try and find the library by module name, and if not present, load one after mapping through the linked libraries
         let library: &mut Library = match self.libraries.entry(entry.module_id) {
-            indexmap::map::Entry::Occupied(e) => e.into_mut(),
-            indexmap::map::Entry::Vacant(e) => {
+            Entry::Occupied(e) => e.into_mut(),
+            Entry::Vacant(e) => {
                 let library_name = match self.links.get(&entry.module_name) {
                     Some(it) => it,
                     None => return OSError(format!("No --link provided for native module {}", entry.module_name)).err()

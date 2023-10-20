@@ -5,9 +5,10 @@ use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 
 use cordy_sys::{ScanTokenType, syntax, SYS_VERSION};
+use cordy_sys::compiler::FunctionLibrary;
 use cordy_sys::repl::{ReadResult, Repl, RunResult};
 use cordy_sys::syntax::{BlockingFormatter, Formatter};
-
+use cordy_sys::vm::{FunctionInterface, IntoValue, ValuePtr, ValueResult};
 
 
 #[allow(dead_code)]
@@ -145,8 +146,19 @@ impl Formatter for TerminalFormatter {
 }
 
 
+struct JsInterface;
+
+impl FunctionInterface for JsInterface {
+    fn handle(&mut self, library: &FunctionLibrary, handle_id: u32, args: Vec<ValuePtr>) -> ValueResult {
+        let function = library.lookup(handle_id);
+        let _ = Manager::get(&Lock).writer.write(format!("called native function '{}->{}{}'\n", function.module_name, function.method_name, args.to_value().to_repr_str().as_slice()).as_bytes());
+        ValuePtr::nil().ok()
+    }
+}
+
+
 struct Manager {
-    repl: Repl<SharedBufWriter>,
+    repl: Repl<SharedBufWriter, JsInterface>,
     writer: SharedBufWriter
 }
 
@@ -154,7 +166,7 @@ impl Manager {
     fn new() -> Manager {
         let writer: SharedBufWriter = SharedBufWriter(Rc::new(RefCell::new(Vec::new())));
         Manager {
-            repl: Repl::new(writer.clone(), false),
+            repl: Repl::new(writer.clone(), JsInterface, false),
             writer,
         }
     }
