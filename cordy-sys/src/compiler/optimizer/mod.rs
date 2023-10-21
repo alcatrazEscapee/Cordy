@@ -78,6 +78,10 @@ mod tests {
     #[test] fn test_partial_function_call_merge_two_arg_unroll_3() { run("map(...1)()", "Map Int(1) Unroll Call...(1) Call(0) Pop") }
     #[test] fn test_store_global_pop_is_merged() { run("let x; x = 1", "InitGlobal Nil Int(1) StoreGlobalPop(0)->x Pop") }
     #[test] fn test_store_global_is_not_pop() { run("let x; print(x = 1)", "InitGlobal Nil Print Int(1) StoreGlobal(0)->x Call(1) PopN(2)") }
+    #[test] fn test_store_global_then_load_has_no_pop() { run("let x, y; y = 1; x = y", "InitGlobal InitGlobal Nil Nil Int(1) StoreGlobal(1)->y StoreGlobalPop(0)->x PopN(2)"); }
+    #[test] fn test_store_local_pop_is_merged() { run("do { let x; x = 1 }", "Nil Int(1) StoreLocalPop(0)->x Pop") }
+    #[test] fn test_store_local_is_not_pop() { run("do { let x; print(x = 1) }", "Nil Print Int(1) StoreLocal(0)->x Call(1) PopN(2)") }
+    #[test] fn test_store_local_then_load_has_no_pop() { run("do { let x, y; y = 1; x = y }", "Nil Nil Int(1) StoreLocal(1)->y StoreLocalPop(0)->x PopN(2)"); }
     #[test] fn test_struct_assign_field_has_no_swap() { run("struct A(a) { fn b(self) { a = 1 } }", "InitGlobal StructType(structA(a)) Pop PushLocal(0)->self Int(1) SetField(0)->a Return") }
 
     fn run(text: &'static str, expected: &'static str) {

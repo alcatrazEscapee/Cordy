@@ -2,6 +2,7 @@ use crate::compiler::parser::expr::{Expr, ExprType};
 use crate::compiler::parser::Parser;
 use crate::vm::Opcode;
 use crate::vm::operator::{BinaryOp, CompareOp};
+use crate::compiler::ParserErrorType;
 use crate::compiler::parser::core::{BranchType, ForwardBlockId};
 use crate::compiler::optimizer::Optimize;
 
@@ -49,14 +50,14 @@ impl<'a> Parser<'a> {
                 self.emit_expr(*arg2);
                 if let Some(arg3) = *arg3 {
                     self.emit_expr(arg3);
-                    self.push_with(SliceWithStep, loc);
+                    self.push_at(SliceWithStep, loc);
                 } else {
-                    self.push_with(Slice, loc);
+                    self.push_at(Slice, loc);
                 }
             },
             Expr(loc, ExprType::Unary(op, arg)) => {
                 self.emit_expr(*arg);
-                self.push_with(Unary(op), loc);
+                self.push_at(Unary(op), loc);
             },
             Expr(loc, ExprType::Binary(op, lhs, rhs, swap)) => {
                 if swap {
@@ -67,7 +68,7 @@ impl<'a> Parser<'a> {
                     self.emit_expr(*lhs);
                     self.emit_expr(*rhs);
                 }
-                self.push_with(Binary(op), loc);
+                self.push_at(Binary(op), loc);
             },
             Expr(_, ExprType::Compare(lhs, mut ops)) => {
                 assert!(ops.len() > 1); // Any other situations should be expressed differently
@@ -93,7 +94,7 @@ impl<'a> Parser<'a> {
                 // <- fix all jumps to jump to here
                 let (loc, op, rhs) = ops.pop().unwrap();
                 self.emit_expr(rhs);
-                self.push_with(Binary(op.to_binary()), loc);
+                self.push_at(Binary(op.to_binary()), loc);
 
                 for (op, cmp) in compare_ops {
                     self.join_forward(cmp, BranchType::Compare(op));
@@ -111,7 +112,7 @@ impl<'a> Parser<'a> {
                                 acc_args = 0;
                             }
                             self.emit_expr(*unroll_arg);
-                            self.push_with(LiteralUnroll, arg_loc);
+                            self.push_at(LiteralUnroll, arg_loc);
                         },
                         _ => {
                             self.emit_expr(arg);
@@ -124,11 +125,11 @@ impl<'a> Parser<'a> {
                     self.push(LiteralAcc(acc_args));
                 }
 
-                self.push_with(LiteralEnd, loc);
+                self.push_at(LiteralEnd, loc);
             },
             Expr(loc, ExprType::Unroll(arg, first)) => {
                 self.emit_expr(*arg);
-                self.push_with(Unroll(first), loc);
+                self.push_at(Unroll(first), loc);
             },
             Expr(loc, ExprType::Eval(f, args, any_unroll)) => {
                 let nargs: u32 = args.len() as u32;
@@ -136,13 +137,13 @@ impl<'a> Parser<'a> {
                 for arg in args {
                     self.emit_expr(arg);
                 }
-                self.push_with(Call(nargs, any_unroll), loc);
+                self.push_at(Call(nargs, any_unroll), loc);
             },
             Expr(loc, ExprType::Compose(arg, f)) => {
                 self.emit_expr(*arg);
                 self.emit_expr(*f);
                 self.push(Swap);
-                self.push_with(Call(1, false), loc);
+                self.push_at(Call(1, false), loc);
             },
             Expr(_, ExprType::LogicalAnd(lhs, rhs)) => {
                 self.emit_expr(*lhs);
@@ -161,20 +162,20 @@ impl<'a> Parser<'a> {
             Expr(loc, ExprType::Index(array, index)) => {
                 self.emit_expr(*array);
                 self.emit_expr(*index);
-                self.push_with(OpIndex, loc);
+                self.push_at(OpIndex, loc);
             },
             Expr(loc, ExprType::Slice(array, arg1, arg2)) => {
                 self.emit_expr(*array);
                 self.emit_expr(*arg1);
                 self.emit_expr(*arg2);
-                self.push_with(OpSlice, loc);
+                self.push_at(OpSlice, loc);
             },
             Expr(loc, ExprType::SliceWithStep(array, arg1, arg2, arg3)) => {
                 self.emit_expr(*array);
                 self.emit_expr(*arg1);
                 self.emit_expr(*arg2);
                 self.emit_expr(*arg3);
-                self.push_with(OpSliceWithStep, loc);
+                self.push_at(OpSliceWithStep, loc);
             },
             Expr(_, ExprType::IfThenElse(condition, if_true, if_false)) => {
                 self.emit_expr(*condition);
@@ -187,22 +188,22 @@ impl<'a> Parser<'a> {
             },
             Expr(loc, ExprType::GetField(lhs, field_index)) => {
                 self.emit_expr(*lhs);
-                self.push_with(GetField(field_index), loc);
+                self.push_at(GetField(field_index), loc);
             },
             Expr(loc, ExprType::SetField(lhs, field_index, rhs)) => {
                 self.emit_expr(*lhs);
                 self.emit_expr(*rhs);
-                self.push_with(SetField(field_index), loc)
+                self.push_at(SetField(field_index), loc)
             },
             Expr(loc, ExprType::SwapField(lhs, field_index, rhs, op)) => {
                 self.emit_expr(*lhs);
-                self.push_with(GetFieldPeek(field_index), loc);
+                self.push_at(GetFieldPeek(field_index), loc);
                 self.emit_expr(*rhs);
-                self.push_with(Binary(op), loc);
-                self.push_with(SetField(field_index), loc);
+                self.push_at(Binary(op), loc);
+                self.push_at(SetField(field_index), loc);
             },
             Expr(loc, ExprType::GetFieldFunction(field_index)) => {
-                self.push_with(GetFieldFunction(field_index), loc);
+                self.push_at(GetFieldFunction(field_index), loc);
             },
             Expr(loc, ExprType::Assignment(lvalue, rhs)) => {
                 self.push_store_lvalue_prefix(&lvalue, loc);
@@ -213,28 +214,28 @@ impl<'a> Parser<'a> {
                 self.emit_expr(*array);
                 self.emit_expr(*index);
                 self.emit_expr(*rhs);
-                self.push_with(StoreArray, loc);
+                self.push_at(StoreArray, loc);
             },
             Expr(loc, ExprType::ArrayOpAssignment(array, index, op, rhs)) => {
                 self.emit_expr(*array);
                 self.emit_expr(*index);
-                self.push_with(OpIndexPeek, loc);
+                self.push_at(OpIndexPeek, loc);
                 self.emit_expr(*rhs);
                 match op {
                     BinaryOp::NotEqual => { // Marker to indicate this is a `array[index] .= rhs`
                         self.push(Swap);
-                        self.push_with(Call(1, false), loc);
+                        self.push_at(Call(1, false), loc);
                     },
-                    op => self.push_with(Binary(op), loc),
+                    op => self.push_at(Binary(op), loc),
                 }
-                self.push_with(StoreArray, loc);
+                self.push_at(StoreArray, loc);
             },
             Expr(_, ExprType::PatternAssignment(lvalue, rhs)) => {
                 self.emit_expr(*rhs);
                 lvalue.emit_destructuring(self, false, true);
             },
             Expr(loc, ExprType::RuntimeError(e)) => {
-                self.runtime_error(loc, e);
+                self.semantic_error_at(loc, ParserErrorType::Runtime(e));
             }
         }
     }

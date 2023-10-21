@@ -589,19 +589,11 @@ pub struct ParserFunctionImpl {
     /// Bytecode for the function body itself
     pub(super) code: Code,
 
-    /// Entries for `locals_reference`, that need to be held until the function code is emitted
-    locals_reference: Vec<String>,
-
     /// Constant index for this function, which is used to fix the function later
     constant_id: u32,
 }
 
 impl ParserFunctionImpl {
-    /// Empties and returns the local references for this parser function.
-    pub(super) fn emit_locals(&mut self) -> std::vec::Drain<'_, String> {
-        self.locals_reference.drain(..)
-    }
-
     /// Bakes this parser function into an immutable `FunctionImpl`.
     /// The `head` and `tail` pointers are computed based on the surrounding code.
     pub(super) fn bake(self, constants: &mut [ValuePtr], default_args: Vec<usize>, head: usize, tail: usize) {
@@ -815,7 +807,6 @@ impl<'a> Parser<'a> {
             native: false,
             instance: params.instance,
             code: Code::new(),
-            locals_reference: Vec::new(),
             constant_id,
         });
         constant_id
@@ -858,7 +849,7 @@ impl<'a> Parser<'a> {
             self.resolve_late_bindings(name.clone(), LateBound::Local(local.index));
 
             // Declare this global variable's name
-            self.globals_reference.push(name);
+            self.global_references.push(name);
         }
 
         if init {
@@ -956,15 +947,11 @@ impl<'a> Parser<'a> {
 
     /// Resolves any outstanding late bindings present at teardown, by either falling back to a global, or raises an error.
     pub fn resolve_remaining_late_bindings(&mut self) {
-        let bindings = std::mem::take(&mut self.late_bindings); // using `take()` here to clear without borrowing, unlike `drain(..)`
-
-        for binding in bindings {
+        for binding in self.late_bindings.drain(..) {
             if let Some(fallback) = binding.fallback {
-
-                // Update the binding if possible
                 match binding.ty {
-                    ReferenceType::Load(at) => self.insert(at, binding.loc, PushGlobal(fallback)),
-                    ReferenceType::Store(at) => self.insert(at, binding.loc, StoreGlobal(fallback, false)),
+                    ReferenceType::Load(at) => Parser::do_insert(at, binding.loc, PushGlobal(fallback), &mut self.functions),
+                    ReferenceType::Store(at) => Parser::do_insert(at, binding.loc, StoreGlobal(fallback, false), &mut self.functions),
                     _ => panic!()
                 }
             } else if binding.error {
@@ -973,14 +960,10 @@ impl<'a> Parser<'a> {
         }
 
         // Also emit errors for any missing used-but-not-declared fields
-        let mut errors: Vec<(Location, String)> = Vec::new(); // Indirection is again needed due to borrow annoyances
         for (field_name, field) in &self.fields.fields {
             if let Some(loc) = field.loc {
-                errors.push((loc, field_name.clone()));
+                Parser::do_error(loc, InvalidFieldName(field_name.clone()), false, &mut self.errors, &mut self.error_recovery);
             }
-        }
-        for (loc, field_name) in errors {
-            self.semantic_error_at(loc, InvalidFieldName(field_name));
         }
     }
 
@@ -1060,14 +1043,6 @@ impl<'a> Parser<'a> {
     pub fn current_function_mut(&mut self) -> &mut ParserFunctionImpl {
         let func: usize = self.current_locals().func.unwrap();
         &mut self.functions[func]
-    }
-
-    /// Returns the locals reference of the current function, like `current_function_mut()`
-    pub fn current_locals_reference_mut(&mut self) -> &mut Vec<String> {
-        match self.current_locals().func {
-            Some(func) => &mut self.functions[func].locals_reference,
-            None => self.locals_reference,
-        }
     }
 
     /// Resolves a reference like `resolve_reference()`, but requires that the reference returned be mutable (i.e. can be assigned to).

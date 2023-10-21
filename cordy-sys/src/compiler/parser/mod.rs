@@ -1,4 +1,6 @@
 use std::collections::VecDeque;
+use std::default::Default;
+use fxhash::FxBuildHasher;
 use indexmap::IndexSet;
 
 use crate::compiler::{CompileParameters, CompileResult};
@@ -44,8 +46,8 @@ pub(super) fn parse(enable_optimization: bool, scan_result: ScanResult) -> Compi
 }
 
 
-pub(super) fn parse_incremental(scan_result: ScanResult, params: &mut CompileParameters, rule: ParseRule) -> IndexSet<ParserError> {
-    let mut errors: IndexSet<ParserError> = IndexSet::new();
+pub(super) fn parse_incremental(scan_result: ScanResult, params: &mut CompileParameters, rule: ParseRule) -> IndexSet<ParserError, FxBuildHasher> {
+    let mut errors: IndexSet<ParserError, FxBuildHasher> = IndexSet::with_hasher(FxBuildHasher::default());
 
     rule(&mut Parser::new(params.enable_optimization, scan_result.tokens, params.code, &mut errors, params.constants, params.patterns, params.globals, params.locations, params.fields, params.functions, params.locals, &mut Vec::new()));
 
@@ -56,7 +58,7 @@ pub(super) fn parse_incremental(scan_result: ScanResult, params: &mut CompilePar
 fn parse_rule(enable_optimization: bool, tokens: Vec<(Location, ScanToken)>, rule: fn(&mut Parser) -> ()) -> CompileResult {
     let mut result = CompileResult {
         code: Vec::new(),
-        errors: IndexSet::new(),
+        errors: IndexSet::with_hasher(FxBuildHasher::default()),
 
         constants: Vec::new(),
         patterns: Vec::new(),
@@ -85,14 +87,14 @@ pub(super) struct Parser<'a> {
     raw_output: &'a mut Vec<Opcode>,
     output: Code,
     /// Use an `IndexSet` to keep consistent (insertion order) iteration, and also enforce strict uniqueness of errors
-    errors: &'a mut IndexSet<ParserError>,
+    errors: &'a mut IndexSet<ParserError, FxBuildHasher>,
 
     /// A 1-1 mapping of the output tokens to their location
     locations: &'a mut Vec<Location>,
     last_location: Option<Location>,
 
-    locals_reference: &'a mut Vec<String>, // A reference for local names on a per-instruction basis, used for disassembly
-    globals_reference: &'a mut Vec<String>, // A reference for global names, in stack order, used for runtime errors due to invalid late bound globals
+    local_references: &'a mut Vec<String>, // A reference for local names on a per-instruction basis, used for disassembly
+    global_references: &'a mut Vec<String>, // A reference for global names, in stack order, used for runtime errors due to invalid late bound globals
 
     /// If we are in error recover mode, this flag is set
     error_recovery: bool,
@@ -150,7 +152,7 @@ impl Parser<'_> {
 
         tokens: Vec<(Location, ScanToken)>,
         output: &'b mut Vec<Opcode>,
-        errors: &'b mut IndexSet<ParserError>,
+        errors: &'b mut IndexSet<ParserError, FxBuildHasher>,
 
         constants: &'b mut Vec<ValuePtr>,
         patterns: &'b mut Vec<Pattern<StoreOp>>,
@@ -173,8 +175,8 @@ impl Parser<'_> {
             locations,
             last_location: None,
 
-            locals_reference,
-            globals_reference,
+            local_references: locals_reference,
+            global_references: globals_reference,
 
             error_recovery: false,
             delay_pop_from_expression_statement: false,
@@ -235,7 +237,7 @@ impl Parser<'_> {
         if self.enable_optimization {
             self.output.optimize();
         }
-        self.output.emit(&mut self.raw_output, &mut self.locations);
+        self.output.emit(&mut self.raw_output, &mut self.locations, &mut self.local_references);
 
         // Resolve late bindings, which may emit code to functions (fallbacks)
         self.resolve_remaining_late_bindings();
@@ -247,14 +249,10 @@ impl Parser<'_> {
             }
 
             let head: usize = self.raw_output.len();
-            let starts = func.code.emit(&mut self.raw_output, &mut self.locations);
+            let starts = func.code.emit(&mut self.raw_output, &mut self.locations, &mut self.local_references);
             let default_args = func.default_args.iter()
                 .map(|block_id| starts[block_id.0] - head)
                 .collect::<Vec<usize>>();
-
-            for local in func.emit_locals() {
-                self.locals_reference.push(local);
-            }
 
             let tail: usize = self.raw_output.len() - 1;
 
@@ -442,7 +440,7 @@ impl Parser<'_> {
         }
 
         self.current_function_mut().set_native();
-        self.push_with(CallNative(handle_id), loc);
+        self.push_at(CallNative(handle_id), loc);
         self.push(Return);
 
         self.pop_locals(Some(self.scope_depth), true, false, false);
@@ -1000,7 +998,7 @@ impl Parser<'_> {
             }
         }
 
-        self.push_with(AssertFailed, loc); // Make sure the `AssertFailed` token has the same location as the original expression that failed
+        self.push_at(AssertFailed, loc); // Make sure the `AssertFailed` token has the same location as the original expression that failed
         self.join_forward(branch, BranchType::JumpIfTruePop)
     }
 

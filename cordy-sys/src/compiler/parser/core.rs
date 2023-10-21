@@ -3,13 +3,17 @@
 /// This implementation manages token advancing, error handling, and issues related to newline handling.
 /// It also handles the core structures representing the code flow graph (`Code`, `Block`, and branch handling).
 
+use std::collections::HashMap;
+use fxhash::FxBuildHasher;
+use indexmap::IndexSet;
+
 use crate::compiler::parser::{Parser, ParserError};
 use crate::compiler::parser::ParserErrorType;
-use crate::compiler::parser::semantic::{LValueReference, ReferenceType};
+use crate::compiler::parser::semantic::{LValueReference, ParserFunctionImpl, ReferenceType};
 use crate::compiler::scanner::ScanToken;
 use crate::reporting::Location;
 use crate::trace;
-use crate::vm::{Opcode, RuntimeError};
+use crate::vm::Opcode;
 use crate::vm::operator::CompareOp;
 
 use Opcode::{*};
@@ -21,9 +25,10 @@ use ScanToken::{*};
 /// - Each `Block` is uniquely identifiable by its index within `blocks`, meaning unique and persistent IDs may be taken
 /// - Blocks can form references to other blocks via these IDs in the form of `BlockEnd`
 /// - A unique identifier for a single opcode location can take the form of a block ID plus a opcode ID
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub struct Code {
-    pub blocks: Vec<Block>
+    pub blocks: Vec<Block>,
+    pub locals: HashMap<CodeId, String, FxBuildHasher>,
 }
 
 
@@ -33,7 +38,7 @@ pub struct Code {
 ///
 /// Note that some optimizations on a `Block` are destructive - i.e. they can delete Opcodes, and their corresponding IDs.
 /// Since we don't track these deleted IDs, this means that all outstanding late bindings need to be resolved before optimizations.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Eq, PartialEq)]
 pub struct Block {
     /// The code within the block, with each location holding:
     /// - A `usize` ID -> this will never change, and is what uniquely identifies a given opcode within a block.
@@ -44,7 +49,7 @@ pub struct Block {
 }
 
 /// An enum representing the terminal behavior of a `Block`
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Eq, PartialEq)]
 pub enum BlockEnd {
     /// The default value of a block, in that it does not connect to another block. `Return`, `Exit` or `Yield` opcodes will be inserted automatically.
     Exit,
@@ -78,18 +83,24 @@ pub enum BranchType {
     Jump, JumpIfTrue, JumpIfFalse, JumpIfTruePop, JumpIfFalsePop, Compare(CompareOp), TestIterable
 }
 
-/// Enough information to uniquely identify any given opcode, and either modify or insert after it. It contains three fields:
-/// - `function_id` : An index into the current function
+/// Enough information to uniquely identify any given opcode within a function:
+///
 /// - `block_id` : An index into the block of that function's code
 /// - `opcode_id` : An index into the block's `code`
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
+pub struct CodeId {
+    block_id: usize,
+    opcode_id: usize,
+}
+
+/// An extension of `OpcodeId` to also identify an enclosing function.
+///
+/// N.B. This does not allow identifying global code
 #[derive(Debug, Clone)]
 pub struct OpcodeId {
-    /// An index into the owning function, as part of the parser functions (or global code)
+    /// An index into the owning function, as part of the parser functions
     function_id: usize,
-    /// An index into the block within the function
-    block_id: usize,
-    /// An ID that identifies a unique opcode (not an index into `block.code`, but a ID that must be matched with the `code[i].0` value)
-    opcode_id: usize
+    code_id: CodeId,
 }
 
 /// An index into a given `Block`, used to identify **forward** branch targets.
@@ -105,13 +116,18 @@ pub struct ReverseBlockId(pub usize);
 impl Code {
 
     pub fn new() -> Code {
-        Code { blocks: vec![Block::new(BlockEnd::Exit)] }
+        Code {
+            blocks: vec![Block::new(BlockEnd::Exit)],
+            locals: HashMap::with_hasher(FxBuildHasher::default()),
+        }
     }
 
     /// Emits code within this code, joining all blocks together with standard jump instructions, and emitting `Location`s in parallel.
     ///
     /// Returns a vector of `block_id` -> `index` in the output.
-    pub fn emit(&mut self, code: &mut Vec<Opcode>, locations: &mut Vec<Location>) -> Vec<usize> {
+    ///
+    /// **Implementation Note:** This function does not take a `&mut Parser` for flexibility of partial borrows.
+    pub fn emit(&mut self, code: &mut Vec<Opcode>, locations: &mut Vec<Location>, locals: &mut Vec<String>) -> Vec<usize> {
         let mut starts: Vec<usize> = Vec::new(); // Indices into the start location of each block. These are the target of all jump instructions
         let mut branches: Vec<(usize, usize, BranchType)> = Vec::new(); // List of un-filled-in branches by index, jump-to-block_id, and branch type
 
@@ -120,9 +136,14 @@ impl Code {
             starts.push(code.len());
 
             // Emit all code within the block
-            for (_, loc, op) in block.code {
+            for (opcode_id, loc, op) in block.code {
                 code.push(op);
                 locations.push(loc);
+
+                // Emit matching locals for each opcode
+                if let Some(local) = self.locals.remove(&CodeId { block_id, opcode_id }) {
+                    locals.push(local);
+                }
             }
 
             // And handle the end of the block
@@ -166,8 +187,14 @@ impl Code {
     }
 
 
-    fn push(&mut self, loc: Location, opcode: Opcode) {
-        self.blocks.last_mut().unwrap().push(loc, opcode)
+    fn push(&mut self, loc: Location, opcode: Opcode, local: Option<String>) {
+        let block_id = self.blocks.len() - 1;
+        let opcode_id = self.blocks.last_mut().unwrap().push(loc, opcode);
+
+        if let Some(local) = local {
+            let code_id = CodeId { block_id, opcode_id };
+            self.locals.insert(code_id, local);
+        }
     }
 
     /// Used to create a forward branch from this point, which the target will be filled in later. Usage:
@@ -252,8 +279,10 @@ impl Block {
 
     // ===== Internals ===== //
 
-    fn push(&mut self, loc: Location, opcode: Opcode) {
-        self.code.push((self.code.len(), loc, opcode))
+    fn push(&mut self, loc: Location, opcode: Opcode) -> usize {
+        let opcode_id = self.code.len();
+        self.code.push((opcode_id, loc, opcode));
+        opcode_id
     }
 
     fn insert(&mut self, id: usize, loc: Location, opcode: Opcode) {
@@ -331,12 +360,16 @@ impl<'a> Parser<'a> {
         let block_id = blocks.len() - 1;
         let opcode_id = blocks[block_id].code.len();
 
-        OpcodeId { function_id, block_id, opcode_id }
+        OpcodeId { function_id, code_id: CodeId { block_id, opcode_id } }
     }
 
+    pub fn insert(&mut self, at: OpcodeId, loc: Location, opcode: Opcode) { Parser::do_insert(at, loc, opcode, &mut self.functions) }
+
     /// Inserts the provided instruction at the `OpcodeId`, and shifts all other code forward.
-    pub fn insert(&mut self, at: OpcodeId, loc: Location, opcode: Opcode) {
-        self.functions[at.function_id].code.blocks[at.block_id].insert(at.opcode_id, loc, opcode);
+    ///
+    /// **Implementation Note:** This does not take `&mut self` to allow the flexibility of partial borrows.
+    pub fn do_insert(at: OpcodeId, loc: Location, opcode: Opcode, functions: &mut Vec<ParserFunctionImpl>) {
+        functions[at.function_id].code.blocks[at.code_id.block_id].insert(at.code_id.opcode_id, loc, opcode);
     }
 
     /// In the parsing of `<term>` defined by the following grammar:
@@ -547,21 +580,21 @@ impl<'a> Parser<'a> {
     pub fn push_load_lvalue(&mut self, loc: Location, lvalue: LValueReference) {
         match lvalue {
             LValueReference::Local(index) |
-            LValueReference::LocalThis(index) => self.push_with(PushLocal(index), loc),
-            LValueReference::Global(index) => self.push_with(PushGlobal(index), loc),
+            LValueReference::LocalThis(index) => self.push_at(PushLocal(index), loc),
+            LValueReference::Global(index) => self.push_at(PushGlobal(index), loc),
             LValueReference::UpValue(index) |
-            LValueReference::UpValueThis(index) => self.push_with(PushUpValue(index), loc),
+            LValueReference::UpValueThis(index) => self.push_at(PushUpValue(index), loc),
             LValueReference::ThisField { upvalue, index, field_index } => {
-                self.push_with(if upvalue { PushUpValue(index) } else { PushLocal(index) }, loc);
-                self.push_with(GetField(field_index), loc);
+                self.push_at(if upvalue { PushUpValue(index) } else { PushLocal(index) }, loc);
+                self.push_at(GetField(field_index), loc);
             }
 
-            LValueReference::Method(index) => self.push_with(Constant(index), loc),
+            LValueReference::Method(index) => self.push_at(Constant(index), loc),
             LValueReference::ThisMethod { upvalue, index, function_id } => {
-                self.push_with(if upvalue { PushUpValue(index) } else { PushLocal(index) }, loc);
-                self.push_with(GetMethod(function_id), loc);
+                self.push_at(if upvalue { PushUpValue(index) } else { PushLocal(index) }, loc);
+                self.push_at(GetMethod(function_id), loc);
             }
-            LValueReference::NativeFunction(native) => self.push_with(NativeFunction(native), loc),
+            LValueReference::NativeFunction(native) => self.push_at(NativeFunction(native), loc),
 
             LValueReference::LateBinding(mut binding) => {
                 binding.update(ReferenceType::Load(self.next_opcode()));
@@ -576,7 +609,7 @@ impl<'a> Parser<'a> {
     pub fn push_store_lvalue_prefix(&mut self, lvalue: &LValueReference, loc: Location) {
         match lvalue {
             LValueReference::ThisField { upvalue, index, .. } => {
-                self.push_with(if *upvalue { PushUpValue(*index) } else { PushLocal(*index) }, loc);
+                self.push_at(if *upvalue { PushUpValue(*index) } else { PushLocal(*index) }, loc);
             },
             _ => {}, // No-op
         }
@@ -584,17 +617,17 @@ impl<'a> Parser<'a> {
 
     pub fn push_store_lvalue(&mut self, lvalue: LValueReference, loc: Location, prefix: bool) {
         match lvalue {
-            LValueReference::Local(index) => self.push_with(StoreLocal(index, false), loc),
-            LValueReference::Global(index) => self.push_with(StoreGlobal(index, false), loc),
-            LValueReference::UpValue(index) => self.push_with(StoreUpValue(index), loc),
+            LValueReference::Local(index) => self.push_at(StoreLocal(index, false), loc),
+            LValueReference::Global(index) => self.push_at(StoreGlobal(index, false), loc),
+            LValueReference::UpValue(index) => self.push_at(StoreUpValue(index), loc),
 
             ref lvalue @ LValueReference::ThisField { field_index, .. } => {
                 // If the prefix was not pushed, we have to push `self` and then swap so `self` is below the target value
                 if !prefix {
                     self.push_store_lvalue_prefix(lvalue, loc);
-                    self.push_with(Swap, loc); // Need the `self` to be below the field to be assigned
+                    self.push_at(Swap, loc); // Need the `self` to be below the field to be assigned
                 }
-                self.push_with(SetField(field_index), loc);
+                self.push_at(SetField(field_index), loc);
             }
 
             LValueReference::LocalThis(_) |
@@ -616,66 +649,63 @@ impl<'a> Parser<'a> {
     /// Pushes a new token into the output stream.
     /// Returns the index of the token pushed, which allows callers to later mutate that token if they need to.
     pub fn push(&mut self, opcode: Opcode) {
-        self.push_with(opcode, self.prev_location());
+        self.push_at(opcode, self.prev_location());
     }
 
-    pub fn push_with(&mut self, opcode: Opcode, location: Location) {
+    pub fn push_at(&mut self, opcode: Opcode, loc: Location) {
         trace::trace_parser!("push {:?}", opcode);
-        if let Some((depth, id)) = match &opcode {
-            PushGlobal(id) | StoreGlobal(id, _) => Some((0, id)),
-            PushLocal(id) | StoreLocal(id, _) => Some((self.function_depth as usize, id)),
-            _ => None,
-        } {
-            let local = self.locals[depth].get_name(*id as usize);
-            self.current_locals_reference_mut().push(local);
-        }
+
+        let local = match opcode {
+            PushGlobal(index) | StoreGlobal(index, _) => Some(self.locals[0].get_name(index as usize)),
+            PushLocal(index) | StoreLocal(index, _) => Some(self.locals[self.function_depth as usize].get_name(index as usize)),
+            // todo: upvalues?
+            _ => None
+        };
 
         let code = match self.current_locals().func {
             Some(func) => &mut self.functions[func].code,
             None => &mut self.output
         };
 
-        code.push(location, opcode);
+        code.push(loc, opcode, local);
     }
 
     /// A specialization of `error()` which provides the last token (the result of `peek()`) to the provided error function
     /// This avoids ugly borrow checker issues where `match self.peek() { ... t => self.error(Error(t)) }` does not work, despite the semantics being identical.
     pub fn error_with<F : FnOnce(Option<ScanToken>) -> ParserErrorType>(&mut self, error: F) {
-        self.do_error(self.next_location(), error(self.peek().cloned()), true)
+        Parser::do_error(self.next_location(), error(self.peek().cloned()), true, &mut self.errors, &mut self.error_recovery)
     }
 
-    /// Pushes a new error token into the output error stream.
     pub fn error(&mut self, error: ParserErrorType) {
-        self.do_error(self.next_location(), error, true)
+        Parser::do_error(self.next_location(), error, true, &mut self.errors, &mut self.error_recovery)
     }
 
     pub fn error_at(&mut self, loc: Location, error: ParserErrorType) {
-        self.do_error(loc, error, true)
+        Parser::do_error(loc, error, true, &mut self.errors, &mut self.error_recovery)
     }
 
-    /// Pushes a new error token into the output error stream, but does not initiate error recovery.
-    /// This is useful for semantic errors which are valid lexically, but still need to report errors.
     pub fn semantic_error(&mut self, error: ParserErrorType) {
-        self.do_error(self.prev_location(), error, false)
+        Parser::do_error(self.prev_location(), error, false, &mut self.errors, &mut self.error_recovery)
     }
 
     pub fn semantic_error_at(&mut self, loc: Location, error: ParserErrorType) {
-        self.do_error(loc, error, false)
+        Parser::do_error(loc, error, false, &mut self.errors, &mut self.error_recovery)
     }
 
-    /// Pushes a new error token into the output error stream, based on the provided runtime error (produced by constant expressions at compile time)
-    /// Does not initiate error recovery.
-    pub fn runtime_error(&mut self, loc: Location, error: Box<RuntimeError>) {
-        self.do_error(loc, Runtime(error), false)
-    }
-
-    fn do_error(&mut self, loc: Location, error: ParserErrorType, error_recovery: bool) {
-        trace::trace_parser!("push_err (error = {}) {:?}", self.error_recovery, error);
-        if !self.error_recovery {
-            self.errors.insert(ParserError::new(error, loc));
+    /// Pushes an error into the output. If error recovery mode was active, no error is emitted.
+    ///
+    /// - `loc` is the code location associated with the error
+    /// - `error` is the error type itself
+    /// - `start_error_recovery` is `true` if this was a **lexical** error, and the following token stream is invalid. This will initiate error recovery mode until a resync.
+    ///
+    /// **Implementation Note:** This function does not take `&mut self` to allow flexibility of partial borrows.
+    pub fn do_error(loc: Location, error: ParserErrorType, lexical: bool, errors: &mut IndexSet<ParserError, FxBuildHasher>, error_recovery: &mut bool) {
+        trace::trace_parser!("push_err (error = {}) {:?}", error_recovery, error);
+        if !*error_recovery {
+            errors.insert(ParserError::new(error, loc));
         }
-        if error_recovery {
-            self.error_recovery = true;
+        if lexical {
+            *error_recovery = true;
         }
     }
 
@@ -709,11 +739,11 @@ mod tests {
         code.join_forward(branch, BranchType::JumpIfTrue);
         // ... third block ...
 
-        assert_eq!(code, Code { blocks: vec![
+        assert_eq!(code.blocks, vec![
             Block { code: vec![], end: BlockEnd::Branch { ty: BranchType::JumpIfTrue, default: 1, branch: 2 } },
             Block { code: vec![], end: BlockEnd::Next(2) },
             Block { code: vec![], end: BlockEnd::Exit }
-        ] })
+        ])
     }
 
     #[test]
@@ -729,13 +759,13 @@ mod tests {
         code.join_forward(branch2, BranchType::Jump);
         // ... final block ...
 
-        assert_eq!(code, Code { blocks: vec![
+        assert_eq!(code.blocks, vec![
             Block { code: vec![], end: BlockEnd::Branch { ty: BranchType::JumpIfFalse, default: 1, branch: 3 } },
             Block { code: vec![], end: BlockEnd::Next(4) },
             Block { code: vec![], end: BlockEnd::Next(3) },
             Block { code: vec![], end: BlockEnd::Next(4) },
             Block { code: vec![], end: BlockEnd::Exit },
-        ] })
+        ])
     }
 
     #[test]
@@ -747,11 +777,11 @@ mod tests {
         code.join_reverse(branch, BranchType::Jump);
         // ... third block ...
 
-        assert_eq!(code, Code { blocks: vec![
+        assert_eq!(code.blocks, vec![
             Block { code: vec![], end: BlockEnd::Next(1) },
             Block { code: vec![], end: BlockEnd::Next(1) },
             Block { code: vec![], end: BlockEnd::Exit }
-        ] })
+        ])
     }
 
     #[test]
@@ -767,12 +797,12 @@ mod tests {
         code.join_forward(branch2, BranchType::JumpIfFalse);
         // ... end of loop ...
 
-        assert_eq!(code, Code { blocks: vec![
+        assert_eq!(code.blocks, vec![
             Block { code: vec![], end: BlockEnd::Next(1) },
             Block { code: vec![], end: BlockEnd::Branch { ty: BranchType::JumpIfFalse, default: 2, branch: 4 } },
             Block { code: vec![], end: BlockEnd::Next(1) },
             Block { code: vec![], end: BlockEnd::Next(4) },
             Block { code: vec![], end: BlockEnd::Exit },
-        ] })
+        ])
     }
 }
