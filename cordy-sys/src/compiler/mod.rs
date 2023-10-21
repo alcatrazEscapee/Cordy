@@ -1,3 +1,4 @@
+use fxhash::FxBuildHasher;
 use indexmap::IndexSet;
 use crate::compiler::parser::ParseRule;
 use crate::compiler::scanner::ScanResult;
@@ -107,7 +108,7 @@ fn try_incremental_compile(params: &mut CompileParameters, rule: ParseRule, abor
     }
 
     // Parse
-    let parse_errors: IndexSet<ParserError> = parser::parse_incremental(scan_result, params, rule);
+    let parse_errors: IndexSet<ParserError, FxBuildHasher> = parser::parse_incremental(scan_result, params, rule);
     if !parse_errors.is_empty() {
         for error in &parse_errors {
             if error.is_eof() && abort_in_eof && errors.is_empty() {
@@ -205,7 +206,7 @@ pub struct CompileResult {
     /// Errors returned by the parser/semantic/codegen stage of the compiler.
     /// Since `parser::parse()` returns a `CompileResult`, these errors are checked in the various public interface methods on `compiler`.
     /// Incremental compiles will return a `IndexSet<ParserError>` instead as they don't own the structures to create a `CompileResult`.
-    errors: IndexSet<ParserError>,
+    errors: IndexSet<ParserError, FxBuildHasher>,
 
     pub constants: Vec<ValuePtr>,
     pub patterns: Vec<Pattern<StoreOp>>,

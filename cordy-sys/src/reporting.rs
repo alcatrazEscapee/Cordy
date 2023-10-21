@@ -2,8 +2,7 @@ use std::cell::{Ref, RefCell};
 use std::ops::{BitOr, BitOrAssign};
 
 use crate::compiler::{ParserError, ParserErrorType, ScanError, ScanErrorType, ScanToken};
-use crate::core::NativeFunction;
-use crate::vm::{FunctionImpl, RuntimeError, ValuePtr};
+use crate::vm::{RuntimeError, ValuePtr};
 use crate::vm::operator::{BinaryOp, UnaryOp};
 
 
@@ -276,72 +275,67 @@ pub trait AsErrorWithContext: AsError {
 
 impl AsError for RuntimeError {
     fn as_error(&self) -> String {
+        use RuntimeError::{*};
         match self {
-            RuntimeError::RuntimeExit | RuntimeError::RuntimeYield => panic!("Not a real error"),
-            RuntimeError::RuntimeAssertFailed(reason) => format!("Assertion Failed: {}", reason),
-            RuntimeError::RuntimeCompilationError(vec) => format!("Encountered compilation error(s) within 'eval':\n\n{}", vec.join("\n")),
+            RuntimeExit | RuntimeYield => panic!("Not a real error"),
+            RuntimeAssertFailed(reason) => format!("Assertion Failed: {}", reason),
+            RuntimeCompilationError(vec) => format!("Encountered compilation error(s) within 'eval':\n\n{}", vec.join("\n")),
 
-            RuntimeError::ValueIsNotFunctionEvaluable(v) => format!("Tried to evaluate {} but it is not a function.", v.to_repr_str().as_slice()),
-            RuntimeError::IncorrectArgumentsUserFunction(f, n) => format!("Incorrect number of arguments for {}, got {}", f.as_error(), n),
-            RuntimeError::IncorrectArgumentsNativeFunction(f, n) => format!("Incorrect number of arguments for {}, got {}", f.as_error(), n),
-            RuntimeError::IncorrectArgumentsGetField(s, n) => format!("Incorrect number of arguments for native (->'{}'), got {}", s, n),
-            RuntimeError::IncorrectArgumentsStruct(s, n) => format!("Incorrect number of arguments for {}, got {}", s, n),
+            ValueIsNotFunctionEvaluable(v) => format!("Tried to evaluate {} but it is not a function.", v.to_repr_str().as_slice()),
+            IncorrectArgumentsUserFunction(f, n) => format!("Incorrect number of arguments for {}, got {}", f.repr(), n),
+            IncorrectArgumentsNativeFunction(f, n) => format!("Incorrect number of arguments for {}, got {}", f.repr(), n),
+            IncorrectArgumentsGetField(s, n) => format!("Incorrect number of arguments for native (->'{}'), got {}", s, n),
+            IncorrectArgumentsStruct(s, n) => format!("Incorrect number of arguments for {}, got {}", s, n),
 
-            RuntimeError::IOError(e) => format!("IOError: {}", e),
-            RuntimeError::OSError(e) => format!("OsError: {}", e),
-            RuntimeError::MonitorError(e) => format!("MonitorError: Illegal monitor command '{}'", e),
+            IOError(e) => format!("IOError: {}", e),
+            OSError(e) => format!("OsError: {}", e),
+            MonitorError(e) => format!("MonitorError: Illegal monitor command '{}'", e),
 
-            RuntimeError::ValueErrorIndexOutOfBounds(i, ln) => format!("Index '{}' is out of bounds for list of length [0, {})", i, ln),
-            RuntimeError::ValueErrorStepCannotBeZero => String::from("ValueError: 'step' argument cannot be zero"),
-            RuntimeError::ValueErrorVariableNotDeclaredYet(x) => format!("ValueError: '{}' was referenced but has not been declared yet", x),
-            RuntimeError::ValueErrorValueMustBeNonEmpty => String::from("ValueError: Expected value to be a non empty iterable"),
-            RuntimeError::ValueErrorCannotUnpackLengthMustBeGreaterThan(e, a, v) => format!("ValueError: Cannot unpack {} with length {}, expected at least {} elements", v.as_error(), a, e),
-            RuntimeError::ValueErrorCannotUnpackLengthMustBeEqual(e, a, v) => format!("ValueError: Cannot unpack {} with length {}, expected exactly {} elements", v.as_error(), a, e),
-            RuntimeError::ValueErrorValueMustBeNonNegative(v) => format!("ValueError: Expected value '{}: int' to be non-negative", v),
-            RuntimeError::ValueErrorValueMustBePositive(v) => format!("ValueError: Expected value '{}: int' to be positive", v),
-            RuntimeError::ValueErrorValueMustBeNonZero => String::from("ValueError: Expected value to be non-zero"),
-            RuntimeError::ValueErrorCannotCollectIntoDict(v) => format!("ValueError: Cannot collect key-value pair {} into a dict", v.as_error()),
-            RuntimeError::ValueErrorKeyNotPresent(v) => format!("ValueError: Key {} not found in dictionary", v.as_error()),
-            RuntimeError::ValueErrorInvalidCharacterOrdinal(i) => format!("ValueError: Cannot convert int {} to a character", i),
-            RuntimeError::ValueErrorInvalidFormatCharacter(c) => format!("ValueError: Invalid format character '{}' in format string", c.as_error()),
-            RuntimeError::ValueErrorNotAllArgumentsUsedInStringFormatting(v) => format!("ValueError: Not all arguments consumed in format string, next: {}", v.as_error()),
-            RuntimeError::ValueErrorMissingRequiredArgumentInStringFormatting => String::from("ValueError: Not enough arguments for format string"),
-            RuntimeError::ValueErrorEvalListMustHaveUnitLength(len) => format!("ValueError: Evaluating an index must have len = 1, got len = {}", len),
-            RuntimeError::ValueErrorCannotCompileRegex(raw, err) => format!("ValueError: Cannot compile regex '{}'\n            {}", raw, err),
-            RuntimeError::ValueErrorRecursiveHash(value) => format!("ValueError: Cannot create recursive hash based collection from {}", value.as_error()),
+            ValueErrorIndexOutOfBounds(i, ln) => format!("Index '{}' is out of bounds for list of length [0, {})", i, ln),
+            ValueErrorStepCannotBeZero => String::from("ValueError: 'step' argument cannot be zero"),
+            ValueErrorVariableNotDeclaredYet(x) => format!("ValueError: '{}' was referenced but has not been declared yet", x),
+            ValueErrorValueMustBeNonEmpty => String::from("ValueError: Expected value to be a non empty iterable"),
+            ValueErrorCannotUnpackLengthMustBeGreaterThan(e, a, v) => format!("ValueError: Cannot unpack {} with length {}, expected at least {} elements", v.as_error(), a, e),
+            ValueErrorCannotUnpackLengthMustBeEqual(e, a, v) => format!("ValueError: Cannot unpack {} with length {}, expected exactly {} elements", v.as_error(), a, e),
+            ValueErrorValueMustBeNonNegative(v) => format!("ValueError: Expected value '{}: int' to be non-negative", v),
+            ValueErrorValueMustBePositive(v) => format!("ValueError: Expected value '{}: int' to be positive", v),
+            ValueErrorValueMustBeNonZero => String::from("ValueError: Expected value to be non-zero"),
+            ValueErrorCannotCollectIntoDict(v) => format!("ValueError: Cannot collect key-value pair {} into a dict", v.as_error()),
+            ValueErrorKeyNotPresent(v) => format!("ValueError: Key {} not found in dictionary", v.as_error()),
+            ValueErrorInvalidCharacterOrdinal(i) => format!("ValueError: Cannot convert int {} to a character", i),
+            ValueErrorInvalidFormatCharacter(c) => match c {
+                Some(c) => format!("ValueError: Invalid format character '{}' in format string", c),
+                None => format!("ValueError: Expected format character after '%', got end of string")
+            }
+            ValueErrorNotAllArgumentsUsedInStringFormatting(v) => format!("ValueError: Not all arguments consumed in format string, next: {}", v.as_error()),
+            ValueErrorMissingRequiredArgumentInStringFormatting => String::from("ValueError: Not enough arguments for format string"),
+            ValueErrorEvalListMustHaveUnitLength(len) => format!("ValueError: Evaluating an index must have len = 1, got len = {}", len),
+            ValueErrorCannotCompileRegex(raw, err) => format!("ValueError: Cannot compile regex '{}'\n            {}", raw, err),
+            ValueErrorRecursiveHash(value) => format!("ValueError: Cannot create recursive hash based collection from {}", value.as_error()),
 
-            RuntimeError::TypeErrorUnaryOp(op, v) => format!("TypeError: Argument to unary '{}' must be an int, got {}", op.as_error(), v.as_error()),
-            RuntimeError::TypeErrorBinaryOp(op, l, r) => format!("TypeError: Cannot {} {} and {}", op.as_error(), l.as_error(), r.as_error()),
-            RuntimeError::TypeErrorBinaryIs(l, r) => format!("TypeError: {} is not a type and cannot be used with binary 'is' on {}", r.as_error(), l.as_error()),
-            RuntimeError::TypeErrorCannotConvertToInt(v) => format!("TypeError: Cannot convert {} to an int", v.as_error()),
-            RuntimeError::TypeErrorFieldNotPresentOnValue { value, field, repr, access} => format!(
+            TypeErrorUnaryOp(op, v) => format!("TypeError: Argument to unary '{}' must be an int, got {}", op.as_error(), v.as_error()),
+            TypeErrorBinaryOp(op, l, r) => format!("TypeError: Cannot {} {} and {}", op.as_error(), l.as_error(), r.as_error()),
+            TypeErrorBinaryIs(l, r) => format!("TypeError: {} is not a type and cannot be used with binary 'is' on {}", r.as_error(), l.as_error()),
+            TypeErrorCannotConvertToInt(v) => format!("TypeError: Cannot convert {} to an int", v.as_error()),
+            TypeErrorFieldNotPresentOnValue { value, field, repr, access} => format!(
                 "TypeError: Cannot {} field '{}' on {}",
                 if *access { "get" } else { "set" },
                 field,
                 if *repr { value.to_repr_str().as_owned() } else { value.as_error() }
             ),
-            RuntimeError::TypeErrorArgMustBeInt(v) => format!("TypeError: Expected {} to be a int", v.as_error()),
-            RuntimeError::TypeErrorArgMustBeComplex(v) => format!("TypeError: Expected {} to be a complex", v.as_error()),
-            RuntimeError::TypeErrorArgMustBeStr(v) => format!("TypeError: Expected {} to be a string", v.as_error()),
-            RuntimeError::TypeErrorArgMustBeChar(v) => format!("TypeError: Expected {} to be a single character string", v.as_error()),
-            RuntimeError::TypeErrorArgMustBeIterable(v) => format!("TypeError: Expected {} to be an iterable", v.as_error()),
-            RuntimeError::TypeErrorArgMustBeIndexable(ls) => format!("TypeError: Cannot index {}", ls.as_error()),
-            RuntimeError::TypeErrorArgMustBeSliceable(ls) => format!("TypeError: Cannot slice {}", ls.as_error()),
-            RuntimeError::TypeErrorArgMustBeList(v) => format!("TypeError: Expected {} to be a list", v.as_error()),
-            RuntimeError::TypeErrorArgMustBeSet(v) => format!("TypeError: Expected {} to be a set", v.as_error()),
-            RuntimeError::TypeErrorArgMustBeDict(v) => format!("TypeError: Expected {} to be a dict", v.as_error()),
-            RuntimeError::TypeErrorArgMustBeFunction(v) => format!("TypeError: Expected {} to be a function", v.as_error()),
-            RuntimeError::TypeErrorArgMustBeCmpOrKeyFunction(v) => format!("TypeError: Expected {} to be a '<A, B> fn key(A) -> B' or '<A> cmp(A, A) -> int' function", v.as_error()),
-            RuntimeError::TypeErrorArgMustBeReplaceFunction(v) => format!("TypeError: Expected {} to be a 'fn replace(vector<str>) -> str' function", v.as_error()),
-        }
-    }
-}
-
-impl AsError for Option<char> {
-    fn as_error(&self) -> String {
-        match self {
-            None => String::from("end of format string"),
-            Some(c) => String::from(*c),
+            TypeErrorArgMustBeInt(v) => format!("TypeError: Expected {} to be a int", v.as_error()),
+            TypeErrorArgMustBeComplex(v) => format!("TypeError: Expected {} to be a complex", v.as_error()),
+            TypeErrorArgMustBeStr(v) => format!("TypeError: Expected {} to be a string", v.as_error()),
+            TypeErrorArgMustBeChar(v) => format!("TypeError: Expected {} to be a single character string", v.as_error()),
+            TypeErrorArgMustBeIterable(v) => format!("TypeError: Expected {} to be an iterable", v.as_error()),
+            TypeErrorArgMustBeIndexable(ls) => format!("TypeError: Cannot index {}", ls.as_error()),
+            TypeErrorArgMustBeSliceable(ls) => format!("TypeError: Cannot slice {}", ls.as_error()),
+            TypeErrorArgMustBeList(v) => format!("TypeError: Expected {} to be a list", v.as_error()),
+            TypeErrorArgMustBeSet(v) => format!("TypeError: Expected {} to be a set", v.as_error()),
+            TypeErrorArgMustBeDict(v) => format!("TypeError: Expected {} to be a dict", v.as_error()),
+            TypeErrorArgMustBeFunction(v) => format!("TypeError: Expected {} to be a function", v.as_error()),
+            TypeErrorArgMustBeCmpOrKeyFunction(v) => format!("TypeError: Expected {} to be a '<A, B> fn key(A) -> B' or '<A> cmp(A, A) -> int' function", v.as_error()),
+            TypeErrorArgMustBeReplaceFunction(v) => format!("TypeError: Expected {} to be a 'fn replace(vector<str>) -> str' function", v.as_error()),
         }
     }
 }
@@ -352,117 +346,109 @@ impl AsError for ValuePtr {
     }
 }
 
-impl AsError for FunctionImpl {
-    fn as_error(&self) -> String {
-        self.repr()
-    }
-}
-
 impl AsError for UnaryOp {
     fn as_error(&self) -> String {
+        use UnaryOp::{*};
         String::from(match self {
-            UnaryOp::Neg => "-",
-            UnaryOp::Not => "!",
+            Neg => "-",
+            Not => "!",
         })
     }
 }
 
 impl AsError for BinaryOp {
     fn as_error(&self) -> String {
+        use BinaryOp::{*};
         String::from(match self {
-            BinaryOp::Div => "divide",
-            BinaryOp::Mul => "multiply",
-            BinaryOp::Mod => "modulo",
-            BinaryOp::Add => "add",
-            BinaryOp::Sub => "subtract",
-            BinaryOp::LeftShift => "left shift",
-            BinaryOp::RightShift => "right shift",
-            BinaryOp::Pow => "**",
-            BinaryOp::Is => "is",
-            BinaryOp::IsNot => "is not",
-            BinaryOp::And => "&",
-            BinaryOp::Or => "|",
-            BinaryOp::Xor => "^",
-            BinaryOp::In => "in",
-            BinaryOp::NotIn => "in",
-            BinaryOp::LessThan => "<",
-            BinaryOp::GreaterThan => ">",
-            BinaryOp::LessThanEqual => "<=",
-            BinaryOp::GreaterThanEqual => ">=",
-            BinaryOp::Equal => "==",
-            BinaryOp::NotEqual => "!=",
-            BinaryOp::Max => "min",
-            BinaryOp::Min => "max",
+            Div => "divide",
+            Mul => "multiply",
+            Mod => "modulo",
+            Add => "add",
+            Sub => "subtract",
+            LeftShift => "left shift",
+            RightShift => "right shift",
+            Pow => "**",
+            Is => "is",
+            IsNot => "is not",
+            And => "&",
+            Or => "|",
+            Xor => "^",
+            In => "in",
+            NotIn => "in",
+            LessThan => "<",
+            GreaterThan => ">",
+            LessThanEqual => "<=",
+            GreaterThanEqual => ">=",
+            Equal => "==",
+            NotEqual => "!=",
+            Max => "min",
+            Min => "max",
         })
-    }
-}
-
-impl AsError for NativeFunction {
-    fn as_error(&self) -> String {
-        self.repr()
     }
 }
 
 impl AsError for ParserError {
     fn as_error(&self) -> String {
+        use ParserErrorType::{*};
         match &self.error {
-            ParserErrorType::UnexpectedTokenAfterEoF(e) => format!("Unexpected {} after parsing finished", e.as_error()),
+            UnexpectedTokenAfterEoF(e) => format!("Unexpected {} after parsing finished", e.as_error()),
 
-            ParserErrorType::ExpectedToken(e, a) => format!("Expected a {}, got {} instead", e.as_error(), a.as_error()),
-            ParserErrorType::ExpectedExpressionTerminal(e) => format!("Expected an expression terminal, got {} instead", e.as_error()),
-            ParserErrorType::ExpectedCommaOrEndOfArguments(e) => format!("Expected a ',' or ')' after function invocation, got {} instead", e.as_error()),
-            ParserErrorType::ExpectedCommaOrEndOfList(e) => format!("Expected a ',' or ']' after list literal, got {} instead", e.as_error()),
-            ParserErrorType::ExpectedCommaOrEndOfVector(e) => format!("Expected a ',' or ')' after vector literal, got {} instead", e.as_error()),
-            ParserErrorType::ExpectedCommaOrEndOfDict(e) => format!("Expected a ',' or '}}' after dict literal, got {} instead", e.as_error()),
-            ParserErrorType::ExpectedCommaOrEndOfSet(e) => format!("Expected a ',' or '}}' after set literal, got {} instead", e.as_error()),
-            ParserErrorType::ExpectedColonOrEndOfSlice(e) => format!("Expected a ':' or ']' in slice, got {} instead", e.as_error()),
-            ParserErrorType::ExpectedStatement(e) => format!("Expected a statement, got {} instead", e.as_error()),
-            ParserErrorType::ExpectedVariableNameAfterLet(e) => format!("Expected a variable name after 'let' keyword, got {} instead", e.as_error()),
-            ParserErrorType::ExpectedVariableNameAfterFor(e) => format!("Expected a variable name after 'for' keyword, got {} instead", e.as_error()),
-            ParserErrorType::ExpectedFunctionNameAfterFn(e) => format!("Expected a function name after 'fn' keyword, got {} instead", e.as_error()),
-            ParserErrorType::ExpectedFunctionBlockOrArrowAfterFn(e) => format!("Expected a function body starting with '{{' or `->` after 'fn', got {} instead", e.as_error()),
-            ParserErrorType::ExpectedParameterOrEndOfList(e) => format!("Expected a function parameter or ')' after function declaration, got {} instead", e.as_error()),
-            ParserErrorType::ExpectedCommaOrEndOfParameters(e) => format!("Expected a ',' or ')' after function parameter, got {} instead", e.as_error()),
-            ParserErrorType::ExpectedPatternTerm(e) => format!("Expected a name, '_', or variadic term in a pattern variable, got {} instead", e.as_error()),
-            ParserErrorType::ExpectedUnderscoreOrVariableNameAfterVariadicInPattern(e) => format!("Expected a name or '_' after '*' in a pattern variable, got {} instead", e.as_error()),
-            ParserErrorType::ExpectedUnderscoreOrVariableNameOrPattern(e) => format!("Expected a variable binding, either a name, '_', or pattern, got {} instead", e.as_error()),
-            ParserErrorType::ExpectedAnnotationOrNamedFunction(e) => format!("Expected another decorator, or a named function after decorator, got {} instead", e.as_error()),
-            ParserErrorType::ExpectedStructNameAfterStruct(e, is_module) => format!("Expected a name after '{}' keyword, got {} instead", if *is_module { "module" } else { "struct" }, e.as_error()),
-            ParserErrorType::ExpectedFieldNameAfterArrow(e) => format!("Expected a field name after '->', got {} instead", e.as_error()),
-            ParserErrorType::ExpectedFieldNameInStruct(e) => format!("Expected a field name in struct declaration, got {} instead", e.as_error()),
-            ParserErrorType::ExpectedFunctionInStruct(e, is_module) => format!("Expected a function within {} body, got {} instead", if *is_module { "module" } else { "struct" }, e.as_error()),
+            ExpectedToken(e, a) => format!("Expected a {}, got {} instead", e.as_error(), a.as_error()),
+            ExpectedExpressionTerminal(e) => format!("Expected an expression terminal, got {} instead", e.as_error()),
+            ExpectedCommaOrEndOfArguments(e) => format!("Expected a ',' or ')' after function invocation, got {} instead", e.as_error()),
+            ExpectedCommaOrEndOfList(e) => format!("Expected a ',' or ']' after list literal, got {} instead", e.as_error()),
+            ExpectedCommaOrEndOfVector(e) => format!("Expected a ',' or ')' after vector literal, got {} instead", e.as_error()),
+            ExpectedCommaOrEndOfDict(e) => format!("Expected a ',' or '}}' after dict literal, got {} instead", e.as_error()),
+            ExpectedCommaOrEndOfSet(e) => format!("Expected a ',' or '}}' after set literal, got {} instead", e.as_error()),
+            ExpectedColonOrEndOfSlice(e) => format!("Expected a ':' or ']' in slice, got {} instead", e.as_error()),
+            ExpectedStatement(e) => format!("Expected a statement, got {} instead", e.as_error()),
+            ExpectedVariableNameAfterLet(e) => format!("Expected a variable name after 'let' keyword, got {} instead", e.as_error()),
+            ExpectedVariableNameAfterFor(e) => format!("Expected a variable name after 'for' keyword, got {} instead", e.as_error()),
+            ExpectedFunctionNameAfterFn(e) => format!("Expected a function name after 'fn' keyword, got {} instead", e.as_error()),
+            ExpectedFunctionBlockOrArrowAfterFn(e) => format!("Expected a function body starting with '{{' or `->` after 'fn', got {} instead", e.as_error()),
+            ExpectedParameterOrEndOfList(e) => format!("Expected a function parameter or ')' after function declaration, got {} instead", e.as_error()),
+            ExpectedCommaOrEndOfParameters(e) => format!("Expected a ',' or ')' after function parameter, got {} instead", e.as_error()),
+            ExpectedPatternTerm(e) => format!("Expected a name, '_', or variadic term in a pattern variable, got {} instead", e.as_error()),
+            ExpectedUnderscoreOrVariableNameAfterVariadicInPattern(e) => format!("Expected a name or '_' after '*' in a pattern variable, got {} instead", e.as_error()),
+            ExpectedUnderscoreOrVariableNameOrPattern(e) => format!("Expected a variable binding, either a name, '_', or pattern, got {} instead", e.as_error()),
+            ExpectedAnnotationOrNamedFunction(e) => format!("Expected another decorator, or a named function after decorator, got {} instead", e.as_error()),
+            ExpectedStructNameAfterStruct(e, is_module) => format!("Expected a name after '{}' keyword, got {} instead", if *is_module { "module" } else { "struct" }, e.as_error()),
+            ExpectedFieldNameAfterArrow(e) => format!("Expected a field name after '->', got {} instead", e.as_error()),
+            ExpectedFieldNameInStruct(e) => format!("Expected a field name in struct declaration, got {} instead", e.as_error()),
+            ExpectedFunctionInStruct(e, is_module) => format!("Expected a function within {} body, got {} instead", if *is_module { "module" } else { "struct" }, e.as_error()),
 
-            ParserErrorType::LocalVariableConflict(e) => format!("Duplicate definition of variable '{}' in the same scope", e),
-            ParserErrorType::LocalVariableConflictWithNativeFunction(e) => format!("Name for variable '{}' conflicts with the native function by the same name", e),
-            ParserErrorType::UndeclaredIdentifier(e) => format!("Undeclared identifier: '{}'", e),
-            ParserErrorType::DuplicateFieldName(e) => format!("Duplicate field name: '{}'", e),
-            ParserErrorType::InvalidFieldName(e) => format!("Invalid or unknown field name: '{}'", e),
-            ParserErrorType::InvalidLValue(e, native) => format!("Invalid value used as a {}function parameter: '{}'", if *native { "native " } else { "" }, e),
+            LocalVariableConflict(e) => format!("Duplicate definition of variable '{}' in the same scope", e),
+            LocalVariableConflictWithNativeFunction(e) => format!("Name for variable '{}' conflicts with the native function by the same name", e),
+            UndeclaredIdentifier(e) => format!("Undeclared identifier: '{}'", e),
+            DuplicateFieldName(e) => format!("Duplicate field name: '{}'", e),
+            InvalidFieldName(e) => format!("Invalid or unknown field name: '{}'", e),
+            InvalidLValue(e, native) => format!("Invalid value used as a {}function parameter: '{}'", if *native { "native " } else { "" }, e),
 
-            ParserErrorType::InvalidAssignmentTarget => String::from("The left hand side is not a valid assignment target"),
-            ParserErrorType::MultipleVariadicTermsInPattern => String::from("Pattern is not allowed to have more than one variadic ('*') term"),
-            ParserErrorType::LetWithPatternBindingNoExpression => String::from("'let' with a pattern variable must be followed by an expression if the pattern contains nontrivial pattern elements"),
-            ParserErrorType::BreakOutsideOfLoop => String::from("Invalid 'break' statement outside of an enclosing loop"),
-            ParserErrorType::ContinueOutsideOfLoop => String::from("Invalid 'continue' statement outside of an enclosing loop"),
-            ParserErrorType::StructNotInGlobalScope => String::from("'struct' statements can only be present in global scope"),
-            ParserErrorType::NonDefaultParameterAfterDefaultParameter => String::from("Non-default argument cannot follow default argument"),
-            ParserErrorType::ParameterAfterVarParameter => String::from("Variadic parameter must be the last one in the function"),
-            ParserErrorType::UnrollNotAllowedInSlice => String::from("Unrolled expression with '...' not allowed in slice literal"),
-            ParserErrorType::UnrollNotAllowedInPartialOperator => String::from("Unrolled expression with '...' not allowed to be attached to a implicit partially-evaluated operator"),
+            InvalidAssignmentTarget => String::from("The left hand side is not a valid assignment target"),
+            MultipleVariadicTermsInPattern => String::from("Pattern is not allowed to have more than one variadic ('*') term"),
+            LetWithPatternBindingNoExpression => String::from("'let' with a pattern variable must be followed by an expression if the pattern contains nontrivial pattern elements"),
+            BreakOutsideOfLoop => String::from("Invalid 'break' statement outside of an enclosing loop"),
+            ContinueOutsideOfLoop => String::from("Invalid 'continue' statement outside of an enclosing loop"),
+            StructNotInGlobalScope => String::from("'struct' statements can only be present in global scope"),
+            NonDefaultParameterAfterDefaultParameter => String::from("Non-default argument cannot follow default argument"),
+            ParameterAfterVarParameter => String::from("Variadic parameter must be the last one in the function"),
+            UnrollNotAllowedInSlice => String::from("Unrolled expression with '...' not allowed in slice literal"),
+            UnrollNotAllowedInPartialOperator => String::from("Unrolled expression with '...' not allowed to be attached to a implicit partially-evaluated operator"),
 
-            ParserErrorType::Runtime(e) => e.as_error(),
+            Runtime(e) => e.as_error(),
         }
     }
 }
 
 impl AsError for ScanError {
     fn as_error(&self) -> String {
+        use ScanErrorType::{*};
         match &self.error {
-            ScanErrorType::InvalidNumericPrefix(c) => format!("Invalid numeric prefix: '0{}'", c),
-            ScanErrorType::InvalidNumericValue(e) => format!("Invalid numeric value: {}", e),
-            ScanErrorType::InvalidCharacter(c) => format!("Invalid character: '{}'", c),
-            ScanErrorType::UnterminatedStringLiteral => String::from("Unterminated string literal (missing a closing quote)"),
-            ScanErrorType::UnterminatedBlockComment => String::from("Unterminated block comment (missing a closing '*/')"),
+            InvalidNumericPrefix(c) => format!("Invalid numeric prefix: '0{}'", c),
+            InvalidNumericValue(e) => format!("Invalid numeric value: {}", e),
+            InvalidCharacter(c) => format!("Invalid character: '{}'", c),
+            UnterminatedStringLiteral => String::from("Unterminated string literal (missing a closing quote)"),
+            UnterminatedBlockComment => String::from("Unterminated block comment (missing a closing '*/')"),
         }
     }
 }
@@ -478,94 +464,95 @@ impl AsError for Option<ScanToken> {
 
 impl AsError for ScanToken {
     fn as_error(&self) -> String {
+        use ScanToken::{*};
         match &self {
-            ScanToken::Identifier(s) => format!("identifier \'{}\'", s),
-            ScanToken::StringLiteral(s) => format!("string '{}'", s),
-            ScanToken::IntLiteral(i) => format!("integer '{}'", i),
-            ScanToken::ComplexLiteral(i) => format!("complex integer '{}i'", i),
+            Identifier(s) => format!("identifier \'{}\'", s),
+            StringLiteral(s) => format!("string '{}'", s),
+            IntLiteral(i) => format!("integer '{}'", i),
+            ComplexLiteral(i) => format!("complex integer '{}i'", i),
 
-            ScanToken::KeywordLet => String::from("'let' keyword"),
-            ScanToken::KeywordFn => String::from("'fn' keyword"),
-            ScanToken::KeywordReturn => String::from("'return' keyword"),
-            ScanToken::KeywordIf => String::from("'if' keyword"),
-            ScanToken::KeywordElif => String::from("'elif' keyword"),
-            ScanToken::KeywordElse => String::from("'else' keyword"),
-            ScanToken::KeywordThen => String::from("'then' keyword"),
-            ScanToken::KeywordLoop => String::from("'loop' keyword"),
-            ScanToken::KeywordWhile => String::from("'while' keyword"),
-            ScanToken::KeywordFor => String::from("'for' keyword"),
-            ScanToken::KeywordIn => String::from("'in' keyword"),
-            ScanToken::KeywordIs => String::from("'is' keyword"),
-            ScanToken::KeywordNot => String::from("'not' keyword"),
-            ScanToken::KeywordBreak => String::from("'break' keyword"),
-            ScanToken::KeywordContinue => String::from("'continue' keyword"),
-            ScanToken::KeywordDo => String::from("'do' keyword"),
-            ScanToken::KeywordTrue => String::from("'true' keyword"),
-            ScanToken::KeywordFalse => String::from("'false' keyword"),
-            ScanToken::KeywordNil => String::from("'nil' keyword"),
-            ScanToken::KeywordStruct => String::from("'struct' keyword"),
-            ScanToken::KeywordExit => String::from("'exit' keyword"),
-            ScanToken::KeywordAssert => String::from("'assert' keyword"),
-            ScanToken::KeywordModule => String::from("'mod' keyword"),
-            ScanToken::KeywordSelf => String::from("'self' keyword"),
-            ScanToken::KeywordNative => String::from("'native' keyword"),
+            KeywordLet => String::from("'let' keyword"),
+            KeywordFn => String::from("'fn' keyword"),
+            KeywordReturn => String::from("'return' keyword"),
+            KeywordIf => String::from("'if' keyword"),
+            KeywordElif => String::from("'elif' keyword"),
+            KeywordElse => String::from("'else' keyword"),
+            KeywordThen => String::from("'then' keyword"),
+            KeywordLoop => String::from("'loop' keyword"),
+            KeywordWhile => String::from("'while' keyword"),
+            KeywordFor => String::from("'for' keyword"),
+            KeywordIn => String::from("'in' keyword"),
+            KeywordIs => String::from("'is' keyword"),
+            KeywordNot => String::from("'not' keyword"),
+            KeywordBreak => String::from("'break' keyword"),
+            KeywordContinue => String::from("'continue' keyword"),
+            KeywordDo => String::from("'do' keyword"),
+            KeywordTrue => String::from("'true' keyword"),
+            KeywordFalse => String::from("'false' keyword"),
+            KeywordNil => String::from("'nil' keyword"),
+            KeywordStruct => String::from("'struct' keyword"),
+            KeywordExit => String::from("'exit' keyword"),
+            KeywordAssert => String::from("'assert' keyword"),
+            KeywordModule => String::from("'mod' keyword"),
+            KeywordSelf => String::from("'self' keyword"),
+            KeywordNative => String::from("'native' keyword"),
 
-            ScanToken::Equals => String::from("'=' token"),
-            ScanToken::PlusEquals => String::from("'+=' token"),
-            ScanToken::MinusEquals => String::from("'-=' token"),
-            ScanToken::MulEquals => String::from("'*=' token"),
-            ScanToken::DivEquals => String::from("'/=' token"),
-            ScanToken::AndEquals => String::from("'&=' token"),
-            ScanToken::OrEquals => String::from("'|=' token"),
-            ScanToken::XorEquals => String::from("'^=' token"),
-            ScanToken::LeftShiftEquals => String::from("'<<=' token"),
-            ScanToken::RightShiftEquals => String::from("'>>=' token"),
-            ScanToken::ModEquals => String::from("'%=' token"),
-            ScanToken::PowEquals => String::from("'**=' token"),
-            ScanToken::DotEquals => String::from("'.=' token"),
+            Equals => String::from("'=' token"),
+            PlusEquals => String::from("'+=' token"),
+            MinusEquals => String::from("'-=' token"),
+            MulEquals => String::from("'*=' token"),
+            DivEquals => String::from("'/=' token"),
+            AndEquals => String::from("'&=' token"),
+            OrEquals => String::from("'|=' token"),
+            XorEquals => String::from("'^=' token"),
+            LeftShiftEquals => String::from("'<<=' token"),
+            RightShiftEquals => String::from("'>>=' token"),
+            ModEquals => String::from("'%=' token"),
+            PowEquals => String::from("'**=' token"),
+            DotEquals => String::from("'.=' token"),
 
-            ScanToken::Plus => String::from("'+' token"),
-            ScanToken::Minus => String::from("'-' token"),
-            ScanToken::Mul => String::from("'*' token"),
-            ScanToken::Div => String::from("'/' token"),
-            ScanToken::BitwiseAnd => String::from("'&' token"),
-            ScanToken::BitwiseOr => String::from("'|' token"),
-            ScanToken::BitwiseXor => String::from("'^' token"),
-            ScanToken::Mod => String::from("'%' token"),
-            ScanToken::Pow => String::from("'**' token"),
-            ScanToken::LeftShift => String::from("'<<' token"),
-            ScanToken::RightShift => String::from("'>>' token"),
+            Plus => String::from("'+' token"),
+            Minus => String::from("'-' token"),
+            Mul => String::from("'*' token"),
+            Div => String::from("'/' token"),
+            BitwiseAnd => String::from("'&' token"),
+            BitwiseOr => String::from("'|' token"),
+            BitwiseXor => String::from("'^' token"),
+            Mod => String::from("'%' token"),
+            Pow => String::from("'**' token"),
+            LeftShift => String::from("'<<' token"),
+            RightShift => String::from("'>>' token"),
 
-            ScanToken::Not => String::from("'!' token"),
+            Not => String::from("'!' token"),
 
-            ScanToken::LogicalAnd => String::from("'and' keyword"),
-            ScanToken::LogicalOr => String::from("'or' keyword"),
+            LogicalAnd => String::from("'and' keyword"),
+            LogicalOr => String::from("'or' keyword"),
 
-            ScanToken::NotEquals => String::from("'!=' token"),
-            ScanToken::DoubleEquals => String::from("'==' token"),
-            ScanToken::LessThan => String::from("'<' token"),
-            ScanToken::LessThanEquals => String::from("'<=' token"),
-            ScanToken::GreaterThan => String::from("'>' token"),
-            ScanToken::GreaterThanEquals => String::from("'>=' token"),
+            NotEquals => String::from("'!=' token"),
+            DoubleEquals => String::from("'==' token"),
+            LessThan => String::from("'<' token"),
+            LessThanEquals => String::from("'<=' token"),
+            GreaterThan => String::from("'>' token"),
+            GreaterThanEquals => String::from("'>=' token"),
 
-            ScanToken::OpenParen => String::from("'(' token"), // ( )
-            ScanToken::CloseParen => String::from("')' token"),
-            ScanToken::OpenSquareBracket => String::from("'[' token"), // [ ]
-            ScanToken::CloseSquareBracket => String::from("']' token"),
-            ScanToken::OpenBrace => String::from("'{' token"), // { }
-            ScanToken::CloseBrace => String::from("'}' token"),
+            OpenParen => String::from("'(' token"), // ( )
+            CloseParen => String::from("')' token"),
+            OpenSquareBracket => String::from("'[' token"), // [ ]
+            CloseSquareBracket => String::from("']' token"),
+            OpenBrace => String::from("'{' token"), // { }
+            CloseBrace => String::from("'}' token"),
 
-            ScanToken::Comma => String::from("',' token"),
-            ScanToken::Dot => String::from("'.' token"),
-            ScanToken::Colon => String::from("':' token"),
-            ScanToken::Arrow => String::from("'->' token"),
-            ScanToken::Underscore => String::from("'_' token"),
-            ScanToken::Semicolon => String::from("';' token"),
-            ScanToken::At => String::from("'@' token"),
-            ScanToken::Ellipsis => String::from("'...' token"),
-            ScanToken::QuestionMark => String::from("'?' token"),
+            Comma => String::from("',' token"),
+            Dot => String::from("'.' token"),
+            Colon => String::from("':' token"),
+            Arrow => String::from("'->' token"),
+            Underscore => String::from("'_' token"),
+            Semicolon => String::from("';' token"),
+            At => String::from("'@' token"),
+            Ellipsis => String::from("'...' token"),
+            QuestionMark => String::from("'?' token"),
 
-            ScanToken::NewLine => String::from("new line"),
+            NewLine => String::from("new line"),
         }
     }
 }
