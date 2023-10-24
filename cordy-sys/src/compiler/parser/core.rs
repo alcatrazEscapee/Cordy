@@ -152,17 +152,17 @@ impl Code {
                 BlockEnd::Next(next_id) => {
                     if block_id + 1 != next_id { // Only need a branch if we aren't branching to the next block
                         branches.push((code.len(), next_id, BranchType::Jump));
-                        code.push(Noop);
+                        code.push(Opcode::placeholder());
                         locations.push(Location::empty());
                     }
                 }
                 BlockEnd::Branch { ty, default, branch } => {
                     branches.push((code.len(), branch, ty)); // Always emit the single branch instruction
-                    code.push(Noop);
+                    code.push(Opcode::placeholder());
                     locations.push(Location::empty());
                     if block_id + 1 != default { // And emit another unconditional jump if necessary
                         branches.push((code.len(), default, BranchType::Jump));
-                        code.push(Noop);
+                        code.push(Opcode::placeholder());
                         locations.push(Location::empty());
                     }
                 }

@@ -7,6 +7,7 @@ use cordy_sys::compiler::CompileResult;
 use cordy_sys::vm::{ExitType, VirtualMachine};
 
 
+fn bench_spin_loop(c: &mut Criterion) { run("spin loop", "let i = 0 ; loop { if i > 10_000 { break } i += 1 }", c) }
 fn bench_add_1_loop_setup(c: &mut Criterion) { run("+1 loop setup", "let x = range(40).list", c) }
 fn bench_add_1_loop_for(c: &mut Criterion) { run("+1 loop with for", "let x = range(40).list ; for i in range(len(x)) { x[i] += 1 }", c) }
 fn bench_add_1_loop_map_fn(c: &mut Criterion) { run("+1 loop with map(fn)", "let x = range(40).list ; x .= map(fn(i) -> i + 1)", c) }
@@ -37,6 +38,7 @@ fn bench_dict_manual_fn_default(c: &mut Criterion) { run("dict manual default fn
 
 
 criterion_group!(benches,
+    bench_spin_loop,
     bench_add_1_loop_setup,
     bench_add_1_loop_for,
     bench_add_1_loop_map_fn,

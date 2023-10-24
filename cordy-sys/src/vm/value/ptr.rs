@@ -237,7 +237,7 @@ impl ValuePtr {
         debug_assert!(self.ty() == Type::Bool || self.ty() == Type::Int || self.ty() == Type::Complex);
         match self.ty() {
             Type::Bool => Complex::new(self.is_true() as i64, 0),
-            Type::Int => Complex::new(self.as_int(), 0),
+            Type::Int => Complex::new(self.as_precise_int(), 0),
             Type::Complex => self.as_precise_complex().value.inner,
             _ => unreachable!(),
         }
@@ -350,7 +350,7 @@ impl ValuePtr {
     }
 
     /// Transmutes this `ValuePtr` into a `&T`, where `T` is a type compatible with `SharedPrefix`
-    pub(crate) fn as_shared_ref<T: SharedValue>(&self) -> &SharedPrefix<T> {
+    pub fn as_shared_ref<T: SharedValue>(&self) -> &SharedPrefix<T> {
         debug_assert!(self.is_shared()); // Any shared pointer type can be converted to a shared prefix.
         unsafe {
             &*(self.as_ptr() as *const SharedPrefix<T>)
