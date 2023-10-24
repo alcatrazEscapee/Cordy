@@ -10,9 +10,6 @@ use Opcode::{*};
 
 #[derive(Eq, PartialEq, Debug, Clone, Copy)]
 pub enum Opcode {
-
-    Noop,
-
     /// The parameter is an offset value, based on the IP *after* the instruction is executed. So an instruction:
     ///
     /// `005: Jump(-2)`
@@ -154,6 +151,7 @@ pub enum StoreOp {
 
 
 impl Opcode {
+    pub fn placeholder() -> Opcode { Exit }
 
     pub fn disassembly<I : Iterator<Item=String>>(self: &Opcode, ip: usize, locals: &mut I, fields: &Fields, constants: &[ValuePtr]) -> String {
         match self {

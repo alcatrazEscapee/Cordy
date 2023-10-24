@@ -227,11 +227,15 @@ impl<R : BufRead, W : Write, F : FunctionInterface> VirtualMachine<R, W, F> {
         self.ip = self.code.len();
     }
 
+    /// Core Interpreter loop. This runs until the current frame is dropped via a `Return` opcode.
+    ///
+    /// **Implementation Note:** This function is absolutely, entirely essential performance wise.
     fn run(&mut self) -> AnyResult {
         #[cfg(test)]
-        let mut limit = 0;
+        let mut limit: usize = 0;
         let drop_frame: usize = self.call_stack.len() - 1;
         loop {
+            // Anti-infinite-loop protection for tests, which are all short-running programs
             #[cfg(test)]
             {
                 limit += 1;
@@ -239,370 +243,374 @@ impl<R : BufRead, W : Write, F : FunctionInterface> VirtualMachine<R, W, F> {
                     panic!("Execution limit reached");
                 }
             }
-            let op: Opcode = self.next_op();
-            self.run_instruction(op)?;
-            if drop_frame == self.call_stack.len() {
-                return Ok(())
-            }
-        }
-    }
 
-    /// Executes a single instruction
-    #[inline(always)]
-    fn run_instruction(&mut self, op: Opcode) -> AnyResult {
-        trace::trace_interpreter!("vm::run op={:?}", op);
-        match op {
-            Opcode::Noop => panic!("Noop should only be emitted as a temporary instruction"),
+            // Fetch the current opcode, and always increment the IP immediately after
+            let op: Opcode = unsafe {
+                // Skipping the bounds check gave a ~3% performance improvement on a spin-loop benchmark, so this is worth doing.
+                debug_assert!(self.ip < self.code.len());
+                *self.code.get_unchecked(self.ip)
+            };
+            self.ip += 1;
 
-            // Flow Control
-            JumpIfFalse(ip) => {
-                let jump: usize = self.ip.add_offset(ip);
-                let a1: &ValuePtr = self.peek(0);
-                if !a1.to_bool() {
+            // Trace current opcode before we begin executing it
+            trace::trace_interpreter!("vm::run op={:?}", op);
+
+            // Execute the current instruction
+            match op {
+                // Flow Control
+                JumpIfFalse(ip) => {
+                    let jump: usize = self.ip.add_offset(ip);
+                    let a1: &ValuePtr = self.peek(0);
+                    if !a1.to_bool() {
+                        self.ip = jump;
+                    }
+                },
+                JumpIfFalsePop(ip) => {
+                    let jump: usize = self.ip.add_offset(ip);
+                    let a1: ValuePtr = self.pop();
+                    if !a1.to_bool() {
+                        self.ip = jump;
+                    }
+                },
+                JumpIfTrue(ip) => {
+                    let jump: usize = self.ip.add_offset(ip);
+                    let a1: &ValuePtr = self.peek(0);
+                    if a1.to_bool() {
+                        self.ip = jump;
+                    }
+                },
+                JumpIfTruePop(ip) => {
+                    let jump: usize = self.ip.add_offset(ip);
+                    let a1: ValuePtr = self.pop();
+                    if a1.to_bool() {
+                        self.ip = jump;
+                    }
+                },
+                Jump(ip) => {
+                    let jump: usize = self.ip.add_offset(ip);
                     self.ip = jump;
-                }
-            },
-            JumpIfFalsePop(ip) => {
-                let jump: usize = self.ip.add_offset(ip);
-                let a1: ValuePtr = self.pop();
-                if !a1.to_bool() {
-                    self.ip = jump;
-                }
-            },
-            JumpIfTrue(ip) => {
-                let jump: usize = self.ip.add_offset(ip);
-                let a1: &ValuePtr = self.peek(0);
-                if a1.to_bool() {
-                    self.ip = jump;
-                }
-            },
-            JumpIfTruePop(ip) => {
-                let jump: usize = self.ip.add_offset(ip);
-                let a1: ValuePtr = self.pop();
-                if a1.to_bool() {
-                    self.ip = jump;
-                }
-            },
-            Jump(ip) => {
-                let jump: usize = self.ip.add_offset(ip);
-                self.ip = jump;
-            },
-            Return => {
-                // Functions leave their return value as the top of the stack
-                // Below that will be the functions locals, and the function itself
-                // The frame pointer points to the first local of the function
-                // [prev values ... function, local0, local1, ... localN, ret_val ]
-                //                            ^frame pointer
-                // So, we pop the return value, truncate the difference between the frame pointer and the top, then push the return value
-                trace::trace_interpreter_stack!("drop frame {}", self.debug_stack());
+                },
+                Return => {
+                    // Functions leave their return value as the top of the stack
+                    // Below that will be the functions locals, and the function itself
+                    // The frame pointer points to the first local of the function
+                    // [prev values ... function, local0, local1, ... localN, ret_val ]
+                    //                            ^frame pointer
+                    // So, we pop the return value, truncate the difference between the frame pointer and the top, then push the return value
+                    trace::trace_interpreter_stack!("drop frame {}", self.debug_stack());
 
-                let frame: CallFrame = self.call_stack.pop().unwrap(); // Pop the call frame
+                    let frame: CallFrame = self.call_stack.pop().unwrap(); // Pop the call frame
 
-                self.stack.swap_remove(frame.frame_pointer - 1); // This removes the function, and drops it, and it gets automatically replaced with the return value
-                self.stack.truncate(frame.frame_pointer); // Drop all values above the frame pointer
-                self.ip = frame.return_ip; // And jump to the return address
-            },
+                    self.stack.swap_remove(frame.frame_pointer - 1); // This removes the function, and drops it, and it gets automatically replaced with the return value
+                    self.stack.truncate(frame.frame_pointer); // Drop all values above the frame pointer
+                    self.ip = frame.return_ip; // And jump to the return address
 
-            // Stack Manipulations
-            Pop => {
-                self.pop();
-            },
-            PopN(n) => {
-                let len: usize = self.stack.len();
-                self.stack.truncate(len - n as usize);
-                trace::trace_interpreter_stack!("PopN {}", self.debug_stack());
-            },
-            Swap => {
-                let len: usize = self.stack.len();
-                self.stack.swap(len - 1, len - 2);
-                trace::trace_interpreter_stack!("Swap {}", self.debug_stack());
-            },
+                    if drop_frame == self.call_stack.len() { // Once we dropped the frame, we may exit to the calling function
+                        return Ok(())
+                    }
+                },
 
-            PushLocal(local) => {
-                // Locals are offset by the frame pointer, and don't need to check existence, as we don't allow late binding.
-                let local = self.frame_pointer() + local as usize;
-                trace::trace_interpreter!("vm::run PushLocal index={}, local={}", local, self.stack[local].as_debug_str());
-                self.push(self.stack[local].clone());
-            }
-            StoreLocal(local, pop) => {
-                trace::trace_interpreter!("vm::run StoreLocal index={}, value={}, prev={}", local, self.stack.last().unwrap().as_debug_str(), self.stack[local as usize].as_debug_str());
-                let value = if pop { self.pop() } else { self.peek(0).clone() };
-                self.store_local(local, value);
-            },
-            PushGlobal(local) => {
-                // Globals are absolute offsets, and allow late binding, which means we have to check the global count before referencing.
-                let local: usize = local as usize;
-                trace::trace_interpreter!("vm::run PushGlobal index={}, value={}", local, self.stack[local].as_debug_str());
-                if local < self.global_count {
+                // Stack Manipulations
+                Pop => {
+                    self.pop();
+                },
+                PopN(n) => {
+                    let len: usize = self.stack.len();
+                    self.stack.truncate(len - n as usize);
+                    trace::trace_interpreter_stack!("PopN {}", self.debug_stack());
+                },
+                Swap => {
+                    let len: usize = self.stack.len();
+                    self.stack.swap(len - 1, len - 2);
+                    trace::trace_interpreter_stack!("Swap {}", self.debug_stack());
+                },
+
+                PushLocal(local) => {
+                    // Locals are offset by the frame pointer, and don't need to check existence, as we don't allow late binding.
+                    let local = self.frame_pointer() + local as usize;
+                    trace::trace_interpreter!("vm::run PushLocal index={}, local={}", local, self.stack[local].as_debug_str());
                     self.push(self.stack[local].clone());
-                } else {
-                    return ValueErrorVariableNotDeclaredYet(self.globals[local].clone()).err()
                 }
-            },
-            StoreGlobal(local, pop) => {
-                trace::trace_interpreter!("vm::run StoreGlobal index={}, value={}, prev={}", local, self.stack.last().unwrap().as_debug_str(), self.stack[local as usize].as_debug_str());
-                let value = if pop { self.pop() } else { self.peek(0).clone() };
-                self.store_global(local, value)?;
-            },
-            PushUpValue(index) => {
-                let fp = self.frame_pointer() - 1;
-                let upvalue: Rc<Cell<UpValue>> = self.stack[fp].as_closure().borrow().get(index as usize);
+                StoreLocal(local, pop) => {
+                    trace::trace_interpreter!("vm::run StoreLocal index={}, value={}, prev={}", local, self.stack.last().unwrap().as_debug_str(), self.stack[local as usize].as_debug_str());
+                    let value = if pop { self.pop() } else { self.peek(0).clone() };
+                    self.store_local(local, value);
+                },
+                PushGlobal(local) => {
+                    // Globals are absolute offsets, and allow late binding, which means we have to check the global count before referencing.
+                    let local: usize = local as usize;
+                    trace::trace_interpreter!("vm::run PushGlobal index={}, value={}", local, self.stack[local].as_debug_str());
+                    if local < self.global_count {
+                        self.push(self.stack[local].clone());
+                    } else {
+                        return ValueErrorVariableNotDeclaredYet(self.globals[local].clone()).err()
+                    }
+                },
+                StoreGlobal(local, pop) => {
+                    trace::trace_interpreter!("vm::run StoreGlobal index={}, value={}, prev={}", local, self.stack.last().unwrap().as_debug_str(), self.stack[local as usize].as_debug_str());
+                    let value = if pop { self.pop() } else { self.peek(0).clone() };
+                    self.store_global(local, value)?;
+                },
+                PushUpValue(index) => {
+                    let fp = self.frame_pointer() - 1;
+                    let upvalue: Rc<Cell<UpValue>> = self.stack[fp].as_closure().borrow().get(index as usize);
 
-                let interior = (*upvalue).take();
-                upvalue.set(interior.clone()); // Replace back the original value
+                    let interior = (*upvalue).take();
+                    upvalue.set(interior.clone()); // Replace back the original value
 
-                let value: ValuePtr = match interior {
-                    UpValue::Open(index) => self.stack[index].clone(),
-                    UpValue::Closed(value) => value,
-                };
-                trace::trace_interpreter!("vm::run PushUpValue index={}, value={}", index, value.as_debug_str());
-                self.push(value);
-            },
-            StoreUpValue(index) => {
-                trace::trace_interpreter!("vm::run StoreUpValue index={}, value={}, prev={}", index, self.stack.last().unwrap().as_debug_str(), self.stack[index as usize].as_debug_str());
-                let value = self.peek(0).clone();
-                self.store_upvalue(index, value);
-            },
-
-            StoreArray => {
-                trace::trace_interpreter!("vm::run StoreArray array={}, index={}, value={}", self.stack[self.stack.len() - 3].as_debug_str(), self.stack[self.stack.len() - 2].as_debug_str(), self.stack.last().unwrap().as_debug_str());
-                let a3: ValuePtr = self.pop();
-                let a2: ValuePtr = self.pop();
-                let a1: &ValuePtr = self.peek(0); // Leave this on the stack when done
-                core::set_index(a1, a2, a3)?;
-            },
-
-            InitGlobal => {
-                self.global_count += 1;
-            }
-
-            Closure => {
-                let f = self.pop();
-                self.push(f.to_closure());
-            },
-
-            CloseLocal(index) => {
-                let local: usize = self.frame_pointer() + index as usize;
-                trace::trace_interpreter!("vm::run CloseLocal index={}, local={}, value={}, closure={}", index, local, self.stack[local].as_debug_str(), self.stack.last().unwrap().as_debug_str());
-                let upvalue: Rc<Cell<UpValue>> = self.open_upvalues.entry(local)
-                    .or_insert_with(|| Rc::new(Cell::new(UpValue::Open(local))))
-                    .clone();
-                self.stack.last()
-                    .unwrap()
-                    .as_closure()
-                    .borrow_mut()
-                    .push(upvalue);
-            },
-            CloseUpValue(index) => {
-                trace::trace_interpreter!("vm::run CloseUpValue index={}, value={}, closure={}", index, self.stack.last().unwrap().as_debug_str(), &self.stack[self.frame_pointer() - 1].as_debug_str());
-                let fp = self.frame_pointer() - 1;
-                let index: usize = index as usize;
-                let upvalue: Rc<Cell<UpValue>> = self.stack[fp].as_closure().borrow().get(index);
-
-                self.stack.last()
-                    .unwrap()
-                    .as_closure()
-                    .borrow_mut()
-                    .push(upvalue.clone());
-            },
-
-            LiftUpValue(index) => {
-                let index = self.frame_pointer() + index as usize;
-                if let Some(upvalue) = self.open_upvalues.remove(&index) {
-                    let value: ValuePtr = self.stack[index].clone();
-                    let unboxed: UpValue = (*upvalue).replace(UpValue::Open(0));
-                    let closed: UpValue = match unboxed {
-                        UpValue::Open(_) => UpValue::Closed(value),
-                        UpValue::Closed(_) => panic!("Tried to lift an already closed upvalue"),
+                    let value: ValuePtr = match interior {
+                        UpValue::Open(index) => self.stack[index].clone(),
+                        UpValue::Closed(value) => value,
                     };
-                    (*upvalue).replace(closed);
+                    trace::trace_interpreter!("vm::run PushUpValue index={}, value={}", index, value.as_debug_str());
+                    self.push(value);
+                },
+                StoreUpValue(index) => {
+                    trace::trace_interpreter!("vm::run StoreUpValue index={}, value={}, prev={}", index, self.stack.last().unwrap().as_debug_str(), self.stack[index as usize].as_debug_str());
+                    let value = self.peek(0).clone();
+                    self.store_upvalue(index, value);
+                },
+
+                StoreArray => {
+                    trace::trace_interpreter!("vm::run StoreArray array={}, index={}, value={}", self.stack[self.stack.len() - 3].as_debug_str(), self.stack[self.stack.len() - 2].as_debug_str(), self.stack.last().unwrap().as_debug_str());
+                    let a3: ValuePtr = self.pop();
+                    let a2: ValuePtr = self.pop();
+                    let a1: &ValuePtr = self.peek(0); // Leave this on the stack when done
+                    core::set_index(a1, a2, a3)?;
+                },
+
+                InitGlobal => {
+                    self.global_count += 1;
                 }
-            },
 
-            InitIterable => {
-                let iter = self.pop().to_iter()?;
-                self.push(iter.to_value());
-            },
-            TestIterable(ip) => {
-                let top: usize = self.stack.len() - 1;
-                let iter = self.stack[top].as_iterable_mut();
-                match iter.next() {
-                    Some(value) => self.push(value),
-                    None => self.ip = self.ip.add_offset(ip),
+                Closure => {
+                    let f = self.pop();
+                    self.push(f.to_closure());
+                },
+
+                CloseLocal(index) => {
+                    let local: usize = self.frame_pointer() + index as usize;
+                    trace::trace_interpreter!("vm::run CloseLocal index={}, local={}, value={}, closure={}", index, local, self.stack[local].as_debug_str(), self.stack.last().unwrap().as_debug_str());
+                    let upvalue: Rc<Cell<UpValue>> = self.open_upvalues.entry(local)
+                        .or_insert_with(|| Rc::new(Cell::new(UpValue::Open(local))))
+                        .clone();
+                    self.stack.last()
+                        .unwrap()
+                        .as_closure()
+                        .borrow_mut()
+                        .push(upvalue);
+                },
+                CloseUpValue(index) => {
+                    trace::trace_interpreter!("vm::run CloseUpValue index={}, value={}, closure={}", index, self.stack.last().unwrap().as_debug_str(), &self.stack[self.frame_pointer() - 1].as_debug_str());
+                    let fp = self.frame_pointer() - 1;
+                    let index: usize = index as usize;
+                    let upvalue: Rc<Cell<UpValue>> = self.stack[fp].as_closure().borrow().get(index);
+
+                    self.stack.last()
+                        .unwrap()
+                        .as_closure()
+                        .borrow_mut()
+                        .push(upvalue.clone());
+                },
+
+                LiftUpValue(index) => {
+                    let index = self.frame_pointer() + index as usize;
+                    if let Some(upvalue) = self.open_upvalues.remove(&index) {
+                        let value: ValuePtr = self.stack[index].clone();
+                        let unboxed: UpValue = (*upvalue).replace(UpValue::Open(0));
+                        let closed: UpValue = match unboxed {
+                            UpValue::Open(_) => UpValue::Closed(value),
+                            UpValue::Closed(_) => panic!("Tried to lift an already closed upvalue"),
+                        };
+                        (*upvalue).replace(closed);
+                    }
+                },
+
+                InitIterable => {
+                    let iter = self.pop().to_iter()?;
+                    self.push(iter.to_value());
+                },
+                TestIterable(ip) => {
+                    let top: usize = self.stack.len() - 1;
+                    let iter = self.stack[top].as_iterable_mut();
+                    match iter.next() {
+                        Some(value) => self.push(value),
+                        None => self.ip = self.ip.add_offset(ip),
+                    }
+                },
+
+                ExecPattern(index) => {
+                    let top = self.peek(0).clone();
+
+                    // Here, we would like to split the VM struct into a `& self.patterns` and a `&mut self.<everything else>`
+                    // But, there's no mechanism for the compiler to understand that this is legal
+                    // So we invoke some unsafe code here to split the mutable and immutable reference
+                    // This just copies the reference, which lets us have a separate `&VM` that we treat as only pointing to `& VM.patterns`
+                    let pattern = unsafe {
+                        std::mem::transmute_copy::<&Pattern<StoreOp>, &Pattern<StoreOp>>(&&self.patterns[index as usize])
+                    };
+                    pattern.apply(self, &top)?;
+                },
+
+                // Push Operations
+                Nil => self.push(ValuePtr::nil()),
+                True => self.push(true.to_value()),
+                False => self.push(false.to_value()),
+                NativeFunction(native) => self.push(native.to_value()),
+                Constant(id) => {
+                    self.push(self.constants[id as usize].clone());
+                },
+
+                LiteralBegin(op, length) => {
+                    self.literal_stack.push(Literal::new(op, length));
+                },
+                LiteralAcc(length) => {
+                    let top = self.literal_stack.last_mut().unwrap();
+                    top.accumulate(splice(&mut self.stack, length));
+                },
+                LiteralUnroll => {
+                    let arg = self.pop();
+                    let top = self.literal_stack.last_mut().unwrap();
+                    top.unroll(arg.to_iter()?)?;
+                },
+                LiteralEnd => {
+                    let top = self.literal_stack.pop().unwrap();
+                    self.push(top.to_value());
+                },
+
+                Unroll(first) => {
+                    if first {
+                        self.unroll_stack.push(0);
+                    }
+                    let arg: ValuePtr = self.pop();
+                    let mut len: i32 = -1; // An empty unrolled argument contributes an offset of -1 + <number of elements unrolled>
+                    for e in arg.to_iter()? {
+                        self.push(e);
+                        len += 1;
+                    }
+                    *self.unroll_stack.last_mut().unwrap() += len;
                 }
-            },
 
-            ExecPattern(index) => {
-                let top = self.peek(0).clone();
+                Call(mut nargs, any_unroll) => {
+                    if any_unroll {
+                        let unrolled_nargs: i32 = self.unroll_stack.pop().unwrap();
+                        nargs = nargs.add_offset(unrolled_nargs);
+                    }
+                    self.invoke(nargs)?;
+                },
 
-                // Here, we would like to split the VM struct into a `& self.patterns` and a `&mut self.<everything else>`
-                // But, there's no mechanism for the compiler to understand that this is legal
-                // So we invoke some unsafe code here to split the mutable and immutable reference
-                // This just copies the reference, which lets us have a separate `&VM` that we treat as only pointing to `& VM.patterns`
-                let pattern = unsafe {
-                    std::mem::transmute_copy::<&Pattern<StoreOp>, &Pattern<StoreOp>>(&&self.patterns[index as usize])
-                };
-                pattern.apply(self, &top)?;
-            },
-
-            // Push Operations
-            Nil => self.push(ValuePtr::nil()),
-            True => self.push(true.to_value()),
-            False => self.push(false.to_value()),
-            NativeFunction(native) => self.push(native.to_value()),
-            Constant(id) => {
-                self.push(self.constants[id as usize].clone());
-            },
-
-            LiteralBegin(op, length) => {
-                self.literal_stack.push(Literal::new(op, length));
-            },
-            LiteralAcc(length) => {
-                let top = self.literal_stack.last_mut().unwrap();
-                top.accumulate(splice(&mut self.stack, length));
-            },
-            LiteralUnroll => {
-                let arg = self.pop();
-                let top = self.literal_stack.last_mut().unwrap();
-                top.unroll(arg.to_iter()?)?;
-            },
-            LiteralEnd => {
-                let top = self.literal_stack.pop().unwrap();
-                self.push(top.to_value());
-            },
-
-            Unroll(first) => {
-                if first {
-                    self.unroll_stack.push(0);
+                CallNative(handle_id) => {
+                    let nargs = self.functions.lookup(handle_id).nargs;
+                    let args = self.popn(nargs as u32);
+                    let ret = self.ffi.handle(&self.functions, handle_id, args)?;
+                    self.push(ret);
                 }
-                let arg: ValuePtr = self.pop();
-                let mut len: i32 = -1; // An empty unrolled argument contributes an offset of -1 + <number of elements unrolled>
-                for e in arg.to_iter()? {
-                    self.push(e);
-                    len += 1;
+
+                OpIndex => {
+                    let a2: ValuePtr = self.pop();
+                    let a1: ValuePtr = self.pop();
+                    let ret = core::get_index(self, &a1, a2)?;
+                    self.push(ret);
+                },
+                OpIndexPeek => {
+                    let a2: ValuePtr = self.peek(0).clone();
+                    let a1: ValuePtr = self.peek(1).clone();
+                    let ret = core::get_index(self, &a1, a2)?;
+                    self.push(ret);
+                },
+                OpSlice => {
+                    let a3: ValuePtr = self.pop();
+                    let a2: ValuePtr = self.pop();
+                    let a1: ValuePtr = self.pop();
+                    let ret = core::get_slice(&a1, a2, a3, 1i64.to_value())?;
+                    self.push(ret);
+                },
+                OpSliceWithStep => {
+                    let a4: ValuePtr = self.pop();
+                    let a3: ValuePtr = self.pop();
+                    let a2: ValuePtr = self.pop();
+                    let a1: ValuePtr = self.pop();
+                    let ret = core::get_slice(&a1, a2, a3, a4)?;
+                    self.push(ret);
+                },
+
+                GetField(field_index) => {
+                    let a1: ValuePtr = self.pop();
+                    let ret: ValuePtr = a1.get_field(&self.fields, &self.constants, field_index)?;
+                    self.push(ret);
+                },
+                GetFieldPeek(field_index) => {
+                    let a1: &ValuePtr = self.peek(0);
+                    let ret: ValuePtr = a1.get_field(&self.fields, &self.constants, field_index)?;
+                    self.push(ret);
+                },
+                GetFieldFunction(field_index) => {
+                    self.push(ValuePtr::field(field_index));
+                },
+                SetField(field_index) => {
+                    let a2: ValuePtr = self.pop();
+                    let a1: ValuePtr = self.pop();
+                    let ret: ValuePtr = a1.set_field(&self.fields, field_index, a2)?;
+                    self.push(ret);
+                },
+
+                GetMethod(index) => {
+                    let a1: ValuePtr = self.pop();
+                    let ret: ValuePtr = ValuePtr::partial(self.constants[index as usize].clone(), vec![a1]);
+                    self.push(ret);
                 }
-                *self.unroll_stack.last_mut().unwrap() += len;
+
+                Unary(op) => {
+                    let arg: ValuePtr = self.pop();
+                    let ret: ValuePtr = op.apply(arg)?;
+                    self.push(ret);
+                },
+                Binary(op) => {
+                    let rhs: ValuePtr = self.pop();
+                    let lhs: ValuePtr = self.pop();
+                    let ret: ValuePtr = op.apply(lhs, rhs)?;
+                    self.push(ret);
+                },
+                Compare(op, offset) => {
+                    let rhs: ValuePtr = self.pop();
+                    let lhs: ValuePtr = self.pop();
+                    if op.apply(&lhs, &rhs) {
+                        // If true, then push back `rhs`, and continue
+                        self.push(rhs);
+                    } else {
+                        // If false, then push `false` and jump to end of chain
+                        let jump: usize = self.ip.add_offset(offset);
+                        self.push(false.to_value());
+                        self.ip = jump;
+                    }
+                }
+
+                Slice => {
+                    let arg2: ValuePtr = self.pop();
+                    let arg1: ValuePtr = self.pop();
+                    self.push(ValuePtr::slice(arg1, arg2, ValuePtr::nil())?);
+                },
+                SliceWithStep => {
+                    let arg3: ValuePtr = self.pop();
+                    let arg2: ValuePtr = self.pop();
+                    let arg1: ValuePtr = self.pop();
+                    self.push(ValuePtr::slice(arg1, arg2, arg3)?);
+                }
+
+                Exit => return RuntimeExit.err(),
+                Yield => {
+                    // First, jump to the end of current code, so when we startup again, we are in the right location
+                    self.ip = self.code.len();
+                    return RuntimeYield.err()
+                },
+                AssertFailed => {
+                    let ret: ValuePtr = self.pop();
+                    return RuntimeAssertFailed(ret.to_str().as_owned()).err()
+                },
             }
-
-            Call(mut nargs, any_unroll) => {
-                if any_unroll {
-                    let unrolled_nargs: i32 = self.unroll_stack.pop().unwrap();
-                    nargs = nargs.add_offset(unrolled_nargs);
-                }
-                self.invoke(nargs)?;
-            },
-
-            CallNative(handle_id) => {
-                let nargs = self.functions.lookup(handle_id).nargs;
-                let args = self.popn(nargs as u32);
-                let ret = self.ffi.handle(&self.functions, handle_id, args)?;
-                self.push(ret);
-            }
-
-            OpIndex => {
-                let a2: ValuePtr = self.pop();
-                let a1: ValuePtr = self.pop();
-                let ret = core::get_index(self, &a1, a2)?;
-                self.push(ret);
-            },
-            OpIndexPeek => {
-                let a2: ValuePtr = self.peek(0).clone();
-                let a1: ValuePtr = self.peek(1).clone();
-                let ret = core::get_index(self, &a1, a2)?;
-                self.push(ret);
-            },
-            OpSlice => {
-                let a3: ValuePtr = self.pop();
-                let a2: ValuePtr = self.pop();
-                let a1: ValuePtr = self.pop();
-                let ret = core::get_slice(&a1, a2, a3, 1i64.to_value())?;
-                self.push(ret);
-            },
-            OpSliceWithStep => {
-                let a4: ValuePtr = self.pop();
-                let a3: ValuePtr = self.pop();
-                let a2: ValuePtr = self.pop();
-                let a1: ValuePtr = self.pop();
-                let ret = core::get_slice(&a1, a2, a3, a4)?;
-                self.push(ret);
-            },
-
-            GetField(field_index) => {
-                let a1: ValuePtr = self.pop();
-                let ret: ValuePtr = a1.get_field(&self.fields, &self.constants, field_index)?;
-                self.push(ret);
-            },
-            GetFieldPeek(field_index) => {
-                let a1: &ValuePtr = self.peek(0);
-                let ret: ValuePtr = a1.get_field(&self.fields, &self.constants, field_index)?;
-                self.push(ret);
-            },
-            GetFieldFunction(field_index) => {
-                self.push(ValuePtr::field(field_index));
-            },
-            SetField(field_index) => {
-                let a2: ValuePtr = self.pop();
-                let a1: ValuePtr = self.pop();
-                let ret: ValuePtr = a1.set_field(&self.fields, field_index, a2)?;
-                self.push(ret);
-            },
-
-            GetMethod(index) => {
-                let a1: ValuePtr = self.pop();
-                let ret: ValuePtr = ValuePtr::partial(self.constants[index as usize].clone(), vec![a1]);
-                self.push(ret);
-            }
-
-            Unary(op) => {
-                let arg: ValuePtr = self.pop();
-                let ret: ValuePtr = op.apply(arg)?;
-                self.push(ret);
-            },
-            Binary(op) => {
-                let rhs: ValuePtr = self.pop();
-                let lhs: ValuePtr = self.pop();
-                let ret: ValuePtr = op.apply(lhs, rhs)?;
-                self.push(ret);
-            },
-            Compare(op, offset) => {
-                let rhs: ValuePtr = self.pop();
-                let lhs: ValuePtr = self.pop();
-                if op.apply(&lhs, &rhs) {
-                    // If true, then push back `rhs`, and continue
-                    self.push(rhs);
-                } else {
-                    // If false, then push `false` and jump to end of chain
-                    let jump: usize = self.ip.add_offset(offset);
-                    self.push(false.to_value());
-                    self.ip = jump;
-                }
-            }
-
-            Slice => {
-                let arg2: ValuePtr = self.pop();
-                let arg1: ValuePtr = self.pop();
-                self.push(ValuePtr::slice(arg1, arg2, ValuePtr::nil())?);
-            },
-            SliceWithStep => {
-                let arg3: ValuePtr = self.pop();
-                let arg2: ValuePtr = self.pop();
-                let arg1: ValuePtr = self.pop();
-                self.push(ValuePtr::slice(arg1, arg2, arg3)?);
-            }
-
-            Exit => return RuntimeExit.err(),
-            Yield => {
-                // First, jump to the end of current code, so when we startup again, we are in the right location
-                self.ip = self.code.len();
-                return RuntimeYield.err()
-            },
-            AssertFailed => {
-                let ret: ValuePtr = self.pop();
-                return RuntimeAssertFailed(ret.to_str().as_owned()).err()
-            },
         }
-        Ok(())
     }
+
 
     // ===== Store Implementations ===== //
 
@@ -646,13 +654,6 @@ impl<R : BufRead, W : Write, F : FunctionInterface> VirtualMachine<R, W, F> {
     /// Returns the current `frame_pointer`
     fn frame_pointer(&self) -> usize {
         self.call_stack[self.call_stack.len() - 1].frame_pointer
-    }
-
-    /// Returns the next opcode and increments `ip`
-    fn next_op(&mut self) -> Opcode {
-        let op: Opcode = self.code[self.ip];
-        self.ip += 1;
-        op
     }
 
     fn invoke_and_spin(&mut self, nargs: u32) -> ValueResult {
