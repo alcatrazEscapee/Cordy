@@ -28,9 +28,6 @@ impl<'a> Optimize for &'a mut Code {
             // For cases like this:
             // module Foo { fn bar() {} }
             // Foo->bar // this is normally a `PushGlobal, GetField` but could be a `Constant`
-            //
-            // Open Issues:
-            // - Removing any `Store` / `Push` opcodes breaks the continuity of local references visible in the disassembly.
             merge_store_pop_load(cursor);
             merge_store_global_pop(cursor);
             merge_pops(cursor);
