@@ -1,6 +1,5 @@
 use std::cell::Cell;
 use std::iter::FusedIterator;
-use std::pin::Pin;
 use std::str::Chars;
 
 use crate::vm::{Type, ValuePtr};
@@ -58,7 +57,9 @@ impl<'a> IntoRefStr<'a> for String {
 /// An owned iterator over a string obtained from a `ValuePtr`. This reduces the need for a copy, and escapes lifetime constraints.
 #[derive(Debug, Clone)]
 pub struct IterStr {
-    ptr: IterStrType,
+    /// This field holds ownership of the underlying `String`, either through a `ValuePtr` shared reference, or a `String` created from a short inline string.
+    /// It is necessary in order to ensure the `Chars<'static>` remains valid for the lifetime of this struct.
+    ptr: StrPtr,
     iter: Chars<'static>,
     /// A cached value of `count()`
     /// When initialized this will be `usize::MAX` which is obviously wrong. We specialize `count()` on `IterStr` to query, possibly cache, and return this value
@@ -66,16 +67,16 @@ pub struct IterStr {
 }
 
 #[derive(Debug, Clone)]
-pub enum IterStrType {
-    Shared(ValuePtr), // Already behind a `Rc<>`
-    Inline(Pin<Box<ValuePtr>>), // Need to pin this somewhere so we can prevent it from being moved
+pub enum StrPtr {
+    Shared(ValuePtr),
+    Owned(String),
 }
 
-impl IterStrType {
-    fn as_str_slice(&self) -> &str {
+impl StrPtr {
+    fn as_str(&self) -> &String {
         match self {
-            IterStrType::Shared(ptr) => ptr.as_long_str().borrow_const().as_str(),
-            IterStrType::Inline(pin) => pin.as_short_str()
+            StrPtr::Shared(ptr) => ptr.as_long_str().borrow_const(),
+            StrPtr::Owned(ptr) => ptr
         }
     }
 }
@@ -91,7 +92,7 @@ impl IterStr {
         if count == INVALID {
             // Need to update the cached count, in the case we call this `count()` again, and the string is lon
             // We can't consume the iterator, so we go into the original `ptr` again and this time iterate over as a string slice
-            count = self.ptr.as_str_slice()
+            count = self.ptr.as_str()
                 .chars()
                 .count();
 
@@ -158,24 +159,23 @@ impl ValuePtr {
     /// The value must either be a `Type::ShortStr` or `Type::LongStr`
     pub fn as_str_iter(self) -> IterStr {
         debug_assert!(self.is_str());
-        let (ptr, iter) = if self.is_short_str() { // Faster path (doesn't have to check `.ty()`)
-            let pin = Box::pin(self);
-            let iter: Chars<'static> = unsafe {
-                std::mem::transmute(pin.as_short_str().chars())
-            };
-            (IterStrType::Inline(pin), iter)
-        } else {
-            let iter: Chars<'static> = unsafe {
-                std::mem::transmute(self.as_long_str().borrow_const().chars())
-            };
-            (IterStrType::Shared(self), iter)
+
+        let ptr = match self.is_short_str() { // Faster check (doesn't have to check `.ty()`)
+            true => StrPtr::Owned(String::from(self.as_short_str())),
+            false => StrPtr::Shared(self)
         };
+        let iter: Chars<'static> = unsafe {
+            // SAFETY: The underlying string must be valid for longer than the lifetime of this iterator.
+            // Both are held on the same `IterStr` struct, and so the `String` cannot go out of scope while leaving the iterator alive.
+            std::mem::transmute(ptr.as_str().chars())
+        };
+
         IterStr { ptr, iter, count: Cell::new(INVALID) }
     }
 
     /// Don't expose this (or `as_short_str`), only interact through `&str`
     fn as_long_str(&self) -> &SharedPrefix<String> {
-        debug_assert!(self.ty() == Type::LongStr);
+        debug_assert!(self.is_long_str());
         self.as_shared_ref()
     }
 
