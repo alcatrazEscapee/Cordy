@@ -606,9 +606,13 @@ impl ParserFunctionImpl {
 }
 
 pub struct ParserFunctionParameters {
+    /// The vector of parsed (but not resolved) `LValue` parameters.
     pub args: Vec<LValue>,
+    /// Any default argument values, if present
     pub default_args: Vec<Expr>,
+    /// If `true`, this function has a variadic `*x` argument as the last argument
     pub variadic: bool,
+    /// If `true`, this function has an explicit `self` parameter as it's first argument
     pub instance: bool,
 }
 
