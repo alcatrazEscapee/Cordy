@@ -94,7 +94,7 @@ pub fn split(pattern: ValuePtr, target: ValuePtr) -> ValueResult {
 
 fn as_result(captures: &Captures) -> ValuePtr {
     captures.iter()
-        .map(|group| group.unwrap().as_str().to_value())
+        .map(|group| group.map_or(ValuePtr::nil(), |u| u.as_str().to_value()))
         .to_vector()
 }
 

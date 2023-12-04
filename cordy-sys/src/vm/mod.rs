@@ -1813,6 +1813,7 @@ mod tests {
     #[test] fn test_search_regex_many_capture_groups_match_one() { run_str("'some WORDS with Capital letters' . search('([A-Z])[a-z]([a-z]+)') . print", "[('Capital', 'C', 'pital')]\n"); }
     #[test] fn test_search_regex_many_capture_groups_match_some() { run_str("'some Words With Capital letters' . search('([A-Z])[a-z]([a-z]+)') . print", "[('Words', 'W', 'rds'), ('With', 'W', 'th'), ('Capital', 'C', 'pital')]\n"); }
     #[test] fn test_search_regex_cannot_compile() { run_str("'test' . search('missing close bracket lol ( this one') . print", "ValueError: Cannot compile regex 'missing close bracket lol ( this one'\n            Parsing error at position 36: Opening parenthesis without closing parenthesis\n  at: line 1 (<test>)\n\n1 | 'test' . search('missing close bracket lol ( this one') . print\n2 |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n"); }
+    #[test] fn test_search_regex_optional_match() { run_str("'123 |  456' . search '^ ([\\d ]+) | ([\\d ]+)' . print", "[('  456', nil, ' 456')]\n"); }
     #[test] fn test_split_regex_empty_str() { run_str("'abc' . split('') . print", "['a', 'b', 'c']\n"); }
     #[test] fn test_split_regex_space() { run_str("'a b c' . split(' ') . print", "['a', 'b', 'c']\n"); }
     #[test] fn test_split_regex_space_duplicates() { run_str("' a  b   c' . split(' ') . print", "['', 'a', '', 'b', '', '', 'c']\n"); }
