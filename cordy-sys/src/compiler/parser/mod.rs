@@ -514,12 +514,6 @@ impl Parser<'_> {
     /// - Empty (`_`) parameters _are_ allowed (unlike in normal functions)
     ///
     /// if `allow_self` is `true`, then the first parameter of this function may be a `self` keyword, and `is_self` will be `true`
-    ///
-    /// Returns the triple `(args, default_args, var_arg)` where:
-    /// - `args` contains the `LValue` parameters
-    /// - `default_args` contains the `Expr` default values
-    /// - `var_arg` is `true` if this function has a last-argument variadic argument.
-    /// - `is_self` is `true` if this function has a `self` first argument.
     fn parse_function_parameters(&mut self, allow_self: bool, restrict: bool) -> ParserFunctionParameters {
         trace::trace_parser!("rule <function-parameters>");
 
@@ -1087,7 +1081,19 @@ impl Parser<'_> {
         expr
     }
 
-    /// Returns an `LValue`, or `None`. If this returns `None`, an error will already have been raised.
+    /// Parses an `LValue` - the left-hand side of an assignment or pattern assignment statement. This may consist of:
+    ///
+    /// - A single `_` or named term `x`
+    /// - A single variadic `*_` or named variadic `*x`
+    /// - A pattern, enclosed in parenthesis, containing at least one inner `LValue`: `(<lvalue> , ... )`
+    ///
+    /// Note that some cases, such as `let` statements, `for` statements, also accept a relaxed version of this syntax,
+    /// where the top-level pattern does not require surrounding parenthesis:
+    ///
+    /// - In this case, we parse an `LValue`, but with implied parenthesis, and then promote the `LValue::Terms` if there is only one element.
+    /// - This is done by calling `parse_bare_lvalue()`
+    ///
+    /// Returns the parsed `LValue`, or `None` if it could not parse - an error will have already been raised.
     fn parse_lvalue(&mut self) -> Option<LValue> {
         trace::trace_parser!("rule <lvalue>");
 
@@ -1119,9 +1125,9 @@ impl Parser<'_> {
             },
             Some(OpenParen) => {
                 self.advance();
-                let terms = self.parse_bare_lvalue();
+                let terms = self.parse_lvalue_terms();
                 self.expect(CloseParen);
-                terms
+                terms.map(LValue::Terms)
             },
             _ => {
                 self.error_with(ExpectedUnderscoreOrVariableNameOrPattern);
@@ -1130,10 +1136,26 @@ impl Parser<'_> {
         }
     }
 
-    /// Parses a 'bare' `LValue`, so a `LValue::Terms` without any surrounding `,`. Promotes the top level `LValue::Terms` into a single term, if possible.
-    /// If `None` is returned, an error will have already been raised.
+    /// Parses a `LValue` without any surrounding parenthesis, see `parse_lvalue()` for explanation.
     fn parse_bare_lvalue(&mut self) -> Option<LValue> {
         trace::trace_parser!("rule <bare-lvalue>");
+        match self.parse_lvalue_terms() {
+            Some(mut terms) if terms.len() == 1 => {
+                // In order to distinguish `x, y` at a top level from `(x, y)` in a bare lvalue, we have to not collapse the second
+                // So, the first becomes `Terms(Named(x), Named(y))`, and the second becomes `Terms(Terms(Named(x), Named(y)))`
+                match terms.pop() {
+                    Some(inner @ LValue::Terms(_)) => Some(LValue::Terms(vec![inner])),
+                    inner @ Some(_) => inner,
+                    _ => None
+                }
+            },
+            Some(terms) => Some(LValue::Terms(terms)),
+            _ => None
+        }
+    }
+
+    fn parse_lvalue_terms(&mut self) -> Option<Vec<LValue>> {
+        trace::trace_parser!("rule <lvalue-terms>");
 
         let mut terms: Vec<LValue> = Vec::new();
         let mut found_variadic_term: bool = false;
@@ -1154,16 +1176,7 @@ impl Parser<'_> {
 
             match self.peek() {
                 Some(Comma) => self.skip(), // Expect more terms
-                _ => return Some({
-                    if terms.len() == 1 {
-                        match &terms[0] {
-                            LValue::Terms(_) => LValue::Terms(terms),
-                            _ => terms.into_iter().next().unwrap()
-                        }
-                    } else {
-                        LValue::Terms(terms)
-                    }
-                }),
+                _ => return Some(terms),
             }
         }
     }
