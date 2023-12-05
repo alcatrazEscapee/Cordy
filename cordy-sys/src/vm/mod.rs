@@ -1028,10 +1028,14 @@ mod tests {
     #[test] fn test_if_then_else_5() { run_str("(if false then (fn() -> 'hello' . print)() else 'nope') . print", "nope\n"); }
     #[test] fn test_if_then_else_top_level() { run_str("if true then print('hello') else print('goodbye')", "hello\n"); }
     #[test] fn test_if_then_else_top_level_in_loop() { run_str("for x in range(2) { if x then x else x }", ""); }
+    #[test] fn test_loop_has_nested_scope() { run_str("let x ; loop { let x ; break }", "") }
+    #[test] fn test_while_loop_has_nested_scope() { run_str("let x ; while nil { let x }", "") }
     #[test] fn test_while_false_if_false() { run_str("while false { if false { } }", ""); }
     #[test] fn test_while_else_no_loop() { run_str("while false { break } else { print('hello') }", "hello\n"); }
     #[test] fn test_while_else_break() { run_str("while true { break } else { print('hello') } print('world')", "world\n"); }
     #[test] fn test_while_else_no_break() { run_str("let x = true ; while x { x = false } else { print('hello') }", "hello\n"); }
+    #[test] fn test_do_loop_has_nested_scope() { run_str("let x ; do { let x }", "") }
+    #[test] fn test_do_while_loop_has_nested_scope() { run_str("let x ; do { let x } while nil", "") }
     #[test] fn test_do_while_1() { run_str("do { 'test' . print } while false", "test\n"); }
     #[test] fn test_do_while_2() { run_str("let i = 0 ; do { i . print ; i += 1 } while i < 3", "0\n1\n2\n"); }
     #[test] fn test_do_while_3() { run_str("let i = 0 ; do { i += 1 ; i . print } while i < 3", "1\n2\n3\n"); }
@@ -1041,6 +1045,7 @@ mod tests {
     #[test] fn test_do_while_else_2() { run_str("do { 'loop' . print ; break } while false else { 'else' . print }", "loop\n"); }
     #[test] fn test_do_while_else_3() { run_str("let i = 0 ; do { i . print ; i += 1 ; if i > 2 { break } } while 1 else { 'end' . print }", "0\n1\n2\n"); }
     #[test] fn test_do_while_else_4() { run_str("let i = 0 ; do { i . print ; i += 1 ; if i > 2 { break } } while i < 2 else { 'end' . print }", "0\n1\nend\n"); }
+    #[test] fn test_for_loop_has_nested_scope() { run_str("let x ; for x in [] {}", "") }
     #[test] fn test_for_loop_no_intrinsic_with_list() { run_str("for x in ['a', 'b', 'c'] { x . print }", "a\nb\nc\n") }
     #[test] fn test_for_loop_no_intrinsic_with_set() { run_str("for x in 'foobar' . set { x . print }", "f\no\nb\na\nr\n") }
     #[test] fn test_for_loop_no_intrinsic_with_str() { run_str("for x in 'hello' { x . print }", "h\ne\nl\nl\no\n") }
@@ -1051,7 +1056,9 @@ mod tests {
     #[test] fn test_for_loop_range_start_stop_step_zero() { run_str("for x in range(1, 2, 0) { x . print }", "ValueError: 'step' argument cannot be zero\n  at: line 1 (<test>)\n\n1 | for x in range(1, 2, 0) { x . print }\n2 |               ^^^^^^^^^\n"); }
     #[test] fn test_for_else_no_loop() { run_str("for _ in [] { print('hello') ; break } else { print('world') }", "world\n"); }
     #[test] fn test_for_else_break() { run_str("for c in 'abcd' { if c == 'b' { break } } else { print('hello') } print('world')", "world\n"); }
+    #[test] fn test_for_else_break_2() { run_str("for x in 'a' { 'hello' break } else { 'world'}", ""); }
     #[test] fn test_for_else_no_break() { run_str("for c in 'abcd' { if c == 'B' { break } } else { print('hello') }", "hello\n"); }
+    #[test] fn test_for_else_no_break_2() { run_str("for x in '' { 'hello' break } else { 'world'}", ""); }
     #[test] fn test_struct_str_of_struct_instance() { run_str("struct Foo(a, b) Foo(1, 2) . print", "Foo(a=1, b=2)\n"); }
     #[test] fn test_struct_str_of_struct_constructor() { run_str("struct Foo(a, b) Foo . print", "struct Foo(a, b)\n"); }
     #[test] fn test_struct_get_field_of_struct() { run_str("struct Foo(a, b) Foo(1, 2) -> a . print", "1\n"); }
@@ -1910,6 +1917,7 @@ mod tests {
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }
     #[test] fn test_append_large_lists() { run("append_large_lists"); }
+    #[test] fn test_break_in_nested_loop() { run("break_in_nested_loop"); }
     #[test] fn test_closure_instead_of_global_variable() { run("closure_instead_of_global_variable"); }
     #[test] fn test_closure_of_loop_variable() { run("closure_of_loop_variable"); }
     #[test] fn test_closure_of_partial_function() { run("closure_of_partial_function"); }

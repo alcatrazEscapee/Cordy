@@ -1,15 +1,17 @@
 L1: 0000 Nil
     0001 Nil
     0002 InitIterable
-    0003 TestIterable(10)
+    0003 TestIterable(12)
     0004 StoreLocal(0) -> x
     0005 Pop
 L2: 0006 Str('hello')
     0007 Pop
-    0008 Jump(14)
-    0009 Jump(3)
-L4: 0010 Pop
-    0011 Pop
-L5: 0012 Str('world')
-L6: 0013 Pop
-    0014 Exit
+L3: 0008 Pop
+    0009 Pop
+    0010 Jump(16)
+    0011 Jump(3)
+L4: 0012 Pop
+    0013 Pop
+L5: 0014 Str('world')
+L6: 0015 Pop
+    0016 Exit
