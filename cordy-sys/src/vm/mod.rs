@@ -1046,6 +1046,7 @@ mod tests {
     #[test] fn test_do_while_else_3() { run_str("let i = 0 ; do { i . print ; i += 1 ; if i > 2 { break } } while 1 else { 'end' . print }", "0\n1\n2\n"); }
     #[test] fn test_do_while_else_4() { run_str("let i = 0 ; do { i . print ; i += 1 ; if i > 2 { break } } while i < 2 else { 'end' . print }", "0\n1\nend\n"); }
     #[test] fn test_for_loop_has_nested_scope() { run_str("let x ; for x in [] {}", "") }
+    #[test] fn test_for_loop_has_2x_nested_scope() { run_str("let x ; for x in [] { let x }", "") }
     #[test] fn test_for_loop_no_intrinsic_with_list() { run_str("for x in ['a', 'b', 'c'] { x . print }", "a\nb\nc\n") }
     #[test] fn test_for_loop_no_intrinsic_with_set() { run_str("for x in 'foobar' . set { x . print }", "f\no\nb\na\nr\n") }
     #[test] fn test_for_loop_no_intrinsic_with_str() { run_str("for x in 'hello' { x . print }", "h\ne\nl\nl\no\n") }
