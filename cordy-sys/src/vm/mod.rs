@@ -1028,9 +1028,47 @@ mod tests {
     #[test] fn test_if_then_else_5() { run_str("(if false then (fn() -> 'hello' . print)() else 'nope') . print", "nope\n"); }
     #[test] fn test_if_then_else_top_level() { run_str("if true then print('hello') else print('goodbye')", "hello\n"); }
     #[test] fn test_if_then_else_top_level_in_loop() { run_str("for x in range(2) { if x then x else x }", ""); }
-    #[test] fn test_loop_has_nested_scope() { run_str("let x ; loop { let x ; break }", "") }
-    #[test] fn test_while_loop_has_nested_scope() { run_str("let x ; while nil { let x }", "") }
+    #[test] fn test_loop_has_nested_scope() { run_str("let x ; loop { let x ; break }", ""); }
+    #[test] fn test_loop_2x_nested_with_break_1() { run_str("loop { break ; loop { } }", ""); }
+    #[test] fn test_loop_2x_nested_with_break_2() { run_str("let x ; loop { break ; loop { } }", ""); }
+    #[test] fn test_loop_2x_nested_with_break_3() { run_str("let x ; loop { let y ; break ; loop { } }", ""); }
+    #[test] fn test_loop_2x_nested_with_break_4() { run_str("let x ; loop { let y ; break ; let z ; loop { } }", ""); }
+    #[test] fn test_loop_2x_nested_with_break_5() { run_str("let x ; loop { break ; loop { } }", ""); }
+    #[test] fn test_loop_2x_nested_with_break_6() { run_str("let x ; loop { let y ; break ; loop { } }", ""); }
+    #[test] fn test_loop_2x_nested_with_break_7() { run_str("let x ; loop { let y ; break ; loop { let z } }", ""); }
+    #[test] fn test_loop_2x_nested_with_break_8() { run_str("let x ; loop { break ; loop { let z } }", ""); }
+    #[test] fn test_loop_2x_nested_with_break_9() { run_str("loop { break ; loop { let z } }", ""); }
+    #[test] fn test_loop_2x_nested_with_break_10() { run_str("loop { loop { break } ; break }", ""); }
+    #[test] fn test_while_loop_has_nested_scope() { run_str("let x ; while nil { let x }", ""); }
     #[test] fn test_while_false_if_false() { run_str("while false { if false { } }", ""); }
+    #[test] fn test_while_2x_nested_with_break_1() { run_str("let x = [0,0,1,2] ; while x.pop { while x.pop { break } }", ""); }
+    #[test] fn test_while_2x_nested_with_break_2() { run_str("let x = [0,0,1,2] ; while x.pop { let y ; while x.pop { break } }", ""); }
+    #[test] fn test_while_2x_nested_with_break_3() { run_str("let x = [0,0,1,2] ; while x.pop { let y ; while x.pop { let z ; break } }", ""); }
+    #[test] fn test_while_2x_nested_with_break_4() { run_str("let x = [0,0,1,2] ; while x.pop { let y ; while x.pop { let z ; break ; let w } }", ""); }
+    #[test] fn test_while_2x_nested_with_break_5() { run_str("let x = [0,0,1,2] ; while x.pop { while x.pop { let z ; break ; let w } }", ""); }
+    #[test] fn test_while_2x_nested_with_break_6() { run_str("let x = [0,0,1,2] ; while x.pop { while x.pop { break ; let w } }", ""); }
+    #[test] fn test_while_2x_nested_with_break_7() { run_str("let x = [0,0,1,2] ; while x.pop { while x.pop { } break }", ""); }
+    #[test] fn test_while_2x_nested_with_break_8() { run_str("let x = [0,0,1,2] ; while x.pop { let y ; while x.pop { } break }", ""); }
+    #[test] fn test_while_2x_nested_with_break_9() { run_str("let x = [0,0,1,2] ; while x.pop { let y ; while x.pop { let z } break }", ""); }
+    #[test] fn test_while_2x_nested_with_break_10() { run_str("let x = [0,0,1,2] ; while x.pop { let y ; while x.pop { let z } let z ; break }", ""); }
+    #[test] fn test_while_2x_nested_with_break_11() { run_str("let x = [0,0,1,2] ; while x.pop { let y ; while x.pop { let z } let z ; break ; let w }", ""); }
+    #[test] fn test_while_2x_nested_with_break_12() { run_str("let x = [0,0,1,2] ; while x.pop { while x.pop { let z } let z ; break ; let w }", ""); }
+    #[test] fn test_while_2x_nested_with_break_13() { run_str("let x = [0,0,1,2] ; while x.pop { while x.pop { } let z ; break ; let w }", ""); }
+    #[test] fn test_while_2x_nested_with_break_14() { run_str("let x = [0,0,1,2] ; while x.pop { while x.pop { } break ; let w }", ""); }
+    #[test] fn test_while_2x_nested_with_continue_1() { run_str("let x = [0,0,1,2] ; while x.pop { while x.pop { continue } }", ""); }
+    #[test] fn test_while_2x_nested_with_continue_2() { run_str("let x = [0,0,1,2] ; while x.pop { let y ; while x.pop { continue } }", ""); }
+    #[test] fn test_while_2x_nested_with_continue_3() { run_str("let x = [0,0,1,2] ; while x.pop { let y ; while x.pop { let z ; continue } }", ""); }
+    #[test] fn test_while_2x_nested_with_continue_4() { run_str("let x = [0,0,1,2] ; while x.pop { let y ; while x.pop { let z ; continue ; let w } }", ""); }
+    #[test] fn test_while_2x_nested_with_continue_5() { run_str("let x = [0,0,1,2] ; while x.pop { while x.pop { let z ; continue ; let w } }", ""); }
+    #[test] fn test_while_2x_nested_with_continue_6() { run_str("let x = [0,0,1,2] ; while x.pop { while x.pop { continue ; let w } }", ""); }
+    #[test] fn test_while_2x_nested_with_continue_7() { run_str("let x = [0,0,1,2] ; while x.pop { while x.pop { } continue }", ""); }
+    #[test] fn test_while_2x_nested_with_continue_8() { run_str("let x = [0,0,1,2] ; while x.pop { let y ; while x.pop { } continue }", ""); }
+    #[test] fn test_while_2x_nested_with_continue_9() { run_str("let x = [0,0,1,2] ; while x.pop { let y ; while x.pop { let z } continue }", ""); }
+    #[test] fn test_while_2x_nested_with_continue_10() { run_str("let x = [0,0,1,2] ; while x.pop { let y ; while x.pop { let z } let z ; continue }", ""); }
+    #[test] fn test_while_2x_nested_with_continue_11() { run_str("let x = [0,0,1,2] ; while x.pop { let y ; while x.pop { let z } let z ; continue ; let w }", ""); }
+    #[test] fn test_while_2x_nested_with_continue_12() { run_str("let x = [0,0,1,2] ; while x.pop { while x.pop { let z } let z ; continue ; let w }", ""); }
+    #[test] fn test_while_2x_nested_with_continue_13() { run_str("let x = [0,0,1,2] ; while x.pop { while x.pop { } let z ; continue ; let w }", ""); }
+    #[test] fn test_while_2x_nested_with_continue_14() { run_str("let x = [0,0,1,2] ; while x.pop { while x.pop { } continue ; let w }", ""); }
     #[test] fn test_while_else_no_loop() { run_str("while false { break } else { print('hello') }", "hello\n"); }
     #[test] fn test_while_else_break() { run_str("while true { break } else { print('hello') } print('world')", "world\n"); }
     #[test] fn test_while_else_no_break() { run_str("let x = true ; while x { x = false } else { print('hello') }", "hello\n"); }
@@ -1040,6 +1078,31 @@ mod tests {
     #[test] fn test_do_while_2() { run_str("let i = 0 ; do { i . print ; i += 1 } while i < 3", "0\n1\n2\n"); }
     #[test] fn test_do_while_3() { run_str("let i = 0 ; do { i += 1 ; i . print } while i < 3", "1\n2\n3\n"); }
     #[test] fn test_do_while_4() { run_str("let i = 5 ; do { i . print } while i < 3", "5\n"); }
+    #[test] fn test_do_while_2x_nested_with_break_1() { run_str("do { break ; do { } while 2 } while 1", ""); }
+    #[test] fn test_do_while_2x_nested_with_break_2() { run_str("let x ; do { break ; do { } while 2 } while 1", ""); }
+    #[test] fn test_do_while_2x_nested_with_break_3() { run_str("let x ; do { let y ; break ; do { } while 2 } while 1", ""); }
+    #[test] fn test_do_while_2x_nested_with_break_4() { run_str("let x ; do { let y ; break ; do { let z ; } while 2 } while 1", ""); }
+    #[test] fn test_do_while_2x_nested_with_break_5() { run_str("do { do { break } while 2 ; break } while 1", ""); }
+    #[test] fn test_do_while_2x_nested_with_break_6() { run_str("let x ; do { do { break } while 2 ; break } while 1", ""); }
+    #[test] fn test_do_while_2x_nested_with_break_7() { run_str("let x ; do { let y ; do { break } while 2 ; break } while 1", ""); }
+    #[test] fn test_do_while_2x_nested_with_break_8() { run_str("let x ; do { let y ; do { let z ; break } while 2 ; break } while 1", ""); }
+    #[test] fn test_do_while_2x_nested_with_break_9() { run_str("let x ; do { let y ; do { let z ; break ; let w } while 2 ; break } while 1", ""); }
+    #[test] fn test_do_while_2x_nested_with_break_10() { run_str("do { do { let z ; break ; let w } while 2 ; break } while 1", ""); }
+    #[test] fn test_do_while_2x_nested_with_break_11() { run_str("do { do { break ; let w } while 2 ; break } while 1", ""); }
+    #[test] fn test_do_while_2x_nested_with_continue_1() { run_str("let x = [0,0,1,2] ; do { while x.pop { continue } } while x.pop", ""); }
+    #[test] fn test_do_while_2x_nested_with_continue_2() { run_str("let x = [0,0,1,2] ; do { let y ; while x.pop { continue } } while x.pop", ""); }
+    #[test] fn test_do_while_2x_nested_with_continue_3() { run_str("let x = [0,0,1,2] ; do { let y ; while x.pop { let z ; continue } } while x.pop", ""); }
+    #[test] fn test_do_while_2x_nested_with_continue_4() { run_str("let x = [0,0,1,2] ; do { let y ; while x.pop { let z ; continue ; let w } } while x.pop", ""); }
+    #[test] fn test_do_while_2x_nested_with_continue_5() { run_str("let x = [0,0,1,2] ; do { while x.pop { let z ; continue ; let w } } while x.pop", ""); }
+    #[test] fn test_do_while_2x_nested_with_continue_6() { run_str("let x = [0,0,1,2] ; do { while x.pop { continue ; let w } } while x.pop", ""); }
+    #[test] fn test_do_while_2x_nested_with_continue_7() { run_str("let x = [0,0,1,2] ; while x.pop { do { } while x.pop continue }", ""); }
+    #[test] fn test_do_while_2x_nested_with_continue_8() { run_str("let x = [0,0,1,2] ; while x.pop { let y ; do { } while x.pop continue }", ""); }
+    #[test] fn test_do_while_2x_nested_with_continue_9() { run_str("let x = [0,0,1,2] ; while x.pop { let y ; do { let z } while x.pop continue }", ""); }
+    #[test] fn test_do_while_2x_nested_with_continue_10() { run_str("let x = [0,0,1,2] ; while x.pop { let y ; do { let z } while x.pop let z ; continue }", ""); }
+    #[test] fn test_do_while_2x_nested_with_continue_11() { run_str("let x = [0,0,1,2] ; while x.pop { let y ; do { let z } while x.pop let z ; continue ; let w }", ""); }
+    #[test] fn test_do_while_2x_nested_with_continue_12() { run_str("let x = [0,0,1,2] ; while x.pop { do { let z } while x.pop let z ; continue ; let w }", ""); }
+    #[test] fn test_do_while_2x_nested_with_continue_13() { run_str("let x = [0,0,1,2] ; while x.pop { do { } while x.pop let z ; continue ; let w }", ""); }
+    #[test] fn test_do_while_2x_nested_with_continue_14() { run_str("let x = [0,0,1,2] ; while x.pop { do { } while x.pop continue ; let w }", ""); }
     #[test] fn test_do_without_while() { run_str("do { 'test' . print }", "test\n"); }
     #[test] fn test_do_while_else_1() { run_str("do { 'loop' . print } while false else { 'else' . print }", "loop\nelse\n"); }
     #[test] fn test_do_while_else_2() { run_str("do { 'loop' . print ; break } while false else { 'else' . print }", "loop\n"); }
@@ -1055,6 +1118,20 @@ mod tests {
     #[test] fn test_for_loop_range_start_stop_step_positive() { run_str("for x in range(1, 10, 3) { x . print }", "1\n4\n7\n"); }
     #[test] fn test_for_loop_range_start_stop_step_negative() { run_str("for x in range(11, 0, -4) { x . print }", "11\n7\n3\n"); }
     #[test] fn test_for_loop_range_start_stop_step_zero() { run_str("for x in range(1, 2, 0) { x . print }", "ValueError: 'step' argument cannot be zero\n  at: line 1 (<test>)\n\n1 | for x in range(1, 2, 0) { x . print }\n2 |               ^^^^^^^^^\n"); }
+    #[test] fn test_for_loop_2x_nested_with_break_1() { run_str("for _ in 'a' { for _ in 'b' { break } }", ""); }
+    #[test] fn test_for_loop_2x_nested_with_break_2() { run_str("for a in 'a' { for b in 'b' { break } }", ""); }
+    #[test] fn test_for_loop_2x_nested_with_break_3() { run_str("for a in 'a' { let x ; for b in 'b' { break } }", ""); }
+    #[test] fn test_for_loop_2x_nested_with_break_4() { run_str("for a in 'a' { let x ; for b in 'b' { let y ; break } }", ""); }
+    #[test] fn test_for_loop_2x_nested_with_break_5() { run_str("for a in 'a' { for b in 'b' { } break }", ""); }
+    #[test] fn test_for_loop_2x_nested_with_break_6() { run_str("for a in 'a' { let x ; for b in 'b' { } break }", ""); }
+    #[test] fn test_for_loop_2x_nested_with_break_7() { run_str("for a in 'a' { let x ; for b in 'b' { let y ; } break }", ""); }
+    #[test] fn test_for_loop_2x_nested_with_continue_1() { run_str("for _ in 'a' { for _ in 'b' { continue } }", ""); }
+    #[test] fn test_for_loop_2x_nested_with_continue_2() { run_str("for a in 'a' { for b in 'b' { continue } }", ""); }
+    #[test] fn test_for_loop_2x_nested_with_continue_3() { run_str("for a in 'a' { let x ; for b in 'b' { continue } }", ""); }
+    #[test] fn test_for_loop_2x_nested_with_continue_4() { run_str("for a in 'a' { let x ; for b in 'b' { let y ; continue } }", ""); }
+    #[test] fn test_for_loop_2x_nested_with_continue_5() { run_str("for a in 'a' { for b in 'b' { } continue }", ""); }
+    #[test] fn test_for_loop_2x_nested_with_continue_6() { run_str("for a in 'a' { let x ; for b in 'b' { } continue }", ""); }
+    #[test] fn test_for_loop_2x_nested_with_continue_7() { run_str("for a in 'a' { let x ; for b in 'b' { let y } continue }", ""); }
     #[test] fn test_for_else_no_loop() { run_str("for _ in [] { print('hello') ; break } else { print('world') }", "world\n"); }
     #[test] fn test_for_else_break() { run_str("for c in 'abcd' { if c == 'b' { break } } else { print('hello') } print('world')", "world\n"); }
     #[test] fn test_for_else_break_2() { run_str("for x in 'a' { 'hello' break } else { 'world'}", ""); }
