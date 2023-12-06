@@ -27,13 +27,22 @@ use ParserErrorType::{*};
 pub struct Loop {
     pub(super) start_id: ReverseBlockId,
     pub(super) break_ids: Vec<ForwardBlockId>,
-    pub(super) scope_depth: u32,
+
+    /// The scope immediately enclosing the loop. This scope is used for `break` statements to jump to, which needs to pop everything inside the loop scope
+    enclosing_scope: u32,
+
+    /// The scope within the loop, containing per-loop-iteration variables.
+    /// This is the scope that a `continue` statement needs to jump to, which is the minimal scope still inside the loop.
+    inner_scope: u32,
 }
 
 impl Loop {
-    fn new(start_id: ReverseBlockId, depth: u32) -> Loop {
-        Loop { start_id, break_ids: Vec::new(), scope_depth: depth }
+    fn new(start_id: ReverseBlockId, enclosing_scope: u32, inner_scope: u32) -> Loop {
+        Loop { start_id, break_ids: Vec::new(), enclosing_scope, inner_scope }
     }
+
+    pub fn enclosing_scope(&self) -> u32 { self.enclosing_scope }
+    pub fn inner_scope(&self) -> u32 { self.inner_scope }
 }
 
 
@@ -735,8 +744,20 @@ impl<'a> Parser<'a> {
     /// Marks the beginning of a loop type statement, for the purposes of tracking `break` and `continue` statements.
     pub fn begin_loop(&mut self) -> ReverseBlockId {
         let loop_start = self.branch_reverse(); // Top of the loop, push onto the loop stack
-        let loop_depth: u32 = self.scope_depth;
-        self.current_locals_mut().loops.push(Loop::new(loop_start, loop_depth));
+        let depth: u32 = self.scope_depth;
+        self.current_locals_mut().loops.push(Loop::new(loop_start, depth + 1, depth + 1));
+        loop_start
+    }
+
+    /// Marks the beginning of a `for` loop type statement, for the purposes of tracking `break` and `continue` statements.
+    ///
+    /// The primary difference between this and `begin_loop()` is the scope depth is tracked differently.
+    /// - In a typical loop, the enclosing and inner scopes are the same.
+    /// - `for` loops have two separate scopes, with the enclosing being one higher than the inner scope
+    pub fn begin_for_loop(&mut self) -> ReverseBlockId {
+        let loop_start = self.branch_reverse(); // Top of the loop, push onto the loop stack
+        let depth: u32 = self.scope_depth;
+        self.current_locals_mut().loops.push(Loop::new(loop_start, depth, depth + 1));
         loop_start
     }
 

@@ -904,16 +904,9 @@ impl Parser<'_> {
         // Applies to the top of the stack
         self.push(InitIterable);
 
-        // In most other loops (do-while, while, loop), the loop's scope depth is the scope of the surrounding code
-        // This ensures that when a break or continue statement goes to pop anything *above the loop scope*, this includes the synthetic and real loop variables declared by for-loops
-        // `begin_loop()` will read the current scope depth, so in order to adjust for that, we decrement and increment after this, so even though for loops have two scopes, the outer one is used for break/continue local pops, and the loop scope
-        self.scope_depth -= 1;
-
         // Test
-        let jump = self.begin_loop();
+        let jump = self.begin_for_loop();
         let test = self.branch_forward();
-
-        self.scope_depth += 1;
 
         // Initialize locals
         lvalue.emit_destructuring(self, false, false);
@@ -950,10 +943,7 @@ impl Parser<'_> {
         self.advance();
         match self.current_locals_mut().top_loop() {
             Some(loop_stmt) => {
-                // We need to pop anything that is _inside_ the scope of the loop
-                // The loop scope is the scope of the surrounding code, i.e. a loop {} 's scope
-                // The scope *inside* the loop, is anything declared within the square brackets
-                let depth: u32 = loop_stmt.scope_depth + 1;
+                let depth: u32 = loop_stmt.enclosing_scope();
                 self.pop_locals(Some(depth), false, true, true);
                 let jump = self.branch_forward();
                 self.current_locals_mut().top_loop().unwrap().break_ids.push(jump);
@@ -969,7 +959,7 @@ impl Parser<'_> {
         match self.current_locals_mut().top_loop() {
             Some(loop_stmt) => {
                 let jump = loop_stmt.start_id;
-                let depth: u32 = loop_stmt.scope_depth + 1;
+                let depth: u32 = loop_stmt.inner_scope();
                 self.pop_locals(Some(depth), false, true, true);
                 self.join_reverse(jump, BranchType::Jump);
             },
