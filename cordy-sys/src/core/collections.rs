@@ -533,8 +533,12 @@ pub fn remove(needle: ValuePtr, target: ValuePtr) -> ValueResult {
                 ValueErrorIndexOutOfBounds(index, len).err()
             }
         },
-        Type::Set => target.as_set().borrow_mut().set.remove(&needle).to_value().ok(),
-        Type::Dict => target.as_dict().borrow_mut().dict.remove(&needle).is_some().to_value().ok(),
+        // Other operations on `dict`, `set`, generally preserve ordering, so this should do, despite O(n) cost
+        // `remove()` is not a particularly common op (`in` or access) is, so this is a fair tradeoff to make
+        //
+        // For reference, Python >=3.7 makes the same guarantee, see https://docs.python.org/3/reference/datamodel.html, 3.2.7.1
+        Type::Set => target.as_set().borrow_mut().set.shift_remove(&needle).to_value().ok(),
+        Type::Dict => target.as_dict().borrow_mut().dict.shift_remove(&needle).is_some().to_value().ok(),
         _ => TypeErrorArgMustBeIterable(target).err(),
     }
 }
