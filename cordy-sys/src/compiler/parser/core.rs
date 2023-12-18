@@ -355,7 +355,7 @@ impl<'a> Parser<'a> {
     ///
     /// N.B. The parser **must** be within a function, this does not allow identifying targets within global code!
     pub fn next_opcode(&self) -> OpcodeId {
-        let function_id = self.functions.len() - 1;
+        let function_id = self.current_locals().func.expect("next_opcode() called in global scope!");
         let blocks = &self.functions[function_id].code.blocks;
         let block_id = blocks.len() - 1;
         let opcode_id = blocks[block_id].code.len();

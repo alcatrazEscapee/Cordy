@@ -2320,6 +2320,7 @@ mod tests {
     #[test] fn test_weird_closure_not_a_closure() { run("weird_closure_not_a_closure"); }
     #[test] fn test_weird_locals() { run("weird_locals"); }
     #[test] fn test_weird_loop_nesting_in_functions() { run("weird_loop_nesting_in_functions"); }
+    #[test] fn test_weird_opcode_id() { run("weird_opcode_id"); }
     #[test] fn test_weird_structs() { run("weird_structs"); }
     #[test] fn test_weird_upvalue_index() { run("weird_upvalue_index"); }
     #[test] fn test_weird_upvalue_index_with_parameter() { run("weird_upvalue_index_with_parameter"); }

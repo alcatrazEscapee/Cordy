@@ -1,0 +1,7 @@
+fn bomb() {
+    fn helper() -> nil
+
+    foo undeclared
+}
+
+let foo
