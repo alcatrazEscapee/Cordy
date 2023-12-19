@@ -1571,8 +1571,14 @@ mod tests {
     #[test] fn test_int_comparisons_2() { run_str("print(1 <= 3, -5 < -10, 3 <= 3, 2 >= 2, 6 >= 7, 6 >= 4, 6 <= 6, 8 >= 8)", "true false true true false true true true\n"); }
     #[test] fn test_int_equality() { run_str("print(1 == 3, -5 == -10, 3 != 3, 2 == 2, 6 != 7)", "false false false true true\n"); }
     #[test] fn test_int_bitwise_operators() { run_str("print(0b111 & 0b100, 0b1100 | 0b1010, 0b1100 ^ 0b1010)", "4 14 6\n"); }
-    #[test] fn test_int_to_hex() { run_str("1234 . hex . print", "4d2\n"); }
-    #[test] fn test_int_to_bin() { run_str("1234 . bin . print", "10011010010\n"); }
+    #[test] fn test_int_to_hex() { run_str("1234 . hex . repr . print", "'4d2'\n"); }
+    #[test] fn test_int_from_hex() { run_str("'4d2' . hex . repr . print", "1234\n"); }
+    #[test] fn test_int_from_hex_error() { run_str("'4x2' . hex . repr . print", "TypeError: Cannot convert '4x2' of type 'str' to an int\n  at: line 1 (<test>)\n\n1 | '4x2' . hex . repr . print\n2 |       ^^^^^\n"); }
+    #[test] fn test_int_from_hex_error_leading_0x() { run_str("'0xff' . hex . repr . print", "TypeError: Cannot convert '0xff' of type 'str' to an int\n  at: line 1 (<test>)\n\n1 | '0xff' . hex . repr . print\n2 |        ^^^^^\n"); }
+    #[test] fn test_int_to_bin() { run_str("1234 . bin . repr . print", "'10011010010'\n"); }
+    #[test] fn test_int_from_bin() { run_str("'10011010010' . bin . repr . print", "1234\n"); }
+    #[test] fn test_int_from_bin_error() { run_str("'100110210010' . bin . repr . print", "TypeError: Cannot convert '100110210010' of type 'str' to an int\n  at: line 1 (<test>)\n\n1 | '100110210010' . bin . repr . print\n2 |                ^^^^^\n"); }
+    #[test] fn test_int_from_bin_error_leading_0b() { run_str("'0b11' . bin . repr . print", "TypeError: Cannot convert '0b11' of type 'str' to an int\n  at: line 1 (<test>)\n\n1 | '0b11' . bin . repr . print\n2 |        ^^^^^\n"); }
     #[test] fn test_int_default_value_yes() { run_str("int('123', 567) . print", "123\n"); }
     #[test] fn test_int_default_value_no() { run_str("int('yes', 567) . print", "567\n"); }
     #[test] fn test_int_min_and_max() { run_str("[int.min, max(int)] . print", "[-4611686018427387904, 4611686018427387903]\n") }

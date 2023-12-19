@@ -4,7 +4,7 @@ use fancy_regex::{Captures, Matches, Regex};
 
 use crate::core::InvokeArg1;
 use crate::util;
-use crate::vm::{ErrorResult, IntoIterableValue, IntoValue, Iterable, Prefix, RuntimeError, ValuePtr, ValueResult, VirtualInterface};
+use crate::vm::{ErrorResult, IntoIterableValue, IntoValue, Iterable, Prefix, RuntimeError, Type, ValuePtr, ValueResult, VirtualInterface};
 
 use RuntimeError::{*};
 
@@ -199,7 +199,7 @@ fn map_join<'a, I : Iterator<Item=ValuePtr>>(mut iter: I, sep: &str) -> ValuePtr
 }
 
 
-pub fn to_char(value: ValuePtr) -> ValueResult {
+pub fn chr(value: ValuePtr) -> ValueResult {
     let i = value.check_int()?.as_int();
     if i <= 0 {
         return ValueErrorInvalidCharacterOrdinal(i).err()
@@ -210,7 +210,7 @@ pub fn to_char(value: ValuePtr) -> ValueResult {
     }
 }
 
-pub fn to_ord(value: ValuePtr) -> ValueResult {
+pub fn ord(value: ValuePtr) -> ValueResult {
     let value = value.check_str()?;
     let s = value.as_str_slice();
     match s.len() {
@@ -221,12 +221,26 @@ pub fn to_ord(value: ValuePtr) -> ValueResult {
     }
 }
 
-pub fn to_hex(value: ValuePtr) -> ValueResult {
-    format!("{:x}", value.check_int()?.as_int()).to_value().ok()
+pub fn hex(value: ValuePtr) -> ValueResult {
+    match value.ty() {
+        Type::Int => format!("{:x}", value.as_precise_int()).to_value().ok(),
+        Type::ShortStr | Type::LongStr => match i64::from_str_radix(value.as_str_slice(), 16).ok() {
+            Some(int) => int.to_value().ok(),
+            _ => TypeErrorCannotConvertToInt(value).err()
+        },
+        _ => TypeErrorArgMustBeIntOrStr(value).err()
+    }
 }
 
-pub fn to_bin(value: ValuePtr) -> ValueResult {
-    format!("{:b}", value.check_int()?.as_int()).to_value().ok()
+pub fn bin(value: ValuePtr) -> ValueResult {
+    match value.ty() {
+        Type::Int => format!("{:b}", value.as_precise_int()).to_value().ok(),
+        Type::ShortStr | Type::LongStr => match i64::from_str_radix(value.as_str_slice(), 2).ok() {
+            Some(int) => int.to_value().ok(),
+            _ => TypeErrorCannotConvertToInt(value).err()
+        }
+        _ => TypeErrorArgMustBeIntOrStr(value).err()
+    }
 }
 
 pub fn format_string(literal: &str, args: ValuePtr) -> ValueResult {
