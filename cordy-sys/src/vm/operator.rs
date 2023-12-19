@@ -383,7 +383,7 @@ type UnaryFn = fn(ValuePtr) -> ValueResult;
 type BinaryFn = fn(ValuePtr, ValuePtr) -> ValueResult;
 
 /// Helpers for `Vector` operations, which all apply elementwise
-fn apply_vector_unary(vector: ValuePtr, unary_op: UnaryFn) -> ValueResult {
+pub fn apply_vector_unary(vector: ValuePtr, unary_op: UnaryFn) -> ValueResult {
     vector.as_vector().borrow().vector.iter()
         .map(|v| unary_op(v.clone()))
         .collect::<Result<Vec<ValuePtr>, Box<Prefix<RuntimeError>>>>()?

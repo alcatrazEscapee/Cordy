@@ -1578,6 +1578,8 @@ mod tests {
     #[test] fn test_int_min_and_max() { run_str("[int.min, max(int)] . print", "[-4611686018427387904, 4611686018427387903]\n") }
     #[test] fn test_int_min_and_max_indirect() { run_str("let i = int ; [min(i), i.max] . print", "[-4611686018427387904, 4611686018427387903]\n")}
     #[test] fn test_int_min_and_max_no_opt() { run_str_with(false, "[int.min, max(int)] . print", "[-4611686018427387904, 4611686018427387903]\n") }
+    #[test] fn test_int_min_negative_underflow() { run_str("min(int) - 1 . print", "4611686018427387903\n"); }
+    #[test] fn test_int_max_positive_overflow() { run_str("max(int) + 1 . print", "-4611686018427387904\n"); }
     #[test] fn test_complex_add() { run_str("(1 + 2i) + (3 + 4j) . print", "4 + 6i\n"); }
     #[test] fn test_complex_mul() { run_str("(1 + 2i) * (3 + 4j) . print", "-5 + 10i\n"); }
     #[test] fn test_complex_str() { run_str("1 + 1i . print", "1 + 1i\n"); }
@@ -1823,6 +1825,11 @@ mod tests {
     #[test] fn test_sum_values() { run_str("sum(1, 3, 5, 7) . print", "16\n"); }
     #[test] fn test_sum_no_arg() { run_str("sum()", "Incorrect number of arguments for fn sum(...), got 0\n  at: line 1 (<test>)\n\n1 | sum()\n2 |    ^^\n"); }
     #[test] fn test_sum_empty_list() { run_str("[] . sum . print", "0\n"); }
+    #[test] fn test_abs_bool() { run_str("[true, false] . map abs . print", "[1, 0]\n"); }
+    #[test] fn test_abs_int() { run_str("[int.max, int.min, 0, -1, 1, 25, -32] . map abs . print", "[4611686018427387903, -4611686018427387904, 0, 1, 1, 25, 32]\n"); }
+    #[test] fn test_abs_complex() { run_str("[0, 1i, -2i, 3 + 4i, -5 + 6i, -7 - 8i, 9 - 10i] . map abs . print", "[0, 1i, 2i, 3 + 4i, 5 + 6i, 7 + 8i, 9 + 10i]\n"); }
+    #[test] fn test_abs_vector_1() { run_str("(1, -2, 0, -12, 10) . abs . print", "(1, 2, 0, 12, 10)\n"); }
+    #[test] fn test_abs_vector_2() { run_str("[(0, 0), (-1, -1), (2, -2), (-3, 3), (4, 4)] . map abs . print", "[(0, 0), (1, 1), (2, 2), (3, 3), (4, 4)]\n"); }
     #[test] fn test_map() { run_str("[1, 2, 3] . map(str) . repr . print", "['1', '2', '3']\n") }
     #[test] fn test_map_lambda() { run_str("[-1, 2, -3] . map(fn(x) -> x . abs) . print", "[1, 2, 3]\n") }
     #[test] fn test_filter() { run_str("[2, 3, 4, 5, 6] . filter (>3) . print", "[4, 5, 6]\n") }
