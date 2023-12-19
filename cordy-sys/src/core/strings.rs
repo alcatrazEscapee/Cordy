@@ -64,7 +64,15 @@ pub fn search(pattern: ValuePtr, target: ValuePtr) -> ValueResult {
     std::iter::from_fn(move || {
         match regex.captures_from_pos(text, start).unwrap() {
             Some(captures) => {
-                start = captures.get(0).unwrap().end();
+                let end = captures.get(0).unwrap().end();
+                if start == end {
+                    // If we match a zero-length group, this regex will run infinitely - so the only sensible way to handle this here is to abort
+                    // Regex captures are greedy by default, so this will trigger only,
+                    // - If we can *only* match an empty string, which will return nothing
+                    // - If we've already matched the whole string, and now are matching *against* an empty string, which will return the existing match
+                    return None
+                }
+                start = end;
                 Some(as_result(&captures))
             },
             None => None
