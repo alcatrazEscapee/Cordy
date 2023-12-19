@@ -98,7 +98,6 @@ pub(super) fn from_usize(value: usize) -> ValuePtr {
 }
 
 pub(super) fn from_i64(value: i64) -> ValuePtr {
-    debug_assert!(MIN_INT <= value && value <= MAX_INT);
     ValuePtr { long_tag: TAG_INT as u64 | ((value << 1) as u64) }
 }
 
@@ -1050,15 +1049,9 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
-    fn test_inline_int_too_small() {
-        let _ = (MIN_INT - 1).to_value();
-    }
-
-    #[test]
-    #[should_panic]
-    fn test_inline_int_too_large() {
-        let _ = (MAX_INT + 1).to_value();
+    fn test_inline_int_out_of_bounds() {
+        assert_eq!((MIN_INT - 1).to_value().as_int(), MAX_INT);
+        assert_eq!((MAX_INT + 1).to_value().as_int(), MIN_INT);
     }
 
     #[test]

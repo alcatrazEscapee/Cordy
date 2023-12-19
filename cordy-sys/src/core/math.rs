@@ -1,6 +1,6 @@
 use num_integer::Roots;
 
-use crate::vm::{ErrorResult, IntoValue, RuntimeError, Type, ValueOption, ValuePtr, ValueResult};
+use crate::vm::{C64, ErrorResult, IntoValue, operator, RuntimeError, Type, ValueOption, ValuePtr, ValueResult};
 
 use RuntimeError::{*};
 
@@ -22,11 +22,17 @@ pub fn convert_to_int(target: ValuePtr, default: ValueOption) -> ValueResult {
 }
 
 pub fn abs(value: ValuePtr) -> ValueResult {
-    value.check_int()?
-        .as_int()
-        .abs()
-        .to_value()
-        .ok()
+    match value.ty() {
+        Type::Bool | Type::Int => value.as_int().abs().to_value().ok(),
+        Type::Complex => {
+            let c = value.as_precise_complex().value.inner;
+            C64::new(c.re.abs(), c.im.abs()).to_value().ok()
+        },
+        Type::Vector => {
+            operator::apply_vector_unary(value, abs)
+        }
+        _ => TypeErrorCannotConvertToInt(value).err()
+    }
 }
 
 pub fn sqrt(value: ValuePtr) -> ValueResult {
