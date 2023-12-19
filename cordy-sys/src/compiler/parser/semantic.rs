@@ -145,6 +145,35 @@ impl Fields {
             .0
             .clone()
     }
+
+    /// Declares the existence of a new field offset, associated to a given field name (which will be used to resolve a `field_index`), and a `type_index`
+    /// Note if the field does not exist, one will be generated along with a late binding error.
+    ///
+    /// Returns the `field_index` for the given field name.
+    fn declare_field_offset(&mut self, name: String, type_index: u32, field_offset: usize) -> u32 {
+        let next_field_index: u32 = self.fields.len() as u32;
+        let field_index: u32 = match self.fields.entry(name) {
+            Entry::Occupied(it) => {
+                let it = it.into_mut();
+                it.loc = None; // The field has been used, so clear the possible error
+                it.field_index
+            }
+            Entry::Vacant(it) => {
+                it.insert(FieldReference { loc: None, field_index: next_field_index });
+                next_field_index
+            }
+        };
+
+        self.lookup.insert((type_index, field_index), field_offset);
+
+        field_index
+    }
+
+    /// Declares a new type, and returns the corresponding `type_index` for that type.
+    fn declare_type(&mut self) -> u32 {
+        self.types += 1;
+        self.types - 1
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -631,17 +660,29 @@ pub struct Module {
     name: String,
     is_module: bool,
 
-    methods: IndexMap<String, Method>,
-    fields: Vec<String>,
+    /// A map of method names to `Method` implementations
+    ///
+    /// Uses an `IndexMap` as we need to preserve order of method names.
+    methods: IndexMap<String, Method, FxBuildHasher>,
+
+    /// A map of field names to `field_index` values
+    ///
+    /// Uses an `IndexMap` as we need to preserve order of field names.
+    fields: IndexMap<String, u32, FxBuildHasher>,
 }
 
 impl Module {
     pub fn new(name: String, is_module: bool) -> Module {
-        Module { name, is_module, methods: IndexMap::new(), fields: Vec::new() }
+        Module {
+            name,
+            is_module,
+            methods: IndexMap::with_hasher(FxBuildHasher::default()),
+            fields: IndexMap::with_hasher(FxBuildHasher::default())
+        }
     }
 
     pub fn bake(self, instance_type: u32, constructor_type: u32) -> StructTypeImpl {
-        StructTypeImpl::new(self.name, self.fields, self.methods.into_values().collect(), instance_type, constructor_type, self.is_module)
+        StructTypeImpl::new(self.name, self.fields.into_keys().collect(), self.methods.into_values().collect(), instance_type, constructor_type, self.is_module)
     }
 }
 
@@ -1197,11 +1238,12 @@ impl<'a> Parser<'a> {
                     }
                 }
 
-                if let Some(field_index) = module.fields.iter().position(|field| field == &name) {
+                if let Some((_, field_index)) = module.fields.iter().find(|(field, _)| field == &&name) {
+                    let field_index = *field_index;
                     return match self.resolve_reference(Reference::This) {
                         // `self` was successful, so we can create the composite reference
-                        LValueReference::LocalThis(index) => LValueReference::ThisField { upvalue: false, index, field_index: field_index as u32 },
-                        LValueReference::UpValueThis(index) => LValueReference::ThisField { upvalue: true, index, field_index: field_index as u32 },
+                        LValueReference::LocalThis(index) => LValueReference::ThisField { upvalue: false, index, field_index },
+                        LValueReference::UpValueThis(index) => LValueReference::ThisField { upvalue: true, index, field_index },
 
                         LValueReference::Invalid => LValueReference::Invalid,
                         lvalue => panic!("Invalid `self` for field load {:?}", lvalue)
@@ -1304,13 +1346,14 @@ impl<'a> Parser<'a> {
 
     /// Declares a field as part of the current module. If the field name is already used, raises a semantic error.
     pub fn declare_field(&mut self, type_index: u32, name: String) {
-        let fields: &mut Vec<String> = &mut self.modules.last_mut().unwrap().fields;
-        if fields.contains(&name) {
+        let fields: &mut IndexMap<String, u32, FxBuildHasher> = &mut self.modules.last_mut().unwrap().fields;
+        if fields.contains_key(&name) {
             self.semantic_error(DuplicateFieldName(name))
         } else {
-            fields.push(name.clone());
-            let offset = fields.len() - 1;
-            self.declare_field_offset(name, type_index, offset);
+            let field_offset = fields.len();
+            let field_index = self.fields.declare_field_offset(name.clone(), type_index, field_offset);
+
+            fields.insert(name, field_index);
         }
     }
 
@@ -1336,7 +1379,7 @@ impl<'a> Parser<'a> {
         // Some prior art:
         // - Java allows conflicts, but (1) access levels, and (2) you can't reference functions without invoking them, and (3) you can't invoke fields -> no ambiguity
         // - Python fields and methods are identical, meaning conflicts can occur and they must be unique (same situation here)
-        if module.fields.contains(&name) || module.methods.contains_key(&name) {
+        if module.fields.contains_key(&name) || module.methods.contains_key(&name) {
             self.semantic_error_at(loc, DuplicateFieldName(name.clone()));
         }
 
@@ -1346,31 +1389,13 @@ impl<'a> Parser<'a> {
         let offset = methods.len();
 
         methods.insert(name.clone(), Method::new(function_id, params.instance));
-        self.declare_field_offset(name.clone(), type_index, offset);
+        self.fields.declare_field_offset(name.clone(), type_index, offset);
         self.resolve_late_bindings(name, LateBound::Method { function_id, instance: params.instance });
     }
 
-    fn declare_field_offset(&mut self, name: String, type_index: u32, field_offset: usize) {
-        let next_field_index: u32 = self.fields.fields.len() as u32;
-        let field_index: u32 = match self.fields.fields.entry(name) {
-            Entry::Occupied(it) => {
-                let it = it.into_mut();
-                it.loc = None; // The field has been used, so clear the possible error
-                it.field_index
-            }
-            Entry::Vacant(it) => {
-                it.insert(FieldReference { loc: None, field_index: next_field_index });
-                next_field_index
-            }
-        };
-
-        self.fields.lookup.insert((type_index, field_index), field_offset);
-    }
-
-    /// Declares a new type, and returns the corresponding `type index`.
+    /// Declares a new type, and returns the corresponding `type index` for that type.
     pub fn declare_type(&mut self) -> u32 {
-        self.fields.types += 1;
-        self.fields.types - 1
+        self.fields.declare_type()
     }
 
     pub fn declare_native(&mut self, module_name: String, method_name: String, nargs: usize) -> u32 {

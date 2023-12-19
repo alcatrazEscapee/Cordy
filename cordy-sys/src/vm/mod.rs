@@ -1141,6 +1141,7 @@ mod tests {
     #[test] fn test_struct_str_of_struct_constructor() { run_str("struct Foo(a, b) Foo . print", "struct Foo(a, b)\n"); }
     #[test] fn test_struct_get_field_of_struct() { run_str("struct Foo(a, b) Foo(1, 2) -> a . print", "1\n"); }
     #[test] fn test_struct_get_field_of_struct_wrong_name() { run_str("struct Foo(a, b) struct Bar(c, d) Foo(1, 2) -> c . print", "TypeError: Cannot get field 'c' on struct Foo(a, b)\n  at: line 1 (<test>)\n\n1 | struct Foo(a, b) struct Bar(c, d) Foo(1, 2) -> c . print\n2 |                                             ^^^^\n"); }
+    #[test] fn test_struct_get_field_of_struct_in_self_method_with_other_struct() { run_str("struct Bad(a) ; struct Good(b) { fn get(self) -> b } ; Good(1)->get() . print", "1\n"); }
     #[test] fn test_struct_get_field_of_not_struct() { run_str("struct Foo(a, b) (1, 2) -> a . print", "TypeError: Cannot get field 'a' on '(1, 2)' of type 'vector'\n  at: line 1 (<test>)\n\n1 | struct Foo(a, b) (1, 2) -> a . print\n2 |                         ^^^^\n"); }
     #[test] fn test_struct_get_field_with_overlapping_offsets() { run_str("struct Foo(a, b) struct Bar(b, a) Foo(1, 2) -> b . print", "2\n"); }
     #[test] fn test_struct_set_field_of_struct() { run_str("struct Foo(a, b) let x = Foo(1, 2) ; x->a = 3 ; x->a . print", "3\n"); }
