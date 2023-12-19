@@ -830,6 +830,36 @@ Converts an integer to its unicode character representation, as a single-charact
 'A'
 ```
 
+#### Hex `hex(x: str | int) -> str | int`
+
+When provided with a hexidecimal string, converts the string into an `int` representing the same value. When provided with an `int`, converts the integer into a hexidecimal string representing the same value.
+
+Note that this will omit any leading `0x` or `#` prefix, and does not expect one to be present when provided a string.
+
+**Examples**
+
+```
+>>> hex 'ff'
+255
+>>> hex 255
+'ff'
+```
+
+#### Bin `bin(x: str | int) -> str | int`
+
+When provided with a binary string, converts the string into an `int` representing the same value. When provided with an `int`, converts the integer into a binary string representing the same value.
+
+Note that this will omit any leading `0b` prefix, and does not expect one to be present when provided a string.
+
+**Examples**
+
+```
+>>> bin 7
+'111'
+>>> bin '111'
+7
+```
+
 #### (Set) Union `<T> union(other: iterable<T>, self: set<T>) -> set<T>`
 
 Computes a union of `self` and `other`, mutating `self`. This is functionally similar to `self |= set(other)`, _except_ this will directly mutate `self`, which can be desirable for performance reasons with large sets. This will return `self`.

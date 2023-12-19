@@ -324,6 +324,7 @@ impl AsError for RuntimeError {
                 if *repr { value.to_repr_str().as_owned() } else { value.as_error() }
             ),
             TypeErrorArgMustBeInt(v) => format!("TypeError: Expected {} to be a int", v.as_error()),
+            TypeErrorArgMustBeIntOrStr(v) => format!("TypeError: Expected {} to be a int or string", v.as_error()),
             TypeErrorArgMustBeComplex(v) => format!("TypeError: Expected {} to be a complex", v.as_error()),
             TypeErrorArgMustBeStr(v) => format!("TypeError: Expected {} to be a string", v.as_error()),
             TypeErrorArgMustBeChar(v) => format!("TypeError: Expected {} to be a single character string", v.as_error()),

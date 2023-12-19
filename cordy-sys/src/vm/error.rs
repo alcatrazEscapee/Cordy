@@ -54,6 +54,7 @@ pub enum RuntimeError {
     },
 
     TypeErrorArgMustBeInt(ValuePtr),
+    TypeErrorArgMustBeIntOrStr(ValuePtr),
     TypeErrorArgMustBeComplex(ValuePtr),
     TypeErrorArgMustBeStr(ValuePtr),
     TypeErrorArgMustBeChar(ValuePtr),
