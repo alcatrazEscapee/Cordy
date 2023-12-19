@@ -1883,15 +1883,20 @@ mod tests {
     #[test] fn test_combinations() { run_str("[1, 2, 3] . combinations(2) . print", "[(1, 2), (1, 3), (2, 3)]\n"); }
     #[test] fn test_replace_regex_1() { run_str("'apples and bananas' . replace('[abe]+', 'o') . print", "opplos ond ononos\n"); }
     #[test] fn test_replace_regex_2() { run_str("'[a] [b] [c] [d]' . replace('[ac]', '$0$0') . print", "[aa] [b] [cc] [d]\n"); }
-    #[test] fn test_replace_regex_with_function() { run_str("'apples and bananas' . replace('apples', fn((c, *_)) -> c . to_upper) . print", "APPLES and bananas\n"); }
+    #[test] fn test_replace_regex_with_function() { run_str("'apples and bananas' . replace('apples', to_upper) . print", "APPLES and bananas\n"); }
     #[test] fn test_replace_regex_with_wrong_function() { run_str("'apples and bananas' . replace('apples', argv) . print", "Incorrect number of arguments for fn argv(), got 1\n  at: line 1 (<test>)\n\n1 | 'apples and bananas' . replace('apples', argv) . print\n2 |                      ^^^^^^^^^^^^^^^^^^^^^^^^^\n"); }
     #[test] fn test_replace_regex_with_capture_group() { run_str("'apples and bananas' . replace('([a-z])([a-z]+)', 'yes') . print", "yes yes yes\n"); }
     #[test] fn test_replace_regex_with_capture_group_function() { run_str("'apples and bananas' . replace('([a-z])([a-z]+)', fn((_, a, b)) -> to_upper(a) + b) . print", "Apples And Bananas\n"); }
     #[test] fn test_replace_regex_implicit_newline() { run_str("'first\nsecond\nthird\nfourth' . replace('\\n', ', ') . print", "first, second, third, fourth\n"); }
     #[test] fn test_replace_regex_explicit_newline() { run_str("'first\nsecond\nthird\nfourth' . replace('\n', ', ') . print", "first, second, third, fourth\n"); }
-    #[test] fn test_search_regex_match_all_yes() { run_str("'test' . search('test') . print", "[('test')]\n"); }
+    #[test] fn test_replace_regex_example_1() { run_str("'bob and alice' . replace('and', 'or') . repr . print", "'bob or alice'\n"); }
+    #[test] fn test_replace_regex_example_2() { run_str("'bob and alice' . replace('\\sa', ' Ba') . repr . print", "'bob Band Balice'\n"); }
+    #[test] fn test_replace_regex_example_3() { run_str("'bob and alice' . replace('[a-z]+', '$0!') . repr . print", "'bob! and! alice!'\n"); }
+    #[test] fn test_replace_regex_example_4() { run_str("'bob and alice' . replace('[a-z]+', fn(g) -> g . reverse . reduce(+)) . repr . print", "'bob dna ecila'\n"); }
+    #[test] fn test_replace_regex_example_5() { run_str("'bob and alice' . replace('([a-z])([a-z]+)', fn((_, g1, g2)) -> to_upper(g1) + g2) . repr . print", "'Bob And Alice'\n"); }
+    #[test] fn test_search_regex_match_all_yes() { run_str("'test' . search('test') . print", "['test']\n"); }
     #[test] fn test_search_regex_match_all_no() { run_str("'test' . search('nope') . print", "[]\n"); }
-    #[test] fn test_search_regex_match_partial_yes() { run_str("'any and nope and nothing' . search('nope') . print", "[('nope')]\n"); }
+    #[test] fn test_search_regex_match_partial_yes() { run_str("'any and nope and nothing' . search('nope') . print", "['nope']\n"); }
     #[test] fn test_search_regex_match_partial_no() { run_str("'any and nope and nothing' . search('some') . print", "[]\n"); }
     #[test] fn test_search_regex_match_partial_no_start() { run_str("'any and nope and nothing' . search('^some') . print", "[]\n"); }
     #[test] fn test_search_regex_match_partial_no_end() { run_str("'any and nope and nothing' . search('some$') . print", "[]\n"); }
@@ -1905,7 +1910,9 @@ mod tests {
     #[test] fn test_search_regex_cannot_compile() { run_str("'test' . search('missing close bracket lol ( this one') . print", "ValueError: Cannot compile regex 'missing close bracket lol ( this one'\n            Parsing error at position 36: Opening parenthesis without closing parenthesis\n  at: line 1 (<test>)\n\n1 | 'test' . search('missing close bracket lol ( this one') . print\n2 |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n"); }
     #[test] fn test_search_regex_optional_match() { run_str("'123 |  456' . search '^ ([\\d ]+) | ([\\d ]+)' . print", "[('  456', nil, ' 456')]\n"); }
     #[test] fn test_search_regex_empty_str_match() { run_str("'abcd' . search '' . print", "[]\n"); }
-    #[test] fn test_search_regex_empty_possible_match() { run_str("'abcd' . search '\\w*' . print", "[('abcd')]\n"); }
+    #[test] fn test_search_regex_empty_possible_match() { run_str("'abcd' . search '\\w*' . print", "['abcd']\n"); }
+    #[test] fn test_search_regex_find_integers_with_no_groups() { run_str("'1 and 3 but not 7 and 21' . search '\\d+' . map int . print", "[1, 3, 7, 21]\n"); }
+    #[test] fn test_search_regex_find_integers_with_groups() { run_str("'1 and 3 but not 7 and 21' . search '(\\d+)' . map(fn((_, g)) -> int g) . print", "[1, 3, 7, 21]\n"); }
     #[test] fn test_split_regex_empty_str() { run_str("'abc' . split('') . print", "['a', 'b', 'c']\n"); }
     #[test] fn test_split_regex_space() { run_str("'a b c' . split(' ') . print", "['a', 'b', 'c']\n"); }
     #[test] fn test_split_regex_space_duplicates() { run_str("' a  b   c' . split(' ') . print", "['', 'a', '', 'b', '', '', 'c']\n"); }

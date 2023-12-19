@@ -101,9 +101,14 @@ pub fn split(pattern: ValuePtr, target: ValuePtr) -> ValueResult {
 }
 
 fn as_result(captures: &Captures) -> ValuePtr {
-    captures.iter()
-        .map(|group| group.map_or(ValuePtr::nil(), |u| u.as_str().to_value()))
-        .to_vector()
+    if captures.len() == 1 {
+        captures.get(0)
+            .map_or(ValuePtr::nil(), |u| u.as_str().to_value())
+    } else {
+        captures.iter()
+            .map(|group| group.map_or(ValuePtr::nil(), |u| u.as_str().to_value()))
+            .to_vector()
+    }
 }
 
 fn compile_regex(a1: ValuePtr) -> ErrorResult<Regex> {
