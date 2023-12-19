@@ -804,6 +804,10 @@ Note, for simple substring searching, it is sufficient to test for truthiness, a
 [('bob', 'b', 'b'), ('and', 'a', 'd'), ('alice', 'a', 'e')]
 ```
 
+#### Trim `trim(x: str) -> str`
+
+Returns a string with whitespace trimmed from it.
+
 #### Ord `ord(x: str) -> int`
 
 When called with a string containing exactly one character (unicode scalar value), returns the integer representing the unicode character.
@@ -860,9 +864,9 @@ Note that this will omit any leading `0b` prefix, and does not expect one to be 
 7
 ```
 
-#### (Set) Union `<T> union(other: iterable<T>, self: set<T>) -> set<T>`
+#### (Set) Union `<T> union(other: iterable<T>, this: set<T>) -> set<T>`
 
-Computes a union of `self` and `other`, mutating `self`. This is functionally similar to `self |= set(other)`, _except_ this will directly mutate `self`, which can be desirable for performance reasons with large sets. This will return `self`.
+Computes a union of `this` and `other`, mutating `this`. This is functionally similar to `this |= set(other)`, _except_ this will directly mutate `this`, which can be desirable for performance reasons with large sets. This will return `this`.
 
 **Example**
 
@@ -874,9 +878,9 @@ Computes a union of `self` and `other`, mutating `self`. This is functionally si
 {1, 2, 3, 4}
 ```
 
-#### (Set) Intersect `<T> intersect(other: iterable<T>, self: set<T>) -> set<T>`
+#### (Set) Intersect `<T> intersect(other: iterable<T>, this: set<T>) -> set<T>`
 
-Computes an intersection of `self` and `other`, mutating `self`. This is functionally similar to `self &= set(other)`, _except_ this will directly mutate `self`, which can be desirable for performance reasons with large sets. This will return `self`.
+Computes an intersection of `this` and `other`, mutating `this`. This is functionally similar to `this &= set(other)`, _except_ this will directly mutate `this`, which can be desirable for performance reasons with large sets. This will return `this`.
 
 **Example**
 
@@ -888,9 +892,9 @@ Computes an intersection of `self` and `other`, mutating `self`. This is functio
 {2, 3}
 ```
 
-#### (Set) Difference `<T> difference(other: iterable<T>, self: set<T>) -> set<T>`
+#### (Set) Difference `<T> difference(other: iterable<T>, this: set<T>) -> set<T>`
 
-Computes a (non-symmetric) difference of `self` and `other`, mutating `self`. This is functionally similar to `self -= set(other)`, _except_ this will directly mutate `self`, which can be desirable for performance reasons with large sets. This will return `self`.
+Computes a (non-symmetric) difference of `this` and `other`, mutating `this`. This is functionally similar to `this -= set(other)`, _except_ this will directly mutate `this`, which can be desirable for performance reasons with large sets. This will return `this`.
 
 **Example**
 
