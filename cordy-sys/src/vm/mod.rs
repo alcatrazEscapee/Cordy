@@ -2014,6 +2014,9 @@ mod tests {
     #[test] fn test_imag_of_imag() { run_str("123j . imag . print", "123\n"); }
     #[test] fn test_imag_of_complex() { run_str("4i + 6 . imag . print", "4\n"); }
     #[test] fn test_imag_of_str() { run_str("'4i + 6' . imag . print", "TypeError: Expected '4i + 6' of type 'str' to be a complex\n  at: line 1 (<test>)\n\n1 | '4i + 6' . imag . print\n2 |          ^^^^^^\n"); }
+    #[test] fn test_counter_of_str_1() { run_str("'hello the world!!!!' . counter . print", "{'h': 2, 'e': 2, 'l': 3, 'o': 2, ' ': 2, 't': 1, 'w': 1, 'r': 1, 'd': 1, '!': 4}\n"); }
+    #[test] fn test_counter_of_str_2() { run_str("'hello world' . counter . print", "{'h': 1, 'e': 1, 'l': 3, 'o': 2, ' ': 1, 'w': 1, 'r': 1, 'd': 1}\n"); }
+    #[test] fn test_counter_of_empty() { run_str("[] . counter . print", "{}\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }

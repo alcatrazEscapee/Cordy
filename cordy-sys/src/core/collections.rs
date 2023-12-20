@@ -703,3 +703,16 @@ pub fn set_difference(other: ValuePtr, this: ValuePtr) -> ValueResult {
         _ => TypeErrorArgMustBeSet(this).err()
     }
 }
+
+pub fn counter(it: ValuePtr) -> ValueResult {
+    let iter = it.to_iter()?;
+    let mut counter: IndexMap<ValuePtr, ValuePtr, FxBuildHasher> = IndexMap::with_capacity_and_hasher(iter.len(), FxBuildHasher::default());
+    for elem in iter {
+        counter.entry(elem)
+            .and_modify(|e| {
+                *e = (e.as_precise_int() + 1).to_value()
+            })
+            .or_insert(1i64.to_value());
+    }
+    counter.to_value().ok()
+}

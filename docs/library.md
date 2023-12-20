@@ -906,6 +906,33 @@ Computes a (non-symmetric) difference of `this` and `other`, mutating `this`. Th
 {1, 2}
 ```
 
+#### Counter `<T> counter(it: iterable<T>) -> dict<T, int>`
+
+Consumes the provided iterable in O(n) time, and produces a dictionary of elements of that iterable, to their number of occurrences in the iterable. The dictionary will be ordered as per 
+
+**Example**
+
+```
+>>> 'hello world' . counter
+{'h': 1, 'e': 1, 'l': 3, 'o': 2, ' ': 1, 'w': 1, 'r': 1, 'd': 1}
+```
+
+Using `counter` is equivalently implemented by the following Cordy function:
+
+```
+fn counter(it) {
+   let d = dict()
+   for e in it {
+      if e not in d {
+         d[e] = 1
+      } else {
+         d[e] += 1
+      }
+   }
+   d
+}
+```
+
 #### (Dict) Default `<K, V> default(x: V, it: dict<K, V>) -> dict<K, V>`
 
 Sets the default value of `it` to `x`, and then returns `it`. This means that any future queries into `it` via the index syntax, if the key is not in the dictionary, will return `x`.

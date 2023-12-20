@@ -88,16 +88,16 @@ pub const MAX_INT: i64 = 0x3fff_ffff_ffff_ffffu64 as i64;
 pub const MIN_INT: i64 = 0xc000_0000_0000_0000u64 as i64;
 
 
-pub(super) fn from_bool(value: bool) -> ValuePtr {
+pub(super) const fn from_bool(value: bool) -> ValuePtr {
     ValuePtr { tag: if value { TAG_TRUE } else { TAG_FALSE } }
 }
 
-pub(super) fn from_usize(value: usize) -> ValuePtr {
+pub(super) const fn from_usize(value: usize) -> ValuePtr {
     debug_assert!(value <= MAX_INT as usize); // Check that it is safe to cast to `i64`
     from_i64(value as i64)
 }
 
-pub(super) fn from_i64(value: i64) -> ValuePtr {
+pub(super) const fn from_i64(value: i64) -> ValuePtr {
     ValuePtr { long_tag: TAG_INT as u64 | ((value << 1) as u64) }
 }
 
