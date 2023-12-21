@@ -1593,6 +1593,7 @@ mod tests {
     #[test] fn test_complex_typeof() { run_str("123i . typeof . print", "complex\n"); }
     #[test] fn test_complex_no_real_part_is_int() { run_str("1i * 1i . typeof . print", "int\n"); }
     #[test] fn test_complex_to_vector() { run_str("1 + 3i . vector . print", "(1, 3)\n"); }
+    #[test] fn test_complex_mod() { run_str("(15i + -9) % 4 . print", "3 + 3i\n"); }
     #[test] fn test_bool_comparisons_1() { run_str("print(false < false, false < true, true < false, true < true)", "false true false false\n"); }
     #[test] fn test_bool_comparisons_2() { run_str("print(false <= false, false >= true, true >= false, true <= true)", "true false true true\n"); }
     #[test] fn test_bool_operator_add() { run_str("true + true + false + false . print", "2\n"); }
