@@ -189,6 +189,11 @@ fn c64_div_floor(lhs: C64, rhs: C64) -> C64 {
 pub fn binary_mod(lhs: ValuePtr, rhs: ValuePtr) -> ValueResult {
     match (lhs.ty(), rhs.ty()) {
         (Bool | Int, Bool | Int) => num_integer::mod_floor(lhs.as_int(), rhs.as_int()).to_value().ok(),
+        (Complex, Bool | Int) => {
+            let lhs = lhs.as_precise_complex().value.inner;
+            let rhs = rhs.as_int();
+            C64::new(num_integer::mod_floor(lhs.re, rhs), num_integer::mod_floor(lhs.im, rhs)).to_value().ok()
+        }
         (ShortStr | LongStr, _) => core::format_string(lhs.as_str_slice(), rhs),
         (Vector, Vector) => apply_vector_binary(lhs, rhs, binary_mod),
         (Vector, _) => apply_vector_binary_scalar_rhs(lhs, rhs, binary_mod),
