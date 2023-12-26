@@ -399,7 +399,13 @@ impl ValuePtr {
                 let str = if c.re == 0 {
                     format!("{}i", c.im)
                 } else {
-                    format!("{} + {}i", c.re, c.im)
+                    // This complicated-ness handles things like 1 - 1i and 1 + 1i
+                    let mut re = format!("{} ", c.re);
+                    let mut im = format!("{:+}i", c.im);
+
+                    im.insert(1, ' '); // Legal, as the first character should be `+` or `-`
+                    re.push_str(im.as_str());
+                    re
                 };
                 str.to_ref_str()
             },
