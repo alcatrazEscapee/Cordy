@@ -1565,6 +1565,8 @@ mod tests {
     #[test] fn test_slice_in_expr_3() { run_str("'hello the world!' . split(' ') . map([2:]) . print", "['llo', 'e', 'rld!']\n"); }
     #[test] fn test_int_operators() { run_str("print(5 - 3, 12 + 5, 3 * 9, 16 / 3)", "2 17 27 5\n"); }
     #[test] fn test_int_div_mod() { run_str("print(3 / 2, 3 / 3, -3 / 2, 10 % 3, 11 % 3, 12 % 3)", "1 1 -2 1 2 0\n"); }
+    #[test] fn test_int_mod_by_zero() { run_str("1 % 0", "Compile Error:\n\nValueError: Expected value to be non-zero\n  at: line 1 (<test>)\n\n1 | 1 % 0\n2 |   ^\n"); }
+    #[test] fn test_int_mod_by_negative() { run_str("5 % -2 . print", "-1\n"); }
     #[test] fn test_int_div_by_zero() { run_str("print(15 / 0)", "Compile Error:\n\nValueError: Expected value to be non-zero\n  at: line 1 (<test>)\n\n1 | print(15 / 0)\n2 |          ^\n"); }
     #[test] fn test_int_left_right_shift() { run_str("print(1 << 10, 16 >> 1, 16 << -1, 1 >> -10)", "1024 8 8 1024\n"); }
     #[test] fn test_int_comparisons_1() { run_str("print(1 < 3, -5 < -10, 6 > 7, 6 > 4)", "true false false true\n"); }
@@ -1589,11 +1591,14 @@ mod tests {
     #[test] fn test_complex_add() { run_str("(1 + 2i) + (3 + 4j) . print", "4 + 6i\n"); }
     #[test] fn test_complex_mul() { run_str("(1 + 2i) * (3 + 4j) . print", "-5 + 10i\n"); }
     #[test] fn test_complex_str() { run_str("1 + 1i . print", "1 + 1i\n"); }
+    #[test] fn test_complex_str_negative() { run_str("-1 - 1i . print", "-1 - 1i\n"); }
     #[test] fn test_complex_str_no_real_part() { run_str("123i . print", "123i\n"); }
     #[test] fn test_complex_typeof() { run_str("123i . typeof . print", "complex\n"); }
     #[test] fn test_complex_no_real_part_is_int() { run_str("1i * 1i . typeof . print", "int\n"); }
     #[test] fn test_complex_to_vector() { run_str("1 + 3i . vector . print", "(1, 3)\n"); }
     #[test] fn test_complex_mod() { run_str("(15i + -9) % 4 . print", "3 + 3i\n"); }
+    #[test] fn test_complex_mod_by_zero() { run_str("(15i + -9) % 0", "Compile Error:\n\nValueError: Expected value to be non-zero\n  at: line 1 (<test>)\n\n1 | (15i + -9) % 0\n2 |            ^\n"); }
+    #[test] fn test_complex_mod_by_negative() { run_str("(15i + -9) % -4 . print", "-1 - 1i\n"); }
     #[test] fn test_bool_comparisons_1() { run_str("print(false < false, false < true, true < false, true < true)", "false true false false\n"); }
     #[test] fn test_bool_comparisons_2() { run_str("print(false <= false, false >= true, true >= false, true <= true)", "true false true true\n"); }
     #[test] fn test_bool_operator_add() { run_str("true + true + false + false . print", "2\n"); }
