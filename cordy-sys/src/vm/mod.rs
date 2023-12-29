@@ -1613,6 +1613,8 @@ mod tests {
     #[test] fn test_str_slice_start() { run_str("'hello'[1:] . print", "ello\n"); }
     #[test] fn test_str_slice_stop() { run_str("'hello'[:3] . print", "hel\n"); }
     #[test] fn test_str_slice_start_stop() { run_str("'hello'[1:3] . print", "el\n"); }
+    #[test] fn test_str_slice_large_step_positive() { run_str("'abc'[1:1000000000:1000000000] . print", "b\n"); }
+    #[test] fn test_str_slice_large_step_negative() { run_str("'abc'[-1:-1000000000:-1000000000] . print", "c\n"); }
     #[test] fn test_str_operator_in_yes() { run_str("'hello' in 'hey now, hello world' . print", "true\n"); }
     #[test] fn test_str_operator_in_no() { run_str("'hello' in 'hey now, \\'ello world' . print", "false\n"); }
     #[test] fn test_str_format_with_percent_no_args() { run_str("'100 %%' % vector() . print", "100 %\n"); }

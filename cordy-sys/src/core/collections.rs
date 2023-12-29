@@ -110,7 +110,8 @@ pub fn get_slice(target: &ValuePtr, low: ValuePtr, high: ValuePtr, step: ValuePt
             slice.accept(i)
         }
     } else {
-        for i in rev_range(abs_start, abs_stop).step_by(abs_step) {
+        // Don't use `step_by` here, as it doesn't get optimized correctly with `rev_range()`
+        for i in rev_range(abs_start, abs_stop, abs_step as i64) {
             slice.accept(i)
         }
     }
@@ -129,15 +130,15 @@ pub fn to_index(len: i64, pos_or_neg: i64) -> i64 {
 }
 
 #[inline(always)]
-fn rev_range(start_high_inclusive: i64, stop_low_exclusive: i64) -> impl Iterator<Item = i64> {
+fn rev_range(start_high_inclusive: i64, stop_low_exclusive: i64, step_size: i64) -> impl Iterator<Item = i64> {
     let mut start: i64 = start_high_inclusive;
     let end: i64 = stop_low_exclusive;
     std::iter::from_fn(move || {
         if start <= end {
             None
         } else {
-            start -= 1;
-            Some(start + 1)
+            start -= step_size;
+            Some(start + step_size)
         }
     })
 }
