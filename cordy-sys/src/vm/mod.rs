@@ -766,8 +766,8 @@ impl<R : BufRead, W : Write, F : FunctionInterface> VirtualMachine<R, W, F> {
                     return ValueIsNotFunctionEvaluable(f.clone()).err();
                 }
                 let arg = self.pop();
-                let slice = self.pop().as_slice().value;
-                self.push(slice.apply(&arg)?);
+                let slice = self.pop();
+                self.push(slice.as_slice().borrow_const().apply(&arg)?);
                 Ok(FunctionType::Native)
             }
             Type::StructType => {

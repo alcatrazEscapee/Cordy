@@ -17,13 +17,14 @@ use crate::core;
 use crate::core::{InvokeArg0, NativeFunction, PartialArgument};
 use crate::util::impl_partial_ord;
 use crate::vm::error::RuntimeError;
-use crate::vm::value::ptr::{Ref, RefMut, SharedPrefix};
+use crate::vm::value::ptr::{RefMut, SharedPrefix};
 use crate::vm::value::str::{IntoRefStr, IterStr, RefStr};
 
 pub use crate::vm::value::ptr::{MAX_INT, MIN_INT, Prefix, ValuePtr};
 
 use RuntimeError::{*};
 use crate::vm::value::range::Range;
+use crate::vm::value::slice::Slice;
 
 pub type ErrorResult<T> = Result<T, Box<Prefix<RuntimeError>>>;
 pub type AnyResult = ErrorResult<()>;
@@ -32,6 +33,7 @@ pub type AnyResult = ErrorResult<()>;
 mod ptr;
 mod str;
 mod range;
+mod slice;
 
 
 /// `Type` is an enumeration of all the possible types (not including user-defined type variants such as `struct`s) possible in Cordy.
@@ -70,11 +72,11 @@ pub enum Type {
 
 impl Type {
     fn is_owned(&self) -> bool {
-        matches!(self, Type::Complex | Type::PartialFunction | Type::PartialNativeFunction | Type::Slice | Type::Iter | Type::Error)
+        matches!(self, Type::Complex | Type::PartialFunction | Type::PartialNativeFunction | Type::Iter | Type::Error)
     }
 
     fn is_shared(&self) -> bool {
-        matches!(self, Type::LongStr | Type::List | Type::Set | Type::Dict | Type::Heap | Type::Vector | Type::Function | Type::Closure | Type::Memoized | Type::Struct | Type::StructType | Type::Range | Type::Enumerate)
+        matches!(self, Type::LongStr | Type::List | Type::Set | Type::Dict | Type::Heap | Type::Vector | Type::Function | Type::Closure | Type::Memoized | Type::Struct | Type::StructType | Type::Range | Type::Enumerate | Type::Slice)
     }
 }
 
@@ -321,14 +323,6 @@ impl ValuePtr {
         }.to_value()
     }
 
-    pub fn slice(arg1: ValuePtr, arg2: ValuePtr, arg3: ValuePtr) -> ValueResult {
-        SliceImpl {
-            arg1: arg1.check_int_or_nil()?,
-            arg2: arg2.check_int_or_nil()?,
-            arg3: arg3.check_int_or_nil()?
-        }.to_value().ok()
-    }
-
     /// Converts the `Value` to a `String`. This is equivalent to the stdlib function `str()`
     pub fn to_str(&self) -> RefStr { self.safe_to_str(&mut RecursionGuard::new()) }
 
@@ -436,22 +430,7 @@ impl ValuePtr {
 
             Type::Range => self.as_range().borrow_const().to_repr_str(),
             Type::Enumerate => format!("enumerate({})", self.as_enumerate().borrow_const().borrow_inner().safe_to_repr_str(rc).as_slice()).to_ref_str(),
-            Type::Slice => {
-                #[inline]
-                fn to_str(i: &ValuePtr) -> String {
-                    if i.is_nil() {
-                        String::new()
-                    } else {
-                        i.as_int().to_string()
-                    }
-                }
-
-                let it = self.as_slice_ref();
-                match it.arg3.is_nil() {
-                    false => format!("[{}:{}:{}]", to_str(&it.arg1), to_str(&it.arg2), it.arg3.as_int()),
-                    true => format!("[{}:{}]", to_str(&it.arg1), to_str(&it.arg2)),
-                }.to_ref_str()
-            },
+            Type::Slice => self.as_slice().borrow_const().to_repr_str(),
 
             Type::Iter => "<synthetic> iterator".to_ref_str(),
             Type::Memoized => format!("@memoize {}", self.as_memoized().borrow().func.safe_to_repr_str(rc).as_slice()).to_ref_str(),
@@ -585,16 +564,6 @@ impl ValuePtr {
         }
     }
 
-    /// Converts this `Value` to a `ValueAsSlice`, which is a builder for slice-like structures, supported for `List` and `Str`
-    pub fn to_slice(&self) -> ErrorResult<Sliceable> {
-        match self.ty() {
-            Type::ShortStr | Type::LongStr => Ok(Sliceable::Str(self.as_str_slice(), String::new())),
-            Type::List => Ok(Sliceable::List(self.as_list().borrow(), VecDeque::new())),
-            Type::Vector => Ok(Sliceable::Vector(self.as_vector().borrow(), Vec::new())),
-            _ => TypeErrorArgMustBeSliceable(self.clone()).err()
-        }
-    }
-
     /// Converts this value into a `(ValuePTr, ValuePtr)` if possible, supported for two-element `List` and `Vector`s
     pub fn to_pair(self) -> ErrorResult<(ValuePtr, ValuePtr)> {
         match match self.ty() {
@@ -718,13 +687,6 @@ impl ValuePtr {
         ValueResult::ok(self)
     }
 
-    pub fn check_int_or_nil(self) -> ValueResult {
-        match self.is_int() || self.is_nil() {
-            true => self.ok(),
-            false => TypeErrorArgMustBeInt(self).err()
-        }
-    }
-
     pub fn check_int(self) -> ValueResult {
         match self.is_int() {
             true => self.ok(),
@@ -836,10 +798,11 @@ impl SharedValue for () {}
 //impl_owned_value!(Type::Enumerate, Enumerate, as_enumerate, as_enumerate_ref, is_enumerate);
 impl_owned_value!(Type::PartialFunction, PartialFunctionImpl, as_partial_function, as_partial_function_ref, is_partial_function);
 impl_owned_value!(Type::PartialNativeFunction, PartialNativeFunctionImpl, as_partial_native, as_partial_native_ref, is_partial_native);
-impl_owned_value!(Type::Slice, SliceImpl, as_slice, as_slice_ref, is_slice);
+//impl_owned_value!(Type::Slice, Slice, as_slice, as_slice_ref, is_slice);
 impl_owned_value!(Type::Iter, Iterable, as_iterable, as_iterable_ref, is_iterable);
 impl_owned_value!(Type::Error, RuntimeError, as_err, as_err_ref, is_err);
 
+impl_shared_value!(Type::Slice, Slice, ConstValue, as_slice, is_slice);
 impl_shared_value!(Type::Range, Range, ConstValue, as_range, is_range);
 impl_shared_value!(Type::Enumerate, Enumerate, ConstValue, as_enumerate, is_enumerate);
 impl_shared_value!(Type::List, ListImpl, MutValue, as_list, is_list);
@@ -891,11 +854,6 @@ impl_into!((ValuePtr, ValuePtr), self, vec![self.0, self.1].to_value());
 impl_into!(IndexSet<ValuePtr, FxBuildHasher>, self, SetImpl { set: self }.to_value());
 impl_into!(IndexMap<ValuePtr, ValuePtr, FxBuildHasher>, self, DictImpl { dict: self, default: None }.to_value());
 impl_into!(BinaryHeap<Reverse<ValuePtr>>, self, HeapImpl { heap: self }.to_value());
-impl_into!(Sliceable<'_>, self, match self {
-    Sliceable::Str(_, it) => it.to_value(),
-    Sliceable::List(_, it) => it.to_value(),
-    Sliceable::Vector(_, it) => it.to_value(),
-});
 
 
 /// A trait which is responsible for wrapping conversions from a `Iterator<Item=Value>` into `IntoValue`, which then converts to a `ValuePtr`.
@@ -1413,21 +1371,6 @@ impl Method {
 }
 
 
-/// All arguments must either be `nil` (which will be treated as `None`), or an int-like type.
-#[derive(Eq, PartialEq, Ord, PartialOrd, Debug, Hash, Clone)]
-pub struct SliceImpl {
-    arg1: ValuePtr,
-    arg2: ValuePtr,
-    arg3: ValuePtr,
-}
-
-impl SliceImpl {
-    pub fn apply(self, arg: &ValuePtr) -> ValueResult {
-        core::get_slice(arg, self.arg1, self.arg2, self.arg3)
-    }
-}
-
-
 /// ### Iterator Type
 ///
 /// Iterators are complex to model within the type system of Rust, with the restrictions imposed by Cordy:
@@ -1656,34 +1599,6 @@ impl<'a> Indexable<'a> {
     }
 }
 
-
-pub enum Sliceable<'a> {
-    Str(&'a str, String),
-    List(Ref<'a, ListImpl>, VecDeque<ValuePtr>),
-    Vector(Ref<'a, VectorImpl>, Vec<ValuePtr>),
-}
-
-impl<'a> Sliceable<'a> {
-
-    pub fn len(&self) -> usize {
-        match self {
-            Sliceable::Str(it, _) => it.len(),
-            Sliceable::List(it, _) => it.list.len(),
-            Sliceable::Vector(it, _) => it.vector.len(),
-        }
-    }
-
-    pub fn accept(&mut self, index: i64) {
-        if index >= 0 && index < self.len() as i64 {
-            let index = index as usize;
-            match self {
-                Sliceable::Str(src, dest) => dest.push(src.chars().nth(index).unwrap()),
-                Sliceable::List(src, dest) => dest.push_back(src.list[index].clone()),
-                Sliceable::Vector(src, dest) => dest.push(src.vector[index].clone()),
-            }
-        }
-    }
-}
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
