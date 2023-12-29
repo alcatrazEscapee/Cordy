@@ -11,6 +11,7 @@ use crate::core::NativeFunction;
 use crate::util::impl_partial_ord;
 use crate::vm::{FunctionImpl, Iterable, RuntimeError, StructTypeImpl};
 use crate::vm::value::{*};
+use crate::vm::value::slice::Slice;
 
 
 /// `ValuePtr` holds an arbitrary object representable by Cordy.
@@ -427,7 +428,7 @@ impl PartialEq for ValuePtr {
             Type::Enumerate => self.as_shared_ref::<Enumerate>() == other.as_shared_ref::<Enumerate>(),
             Type::PartialFunction => self.as_ref::<PartialFunctionImpl>() == other.as_ref::<PartialFunctionImpl>(),
             Type::PartialNativeFunction => self.as_ref::<PartialNativeFunctionImpl>() == other.as_ref::<PartialNativeFunctionImpl>(),
-            Type::Slice => self.as_ref::<SliceImpl>() == other.as_ref::<SliceImpl>(),
+            Type::Slice => self.as_shared_ref::<Slice>() == other.as_shared_ref::<Slice>(),
             Type::Error => self.as_ref::<RuntimeError>() == other.as_ref::<RuntimeError>(),
             // Shared types check equality based on the shared ref
             Type::LongStr => self.as_shared_ref::<String>() == other.as_shared_ref::<String>(),
@@ -516,7 +517,7 @@ impl Clone for ValuePtr {
                 Type::Enumerate => self.clone_shared::<Enumerate>(),
                 Type::PartialFunction => self.clone_owned::<PartialFunctionImpl>(),
                 Type::PartialNativeFunction => self.clone_owned::<PartialNativeFunctionImpl>(),
-                Type::Slice => self.clone_owned::<SliceImpl>(),
+                Type::Slice => self.clone_shared::<Slice>(),
                 Type::Iter => self.clone_owned::<Iterable>(),
                 Type::Error => self.clone_owned::<RuntimeError>(),
                 // Shared types
@@ -560,7 +561,7 @@ impl Drop for ValuePtr {
                 Type::Enumerate => self.drop_shared::<Enumerate>(),
                 Type::PartialFunction => self.drop_owned::<PartialFunctionImpl>(),
                 Type::PartialNativeFunction => self.drop_owned::<PartialNativeFunctionImpl>(),
-                Type::Slice => self.drop_owned::<SliceImpl>(),
+                Type::Slice => self.drop_shared::<Slice>(),
                 Type::Iter => self.drop_owned::<Iterable>(),
                 Type::Error => self.drop_owned::<RuntimeError>(),
                 // Shared types
@@ -599,7 +600,7 @@ impl Hash for ValuePtr {
             Type::Enumerate => self.as_shared_ref::<Enumerate>().hash(state),
             Type::PartialFunction => self.as_ref::<PartialFunctionImpl>().hash(state),
             Type::PartialNativeFunction => self.as_ref::<PartialNativeFunctionImpl>().hash(state),
-            Type::Slice => self.as_ref::<SliceImpl>().hash(state),
+            Type::Slice => self.as_shared_ref::<Slice>().hash(state),
             // Shared types
             Type::Range => self.as_shared_ref::<Range>().hash(state),
             Type::LongStr => self.as_shared_ref::<String>().hash(state),
@@ -635,7 +636,7 @@ impl Debug for ValuePtr {
             Type::Enumerate => Debug::fmt(self.as_shared_ref::<Enumerate>(), f),
             Type::PartialFunction => Debug::fmt(self.as_ref::<PartialFunctionImpl>(), f),
             Type::PartialNativeFunction => Debug::fmt(self.as_ref::<PartialNativeFunctionImpl>(), f),
-            Type::Slice => Debug::fmt(self.as_ref::<SliceImpl>(), f),
+            Type::Slice => Debug::fmt(self.as_shared_ref::<Slice>(), f),
             Type::Error => Debug::fmt(self.as_ref::<RuntimeError>(), f),
             // Shared types
             Type::Range => Debug::fmt(self.as_shared_ref::<Range>(), f),
