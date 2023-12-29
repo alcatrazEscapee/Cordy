@@ -423,7 +423,7 @@ impl PartialEq for ValuePtr {
             Type::ShortStr => unsafe { self.long_tag == other.long_tag },
             // Owned types check equality based on their ref
             Type::Complex => self.as_ref::<ComplexImpl>() == other.as_ref::<ComplexImpl>(),
-            Type::Range => self.as_ref::<RangeImpl>() == other.as_ref::<RangeImpl>(),
+            Type::Range => self.as_shared_ref::<Range>() == other.as_shared_ref::<Range>(),
             Type::Enumerate => self.as_ref::<EnumerateImpl>() == other.as_ref::<EnumerateImpl>(),
             Type::PartialFunction => self.as_ref::<PartialFunctionImpl>() == other.as_ref::<PartialFunctionImpl>(),
             Type::PartialNativeFunction => self.as_ref::<PartialNativeFunctionImpl>() == other.as_ref::<PartialNativeFunctionImpl>(),
@@ -468,7 +468,7 @@ impl Ord for ValuePtr {
 
             // Owned types check equality based on their ref
             Type::Complex => self.as_ref::<ComplexImpl>().cmp(other.as_ref::<ComplexImpl>()),
-            Type::Range => self.as_ref::<RangeImpl>().cmp(other.as_ref::<RangeImpl>()),
+            Type::Range => self.as_shared_ref::<Range>().cmp(other.as_shared_ref::<Range>()),
             Type::Enumerate => self.as_ref::<EnumerateImpl>().cmp(other.as_ref::<EnumerateImpl>()),
             // Shared types check equality based on the shared ref
             Type::LongStr => self.as_shared_ref::<String>().cmp(other.as_shared_ref::<String>()),
@@ -512,7 +512,7 @@ impl Clone for ValuePtr {
                 Type::GetField => self.as_copy(),
                 // Owned types
                 Type::Complex => self.clone_owned::<ComplexImpl>(),
-                Type::Range => self.clone_owned::<RangeImpl>(),
+                Type::Range => self.clone_shared::<Range>(),
                 Type::Enumerate => self.clone_owned::<EnumerateImpl>(),
                 Type::PartialFunction => self.clone_owned::<PartialFunctionImpl>(),
                 Type::PartialNativeFunction => self.clone_owned::<PartialNativeFunctionImpl>(),
@@ -556,7 +556,7 @@ impl Drop for ValuePtr {
                 Type::GetField => {},
                 // Owned types
                 Type::Complex => self.drop_owned::<ComplexImpl>(),
-                Type::Range => self.drop_owned::<RangeImpl>(),
+                Type::Range => self.drop_shared::<Range>(),
                 Type::Enumerate => self.drop_owned::<EnumerateImpl>(),
                 Type::PartialFunction => self.drop_owned::<PartialFunctionImpl>(),
                 Type::PartialNativeFunction => self.drop_owned::<PartialNativeFunctionImpl>(),
@@ -596,12 +596,12 @@ impl Hash for ValuePtr {
             Type::GetField => unsafe { self.tag }.hash(state),
             // Owned types
             Type::Complex => self.as_ref::<ComplexImpl>().hash(state),
-            Type::Range => self.as_ref::<RangeImpl>().hash(state),
             Type::Enumerate => self.as_ref::<EnumerateImpl>().hash(state),
             Type::PartialFunction => self.as_ref::<PartialFunctionImpl>().hash(state),
             Type::PartialNativeFunction => self.as_ref::<PartialNativeFunctionImpl>().hash(state),
             Type::Slice => self.as_ref::<SliceImpl>().hash(state),
             // Shared types
+            Type::Range => self.as_shared_ref::<Range>().hash(state),
             Type::LongStr => self.as_shared_ref::<String>().hash(state),
             Type::List => self.as_shared_ref::<ListImpl>().hash(state),
             Type::Set => self.as_shared_ref::<SetImpl>().hash(state),
@@ -632,13 +632,13 @@ impl Debug for ValuePtr {
             Type::GetField => f.debug_struct("GetField").field("field_index", &self.as_field()).finish(),
             // Owned types
             Type::Complex => Debug::fmt(self.as_ref::<ComplexImpl>(), f),
-            Type::Range => Debug::fmt(self.as_ref::<RangeImpl>(), f),
             Type::Enumerate => Debug::fmt(self.as_ref::<EnumerateImpl>(), f),
             Type::PartialFunction => Debug::fmt(self.as_ref::<PartialFunctionImpl>(), f),
             Type::PartialNativeFunction => Debug::fmt(self.as_ref::<PartialNativeFunctionImpl>(), f),
             Type::Slice => Debug::fmt(self.as_ref::<SliceImpl>(), f),
             Type::Error => Debug::fmt(self.as_ref::<RuntimeError>(), f),
             // Shared types
+            Type::Range => Debug::fmt(self.as_shared_ref::<Range>(), f),
             Type::LongStr => Debug::fmt(self.as_shared_ref::<String>(), f),
             Type::List => Debug::fmt(self.as_shared_ref::<ListImpl>(), f),
             Type::Set => Debug::fmt(self.as_shared_ref::<SetImpl>(), f),

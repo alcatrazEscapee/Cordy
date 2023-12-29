@@ -22,6 +22,7 @@ use crate::vm::value::str::{RefStr, IntoRefStr, IterStr};
 pub use crate::vm::value::ptr::{MAX_INT, MIN_INT, ValuePtr, Prefix};
 
 use RuntimeError::{*};
+use crate::vm::value::range::Range;
 
 pub type ErrorResult<T> = Result<T, Box<Prefix<RuntimeError>>>;
 pub type AnyResult = ErrorResult<()>;
@@ -29,6 +30,7 @@ pub type AnyResult = ErrorResult<()>;
 
 mod ptr;
 mod str;
+mod range;
 
 
 /// `Type` is an enumeration of all the possible types (not including user-defined type variants such as `struct`s) possible in Cordy.
@@ -67,11 +69,11 @@ pub enum Type {
 
 impl Type {
     fn is_owned(&self) -> bool {
-        matches!(self, Type::Complex | Type::Range | Type::Enumerate | Type::PartialFunction | Type::PartialNativeFunction | Type::Slice | Type::Iter | Type::Error)
+        matches!(self, Type::Complex | Type::Enumerate | Type::PartialFunction | Type::PartialNativeFunction | Type::Slice | Type::Iter | Type::Error)
     }
 
     fn is_shared(&self) -> bool {
-        matches!(self, Type::LongStr | Type::List | Type::Set | Type::Dict | Type::Heap | Type::Vector | Type::Function | Type::Closure | Type::Memoized | Type::Struct | Type::StructType)
+        matches!(self, Type::LongStr | Type::List | Type::Set | Type::Dict | Type::Heap | Type::Vector | Type::Function | Type::Closure | Type::Memoized | Type::Struct | Type::StructType | Type::Range)
     }
 }
 
@@ -327,13 +329,7 @@ impl ValuePtr {
     ///
     /// Note: this implementation internally replaces all empty range values with the single `range(0, 0, 0)` instance. This means that `range(1, 2, -1) . str` will have to handle this case as it will not be representative.
     pub fn range(start: i64, stop: i64, step: i64) -> ValueResult {
-        if step == 0 {
-            ValueErrorStepCannotBeZero.err()
-        } else if (stop > start && step > 0) || (stop < start && step < 0) { // Non-empty range
-            RangeImpl { start, stop, step }.to_value().ok()
-        } else { // Empty range
-            RangeImpl { start: 0, stop: 0, step: 0 }.to_value().ok()
-        }
+        Range::from(start, stop, step)
     }
 
     pub fn slice(arg1: ValuePtr, arg2: ValuePtr, arg3: ValuePtr) -> ValueResult {
@@ -449,14 +445,7 @@ impl ValuePtr {
             },
             Type::StructType => self.as_struct_type().borrow_const().as_str().to_ref_str(),
 
-            Type::Range => {
-                let r = self.as_range_ref();
-                if r.step == 0 {
-                    "range(empty)".to_ref_str()
-                } else {
-                    format!("range({}, {}, {})", r.start, r.stop, r.step).to_ref_str()
-                }
-            },
+            Type::Range => self.as_range().borrow_const().to_repr_str(),
             Type::Enumerate => format!("enumerate({})", self.as_enumerate_ref().inner.safe_to_repr_str(rc).as_slice()).to_ref_str(),
             Type::Slice => {
                 #[inline]
@@ -552,7 +541,7 @@ impl ValuePtr {
             Type::Dict => !self.as_dict().borrow().dict.is_empty(),
             Type::Heap => !self.as_heap().borrow().heap.is_empty(),
             Type::Vector => !self.as_vector().borrow().vector.is_empty(),
-            Type::Range => !self.as_range_ref().is_empty(),
+            Type::Range => !self.as_range().borrow_const().is_empty(),
             Type::Enumerate => self.as_enumerate_ref().inner.to_bool(),
             _ => true,
         }
@@ -573,11 +562,8 @@ impl ValuePtr {
                 .cloned().map(|u| u.0)
                 .collect::<Vec<ValuePtr>>())),
 
-            Type::Range => {
-                let it = self.as_range();
-                Ok(Iterable::Range(it.value.start, it.value))
-            },
-            Type::Enumerate => Ok(Iterable::Enumerate(0, Box::new(self.as_enumerate().value.inner.to_iter()?))),
+            Type::Range => Ok(self.as_range().borrow_const().to_iter()),
+            Type::Enumerate => Ok(Iterable::Enumerate(0, Box::new(self.as_enumerate_ref().inner.clone().to_iter()?))),
 
             _ => TypeErrorArgMustBeIterable(self.clone()).err(),
         }
@@ -596,11 +582,8 @@ impl ValuePtr {
                 .map(|u| u.0)
                 .collect::<Vec<ValuePtr>>()),
 
-            Type::Range => {
-                let it = self.as_range();
-                Iterable::Range(it.value.start, it.value)
-            },
-            Type::Enumerate => Iterable::Enumerate(0, Box::new(self.as_enumerate().value.inner.as_iter_or_unit())),
+            Type::Range => self.as_range().borrow_const().to_iter(),
+            Type::Enumerate => Iterable::Enumerate(0, Box::new(self.as_enumerate_ref().inner.clone().as_iter_or_unit())),
 
             _ => Iterable::Unit(ValueOption::some(self)),
         }
@@ -665,7 +648,7 @@ impl ValuePtr {
             Type::Dict => Ok(self.as_dict().borrow().dict.len()),
             Type::Heap => Ok(self.as_heap().borrow().heap.len()),
             Type::Vector => Ok(self.as_vector().borrow().vector.len()),
-            Type::Range => Ok(self.as_range_ref().len()),
+            Type::Range => Ok(self.as_range().borrow_const().len()),
             Type::Enumerate => self.as_enumerate_ref().inner.len(),
             _ => TypeErrorArgMustBeIterable(self.clone()).err()
         }
@@ -863,7 +846,7 @@ impl OwnedValue for () {}
 impl SharedValue for () {}
 
 // Cannot implement for `ComplexImpl` because we need a specialized to_value() which may convert to int
-impl_owned_value!(Type::Range, RangeImpl, as_range, as_range_ref, is_range);
+//impl_owned_value!(Type::Range, Range, as_range, as_range_ref, is_range);
 impl_owned_value!(Type::Enumerate, EnumerateImpl, as_enumerate, as_enumerate_ref, is_enumerate);
 impl_owned_value!(Type::PartialFunction, PartialFunctionImpl, as_partial_function, as_partial_function_ref, is_partial_function);
 impl_owned_value!(Type::PartialNativeFunction, PartialNativeFunctionImpl, as_partial_native, as_partial_native_ref, is_partial_native);
@@ -871,6 +854,7 @@ impl_owned_value!(Type::Slice, SliceImpl, as_slice, as_slice_ref, is_slice);
 impl_owned_value!(Type::Iter, Iterable, as_iterable, as_iterable_ref, is_iterable);
 impl_owned_value!(Type::Error, RuntimeError, as_err, as_err_ref, is_err);
 
+impl_shared_value!(Type::Range, Range, ConstValue, as_range, is_range);
 impl_shared_value!(Type::List, ListImpl, MutValue, as_list, is_list);
 impl_shared_value!(Type::Set, SetImpl, MutValue, as_set, is_set);
 impl_shared_value!(Type::Dict, DictImpl, MutValue, as_dict, is_dict);
@@ -1442,71 +1426,6 @@ impl Method {
 }
 
 
-/// ### Range Type
-///
-/// This is the internal lazy type used by the native function `range(...)`. For non-empty ranges, `step` must be non-zero.
-/// For an empty range, this will store the `step` as `0` - in this case the `start` and `stop` values should be ignored
-/// Note that depending on the relation of `start`, `stop` and the sign of `step`, this may represent an empty range.
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub struct RangeImpl {
-    start: i64,
-    stop: i64,
-    step: i64,
-}
-
-impl RangeImpl {
-    /// Used by `operator in`, to check if a value is in this range.
-    pub fn contains(&self, value: i64) -> bool {
-        match self.step.cmp(&0) {
-            Ordering::Equal => false,
-            Ordering::Greater => value >= self.start && value < self.stop && (value - self.start) % self.step == 0,
-            Ordering::Less => value <= self.start && value > self.stop && (self.start - value) % self.step == 0
-        }
-    }
-
-    /// Reverses the range, so that iteration advances from the end to the start
-    /// Note this is not as simple as just swapping `start` and `stop`, due to non-unit step sizes.
-    pub fn reverse(self) -> RangeImpl {
-        match self.step.cmp(&0) {
-            Ordering::Equal => self,
-            Ordering::Greater => RangeImpl { start: self.start + self.len() as i64 * self.step, stop: self.start + 1, step: -self.step },
-            Ordering::Less => RangeImpl { start: self.start + self.len() as i64 * self.step, stop: self.start - 1, step: -self.step }
-        }
-    }
-
-    /// Advances the `Range`, based on the external `current` value.
-    /// The `current` value is the one that will be returned, and internally advanced to the next value.
-    fn next(&self, current: &mut i64) -> Option<ValuePtr> {
-        if *current == self.stop || self.step == 0 {
-            None
-        } else if self.step > 0 {
-            let ret = *current;
-            *current += self.step;
-            if *current > self.stop {
-                *current = self.stop;
-            }
-            Some(ret.to_value())
-        } else {
-            let ret = *current;
-            *current += self.step;
-            if *current < self.stop {
-                *current = self.stop;
-            }
-            Some(ret.to_value())
-        }
-    }
-
-    fn len(&self) -> usize {
-        // Since this type ensures that the range is non-empty, we can do simple checked arithmetic
-        if self.step == 0 { 0 } else { (self.start.abs_diff(self.stop) / self.step.unsigned_abs()) as usize }
-    }
-
-    fn is_empty(&self) -> bool {
-        self.step == 0
-    }
-}
-
-
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct EnumerateImpl {
     pub inner: ValuePtr
@@ -1572,7 +1491,7 @@ pub enum Iterable {
     Unit(ValueOption),
     Collection(usize, ValuePtr),
     RawVector(usize, Vec<ValuePtr>),
-    Range(i64, RangeImpl),
+    Range(i64, Range),
     Enumerate(usize, Box<Iterable>),
 }
 
@@ -1593,10 +1512,7 @@ impl Iterable {
     pub fn reverse(self) -> IterableRev {
         let len: usize = self.len();
         match self {
-            Iterable::Range(_, it) => {
-                let range = it.reverse();
-                IterableRev(Iterable::Range(range.start, range))
-            },
+            Iterable::Range(_, it) => IterableRev(it.reverse().to_iter()),
             Iterable::Collection(_, it) => IterableRev(Iterable::Collection(len, it)),
             Iterable::RawVector(_, it) => IterableRev(Iterable::RawVector(len, it)),
             Iterable::Enumerate(_, it) => IterableRev(Iterable::Enumerate(len, Box::new(it.reverse().0))),
