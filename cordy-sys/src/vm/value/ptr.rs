@@ -424,7 +424,7 @@ impl PartialEq for ValuePtr {
             // Owned types check equality based on their ref
             Type::Complex => self.as_ref::<ComplexImpl>() == other.as_ref::<ComplexImpl>(),
             Type::Range => self.as_shared_ref::<Range>() == other.as_shared_ref::<Range>(),
-            Type::Enumerate => self.as_ref::<EnumerateImpl>() == other.as_ref::<EnumerateImpl>(),
+            Type::Enumerate => self.as_shared_ref::<Enumerate>() == other.as_shared_ref::<Enumerate>(),
             Type::PartialFunction => self.as_ref::<PartialFunctionImpl>() == other.as_ref::<PartialFunctionImpl>(),
             Type::PartialNativeFunction => self.as_ref::<PartialNativeFunctionImpl>() == other.as_ref::<PartialNativeFunctionImpl>(),
             Type::Slice => self.as_ref::<SliceImpl>() == other.as_ref::<SliceImpl>(),
@@ -469,7 +469,7 @@ impl Ord for ValuePtr {
             // Owned types check equality based on their ref
             Type::Complex => self.as_ref::<ComplexImpl>().cmp(other.as_ref::<ComplexImpl>()),
             Type::Range => self.as_shared_ref::<Range>().cmp(other.as_shared_ref::<Range>()),
-            Type::Enumerate => self.as_ref::<EnumerateImpl>().cmp(other.as_ref::<EnumerateImpl>()),
+            Type::Enumerate => self.as_shared_ref::<Enumerate>().cmp(other.as_shared_ref::<Enumerate>()),
             // Shared types check equality based on the shared ref
             Type::LongStr => self.as_shared_ref::<String>().cmp(other.as_shared_ref::<String>()),
             Type::List => self.as_shared_ref::<ListImpl>().cmp(other.as_shared_ref::<ListImpl>()),
@@ -513,7 +513,7 @@ impl Clone for ValuePtr {
                 // Owned types
                 Type::Complex => self.clone_owned::<ComplexImpl>(),
                 Type::Range => self.clone_shared::<Range>(),
-                Type::Enumerate => self.clone_owned::<EnumerateImpl>(),
+                Type::Enumerate => self.clone_shared::<Enumerate>(),
                 Type::PartialFunction => self.clone_owned::<PartialFunctionImpl>(),
                 Type::PartialNativeFunction => self.clone_owned::<PartialNativeFunctionImpl>(),
                 Type::Slice => self.clone_owned::<SliceImpl>(),
@@ -557,7 +557,7 @@ impl Drop for ValuePtr {
                 // Owned types
                 Type::Complex => self.drop_owned::<ComplexImpl>(),
                 Type::Range => self.drop_shared::<Range>(),
-                Type::Enumerate => self.drop_owned::<EnumerateImpl>(),
+                Type::Enumerate => self.drop_shared::<Enumerate>(),
                 Type::PartialFunction => self.drop_owned::<PartialFunctionImpl>(),
                 Type::PartialNativeFunction => self.drop_owned::<PartialNativeFunctionImpl>(),
                 Type::Slice => self.drop_owned::<SliceImpl>(),
@@ -596,7 +596,7 @@ impl Hash for ValuePtr {
             Type::GetField => unsafe { self.tag }.hash(state),
             // Owned types
             Type::Complex => self.as_ref::<ComplexImpl>().hash(state),
-            Type::Enumerate => self.as_ref::<EnumerateImpl>().hash(state),
+            Type::Enumerate => self.as_shared_ref::<Enumerate>().hash(state),
             Type::PartialFunction => self.as_ref::<PartialFunctionImpl>().hash(state),
             Type::PartialNativeFunction => self.as_ref::<PartialNativeFunctionImpl>().hash(state),
             Type::Slice => self.as_ref::<SliceImpl>().hash(state),
@@ -632,7 +632,7 @@ impl Debug for ValuePtr {
             Type::GetField => f.debug_struct("GetField").field("field_index", &self.as_field()).finish(),
             // Owned types
             Type::Complex => Debug::fmt(self.as_ref::<ComplexImpl>(), f),
-            Type::Enumerate => Debug::fmt(self.as_ref::<EnumerateImpl>(), f),
+            Type::Enumerate => Debug::fmt(self.as_shared_ref::<Enumerate>(), f),
             Type::PartialFunction => Debug::fmt(self.as_ref::<PartialFunctionImpl>(), f),
             Type::PartialNativeFunction => Debug::fmt(self.as_ref::<PartialNativeFunctionImpl>(), f),
             Type::Slice => Debug::fmt(self.as_ref::<SliceImpl>(), f),

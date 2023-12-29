@@ -1,12 +1,12 @@
 use std::cmp::Ordering;
 
-use crate::vm::{IntoValue, Iterable, ValuePtr, ValueResult, RuntimeError};
+use crate::vm::{ErrorResult, IntoValue, Iterable, RuntimeError, ValuePtr, ValueResult};
 use crate::vm::value::str::{IntoRefStr, RefStr};
 
 
 /// # Range
 ///
-/// This is the type of the value returned by the native function `range(...)`. It is a lazily-evaluated iterable, which produces integer values.
+/// This is the value returned by the native function `range(...)`. It is a lazily-evaluated iterable, which produces integer values.
 ///
 /// `Range` is considered immutable, and shared.
 ///
@@ -24,10 +24,15 @@ pub struct Range {
     step: i64,
 }
 
+impl ValuePtr {
+    pub fn range(start: i64, stop: i64, step: i64) -> ValueResult {
+        Range::from(start, stop, step)
+    }
+}
 
 impl Range {
     /// Creates a new `range()` from the given parameters. Raises an error if `step` is zero, and converts all empty ranges to `range(0, 0, 0)` internally.
-    pub fn from(start: i64, stop: i64, step: i64) -> ValueResult {
+    fn from(start: i64, stop: i64, step: i64) -> ValueResult {
         if step == 0 {
             RuntimeError::ValueErrorStepCannotBeZero.err()
         } else if (stop > start && step > 0) || (stop < start && step < 0) {
@@ -112,6 +117,41 @@ impl Range {
 
     pub fn is_empty(&self) -> bool {
         self.step == 0
+    }
+}
+
+
+/// # Enumerate
+///
+/// This is the value returned by the native function `enumerate()`. It is a lazily-evaluated wrapper around the underlying iterable.
+///
+/// `Enumerate` is considered immutable, and shared.
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub struct Enumerate {
+    pub inner: ValuePtr
+}
+
+impl ValuePtr {
+    pub fn enumerate(inner: ValuePtr) -> ValuePtr {
+        Enumerate::new(inner)
+    }
+}
+
+impl Enumerate {
+    fn new(inner: ValuePtr) -> ValuePtr {
+        Enumerate { inner }.to_value()
+    }
+
+    pub fn borrow_inner(&self) -> &ValuePtr {
+        &self.inner
+    }
+
+    pub fn to_iter(&self) -> ErrorResult<Iterable> {
+        Ok(Iterable::Enumerate(0, Box::new(self.inner.clone().to_iter()?)))
+    }
+
+    pub fn len(&self) -> ErrorResult<usize> {
+        self.inner.len()
     }
 }
 

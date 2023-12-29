@@ -10,6 +10,7 @@ use std::rc::Rc;
 use fxhash::FxBuildHasher;
 use indexmap::{IndexMap, IndexSet};
 use itertools::Itertools;
+use range::Enumerate;
 
 use crate::compiler::Fields;
 use crate::core;
@@ -17,9 +18,9 @@ use crate::core::{InvokeArg0, NativeFunction, PartialArgument};
 use crate::util::impl_partial_ord;
 use crate::vm::error::RuntimeError;
 use crate::vm::value::ptr::{Ref, RefMut, SharedPrefix};
-use crate::vm::value::str::{RefStr, IntoRefStr, IterStr};
+use crate::vm::value::str::{IntoRefStr, IterStr, RefStr};
 
-pub use crate::vm::value::ptr::{MAX_INT, MIN_INT, ValuePtr, Prefix};
+pub use crate::vm::value::ptr::{MAX_INT, MIN_INT, Prefix, ValuePtr};
 
 use RuntimeError::{*};
 use crate::vm::value::range::Range;
@@ -69,11 +70,11 @@ pub enum Type {
 
 impl Type {
     fn is_owned(&self) -> bool {
-        matches!(self, Type::Complex | Type::Enumerate | Type::PartialFunction | Type::PartialNativeFunction | Type::Slice | Type::Iter | Type::Error)
+        matches!(self, Type::Complex | Type::PartialFunction | Type::PartialNativeFunction | Type::Slice | Type::Iter | Type::Error)
     }
 
     fn is_shared(&self) -> bool {
-        matches!(self, Type::LongStr | Type::List | Type::Set | Type::Dict | Type::Heap | Type::Vector | Type::Function | Type::Closure | Type::Memoized | Type::Struct | Type::StructType | Type::Range)
+        matches!(self, Type::LongStr | Type::List | Type::Set | Type::Dict | Type::Heap | Type::Vector | Type::Function | Type::Closure | Type::Memoized | Type::Struct | Type::StructType | Type::Range | Type::Enumerate)
     }
 }
 
@@ -320,18 +321,6 @@ impl ValuePtr {
         }.to_value()
     }
 
-    pub fn enumerate(ptr: ValuePtr) -> ValuePtr {
-        EnumerateImpl { inner: ptr }.to_value()
-    }
-
-    /// Creates a new `Range()` value from a given set of integer parameters.
-    /// Raises an error if `step == 0`
-    ///
-    /// Note: this implementation internally replaces all empty range values with the single `range(0, 0, 0)` instance. This means that `range(1, 2, -1) . str` will have to handle this case as it will not be representative.
-    pub fn range(start: i64, stop: i64, step: i64) -> ValueResult {
-        Range::from(start, stop, step)
-    }
-
     pub fn slice(arg1: ValuePtr, arg2: ValuePtr, arg3: ValuePtr) -> ValueResult {
         SliceImpl {
             arg1: arg1.check_int_or_nil()?,
@@ -446,7 +435,7 @@ impl ValuePtr {
             Type::StructType => self.as_struct_type().borrow_const().as_str().to_ref_str(),
 
             Type::Range => self.as_range().borrow_const().to_repr_str(),
-            Type::Enumerate => format!("enumerate({})", self.as_enumerate_ref().inner.safe_to_repr_str(rc).as_slice()).to_ref_str(),
+            Type::Enumerate => format!("enumerate({})", self.as_enumerate().borrow_const().borrow_inner().safe_to_repr_str(rc).as_slice()).to_ref_str(),
             Type::Slice => {
                 #[inline]
                 fn to_str(i: &ValuePtr) -> String {
@@ -542,7 +531,7 @@ impl ValuePtr {
             Type::Heap => !self.as_heap().borrow().heap.is_empty(),
             Type::Vector => !self.as_vector().borrow().vector.is_empty(),
             Type::Range => !self.as_range().borrow_const().is_empty(),
-            Type::Enumerate => self.as_enumerate_ref().inner.to_bool(),
+            Type::Enumerate => self.as_enumerate().borrow_const().borrow_inner().to_bool(),
             _ => true,
         }
     }
@@ -563,7 +552,7 @@ impl ValuePtr {
                 .collect::<Vec<ValuePtr>>())),
 
             Type::Range => Ok(self.as_range().borrow_const().to_iter()),
-            Type::Enumerate => Ok(Iterable::Enumerate(0, Box::new(self.as_enumerate_ref().inner.clone().to_iter()?))),
+            Type::Enumerate => self.as_enumerate().borrow_const().to_iter(),
 
             _ => TypeErrorArgMustBeIterable(self.clone()).err(),
         }
@@ -581,9 +570,6 @@ impl ValuePtr {
                 .cloned()
                 .map(|u| u.0)
                 .collect::<Vec<ValuePtr>>()),
-
-            Type::Range => self.as_range().borrow_const().to_iter(),
-            Type::Enumerate => Iterable::Enumerate(0, Box::new(self.as_enumerate_ref().inner.clone().as_iter_or_unit())),
 
             _ => Iterable::Unit(ValueOption::some(self)),
         }
@@ -649,7 +635,7 @@ impl ValuePtr {
             Type::Heap => Ok(self.as_heap().borrow().heap.len()),
             Type::Vector => Ok(self.as_vector().borrow().vector.len()),
             Type::Range => Ok(self.as_range().borrow_const().len()),
-            Type::Enumerate => self.as_enumerate_ref().inner.len(),
+            Type::Enumerate => self.as_enumerate().borrow_const().len(),
             _ => TypeErrorArgMustBeIterable(self.clone()).err()
         }
     }
@@ -847,7 +833,7 @@ impl SharedValue for () {}
 
 // Cannot implement for `ComplexImpl` because we need a specialized to_value() which may convert to int
 //impl_owned_value!(Type::Range, Range, as_range, as_range_ref, is_range);
-impl_owned_value!(Type::Enumerate, EnumerateImpl, as_enumerate, as_enumerate_ref, is_enumerate);
+//impl_owned_value!(Type::Enumerate, Enumerate, as_enumerate, as_enumerate_ref, is_enumerate);
 impl_owned_value!(Type::PartialFunction, PartialFunctionImpl, as_partial_function, as_partial_function_ref, is_partial_function);
 impl_owned_value!(Type::PartialNativeFunction, PartialNativeFunctionImpl, as_partial_native, as_partial_native_ref, is_partial_native);
 impl_owned_value!(Type::Slice, SliceImpl, as_slice, as_slice_ref, is_slice);
@@ -855,6 +841,7 @@ impl_owned_value!(Type::Iter, Iterable, as_iterable, as_iterable_ref, is_iterabl
 impl_owned_value!(Type::Error, RuntimeError, as_err, as_err_ref, is_err);
 
 impl_shared_value!(Type::Range, Range, ConstValue, as_range, is_range);
+impl_shared_value!(Type::Enumerate, Enumerate, ConstValue, as_enumerate, is_enumerate);
 impl_shared_value!(Type::List, ListImpl, MutValue, as_list, is_list);
 impl_shared_value!(Type::Set, SetImpl, MutValue, as_set, is_set);
 impl_shared_value!(Type::Dict, DictImpl, MutValue, as_dict, is_dict);
@@ -1423,12 +1410,6 @@ impl Method {
 
     /// If `true`, this method is a instance method with a leading `self` parameter.
     pub fn instance(&self) -> bool { self.1 }
-}
-
-
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub struct EnumerateImpl {
-    pub inner: ValuePtr
 }
 
 
