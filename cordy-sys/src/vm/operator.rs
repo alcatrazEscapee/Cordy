@@ -266,7 +266,7 @@ pub fn binary_is(lhs: ValuePtr, rhs: ValuePtr, invert: bool) -> ValueResult {
 pub fn binary_in(lhs: ValuePtr, rhs: ValuePtr, invert: bool) -> ValueResult {
     (match (lhs.ty(), rhs.ty()) {
         (ShortStr | LongStr, ShortStr | LongStr) => rhs.as_str_slice().contains(lhs.as_str_slice()),
-        (Int | Bool, Range) => rhs.as_range().value.contains(lhs.as_int()),
+        (Int | Bool, Range) => rhs.as_range().borrow_const().contains(lhs.as_int()),
         (_, List) => rhs.as_list().borrow().list.contains(&lhs),
         (_, Set) => rhs.as_set().borrow().set.contains(&lhs),
         (_, Dict) => rhs.as_dict().borrow().dict.contains_key(&lhs),
