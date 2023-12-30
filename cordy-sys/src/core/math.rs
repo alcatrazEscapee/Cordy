@@ -1,6 +1,6 @@
 use num_integer::Roots;
 
-use crate::vm::{ErrorResult, IntoValue, operator, RuntimeError, Type, ValueOption, ValuePtr, ValueResult};
+use crate::vm::{ComplexValue, ErrorResult, IntoValue, operator, RuntimeError, Type, ValueOption, ValuePtr, ValueResult};
 
 use RuntimeError::{*};
 
@@ -25,8 +25,8 @@ pub fn abs(value: ValuePtr) -> ValueResult {
     match value.ty() {
         Type::Bool | Type::Int => value.as_int().abs().to_value().ok(),
         Type::Complex => {
-            let c = value.as_precise_complex().value.inner;
-            num_complex::Complex::new(c.re.abs(), c.im.abs()).to_value().ok()
+            let c = value.as_complex();
+            ComplexValue::new(c.re.abs(), c.im.abs()).to_value().ok()
         },
         Type::Vector => {
             operator::apply_vector_unary(value, abs)
@@ -80,7 +80,7 @@ pub fn count_zeros(value: ValuePtr) -> ValueResult {
 
 pub fn get_real(value: ValuePtr) -> ValueResult {
     match value.ty() {
-        Type::Complex => value.as_precise_complex().value.inner.re.to_value().ok(),
+        Type::Complex => value.as_complex().re.to_value().ok(),
         Type::Bool | Type::Int => value.as_int().to_value().ok(),
         _ => TypeErrorArgMustBeComplex(value).err()
     }
@@ -88,7 +88,7 @@ pub fn get_real(value: ValuePtr) -> ValueResult {
 
 pub fn get_imag(value: ValuePtr) -> ValueResult {
     match value.ty() {
-        Type::Complex => value.as_precise_complex().value.inner.im.to_value().ok(),
+        Type::Complex => value.as_complex().im.to_value().ok(),
         Type::Bool | Type::Int => 0i64.to_value().ok(),
         _ => TypeErrorArgMustBeComplex(value).err()
     }

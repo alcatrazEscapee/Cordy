@@ -851,8 +851,8 @@ fn invoke_arg1<VM : VirtualInterface>(f: NativeFunction, a1: ValuePtr, vm: &mut 
         Bool => a1.to_bool().to_value().ok(),
         Int => math::convert_to_int(a1, ValueOption::none()),
         Str => a1.to_str().to_value().ok(),
-        Vector => if a1.is_precise_complex() {  // Handle `a + bi . vector` as a special case here
-            let it = a1.as_precise_complex().value.inner;
+        Vector => if a1.is_complex() {  // Handle `a + bi . vector` as a special case here, along with all integral types
+            let it = a1.to_complex(); // Must call `to_complex()` to handle `bool`, `int`
             (it.re.to_value(), it.im.to_value()).to_value().ok()
         } else {
             a1.to_iter()?.to_vector().ok()

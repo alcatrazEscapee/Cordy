@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 
 use crate::core;
 use crate::core::NativeFunction;
-use crate::vm::{ErrorResult, Type, ValuePtr, ValueResult};
+use crate::vm::{ComplexValue, ErrorResult, Type, ValuePtr, ValueResult};
 use crate::vm::error::RuntimeError;
 use crate::vm::value::{IntoIterableValue, IntoValue, Prefix};
 
@@ -115,7 +115,7 @@ pub fn unary_not(a1: ValuePtr) -> ValueResult {
 pub fn binary_mul(lhs: ValuePtr, rhs: ValuePtr) -> ValueResult {
     match (lhs.ty(), rhs.ty()) {
         (Bool | Int, Bool | Int) => (lhs.as_int() * rhs.as_int()).to_value().ok(),
-        (Bool | Int | Complex, Bool | Int | Complex) => (lhs.as_complex() * rhs.as_complex()).to_value().ok(),
+        (Bool | Int | Complex, Bool | Int | Complex) => (lhs.to_complex() * rhs.to_complex()).to_value().ok(),
         (ShortStr | LongStr, Int) => binary_str_repeat(lhs, rhs),
         (Int, ShortStr | LongStr) => binary_str_repeat(rhs, lhs),
         (List, Int) => binary_list_repeat(lhs, rhs),
@@ -161,8 +161,8 @@ pub fn binary_div(lhs: ValuePtr, rhs: ValuePtr) -> ValueResult {
             }
         },
         (Bool | Int | Complex, Bool | Int | Complex) => {
-            let lhs = lhs.as_complex();
-            let rhs = rhs.as_complex();
+            let lhs = lhs.to_complex();
+            let rhs = rhs.to_complex();
             if rhs.norm_sqr() == 0 {
                 ValueErrorValueMustBeNonZero.err()
             } else {
@@ -179,11 +179,11 @@ pub fn binary_div(lhs: ValuePtr, rhs: ValuePtr) -> ValueResult {
 /// The `C64` type provided by `num-complex` defines `div()` using regular rust division.
 /// This is a clone of that but using `floor_div` provided by `num-integer`, which keeps consistency with how we define division for `complex / int`
 #[inline]
-fn c64_div_floor(lhs: num_complex::Complex<i64>, rhs: num_complex::Complex<i64>) -> num_complex::Complex<i64> {
+fn c64_div_floor(lhs: ComplexValue, rhs: ComplexValue) -> ComplexValue {
     let norm_sqr = rhs.norm_sqr();
     let re = lhs.re * rhs.re + lhs.im * rhs.im;
     let im = lhs.im * rhs.re - lhs.re * rhs.im;
-    num_complex::Complex::new(num_integer::div_floor(re, norm_sqr), num_integer::div_floor(im, norm_sqr))
+    ComplexValue::new(num_integer::div_floor(re, norm_sqr), num_integer::div_floor(im, norm_sqr))
 }
 
 pub fn binary_mod(lhs: ValuePtr, rhs: ValuePtr) -> ValueResult {
@@ -197,12 +197,12 @@ pub fn binary_mod(lhs: ValuePtr, rhs: ValuePtr) -> ValueResult {
             }
         },
         (Complex, Bool | Int) => {
-            let lhs = lhs.as_precise_complex().value.inner;
+            let lhs = lhs.as_complex();
             let rhs = rhs.as_int();
             if rhs == 0 {
                 ValueErrorValueMustBeNonZero.err()
             } else {
-                num_complex::Complex::new(num_integer::mod_floor(lhs.re, rhs), num_integer::mod_floor(lhs.im, rhs)).to_value().ok()
+                ComplexValue::new(num_integer::mod_floor(lhs.re, rhs), num_integer::mod_floor(lhs.im, rhs)).to_value().ok()
             }
         }
         (ShortStr | LongStr, _) => core::format_string(lhs.as_str_slice(), rhs),
@@ -226,7 +226,7 @@ pub fn binary_pow(lhs: ValuePtr, rhs: ValuePtr) -> ValueResult {
         (Complex, Bool | Int) => {
             let rhs = rhs.as_int();
             if rhs >= 0 {
-                lhs.as_precise_complex().value.inner.powu(rhs as u32).to_value().ok()
+                lhs.as_complex().powu(rhs as u32).to_value().ok()
             } else {
                 ValueErrorValueMustBeNonNegative(rhs).err()
             }
@@ -279,7 +279,7 @@ pub fn binary_in(lhs: ValuePtr, rhs: ValuePtr, invert: bool) -> ValueResult {
 pub fn binary_add(lhs: ValuePtr, rhs: ValuePtr) -> ValueResult {
     match (lhs.ty(), rhs.ty()) {
         (Bool | Int, Bool | Int) => (lhs.as_int() + rhs.as_int()).to_value().ok(),
-        (Bool | Int | Complex, Bool | Int | Complex) => (lhs.as_complex() + rhs.as_complex()).to_value().ok(),
+        (Bool | Int | Complex, Bool | Int | Complex) => (lhs.to_complex() + rhs.to_complex()).to_value().ok(),
         (List, List) => {
             let lhs = lhs.as_list().borrow();
             let rhs = rhs.as_list().borrow();
@@ -300,7 +300,7 @@ pub fn binary_add(lhs: ValuePtr, rhs: ValuePtr) -> ValueResult {
 pub fn binary_sub(lhs: ValuePtr, rhs: ValuePtr) -> ValueResult {
     match (lhs.ty(), rhs.ty()) {
         (Bool | Int, Bool | Int) => (lhs.as_int() - rhs.as_int()).to_value().ok(),
-        (Bool | Int | Complex, Bool | Int | Complex) => (lhs.as_complex() - rhs.as_complex()).to_value().ok(),
+        (Bool | Int | Complex, Bool | Int | Complex) => (lhs.to_complex() - rhs.to_complex()).to_value().ok(),
         (Set, Set) => {
             let lhs = lhs.as_set().borrow();
             let rhs = rhs.as_set().borrow();
@@ -435,7 +435,7 @@ fn apply_vector_binary_scalar_rhs(lhs: ValuePtr, scalar_rhs: ValuePtr, binary_op
 
 #[cfg(test)]
 mod test {
-    use crate::vm::{IntoValue, operator, RuntimeError};
+    use crate::vm::{ComplexValue, IntoValue, operator, RuntimeError};
 
     #[test]
     fn test_binary_int_div() {
@@ -464,7 +464,7 @@ mod test {
             ((3, 2), 2, (1, 1)), ((2, 2), 2, (1, 1)), ((1, 2), 2, (0, 1)), ((0, 2), 2, (0, 1)), ((-1, 2), 2, (-1, 1)), ((-2, 2), 2, (-1, 1)), ((-3, 2), 2, (-2, 1)),
             ((3, 3), 2, (1, 1)), ((2, 3), 2, (1, 1)), ((1, 3), 2, (0, 1)), ((0, 3), 2, (0, 1)), ((-1, 3), 2, (-1, 1)), ((-2, 3), 2, (-1, 1)), ((-3, 3), 2, (-2, 1)),
         ] {
-            assert_eq!(operator::binary_div(num_complex::Complex::new(a, ai).to_value(), b.to_value()), num_complex::Complex::new(c, ci).to_value().ok(), "{:?} / {}", (a, ai), b)
+            assert_eq!(operator::binary_div(ComplexValue::new(a, ai).to_value(), b.to_value()), ComplexValue::new(c, ci).to_value().ok(), "{:?} / {}", (a, ai), b)
         }
     }
 
