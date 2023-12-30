@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::cell::Cell;
 use std::cmp::{Ordering, Reverse};
 use std::collections::{BinaryHeap, HashMap, VecDeque};
@@ -18,7 +19,7 @@ use crate::core::{InvokeArg0, NativeFunction, PartialArgument};
 use crate::util::impl_partial_ord;
 use crate::vm::error::RuntimeError;
 use crate::vm::value::ptr::{RefMut, SharedPrefix};
-use crate::vm::value::str::{IntoRefStr, IterStr, RefStr};
+use crate::vm::value::str::IterStr;
 use crate::vm::value::range::Range;
 use crate::vm::value::slice::Slice;
 
@@ -324,24 +325,24 @@ impl ValuePtr {
     }
 
     /// Converts the `Value` to a `String`. This is equivalent to the stdlib function `str()`
-    pub fn to_str(&self) -> RefStr { self.safe_to_str(&mut RecursionGuard::new()) }
+    pub fn to_str(&self) -> Cow<str> { self.safe_to_str(&mut RecursionGuard::new()) }
 
-    fn safe_to_str(&self, rc: &mut RecursionGuard) -> RefStr {
+    fn safe_to_str(&self, rc: &mut RecursionGuard) -> Cow<str> {
         match self.ty() {
-            Type::ShortStr | Type::LongStr => self.as_str_slice().to_ref_str(),
-            Type::Function => self.as_function().borrow_const().name.as_str().to_ref_str(),
+            Type::ShortStr | Type::LongStr => Cow::from(self.as_str_slice()),
+            Type::Function => Cow::from(&self.as_function().borrow_const().name),
             Type::PartialFunction => self.as_partial_function_ref().func.ptr.safe_to_str(rc),
-            Type::NativeFunction => self.as_native().name().to_ref_str(),
-            Type::PartialNativeFunction => self.as_partial_native_ref().func.name().to_ref_str(),
-            Type::Closure => self.as_closure().borrow().func.get().name.clone().to_ref_str(),
+            Type::NativeFunction => Cow::from(self.as_native().name()),
+            Type::PartialNativeFunction => Cow::from(self.as_partial_native_ref().func.name()),
+            Type::Closure => Cow::from(self.as_closure().borrow().func.get().name.clone()),
             _ => self.safe_to_repr_str(rc),
         }
     }
 
     /// Converts the `Value` to a representative `String`. This is equivalent to the stdlib function `repr()`, and meant to be an inverse of `eval()`
-    pub fn to_repr_str(&self) -> RefStr { self.safe_to_repr_str(&mut RecursionGuard::new()) }
+    pub fn to_repr_str(&self) -> Cow<str> { self.safe_to_repr_str(&mut RecursionGuard::new()) }
 
-    fn safe_to_repr_str(&self, rc: &mut RecursionGuard) -> RefStr {
+    fn safe_to_repr_str(&self, rc: &mut RecursionGuard) -> Cow<str> {
         macro_rules! recursive_guard {
             ($default:expr, $recursive:expr) => {{
                 let ret = if rc.enter(self) { $default } else { $recursive };
@@ -350,84 +351,87 @@ impl ValuePtr {
             }};
         }
 
-        fn map_join<'a, 'b, I : Iterator<Item=&'b ValuePtr>>(rc: &mut RecursionGuard, mut iter: I, prefix: char, suffix: char, empty: &'a str, sep: &str) -> RefStr<'a> {
+        fn map_join<'a, 'b, I : Iterator<Item=&'b ValuePtr>>(rc: &mut RecursionGuard, mut iter: I, prefix: char, suffix: char, empty: &'a str, sep: &str) -> Cow<'a, str> {
             // Avoids issues with `.map().join()` that create temporaries in the `map()` and then destroy them
             match iter.next() {
-                None => empty.to_ref_str(),
+                None => Cow::from(empty),
                 Some(first) => {
                     let (lower, _) = iter.size_hint();
                     let mut result = String::with_capacity(lower * (sep.len() + 2));
                     result.push(prefix);
-                    result.push_str(first.safe_to_repr_str(rc).as_slice());
+                    result.push_str(&first.safe_to_repr_str(rc));
                     while let Some(next) = iter.next() {
                         result.push_str(sep);
-                        result.push_str(next.safe_to_repr_str(rc).as_slice());
+                        result.push_str(&next.safe_to_repr_str(rc));
                     }
                     result.push(suffix);
-                    result.to_ref_str()
+                    Cow::from(result)
                 }
             }
         }
 
         match self.ty() {
-            Type::Nil => "nil".to_ref_str(),
-            Type::Bool => if self.as_bool() { "true" } else { "false" }.to_ref_str(),
-            Type::Int => self.as_int().to_string().to_ref_str(),
+            Type::Nil => Cow::from("nil"),
+            Type::Bool => Cow::from(if self.is_true() { "true" } else { "false" }),
+            Type::Int => Cow::from(self.as_int().to_string()),
             Type::Complex => self.as_precise_complex_ref().to_repr_str(),
             Type::ShortStr | Type::LongStr => {
                 let escaped = format!("{:?}", self.as_str_slice());
-                format!("'{}'", &escaped[1..escaped.len() - 1]).to_ref_str()
+                Cow::from(format!("'{}'", &escaped[1..escaped.len() - 1]))
             },
 
             Type::List => recursive_guard!(
-                "[...]".to_ref_str(),
+                Cow::from("[...]"),
                 map_join(rc, self.as_list().borrow().list.iter(), '[', ']', "[]", ", ")
             ),
             Type::Set => recursive_guard!(
-                "{...}".to_ref_str(),
+                Cow::from("{...}"),
                 map_join(rc, self.as_set().borrow().set.iter(), '{', '}', "{}", ", ")
             ),
             Type::Dict => recursive_guard!(
-                "{...}".to_ref_str(),
-                format!("{{{}}}", self.as_dict().borrow().dict.iter()
-                    .map(|(k, v)| format!("{}: {}", k.safe_to_repr_str(rc).as_slice(), v.safe_to_repr_str(rc).as_slice()))
-                    .join(", ")).to_ref_str()
+                Cow::from("{...}"),
+                Cow::from(format!("{{{}}}", self.as_dict()
+                    .borrow()
+                    .dict
+                    .iter()
+                    .map(|(k, v)| format!("{}: {}", k.safe_to_repr_str(rc), v.safe_to_repr_str(rc)))
+                    .join(", ")))
             ),
             Type::Heap => recursive_guard!(
-                "[...]".to_ref_str(),
+                Cow::from("[...]"),
                 map_join(rc, self.as_heap().borrow().heap.iter().map(|u| &u.0), '[', ']', "[]",  ", ")
             ),
             Type::Vector => recursive_guard!(
-                "(...)".to_ref_str(),
+                Cow::from("(...)"),
                 map_join(rc, self.as_vector().borrow().vector.iter(), '(', ')', "()", ", ")
             ),
 
             Type::Struct => {
                 let it = self.as_struct().borrow();
                 recursive_guard!(
-                    format!("{}(...)", it.get_owner().name).to_ref_str(),
-                    format!("{}({})", it.get_owner().name.as_str(), it.values.iter()
+                    Cow::from(format!("{}(...)", it.get_owner().name)),
+                    Cow::from(format!("{}({})", it.get_owner().name.as_str(), it.values.iter()
                         .zip(it.get_owner().fields.iter())
-                        .map(|(v, k)| format!("{}={}", k, v.safe_to_repr_str(rc).as_slice()))
-                        .join(", ")).to_ref_str()
+                        .map(|(v, k)| format!("{}={}", k, v.safe_to_repr_str(rc)))
+                        .join(", ")))
                 )
             },
-            Type::StructType => self.as_struct_type().borrow_const().as_str().to_ref_str(),
+            Type::StructType => Cow::from(self.as_struct_type().borrow_const().as_str()),
 
             Type::Range => self.as_range().borrow_const().to_repr_str(),
-            Type::Enumerate => format!("enumerate({})", self.as_enumerate().borrow_const().borrow_inner().safe_to_repr_str(rc).as_slice()).to_ref_str(),
+            Type::Enumerate => self.as_enumerate().borrow_const().to_repr_str(rc),
             Type::Slice => self.as_slice().borrow_const().to_repr_str(),
 
-            Type::Iter => "<synthetic> iterator".to_ref_str(),
-            Type::Memoized => format!("@memoize {}", self.as_memoized().borrow().func.safe_to_repr_str(rc).as_slice()).to_ref_str(),
+            Type::Iter => Cow::from("<synthetic> iterator"),
+            Type::Memoized => Cow::from(format!("@memoize {}", self.as_memoized().borrow().func.safe_to_repr_str(rc))),
 
-            Type::GetField => "(->)".to_ref_str(),
+            Type::GetField => Cow::from("(->)"),
 
-            Type::Function => self.as_function().borrow_const().repr().to_ref_str(),
+            Type::Function => Cow::from(self.as_function().borrow_const().repr()),
             Type::PartialFunction => self.as_partial_function_ref().func.ptr.safe_to_repr_str(rc),
-            Type::NativeFunction => self.as_native().repr().to_ref_str(),
-            Type::PartialNativeFunction => self.as_partial_native_ref().func.repr().to_ref_str(),
-            Type::Closure => self.as_closure().borrow().func.get().repr().to_ref_str(),
+            Type::NativeFunction => Cow::from(self.as_native().repr()),
+            Type::PartialNativeFunction => Cow::from(self.as_partial_native_ref().func.repr()),
+            Type::Closure => Cow::from(self.as_closure().borrow().func.get().repr()),
 
             Type::Error | Type::None | Type::Never => unreachable!(),
         }
@@ -481,7 +485,7 @@ impl ValuePtr {
 
     /// Used by `trace` disabled code, do not remove!
     pub fn as_debug_str(&self) -> String {
-        format!("{}: {}", self.to_repr_str().as_slice(), self.as_type_str())
+        format!("{}: {}", self.to_repr_str(), self.as_type_str())
     }
 
     pub fn to_bool(&self) -> bool {
@@ -496,7 +500,7 @@ impl ValuePtr {
             Type::Heap => !self.as_heap().borrow().heap.is_empty(),
             Type::Vector => !self.as_vector().borrow().vector.is_empty(),
             Type::Range => !self.as_range().borrow_const().is_empty(),
-            Type::Enumerate => self.as_enumerate().borrow_const().borrow_inner().to_bool(),
+            Type::Enumerate => self.as_enumerate().borrow_const().to_bool(),
             _ => true,
         }
     }
@@ -832,7 +836,7 @@ impl_into!(bool, self, ptr::from_bool(self));
 impl_into!(char, self, ptr::from_char(self));
 impl_into!(&str, self, ptr::from_str(self));
 impl_into!(String, self, ptr::from_str(self.as_str()));
-impl_into!(RefStr<'_>, self, ptr::from_str(self.as_slice()));
+impl_into!(Cow<'_, str>, self, ptr::from_str(&self));
 impl_into!(NativeFunction, self, ptr::from_native(self));
 impl_into!(VecDeque<ValuePtr>, self, ListImpl { list: self }.to_value());
 impl_into!(Vec<ValuePtr>, self, VectorImpl { vector: self }.to_value());

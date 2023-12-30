@@ -1,7 +1,8 @@
+use std::borrow::Cow;
 use std::cmp::Ordering;
 
 use crate::vm::{ErrorResult, IntoValue, Iterable, RuntimeError, ValuePtr, ValueResult};
-use crate::vm::value::str::{IntoRefStr, RefStr};
+use crate::vm::value::RecursionGuard;
 
 
 /// # Range
@@ -58,7 +59,7 @@ impl Range {
     }
 
     /// Reverses the range, so that iteration advances from the end to the start
-    pub fn reverse(self) -> Range {
+    pub(super) fn reverse(self) -> Range {
         match self.step.cmp(&0) {
             Ordering::Equal => self,
             Ordering::Greater => Range::new(
@@ -76,7 +77,7 @@ impl Range {
 
     /// Advances the `Range`, based on the external `current` value.
     /// The `current` value is the one that will be returned, and internally advanced to the next value.
-    pub fn next(&self, current: &mut i64) -> Option<ValuePtr> {
+    pub(super) fn next(&self, current: &mut i64) -> Option<ValuePtr> {
         if *current == self.stop || self.step == 0 {
             None
         } else if self.step > 0 {
@@ -96,18 +97,18 @@ impl Range {
         }
     }
 
-    pub fn to_repr_str(&self) -> RefStr {
+    pub(super) fn to_repr_str(&self) -> Cow<str> {
         match self.step {
-            0 => "range(empty)".to_ref_str(),
-            _ => format!("range({}, {}, {})", self.start, self.stop, self.step).to_ref_str()
+            0 => Cow::from("range(empty)"),
+            _ => Cow::from(format!("range({}, {}, {})", self.start, self.stop, self.step))
         }
     }
 
-    pub fn to_iter(&self) -> Iterable {
+    pub(super) fn to_iter(&self) -> Iterable {
         Iterable::Range(self.start, self.clone())
     }
 
-    pub fn len(&self) -> usize {
+    pub(super) fn len(&self) -> usize {
         // Since this type ensures that the range is non-empty, we can do simple checked arithmetic
         match self.step {
             0 => 0,
@@ -115,7 +116,7 @@ impl Range {
         }
     }
 
-    pub fn is_empty(&self) -> bool {
+    pub(super) fn is_empty(&self) -> bool {
         self.step == 0
     }
 }
@@ -142,15 +143,19 @@ impl Enumerate {
         Enumerate { inner }.to_value()
     }
 
-    pub fn borrow_inner(&self) -> &ValuePtr {
-        &self.inner
-    }
-
-    pub fn to_iter(&self) -> ErrorResult<Iterable> {
+    pub(super) fn to_iter(&self) -> ErrorResult<Iterable> {
         Ok(Iterable::Enumerate(0, Box::new(self.inner.clone().to_iter()?)))
     }
 
-    pub fn len(&self) -> ErrorResult<usize> {
+    pub(super) fn to_repr_str(&self, rc: &mut RecursionGuard) -> Cow<str> {
+        Cow::from(format!("enumerate({})", self.inner.safe_to_repr_str(rc)))
+    }
+
+    pub(super) fn to_bool(&self) -> bool {
+        self.inner.to_bool()
+    }
+
+    pub(super) fn len(&self) -> ErrorResult<usize> {
         self.inner.len()
     }
 }

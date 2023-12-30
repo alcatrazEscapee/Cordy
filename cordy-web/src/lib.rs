@@ -151,7 +151,7 @@ struct JsInterface;
 impl FunctionInterface for JsInterface {
     fn handle(&mut self, library: &FunctionLibrary, handle_id: u32, args: Vec<ValuePtr>) -> ValueResult {
         let function = library.lookup(handle_id);
-        let _ = Manager::get(&Lock).writer.write(format!("called native function '{}->{}{}'\n", function.module_name, function.method_name, args.to_value().to_repr_str().as_slice()).as_bytes());
+        let _ = Manager::get(&Lock).writer.write(format!("called native function '{}->{}{}'\n", function.module_name, function.method_name, args.to_value().to_repr_str()).as_bytes());
         ValuePtr::nil().ok()
     }
 }

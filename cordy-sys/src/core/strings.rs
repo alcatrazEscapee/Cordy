@@ -188,10 +188,10 @@ fn map_join<'a, I : Iterator<Item=ValuePtr>>(mut iter: I, sep: &str) -> ValuePtr
         Some(first) => {
             let (lower, _) = iter.size_hint();
             let mut result = String::with_capacity(lower * sep.len());
-            result.push_str(first.to_str().as_slice());
+            result.push_str(&first.to_str());
             while let Some(next) = iter.next() {
                 result.push_str(sep);
-                result.push_str(next.to_str().as_slice());
+                result.push_str(&next.to_str());
             }
             result.to_value()
         }
@@ -314,8 +314,8 @@ impl<'a> StringFormatter<'a> {
                         (Some('x'), true) => format!("{:0width$x}", self.arg()?.check_int()?.as_int(), width = padding),
                         (Some('b'), false) => format!("{:width$b}", self.arg()?.check_int()?.as_int(), width = padding),
                         (Some('b'), true) => format!("{:0width$b}", self.arg()?.check_int()?.as_int(), width = padding),
-                        (Some('s'), true) => format!("{:width$}", self.arg()?.to_str().as_slice(), width = padding),
-                        (Some('s'), false) => format!("{:0width$}", self.arg()?.to_str().as_slice(), width = padding),
+                        (Some('s'), true) => format!("{:width$}", self.arg()?.to_str(), width = padding),
+                        (Some('s'), false) => format!("{:0width$}", self.arg()?.to_str(), width = padding),
                         (c, _) => return ValueErrorInvalidFormatCharacter(c.cloned()).err(),
                     };
 

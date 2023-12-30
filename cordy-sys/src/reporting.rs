@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::cell::{Ref, RefCell};
 use std::ops::{BitOr, BitOrAssign};
 
@@ -281,7 +282,7 @@ impl AsError for RuntimeError {
             RuntimeAssertFailed(reason) => format!("Assertion Failed: {}", reason),
             RuntimeCompilationError(vec) => format!("Encountered compilation error(s) within 'eval':\n\n{}", vec.join("\n")),
 
-            ValueIsNotFunctionEvaluable(v) => format!("Tried to evaluate {} but it is not a function.", v.to_repr_str().as_slice()),
+            ValueIsNotFunctionEvaluable(v) => format!("Tried to evaluate {} but it is not a function.", v.to_repr_str()),
             IncorrectArgumentsUserFunction(f, n) => format!("Incorrect number of arguments for {}, got {}", f.repr(), n),
             IncorrectArgumentsNativeFunction(f, n) => format!("Incorrect number of arguments for {}, got {}", f.repr(), n),
             IncorrectArgumentsGetField(s, n) => format!("Incorrect number of arguments for native (->'{}'), got {}", s, n),
@@ -321,7 +322,7 @@ impl AsError for RuntimeError {
                 "TypeError: Cannot {} field '{}' on {}",
                 if *access { "get" } else { "set" },
                 field,
-                if *repr { value.to_repr_str().as_owned() } else { value.as_error() }
+                if *repr { value.to_repr_str() } else { Cow::from(value.as_error()) }
             ),
             TypeErrorArgMustBeInt(v) => format!("TypeError: Expected {} to be a int", v.as_error()),
             TypeErrorArgMustBeIntOrStr(v) => format!("TypeError: Expected {} to be a int or string", v.as_error()),
@@ -343,7 +344,7 @@ impl AsError for RuntimeError {
 
 impl AsError for ValuePtr {
     fn as_error(&self) -> String {
-        format!("'{}' of type '{}'", self.to_str().as_slice(), self.as_type_str())
+        format!("'{}' of type '{}'", self.to_str(), self.as_type_str())
     }
 }
 

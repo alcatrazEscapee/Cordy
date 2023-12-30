@@ -288,8 +288,8 @@ pub fn binary_add(lhs: ValuePtr, rhs: ValuePtr) -> ValueResult {
             ret.extend(rhs.list.iter().cloned());
             ret.to_value().ok()
         }
-        (ShortStr | LongStr, _) => format!("{}{}", lhs.as_str_slice(), rhs.to_str().as_slice()).to_value().ok(),
-        (_, ShortStr | LongStr) => format!("{}{}", lhs.to_str().as_slice(), rhs.as_str_slice()).to_value().ok(),
+        (ShortStr | LongStr, _) => format!("{}{}", lhs.as_str_slice(), rhs.to_str()).to_value().ok(),
+        (_, ShortStr | LongStr) => format!("{}{}", lhs.to_str(), rhs.as_str_slice()).to_value().ok(),
         (Vector, Vector) => apply_vector_binary(lhs, rhs, binary_add),
         (Vector, _) => apply_vector_binary_scalar_rhs(lhs, rhs, binary_add),
         (_, Vector) => apply_vector_binary_scalar_lhs(lhs, rhs, binary_add),

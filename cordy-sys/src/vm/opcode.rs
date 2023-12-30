@@ -170,7 +170,7 @@ impl Opcode {
                         Type::ShortStr | Type::LongStr => "Str",
                         Type::Complex => "Complex",
                         _ => panic!("Not a constant: {:?}", constant),
-                    }, constant.to_repr_str().as_slice())
+                    }, constant.to_repr_str())
                 }
             },
             PushGlobal(id) | StoreGlobal(id, _) | PushLocal(id) | StoreLocal(id, _) => {
