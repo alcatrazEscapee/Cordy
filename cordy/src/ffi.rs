@@ -297,6 +297,6 @@ mod tests {
 
     fn run_err(f: ExternFunc, args: Vec<ValuePtr>, expected: &'static str) {
         ffi::init(_cordy_api_init);
-        assert_eq(ffi::call(f, args).as_result().expect_err("Expected FFI to return error").value.as_error(), String::from(expected));
+        assert_eq(ffi::call(f, args).as_result().expect_err("Expected FFI to return error").as_err().as_error(), String::from(expected));
     }
 }

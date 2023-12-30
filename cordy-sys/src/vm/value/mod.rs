@@ -17,19 +17,40 @@ use crate::core;
 use crate::core::{InvokeArg0, NativeFunction};
 use crate::util::impl_partial_ord;
 use crate::vm::error::RuntimeError;
-use crate::vm::value::ptr::{RefMut, SharedPrefix};
+use crate::vm::value::ptr::{RefMut, Prefix};
 use crate::vm::value::str::IterStr;
 use crate::vm::value::range::Range;
 use crate::vm::value::slice::Slice;
 use crate::vm::value::complex::Complex;
 
-pub use crate::vm::value::ptr::{MAX_INT, MIN_INT, Prefix, ValuePtr};
+pub use crate::vm::value::ptr::{MAX_INT, MIN_INT, ValuePtr};
 pub use crate::vm::value::complex::ComplexValue;
 pub use crate::vm::value::func::{Closure, Function, PartialFunction, PartialNativeFunction, UpValue};
 
 use RuntimeError::{*};
 
-pub type ErrorResult<T> = Result<T, Box<Prefix<RuntimeError>>>;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ErrorPtr(ValuePtr);
+
+impl ErrorPtr {
+    pub fn new(ptr: ValuePtr) -> ErrorPtr {
+        debug_assert!(ptr.is_err());
+        ErrorPtr(ptr)
+    }
+
+    pub fn as_err(&self) -> &RuntimeError {
+        self.0.as_err()
+    }
+}
+
+impl From<ErrorPtr> for ValueResult {
+    fn from(value: ErrorPtr) -> Self {
+        ValueResult::err(value.0)
+    }
+}
+
+pub type ErrorResult<T> = Result<T, ErrorPtr>;
 pub type AnyResult = ErrorResult<()>;
 
 
@@ -76,34 +97,60 @@ pub enum Type {
 }
 
 impl Type {
-    fn is_owned(&self) -> bool {
-        matches!(self, Type::Error)
-    }
-
-    fn is_shared(&self) -> bool {
-        matches!(self, Type::Iter | Type::PartialNativeFunction | Type::PartialFunction | Type::Complex | Type::LongStr | Type::List | Type::Set | Type::Dict | Type::Heap | Type::Vector | Type::Function | Type::Closure | Type::Memoized | Type::Struct | Type::StructType | Type::Range | Type::Enumerate | Type::Slice)
+    fn name(self) -> &'static str {
+        use Type::{*};
+        match self {
+            Nil => "nil",
+            Bool => "bool",
+            Int => "int",
+            Complex => "complex",
+            ShortStr | LongStr => "str",
+            List => "list",
+            Set => "set",
+            Dict => "dict",
+            Heap => "heap",
+            Vector => "vector",
+            Struct => "struct",
+            StructType => "struct type",
+            Range => "range",
+            Enumerate => "enumerate",
+            Slice => "slice",
+            Iter => "iter",
+            Memoized => "memoized",
+            GetField => "get field",
+            Function => "function",
+            PartialFunction => "partial function",
+            NativeFunction => "native function",
+            PartialNativeFunction => "partial native function",
+            Closure => "closure",
+            Error => "error",
+            None => "none",
+            Never => "never"
+        }
     }
 }
 
 
-/// A trait marking the value type of an owned piece of data.
-/// This means a `ValuePtr` may point to a `Prefix<T : OwnedValue>`
-pub trait OwnedValue {}
-
-/// A trait marking the value type of a shared (reference counted) piece of data.
-/// This means a `ValuePtr` may point to a `SharedPrefix<T : SharedValue>`
-pub trait SharedValue {}
-
-/// A trait marking that the shared value is const (immutable), and thus can be directly accessed via `.borrow_const()`
+/// A trait which marks types as values which may be contained by a `Prefix<T>` pointer.
 ///
-/// Note that in the absence of negative type bounds (i.e. `SharedValue + !ConstValue`, this can lead to unsafe code, since `borrow_mut()` and `borrow_const()` can both be called for const types.
-/// So, we split that into `MutValue`, and hope that nothing implements both `MutValue` and `SharedValue`
-pub trait ConstValue : SharedValue {}
+/// All values pointed to in this manner are memory managed by `ValuePtr`, with reference counting for clone/drop,
+/// and provide interior mutability via `borrow()`, `borrow_mut`()
+pub trait Value {}
 
-/// The counterpart to `ConstValue`, this enables `RefCell<T>` like behavior via `.borrow()` and `.borrow_mut()` for the underlying shared value.
+/// Before we know the type of an object, we must interpret it as a `Prefix<()>`, thus `()` needs to be a `Value`
+impl Value for () {}
+
+/// A trait marking that a certain type is constant or immutable. This then implies:
 ///
-/// This must **not be implemented in addition to `ConstValue`!**
-pub trait MutValue : SharedValue {}
+/// - The `borrow()` and `borrow_mut()` values must **never** be called for this type.
+/// - The `borrow_const()` is provided, which does an unchecked, immutable borrow.
+///
+/// This is enforced by the implementation of `impl_const!()`, which notably never hands out a reference to the underlying `Prefix<T>`,
+/// which ensures that callers can not call `borrow()` or `borrow_mut()`, both of which are invalid.
+///
+/// **N.B.** With negative trait bounds, we could refine `borrow()` and `borrow_mut()` to be `Value + !ConstValue`, preventing the above issue
+/// at compile time, instead of relying on a contract.
+pub trait ConstValue : Value {}
 
 
 /// A specialized reference-equality version of `ValuePtr`. Unlike `ValuePtr`, this does not manage any memory, and can be created multiple times from a `ValuePtr`
@@ -201,7 +248,7 @@ impl ValueResult {
     #[inline(always)]
     pub fn as_result(self) -> ErrorResult<ValuePtr> {
         match self.ptr.is_err() {
-            true => Err(self.ptr.as_box()),
+            true => Err(ErrorPtr::new(self.ptr)),
             false => Ok(self.ptr)
         }
     }
@@ -222,33 +269,33 @@ impl ValueResult {
 impl FromResidual<ErrorResult<Infallible>> for ValueResult {
     fn from_residual(residual: ErrorResult<Infallible>) -> Self {
         match residual {
-            Err(err) => ValueResult::from(err.value),
+            Err(err) => ValueResult::err(err.0),
             _ => unreachable!(),
         }
     }
 }
 
-/// Converts a `Box<Prefix<RuntimeError>>` returned as the residual from a `ValueResult?` into a `ErrorResult<T>`
-impl<T> FromResidual<Box<Prefix<RuntimeError>>> for ErrorResult<T> {
-    fn from_residual(residual: Box<Prefix<RuntimeError>>) -> Self {
+/// Converts a `ErrorPtr` returned as the residual from a `ValueResult?` into a `ErrorResult<T>`
+impl<T> FromResidual<ErrorPtr> for ErrorResult<T> {
+    fn from_residual(residual: ErrorPtr) -> Self {
         Err(residual)
     }
 }
 
 /// Allows us to use `?` operator on `check_<T>()?` expressions, which assert that the value is of a given type, and early return if not.
 /// This does, unfortunately, require nightly unstable rust, but the code clarity is worth having (and it allows us to seamlessly use `ValueResult`
-/// as a zero-cost (memory layout) wise abstraction for `Result<ValuePtr, Box<Prefix<RuntimeError>>>` (which would otherwise be twice the stack size.
+/// as a zero-cost (memory layout) wise abstraction for `Result<ValuePtr, ErrorPtr>` (which would otherwise be twice the stack size.
 impl Try for ValueResult {
     type Output = ValuePtr;
-    type Residual = Box<Prefix<RuntimeError>>;
+    type Residual = ErrorPtr;
 
     fn from_output(ptr: ValuePtr) -> ValueResult {
         ValueResult { ptr }
     }
 
-    fn branch(self) -> ControlFlow<Box<Prefix<RuntimeError>>, ValuePtr> {
+    fn branch(self) -> ControlFlow<ErrorPtr, ValuePtr> {
         match self.ptr.is_err() {
-            true => ControlFlow::Break(self.ptr.as_box()),
+            true => ControlFlow::Break(ErrorPtr(self.ptr)),
             false => ControlFlow::Continue(self.ptr),
         }
     }
@@ -256,8 +303,8 @@ impl Try for ValueResult {
 
 /// Associated type for `Try`
 impl FromResidual for ValueResult {
-    fn from_residual(residual: Box<Prefix<RuntimeError>>) -> ValueResult {
-        ValueResult { ptr: ptr::from_owned(*residual) }
+    fn from_residual(residual: ErrorPtr) -> ValueResult {
+        ValueResult { ptr: residual.0 }
     }
 }
 
@@ -345,7 +392,7 @@ impl ValuePtr {
             Type::Nil => Cow::from("nil"),
             Type::Bool => Cow::from(if self.is_true() { "true" } else { "false" }),
             Type::Int => Cow::from(self.as_int().to_string()),
-            Type::Complex => self.as_complex_ref().to_repr_str(),
+            Type::Complex => Complex::to_repr_str(self.as_complex()),
             Type::ShortStr | Type::LongStr => {
                 let escaped = format!("{:?}", self.as_str_slice());
                 Cow::from(format!("'{}'", &escaped[1..escaped.len() - 1]))
@@ -417,35 +464,8 @@ impl ValuePtr {
     }
 
     /// Represents the type of this `Value`. This is used for runtime error messages,
-    pub fn as_type_str(&self) -> String {
-        String::from(match self.ty() {
-            Type::Nil => "nil",
-            Type::Bool => "bool",
-            Type::Int => "int",
-            Type::Complex => "complex",
-            Type::ShortStr | Type::LongStr => "str",
-            Type::List => "list",
-            Type::Set => "set",
-            Type::Dict => "dict",
-            Type::Heap => "heap",
-            Type::Vector => "vector",
-            Type::Struct => "struct",
-            Type::StructType => "struct type",
-            Type::Range => "range",
-            Type::Enumerate => "enumerate",
-            Type::Slice => "slice",
-            Type::Iter => "iter",
-            Type::Memoized => "memoized",
-            Type::GetField => "get field",
-            Type::Function => "function",
-            Type::PartialFunction => "partial function",
-            Type::NativeFunction => "native function",
-            Type::PartialNativeFunction => "partial native function",
-            Type::Closure => "closure",
-            Type::Error => "error",
-            Type::None => "none",
-            Type::Never => "never"
-        })
+    pub fn as_type_str(&self) -> &'static str {
+        self.ty().name()
     }
 
     /// Used by `trace` disabled code, do not remove!
@@ -687,32 +707,20 @@ impl RecursionGuard {
 }
 
 
-macro_rules! impl_owned {
-    ($ty:expr, $inner:ident) => {
-        impl OwnedValue for $inner {}
-        impl IntoValue for $inner {
-            fn to_value(self) -> ValuePtr {
-                ptr::from_owned(Prefix::new($ty, self))
-            }
-        }
-    };
-}
-
 macro_rules! impl_mut {
     ($ty:expr, $inner:ident, $as_T:ident, $is_T:ident) => {
-        impl SharedValue for $inner {}
-        impl MutValue for $inner {}
+        impl Value for $inner {}
 
         impl IntoValue for $inner {
             fn to_value(self) -> ValuePtr {
-                ptr::from_shared(SharedPrefix::new($ty, self))
+                ptr::from_shared(Prefix::new($ty, self))
             }
         }
 
         impl ValuePtr {
-            pub fn $as_T(&self) -> &SharedPrefix<$inner> {
+            pub fn $as_T(&self) -> &Prefix<$inner> {
                 debug_assert!(self.ty() == $ty);
-                self.as_shared_ref()
+                self.as_prefix()
             }
             pub fn $is_T(&self) -> bool {
                 self.ty() == $ty
@@ -723,19 +731,19 @@ macro_rules! impl_mut {
 
 macro_rules! impl_const {
     ($ty:expr, $inner:ident, $as_T:ident, $is_T:ident) => {
-        impl SharedValue for $inner {}
+        impl Value for $inner {}
         impl ConstValue for $inner {}
 
         impl IntoValue for $inner {
             fn to_value(self) -> ValuePtr {
-                ptr::from_shared(SharedPrefix::new($ty, self))
+                ptr::from_shared(Prefix::new($ty, self))
             }
         }
 
         impl ValuePtr {
             pub fn $as_T(&self) -> &$inner {
                 debug_assert!(self.ty() == $ty);
-                self.as_shared_ref::<$inner>().borrow_const()
+                self.as_prefix::<$inner>().borrow_const()
             }
             pub fn $is_T(&self) -> bool {
                 self.ty() == $ty
@@ -744,11 +752,6 @@ macro_rules! impl_const {
     };
 }
 
-impl OwnedValue for () {}
-impl SharedValue for () {}
-
-//impl_owned!(Type::Iter, Iterable);
-impl_owned!(Type::Error, RuntimeError);
 
 impl_const!(Type::Function, Function, as_function, is_function);
 impl_const!(Type::PartialFunction, PartialFunction, as_partial_function, is_partial_function);
@@ -757,6 +760,7 @@ impl_const!(Type::Slice, Slice, as_slice, is_slice);
 impl_const!(Type::Range, Range, as_range, is_range);
 impl_const!(Type::Enumerate, Enumerate, as_enumerate, is_enumerate);
 impl_const!(Type::StructType, StructTypeImpl, as_struct_type, is_struct_type);
+impl_const!(Type::Error, RuntimeError, as_err, is_err);
 
 impl_mut!(Type::List, ListImpl, as_list, is_list);
 impl_mut!(Type::Set, SetImpl, as_set, is_set);
@@ -786,7 +790,7 @@ macro_rules! impl_into {
 }
 
 impl_into!(ValuePtr, self, self);
-impl_into!(usize, self, ptr::from_usize(self));
+impl_into!(usize, self, ptr::from_i64(self as i64));
 impl_into!(i64, self, ptr::from_i64(self));
 impl_into!(bool, self, ptr::from_bool(self));
 impl_into!(char, self, ptr::from_char(self));
@@ -888,7 +892,7 @@ impl Ord for SetImpl {
 /// - If the borrow check fails, we set a global flag that we've entered this pathological case, which is checked by `ArrayStore` before yielding back to user code
 ///
 /// Note this also applies to `DictImpl` / `dict()`, although only when used as a key.
-impl Hash for SharedPrefix<SetImpl> {
+impl Hash for Prefix<SetImpl> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         match self.try_borrow() {
             Some(it) => {
@@ -939,7 +943,7 @@ impl Ord for DictImpl {
 }
 
 /// See justification for the unique `Hash` implementation on `SetImpl`
-impl Hash for SharedPrefix<DictImpl> {
+impl Hash for Prefix<DictImpl> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         match self.try_borrow() {
             Some(it) => {

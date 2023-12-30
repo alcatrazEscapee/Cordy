@@ -13,14 +13,12 @@ use crate::vm::value::{*};
 use crate::vm::value::slice::Slice;
 
 
-/// `ValuePtr` holds an arbitrary object representable by Cordy.
+/// # ValuePtr
 ///
-/// In order to minimize memory usage, improving cache efficiency, and reducing memory boxing, `ValuePtr` is structured as a **tagged pointer**.
-/// On 64-bit systems, pointers that point to 64-bit (8-byte) aligned objects naturally have the last three bits set to zero.
-/// On 32-bit systems (like web assembly), the last two bits are zero.
-/// This means we can store a little bit of type information in the low bits of a pointer.
+/// A `ValuePtr` is the underlying value used by Cordy. It is a **tagged pointer**, using the tag bits to store a number of inline types.
+/// The pointer points to a `Prefix<T>`, which includes exact type information, reference counting and interior mutability semantics.
 ///
-/// # Representation
+/// ### Representation
 ///
 /// A `ValuePtr` may be:
 ///
@@ -28,21 +26,10 @@ use crate::vm::value::slice::Slice;
 /// - An inline constant `nil`, `true`, or `false`, `NativeFunction`, or `GetField`, all stored with the lowest three bits equal to `01`
 /// - A tagged pointer, to a `Prefix<T>`, with the lowest three bits equal to `11`
 ///
-/// In order to fully determine the type of a given `ValuePtr`, we use a secondary characteristic, which is enabled by having strict, `#[repr(C)]` struct semantics:
-/// For every owned, and shared value, we can treat it as a `NonNull<Prefix>` This lets us check the `ty` field, which fully specifies the type of the value.
+/// ### Memory Allocation
 ///
-/// In order to fully interpret a `ValuePtr` which is pointing to either owned or shared memory, first, we dereference it, and check the type via `ty`.
-/// Then, we are safe to reinterpret the _pointer_ into a pointer to the destination type, including the same prefix. Then, depending on the type, we can either interpret this as a `Box<Prefix<T>>` or a `&SharedPrefix<T>` as desired.
-///
-/// # Owned vs. Shared Memory
-///
-/// - **Inline** `ValuePtr`s own no memory. This makes them incredibly fast to both use on the stack, pass to operators, copy, and use. However non-inline `ValuePtr`s
-/// are either **owned** or **shared**, determined by the second lowest bit of the pointer. This refers to how the memory pointed to is managed.
-///
-/// - **Owned** memory should be treated as if the `ValuePtr` was a `Box<Prefix>`. When creating a `.clone()` of the value, the memory needs to be copied. This is
-/// used for small immutable types like `C64`, where the additional overhead and semantics of carrying around a `Rc<C64>` does not make sense.
-///
-/// - **Shared** memory should be treated as if the `ValuePtr` was a `Rc<RefCell<Prefix>>`. Notably, we cannot do this in practice, as that creates a layout restriction on the value being pointed to (the `ty` field of the prefix is no longer the first). So, we have to re-implement the reference counting semantics in order to fully satisfy Rust's memory safety guarantees.
+/// Inline `ValuePtr`s own no memory, making them easy to copy and drop. All other `ValuePtr`s function as `Rc<RefCell<T>>`, with a pointer to
+/// some reference counted heap memory.
 pub union ValuePtr {
     /// Note that we cannot really use a `NonNull<Prefix>` here, because our pointer type has a tag in it.
     /// So every time we would try and use this, we still have to do arithmetic on the pointer to get the actual pointer.
@@ -98,11 +85,6 @@ pub(super) const fn from_bool(value: bool) -> ValuePtr {
     ValuePtr { tag: if value { TAG_TRUE } else { TAG_FALSE } }
 }
 
-pub(super) const fn from_usize(value: usize) -> ValuePtr {
-    debug_assert!(value <= MAX_INT as usize); // Check that it is safe to cast to `i64`
-    from_i64(value as i64)
-}
-
 pub(super) const fn from_i64(value: i64) -> ValuePtr {
     ValuePtr { long_tag: TAG_INT as u64 | ((value << 1) as u64) }
 }
@@ -118,7 +100,7 @@ pub(super) fn from_str(str: &str) -> ValuePtr {
         from_small_str(str)
     } else {
         // And larger strings are shared, reference counted and stored on the heap
-        from_shared(SharedPrefix::new(Type::LongStr, String::from(str)))
+        from_shared(Prefix::new(Type::LongStr, String::from(str)))
     }
 }
 
@@ -174,11 +156,7 @@ pub(super) fn from_field(value: u32) -> ValuePtr {
     ValuePtr { long_tag: TAG_FIELD as u64 | ((value as u64) << 6) }
 }
 
-pub(super) fn from_owned<T : OwnedValue>(value: Prefix<T>) -> ValuePtr {
-    ValuePtr { tag: TAG_PTR | (Box::into_raw(Box::new(value)) as usize) }
-}
-
-pub(super) fn from_shared<T : SharedValue>(value: SharedPrefix<T>) -> ValuePtr {
+pub(super) fn from_shared<T : Value>(value: Prefix<T>) -> ValuePtr {
     ValuePtr { tag: TAG_PTR | (Box::into_raw(Box::new(value)) as usize) }
 }
 
@@ -193,7 +171,7 @@ impl ValuePtr {
         ValuePtr { tag: TAG_NONE }
     }
 
-    pub const fn empty_str() -> ValuePtr {
+    pub const fn str() -> ValuePtr {
         ValuePtr { tag: TAG_STR }
     }
 
@@ -201,10 +179,9 @@ impl ValuePtr {
 
     pub fn as_int(&self) -> i64 {
         debug_assert!(self.is_int());
-        if self.is_precise_int() {
-            self.as_precise_int()
-        } else {
-            self.is_true() as i64
+        match self.is_precise_int() {
+            true => self.as_precise_int(),
+            false => self.is_true() as i64
         }
     }
 
@@ -278,7 +255,7 @@ impl ValuePtr {
                     TAG_STR => Type::ShortStr,
                     _ => Type::Never,
                 },
-                TAG_PTR => (*self.as_ptr()).ty, // Check the prefix for the type
+                TAG_PTR => (*self.as_ptr::<()>()).ty, // Check the prefix for the type
                 _ => Type::Int, // Includes all remaining bit patterns with a `0` LSB
             }
         }
@@ -306,99 +283,34 @@ impl ValuePtr {
     pub const fn is_field(&self) -> bool { (unsafe { self.tag } & MASK_FIELD) == TAG_FIELD }
     pub const fn is_none(&self) -> bool { (unsafe { self.tag } & MASK_NONE) == TAG_NONE }
 
-    pub fn is_err(&self) -> bool {
-        self.ty() == Type::Error
-    }
-
     fn is_ptr(&self) -> bool { (unsafe { self.tag } & MASK_PTR) == TAG_PTR }
-    fn is_owned(&self) -> bool { self.ty().is_owned() }
-    fn is_shared(&self) -> bool { self.ty().is_shared() }
 
-    pub fn as_value_ref(&self) -> ValueRef {
+    /// Transmutes this `ValuePtr` into a `ValueRef`, providing reference equality semantics
+    pub(super) fn as_value_ref(&self) -> ValueRef {
         ValueRef::new(unsafe { self.tag })
     }
 
-    /// Transmutes this `ValuePtr` into a `Box<T>`, where `T` is a type compatible with `Prefix`
+    /// Transmutes this `ValuePtr` into a `&T`, provided we have already checked the type is of the type `T`.
     ///
-    /// First `as_mut_ptr()` performs the correct pointer arithmetic to get a _real_ pointer.
-    /// Then we box it using `from_raw()`, to indicate the memory is owned, and transmute it to the desired type.
-    /// This is fine since the `Box<T>` types are an identical size (despite the size of `Prefix` not being the size of the result type).
-    ///
-    /// This hides the unsafe operations underneath, even though everything happening here is _terribly_ unsafe. But, as a result,
-    /// since we consume this `ValuePtr` and return a valid representation, this is a safe API.
-    pub fn as_box<T : OwnedValue>(self) -> Box<Prefix<T>> {
-        debug_assert!(self.is_owned()); // Must be owned memory, to make sense converting to `Box<T>`
+    /// SAFETY: The caller **must guarantee** that `self.ty()` is of the correct type associated to `T`.
+    /// This is in practice ensured by the implementations of `impl_mut!()` and `impl_const!()` macros.
+    pub(super) fn as_prefix<T: Value>(&self) -> &Prefix<T> {
         unsafe {
-            // Transmute self into a `Box` of the right prefix type.
-            let ret = Box::from_raw(self.as_ptr() as *mut Prefix<T>);
-
-            // Then forget the current `self`. This is a manual way of telling rust that we have fully transmuted ourselves into `ret`
-            // We can't drop this here, since we technically created a copy of the same resource by calling `as_mut_ptr()`
-            std::mem::forget(self);
-            ret
-        }
-    }
-
-    /// Transmutes this `ValuePtr` into a `&T`, where `T` is a type compatible with `Prefix`
-    ///
-    /// This is akin to `as_box()`, but taking in a reference, and handing one back. In that sense, it's the same safety guarantee as `.as_box()`
-    /// The pointer has to be non-null, so `new_unchecked()`, and `as_mut_ptr()` are both valid.
-    pub fn as_ref<T: OwnedValue>(&self) -> &T {
-        debug_assert!(self.is_owned());
-        unsafe {
-            &(*(self.as_ptr() as *const Prefix<T>)).value
-        }
-    }
-
-    /// Transmutes this `ValuePtr` into a `&T`, where `T` is a type compatible with `SharedPrefix`
-    pub fn as_shared_ref<T: SharedValue>(&self) -> &SharedPrefix<T> {
-        debug_assert!(self.is_shared()); // Any shared pointer type can be converted to a shared prefix.
-        unsafe {
-            &*(self.as_ptr() as *const SharedPrefix<T>)
+            &*self.as_ptr::<T>()
         }
     }
 
     /// Strips away the tag bits, and converts this value into a `* mut` pointer to an arbitrary `Prefix`
-    unsafe fn as_ptr(&self) -> *mut Prefix<()> {
+    unsafe fn as_ptr<T : Value>(&self) -> *mut Prefix<T> {
         debug_assert!(self.is_ptr());
         unsafe {
-            (self.tag & PTR_MASK) as *mut Prefix<()>
+            (self.tag & PTR_MASK) as *mut Prefix<T>
         }
     }
 
-    /// Creates a new copy of this `ValuePtr`, **pointing to the same memory!**. Whenever this is called, either the original,
-    /// or the new copy **MUST** be forgotten, before being dropped.
-    unsafe fn as_copy(&self) -> ValuePtr {
-        ValuePtr { long_tag: self.long_tag }
-    }
-
-    /// Clones an owned `ValuePtr`, using `Box<T>` to clone the underlying memory.
-    ///
-    /// Create a new `Box<T>` pointing to this memory, clone it, and then forget the original.
-    /// This avoids accidentally freeing the memory for this pointer.
-    unsafe fn clone_owned<T: Clone + OwnedValue>(&self) -> ValuePtr {
-        let copy = Box::from_raw(self.as_ptr() as *mut Prefix<T>);
-        let cloned = copy.clone();
-        std::mem::forget(copy);
-        ValuePtr { tag: TAG_PTR | (Box::into_raw(cloned) as usize) }
-    }
-
-    unsafe fn drop_owned<T: OwnedValue>(&self) {
-        debug_assert!(self.is_owned()); // Must be owned memory, to make sense converting to `Box<T>`
-        unsafe {
-            drop(Box::from_raw(self.as_ptr() as *mut Prefix<T>));
-        }
-    }
-
-    unsafe fn drop_shared<T: SharedValue>(&self) {
-        debug_assert!(self.is_shared()); // Any shared pointer type can be converted to a shared prefix.
-        let shared: &SharedPrefix<()> = self.as_shared_ref::<()>();
-        shared.dec_strong();
-        if shared.refs.get() == 0 {
-            unsafe {
-                drop(Box::from_raw(self.as_ptr() as *mut SharedPrefix<T>));
-            }
-        }
+    /// Drops the memory pointed to by this value, by reinterpreting the pointer as a `Box<Prefix<T>>`
+    unsafe fn drop_value<T: Value>(&self) {
+        drop(Box::from_raw(self.as_ptr::<T>()));
     }
 }
 
@@ -435,7 +347,7 @@ impl PartialEq for ValuePtr {
             Type::PartialFunction => eq!(as_partial_function),
             Type::PartialNativeFunction => eq!(as_partial_native),
             Type::Slice => eq!(as_slice),
-            Type::LongStr => self.as_shared_ref::<String>() == other.as_shared_ref::<String>(),
+            Type::LongStr => self.as_prefix::<String>() == other.as_prefix::<String>(),
             Type::List => eq!(as_list),
             Type::Set => eq!(as_set),
             Type::Dict => eq!(as_dict),
@@ -446,8 +358,7 @@ impl PartialEq for ValuePtr {
             Type::Memoized => eq!(as_memoized),
             Type::Function => eq!(as_function),
             Type::Closure => eq!(as_closure),
-
-            Type::Error => self.as_ref::<RuntimeError>() == other.as_ref::<RuntimeError>(),
+            Type::Error => eq!(as_err),
 
             Type::Iter | Type::None | Type::Never => false,
         }
@@ -462,7 +373,7 @@ impl Ord for ValuePtr {
     fn cmp(&self, other: &Self) -> Ordering {
         macro_rules! cmp {
             ($ty:ident, $inner:ident) => {
-                if other.ty() == Type::$ty { self.as_shared_ref::<$inner>().cmp(&other.as_shared_ref::<$inner>()) } else { Ordering::Equal }
+                if other.ty() == Type::$ty { self.as_prefix::<$inner>().cmp(&other.as_prefix::<$inner>()) } else { Ordering::Equal }
             };
         }
 
@@ -545,53 +456,53 @@ impl Ord for ValuePtr {
 /// - Shared Types: Increment the strong reference count, and copy the `ValuePtr` itself, using `clone_shared()`
 impl Clone for ValuePtr {
     fn clone(&self) -> Self {
+        if self.memory_ty() == MemoryType::Shared {
+            // Shared memory types are able to copy by incrementing the strong reference count,
+            // and then just returning the same copy as inline types
+            self.as_prefix::<()>().inc_strong();
+        }
         unsafe {
-            if self.memory_ty() == MemoryType::Shared {
-                // todo: fix this special case
-                if self.ty() == Type::Error {
-                    return self.clone_owned::<RuntimeError>()
-                }
-                // Shared memory types are able to copy by incrementing the strong reference count,
-                // and then just returning the same copy as inline types
-                self.as_shared_ref::<()>().inc_strong();
-            }
-            self.as_copy()
+            // Copy the raw value of the pointer
+            ValuePtr { long_tag: self.long_tag }
         }
     }
 }
 
 
-/// For `Drop`, we need to once again, have specific behavior based on the type in question.
-///
-/// - Inline types have no drop behavior.
-/// - Owned types need to drop their owned data, which is accomplished via just reinterpreting the type as a `Box<T>` and letting that drop.
-/// - Shared types need to check and decrement their reference count, and potentially drop that.
 impl Drop for ValuePtr {
     fn drop(&mut self) {
-        unsafe {
-            match self.ty() {
-                Type::Complex => self.drop_shared::<Complex>(),
-                Type::Range => self.drop_shared::<Range>(),
-                Type::Enumerate => self.drop_shared::<Enumerate>(),
-                Type::PartialFunction => self.drop_shared::<PartialFunction>(),
-                Type::PartialNativeFunction => self.drop_shared::<PartialNativeFunction>(),
-                Type::Slice => self.drop_shared::<Slice>(),
-                Type::Iter => self.drop_shared::<Iterable>(),
-                Type::LongStr => self.drop_shared::<String>(),
-                Type::List => self.drop_shared::<ListImpl>(),
-                Type::Set => self.drop_shared::<SetImpl>(),
-                Type::Dict => self.drop_shared::<DictImpl>(),
-                Type::Heap => self.drop_shared::<HeapImpl>(),
-                Type::Vector => self.drop_shared::<VectorImpl>(),
-                Type::Struct => self.drop_shared::<StructImpl>(),
-                Type::StructType => self.drop_shared::<StructTypeImpl>(),
-                Type::Memoized => self.drop_shared::<MemoizedImpl>(),
-                Type::Function => self.drop_shared::<Function>(),
-                Type::Closure => self.drop_shared::<Closure>(),
+        if self.memory_ty() == MemoryType::Shared {
+            // Only shared types have drop behavior
+            // They all decrement the strong reference count, and if it reaches zero, performs a drop based on the type
+            let shared: &Prefix<()> = self.as_prefix::<()>();
 
-                Type::Error => self.drop_owned::<RuntimeError>(),
+            shared.dec_strong();
+            if shared.refs.get() == 0 {
+                unsafe {
+                    match self.ty() {
+                        Type::Complex => self.drop_value::<Complex>(),
+                        Type::Range => self.drop_value::<Range>(),
+                        Type::Enumerate => self.drop_value::<Enumerate>(),
+                        Type::PartialFunction => self.drop_value::<PartialFunction>(),
+                        Type::PartialNativeFunction => self.drop_value::<PartialNativeFunction>(),
+                        Type::Slice => self.drop_value::<Slice>(),
+                        Type::Iter => self.drop_value::<Iterable>(),
+                        Type::LongStr => self.drop_value::<String>(),
+                        Type::List => self.drop_value::<ListImpl>(),
+                        Type::Set => self.drop_value::<SetImpl>(),
+                        Type::Dict => self.drop_value::<DictImpl>(),
+                        Type::Heap => self.drop_value::<HeapImpl>(),
+                        Type::Vector => self.drop_value::<VectorImpl>(),
+                        Type::Struct => self.drop_value::<StructImpl>(),
+                        Type::StructType => self.drop_value::<StructTypeImpl>(),
+                        Type::Memoized => self.drop_value::<MemoizedImpl>(),
+                        Type::Function => self.drop_value::<Function>(),
+                        Type::Closure => self.drop_value::<Closure>(),
+                        Type::Error => self.drop_value::<RuntimeError>(),
 
-                _ => {}
+                        _ => {}
+                    }
+                }
             }
         }
     }
@@ -619,7 +530,7 @@ impl Hash for ValuePtr {
             Type::PartialNativeFunction => hash!(as_partial_native),
             Type::Slice => hash!(as_slice),
             Type::Range => hash!(as_range),
-            Type::LongStr => self.as_shared_ref::<String>().hash(state),
+            Type::LongStr => self.as_prefix::<String>().hash(state),
             Type::List => hash!(as_list),
             Type::Set => hash!(as_set),
             Type::Dict => hash!(as_dict),
@@ -657,7 +568,7 @@ impl Debug for ValuePtr {
             Type::PartialNativeFunction => fmt!(as_partial_native),
             Type::Slice => fmt!(as_slice),
             Type::Range => fmt!(as_range),
-            Type::LongStr => Debug::fmt(self.as_shared_ref::<String>(), f),
+            Type::LongStr => Debug::fmt(self.as_prefix::<String>(), f),
             Type::List => fmt!(as_list),
             Type::Set => fmt!(as_set),
             Type::Dict => fmt!(as_dict),
@@ -668,8 +579,8 @@ impl Debug for ValuePtr {
             Type::Memoized => fmt!(as_memoized),
             Type::Function => fmt!(as_function),
             Type::Closure => fmt!(as_closure),
+            Type::Error => fmt!(as_err),
 
-            Type::Error => Debug::fmt(self.as_ref::<RuntimeError>(), f),
             Type::Iter => write!(f, "Iter"),
             Type::None => write!(f, "None"),
             Type::Never => write!(f, "Never"),
@@ -678,80 +589,32 @@ impl Debug for ValuePtr {
 }
 
 
-
-#[repr(C)]
-pub struct Prefix<T : OwnedValue> {
-    ty: Type,
-    pub value: T
-}
-
-impl<T : OwnedValue> Prefix<T> {
-    pub fn new(ty: Type, value: T) -> Prefix<T> {
-        Prefix { ty, value }
-    }
-}
-
-impl<T : Clone + OwnedValue> Clone for Prefix<T> {
-    fn clone(&self) -> Self {
-        Prefix::new(self.ty, self.value.clone())
-    }
-}
-
-impl<T : Eq + OwnedValue> Eq for Prefix<T> {}
-impl<T : Eq + OwnedValue> PartialEq for Prefix<T> {
-    fn eq(&self, other: &Self) -> bool {
-        self.value == other.value
-    }
-}
-
-impl<T : Eq + Ord + OwnedValue> Ord for Prefix<T> {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.value.cmp(&other.value)
-    }
-}
-
-impl<T : Eq + Ord + OwnedValue> PartialOrd for Prefix<T> {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl<T : Hash + OwnedValue> Hash for Prefix<T> {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.value.hash(state);
-    }
-}
-
-impl<T : Debug + OwnedValue> Debug for Prefix<T> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        Debug::fmt(&self.value, f)
-    }
-}
-
-
-/// `SharedPrefix` is a combination of the functionality of `Prefix`, `Rc` and `RefCell`:
+/// # Prefix<T>
 ///
-/// - It provides a `Prefix`-compatible struct representation, meaning the `ty` field can be read from an arbitrary `ValuePtr`
-/// - The memory managed by the `ValuePtr` to a shared prefix is reference counted like `Rc`
-/// - It provides a (simple), safe, interior mutability concept similar to `RefCell` for types that need it.
+/// This is the header attached to all heap-allocated values in Cordy, which provides a number of important features:
 ///
-/// This abstraction has a couple differences from `Rc<RefCell<T>>` that are required, and others which are optimized for Cordy:
+/// - The type information can be observed from the `ty` field, read from an arbitrary `Prefix<()>` to determine the exact type
+/// - The `lock` provides `RefCell`-like, runtime interior mutability for those that need it
+/// - The value is reference counted, up to a limit of `u32::MAX` references
 ///
-/// 1. We fundamentally cannot use `Rc<RefCell<T>>` with `ValuePtr`, so the constructs have to be re-invented anyway.
-/// 2. Unlike `Rc<RefCell<T>>`, we optimize for memory overhead here: `Rc<RefCell<T>>` usually has 24 bytes of overhead: `usize` strong reference count,
-/// `usize` weak reference count, and `isize` borrow flag. We can improve on this, and pack with the `ty` field to only use 8 bytes total:
-///     - We skimp on the number of possible references, using a `Cell<u32>` instead of `Cell<usize>`, and don't need weak references (it is simply never used in Cordy).
-///     - We use a `Cell<u16>` instead of `Cell<usize>` for the borrow flag, in order to fit it into the remaining space.
+/// ### Notable Differences
 ///
-/// Both of the above mean we can fit all the header information in 8 bytes, conveniently aligned for other pointer-sized data.
+/// Unlike `Rc<RefCell<T>>`, we optimize for memory overhead here: `Rc<RefCell<T>>` usually has 24 bytes of overhead:
 ///
-/// **Issues**
+/// - `usize` strong reference count - we reduce this to a `u32`
+/// - `usize` weak reference count - we don't use weak references at all
+/// - `isize` borrow flag - we reduce this to a `u16`
+///
+/// Based on the alignment of each type, this allows the entire header to fit into 8 bytes, and is conveniently 8-byte aligned.
+///
+/// ### Issues
 ///
 /// - We don't use a weak reference in Cordy to break cycles, mostly because there's no mechanism in which is makes sense to use. So instead, we use
 /// a strategy called "not worrying about it" to deal with the potential to leak memory through cycles.
 /// - Overflow... may happen on the number of borrows, or the number of references, but both are so ridiculously infeasible scenarios that we employ the same strategy.
+///
 #[repr(C)]
-pub struct SharedPrefix<T : SharedValue> {
+pub struct Prefix<T : Value> {
     ty: Type,
     /// A `0` indicates a mutable borrow is currently taken, a `1` indicates no borrow, and `>1` indicates the number of current immutable borrows + 1
     lock: Cell<u16>,
@@ -762,10 +625,10 @@ pub struct SharedPrefix<T : SharedValue> {
     value: UnsafeCell<T>,
 }
 
-/// Implementation for all (`ConstValue` and `MutValue`) `SharedPrefix<T>` types
-impl<T : SharedValue> SharedPrefix<T> {
-    pub fn new(ty: Type, value: T) -> SharedPrefix<T> {
-        SharedPrefix {
+/// **N.B.** With negative trait bounds, the `borrow()` methods could be split to require `T : Value + !ConstValue`
+impl<T : Value> Prefix<T> {
+    pub fn new(ty: Type, value: T) -> Prefix<T> {
+        Prefix {
             ty,
             lock: Cell::new(BORROW_NONE),
             refs: Cell::new(1),
@@ -773,7 +636,9 @@ impl<T : SharedValue> SharedPrefix<T> {
         }
     }
 
-    /// Copied from the implementation in `RefCell`. Must be implemented on `SharedPrefix<T : SharedValue>` for builtin trait implementations to reference.
+    /// Copied from the implementation in `RefCell`.
+    ///
+    /// Must be implemented on `Prefix<T : Value>` for builtin trait implementations to reference.
     pub fn borrow(&self) -> Ref<'_, T> {
         self.try_borrow().expect("already borrowed")
     }
@@ -803,7 +668,7 @@ impl<T : SharedValue> SharedPrefix<T> {
 
 
 /// `ConstValue` implementations
-impl<T : ConstValue> SharedPrefix<T> {
+impl<T : ConstValue> Prefix<T> {
     /// For const values, we know the underlying value is never mutable, and thus a mutable borrow is never taken.
     /// Thus, we can hand out unchecked references to the underlying value, which avoids the overhead of useless borrow checking.
     pub fn borrow_const(&self) -> &T {
@@ -813,7 +678,7 @@ impl<T : ConstValue> SharedPrefix<T> {
     }
 }
 
-impl<T : MutValue> SharedPrefix<T> {
+impl<T : Value> Prefix<T> {
     /// This is explicitly unsafe, as we are handing out a unchecked, immutable reference to the underlying data.
     /// It relies on the caller knowing that we take split, or partial borrows (such as closures, having an immutable and mutable part)
     ///
@@ -824,38 +689,37 @@ impl<T : MutValue> SharedPrefix<T> {
 }
 
 
-/// In order to properly implement these traits, we need to only specialize them on `T : SharedValue`. However, we don't know a priori if these are const, or mutable types, which creates a problem for access.
-/// If we had negative trait bounds, we could make `ConstValue` and `MutValue` incompatible traits, and then implement individually.
+/// In order to implement these traits properly, we need to specialize only on `T : Value`, which means even for `ConstValue` types, we cannot
+/// use `borrow_const()`, and instead are _required_ to call `.borrow()`
 ///
-/// The result, is we _need_ to use runtime borrow checking for the implementation of standard library traits, since it gets declared on `SharedPrefix<T : SharedValue>`
-///
-/// Note that other implementations that _can_ specialize on `SharedPrefix<T : ConstValue>` can use the `borrow_const()` which does no checking. This is still safe, because we are still sure that for const types, no mutable borrows will be taken. It just represents extra work being done.
-impl<T : Eq + SharedValue> Eq for SharedPrefix<T> {}
-impl<T : Eq + SharedValue> PartialEq for SharedPrefix<T> {
+/// **N.B.** With negative trait bounds, we could split these into an optimized variant using `.borrow_const()` for `Value + ConstValue`, and the existing
+/// version for `Value + !ConstValue`
+impl<T : Eq + Value> Eq for Prefix<T> {}
+impl<T : Eq + Value> PartialEq for Prefix<T> {
     fn eq(&self, other: &Self) -> bool {
         *self.borrow() == *other.borrow()
     }
 }
 
-impl<T : Eq + Ord + SharedValue> Ord for SharedPrefix<T> {
+impl<T : Eq + Ord + Value> Ord for Prefix<T> {
     fn cmp(&self, other: &Self) -> Ordering {
         self.borrow().cmp(&other.borrow())
     }
 }
 
-impl<T : Eq + Ord + SharedValue> PartialOrd for SharedPrefix<T> {
+impl<T : Eq + Ord + Value> PartialOrd for Prefix<T> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<T : Hash + SharedValue> Hash for SharedPrefix<T> {
+impl<T : Hash + Value> Hash for Prefix<T> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.borrow().hash(state);
     }
 }
 
-impl<T : Debug + SharedValue> Debug for SharedPrefix<T> {
+impl<T : Debug + Value> Debug for Prefix<T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         Debug::fmt(&*self.borrow(), f)
     }
@@ -864,8 +728,7 @@ impl<T : Debug + SharedValue> Debug for SharedPrefix<T> {
 const BORROW_MUT: u16 = 0;
 const BORROW_NONE: u16 = 1;
 
-/// `MutValue` implementations. This prevents any `ConstValue` from accessing mutable borrows.
-impl<T : MutValue> SharedPrefix<T> {
+impl<T : Value> Prefix<T> {
 
     pub fn borrow_mut(&self) -> RefMut<'_, T> {
         self.try_borrow_mut().expect("already borrowed")
@@ -948,14 +811,13 @@ mod tests {
 
     use crate::core::NativeFunction;
     use crate::vm::{ComplexValue, IntoValue};
-    use crate::vm::value::ptr::{MAX_INT, MIN_INT, Prefix, SharedPrefix, ValuePtr};
+    use crate::vm::value::ptr::{MAX_INT, MIN_INT, Prefix, ValuePtr};
     use crate::vm::value::Type;
 
     #[test]
     fn test_sizeof() {
         assert_eq!(std::mem::size_of::<ValuePtr>(), 8);
-        assert_eq!(std::mem::size_of::<Prefix<()>>(), 1); // 1 byte, but usually followed by 7 bytes padding for most types, so 8 bytes in practice
-        assert_eq!(std::mem::size_of::<SharedPrefix<()>>(), 8); // 1 (Type) + 1 (bool) lock + 2 padding + 4 (u32 ref count)
+        assert_eq!(std::mem::size_of::<Prefix<()>>(), 8); // 1 (Type) + 1 (bool) lock + 2 padding + 4 (u32 ref count)
     }
 
     #[test]
@@ -968,8 +830,6 @@ mod tests {
         assert!(!ptr.is_none());
         assert!(!ptr.is_err());
         assert!(!ptr.is_ptr());
-        assert!(!ptr.is_owned());
-        assert!(!ptr.is_shared());
         assert_eq!(ptr.ty(), Type::Nil);
         assert_eq!(format!("{:?}", ptr), "Nil");
     }
@@ -985,8 +845,6 @@ mod tests {
         assert!(!ptr.is_none());
         assert!(!ptr.is_err());
         assert!(!ptr.is_ptr());
-        assert!(!ptr.is_owned());
-        assert!(!ptr.is_shared());
         assert_eq!(ptr.ty(), Type::Bool);
         assert!(ptr.clone().as_bool());
         assert_eq!(ptr.clone().as_int(), 1);
@@ -1004,8 +862,6 @@ mod tests {
         assert!(!ptr.is_none());
         assert!(!ptr.is_err());
         assert!(!ptr.is_ptr());
-        assert!(!ptr.is_owned());
-        assert!(!ptr.is_shared());
         assert_eq!(ptr.ty(), Type::Bool);
         assert!(!ptr.clone().as_bool());
         assert_eq!(ptr.clone().as_int(), 0);
@@ -1023,8 +879,6 @@ mod tests {
             assert!(!ptr.is_none());
             assert!(!ptr.is_err());
             assert!(!ptr.is_ptr());
-            assert!(!ptr.is_owned());
-            assert!(!ptr.is_shared());
             assert_eq!(ptr.ty(), Type::Int);
             assert_eq!(ptr.clone().as_int(), int);
             assert_eq!(ptr.clone().as_precise_int(), int);
@@ -1040,8 +894,6 @@ mod tests {
             assert!(!ptr.is_none());
             assert!(!ptr.is_err());
             assert!(!ptr.is_ptr());
-            assert!(!ptr.is_owned());
-            assert!(!ptr.is_shared());
             assert_eq!(ptr.ty(), Type::Int);
             assert_eq!(ptr.clone().as_int(), int);
             assert_eq!(ptr.clone().as_precise_int(), int);
@@ -1086,8 +938,6 @@ mod tests {
             assert!(!ptr.is_none());
             assert!(!ptr.is_err());
             assert!(!ptr.is_ptr());
-            assert!(!ptr.is_owned());
-            assert!(!ptr.is_shared());
             assert_eq!(ptr.ty(), Type::NativeFunction);
             assert_eq!(ptr.as_native(), f);
             assert_eq!(format!("{:?}", ptr), format!("{:?}", f));
@@ -1105,8 +955,6 @@ mod tests {
         assert!(ptr.is_none());
         assert!(!ptr.is_err());
         assert!(!ptr.is_ptr());
-        assert!(!ptr.is_owned());
-        assert!(!ptr.is_shared());
         assert_eq!(ptr.ty(), Type::None);
     }
 
@@ -1121,8 +969,6 @@ mod tests {
         assert!(!ptr.is_none());
         assert!(!ptr.is_err());
         assert!(ptr.is_ptr());
-        assert!(!ptr.is_owned());
-        assert!(ptr.is_shared());
         assert_eq!(ptr.ty(), Type::Complex);
         assert_eq!(format!("{:?}", ptr), "Complex { re: 1, im: 2 }");
     }
@@ -1151,8 +997,6 @@ mod tests {
         assert!(!ptr.is_none());
         assert!(!ptr.is_err());
         assert!(ptr.is_ptr());
-        assert!(!ptr.is_owned());
-        assert!(ptr.is_shared());
         assert_eq!(ptr.ty(), Type::LongStr);
         assert_eq!(format!("{:?}", ptr), String::from("\"hello world\""));
     }

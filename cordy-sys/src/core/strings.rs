@@ -4,7 +4,7 @@ use fancy_regex::{Captures, Matches, Regex};
 
 use crate::core::InvokeArg1;
 use crate::util;
-use crate::vm::{ErrorResult, IntoIterableValue, IntoValue, Iterable, Prefix, RuntimeError, Type, ValuePtr, ValueResult, VirtualInterface};
+use crate::vm::{ErrorPtr, ErrorResult, IntoIterableValue, IntoValue, Iterable, RuntimeError, Type, ValuePtr, ValueResult, VirtualInterface};
 
 use RuntimeError::{*};
 
@@ -47,7 +47,7 @@ pub fn replace<VM: VirtualInterface>(vm: &mut VM, pattern: ValuePtr, replacer: V
                 .as_str_owned()),
                 String::new())
         }).to_value();
-        util::join::<ValuePtr, Box<Prefix<RuntimeError>>, ValueResult>(replaced, err)
+        util::join::<ValuePtr, ErrorPtr, ValueResult>(replaced, err)
     } else {
         regex.replace_all(text, replacer.check_str()?.as_str_slice())
             .to_value()
@@ -184,7 +184,7 @@ pub fn join(joiner: ValuePtr, it: ValuePtr) -> ValueResult {
 fn map_join<'a, I : Iterator<Item=ValuePtr>>(mut iter: I, sep: &str) -> ValuePtr {
     // Avoids issues with `.map().join()` that create temporaries in the `map()` and then destroy them
     match iter.next() {
-        None => ValuePtr::empty_str(),
+        None => ValuePtr::str(),
         Some(first) => {
             let (lower, _) = iter.size_hint();
             let mut result = String::with_capacity(lower * sep.len());
