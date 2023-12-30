@@ -22,11 +22,12 @@ use crate::vm::value::ptr::{RefMut, SharedPrefix};
 use crate::vm::value::str::IterStr;
 use crate::vm::value::range::Range;
 use crate::vm::value::slice::Slice;
+use crate::vm::value::complex::Complex;
 
 pub use crate::vm::value::ptr::{MAX_INT, MIN_INT, Prefix, ValuePtr};
+pub use crate::vm::value::complex::ComplexValue;
 
 use RuntimeError::{*};
-use crate::vm::value::complex::ComplexImpl;
 
 pub type ErrorResult<T> = Result<T, Box<Prefix<RuntimeError>>>;
 pub type AnyResult = ErrorResult<()>;
@@ -75,11 +76,11 @@ pub enum Type {
 
 impl Type {
     fn is_owned(&self) -> bool {
-        matches!(self, Type::Complex | Type::PartialFunction | Type::PartialNativeFunction | Type::Iter | Type::Error)
+        matches!(self, Type::PartialFunction | Type::PartialNativeFunction | Type::Iter | Type::Error)
     }
 
     fn is_shared(&self) -> bool {
-        matches!(self, Type::LongStr | Type::List | Type::Set | Type::Dict | Type::Heap | Type::Vector | Type::Function | Type::Closure | Type::Memoized | Type::Struct | Type::StructType | Type::Range | Type::Enumerate | Type::Slice)
+        matches!(self, Type::Complex | Type::LongStr | Type::List | Type::Set | Type::Dict | Type::Heap | Type::Vector | Type::Function | Type::Closure | Type::Memoized | Type::Struct | Type::StructType | Type::Range | Type::Enumerate | Type::Slice)
     }
 }
 
@@ -374,7 +375,7 @@ impl ValuePtr {
             Type::Nil => Cow::from("nil"),
             Type::Bool => Cow::from(if self.is_true() { "true" } else { "false" }),
             Type::Int => Cow::from(self.as_int().to_string()),
-            Type::Complex => self.as_precise_complex_ref().to_repr_str(),
+            Type::Complex => self.as_complex_ref().to_repr_str(),
             Type::ShortStr | Type::LongStr => {
                 let escaped = format!("{:?}", self.as_str_slice());
                 Cow::from(format!("'{}'", &escaped[1..escaped.len() - 1]))
@@ -826,12 +827,6 @@ macro_rules! impl_into {
 impl_into!(ValuePtr, self, self);
 impl_into!(usize, self, ptr::from_usize(self));
 impl_into!(i64, self, ptr::from_i64(self));
-impl_into!(num_complex::Complex<i64>, self, ComplexImpl { inner: self }.to_value());
-impl_into!(ComplexImpl, self, if self.inner.im == 0 {
-    ptr::from_i64(self.inner.re)
-} else {
-    ptr::from_owned(Prefix::new(Type::Complex, self))
-});
 impl_into!(bool, self, ptr::from_bool(self));
 impl_into!(char, self, ptr::from_char(self));
 impl_into!(&str, self, ptr::from_str(self));

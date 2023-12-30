@@ -5,7 +5,6 @@ use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 use std::ptr::NonNull;
-use num_complex::Complex;
 
 use crate::core::NativeFunction;
 use crate::util::impl_partial_ord;
@@ -232,17 +231,6 @@ impl ValuePtr {
         }
     }
 
-    /// If the current type is int-like, then automatically converts it to a complex number.
-    pub fn as_complex(self) -> Complex<i64> {
-        debug_assert!(self.ty() == Type::Bool || self.ty() == Type::Int || self.ty() == Type::Complex);
-        match self.ty() {
-            Type::Bool => Complex::new(self.is_true() as i64, 0),
-            Type::Int => Complex::new(self.as_precise_int(), 0),
-            Type::Complex => self.as_precise_complex().value.inner,
-            _ => unreachable!(),
-        }
-    }
-
     pub fn as_bool(&self) -> bool {
         debug_assert!(self.is_bool());
         self.is_true()
@@ -423,7 +411,7 @@ impl PartialEq for ValuePtr {
             Type::GetField |
             Type::ShortStr => unsafe { self.long_tag == other.long_tag },
             // Owned types check equality based on their ref
-            Type::Complex => self.as_ref::<ComplexImpl>() == other.as_ref::<ComplexImpl>(),
+            Type::Complex => self.as_shared_ref::<Complex>() == other.as_shared_ref::<Complex>(),
             Type::Range => self.as_shared_ref::<Range>() == other.as_shared_ref::<Range>(),
             Type::Enumerate => self.as_shared_ref::<Enumerate>() == other.as_shared_ref::<Enumerate>(),
             Type::PartialFunction => self.as_ref::<PartialFunctionImpl>() == other.as_ref::<PartialFunctionImpl>(),
@@ -468,7 +456,7 @@ impl Ord for ValuePtr {
             Type::ShortStr => self.as_str_slice().cmp(other.as_str_slice()),
 
             // Owned types check equality based on their ref
-            Type::Complex => self.as_ref::<ComplexImpl>().cmp(other.as_ref::<ComplexImpl>()),
+            Type::Complex => self.as_shared_ref::<Complex>().cmp(other.as_shared_ref::<Complex>()),
             Type::Range => self.as_shared_ref::<Range>().cmp(other.as_shared_ref::<Range>()),
             Type::Enumerate => self.as_shared_ref::<Enumerate>().cmp(other.as_shared_ref::<Enumerate>()),
             // Shared types check equality based on the shared ref
@@ -512,7 +500,7 @@ impl Clone for ValuePtr {
                 Type::NativeFunction |
                 Type::GetField => self.as_copy(),
                 // Owned types
-                Type::Complex => self.clone_owned::<ComplexImpl>(),
+                Type::Complex => self.clone_shared::<Complex>(),
                 Type::Range => self.clone_shared::<Range>(),
                 Type::Enumerate => self.clone_shared::<Enumerate>(),
                 Type::PartialFunction => self.clone_owned::<PartialFunctionImpl>(),
@@ -556,7 +544,7 @@ impl Drop for ValuePtr {
                 Type::NativeFunction |
                 Type::GetField => {},
                 // Owned types
-                Type::Complex => self.drop_owned::<ComplexImpl>(),
+                Type::Complex => self.drop_shared::<Complex>(),
                 Type::Range => self.drop_shared::<Range>(),
                 Type::Enumerate => self.drop_shared::<Enumerate>(),
                 Type::PartialFunction => self.drop_owned::<PartialFunctionImpl>(),
@@ -596,7 +584,7 @@ impl Hash for ValuePtr {
             Type::NativeFunction |
             Type::GetField => unsafe { self.tag }.hash(state),
             // Owned types
-            Type::Complex => self.as_ref::<ComplexImpl>().hash(state),
+            Type::Complex => self.as_shared_ref::<Complex>().hash(state),
             Type::Enumerate => self.as_shared_ref::<Enumerate>().hash(state),
             Type::PartialFunction => self.as_ref::<PartialFunctionImpl>().hash(state),
             Type::PartialNativeFunction => self.as_ref::<PartialNativeFunctionImpl>().hash(state),
@@ -632,7 +620,7 @@ impl Debug for ValuePtr {
             Type::NativeFunction => Debug::fmt(&self.as_native(), f),
             Type::GetField => f.debug_struct("GetField").field("field_index", &self.as_field()).finish(),
             // Owned types
-            Type::Complex => Debug::fmt(self.as_ref::<ComplexImpl>(), f),
+            Type::Complex => Debug::fmt(self.as_shared_ref::<Complex>(), f),
             Type::Enumerate => Debug::fmt(self.as_shared_ref::<Enumerate>(), f),
             Type::PartialFunction => Debug::fmt(self.as_ref::<PartialFunctionImpl>(), f),
             Type::PartialNativeFunction => Debug::fmt(self.as_ref::<PartialNativeFunctionImpl>(), f),
@@ -925,10 +913,9 @@ impl<T: ?Sized> DerefMut for RefMut<'_, T> {
 #[cfg(test)]
 mod tests {
     use std::cmp::Ordering;
-    use num_complex::Complex;
 
     use crate::core::NativeFunction;
-    use crate::vm::IntoValue;
+    use crate::vm::{ComplexValue, IntoValue};
     use crate::vm::value::ptr::{MAX_INT, MIN_INT, Prefix, SharedPrefix, ValuePtr};
     use crate::vm::value::Type;
 
@@ -1093,7 +1080,7 @@ mod tests {
 
     #[test]
     fn test_owned_complex() {
-        let ptr = Complex::<i64>::new(1, 2).to_value();
+        let ptr = ComplexValue::new(1, 2).to_value();
 
         assert!(!ptr.is_nil());
         assert!(!ptr.is_bool());
@@ -1102,17 +1089,17 @@ mod tests {
         assert!(!ptr.is_none());
         assert!(!ptr.is_err());
         assert!(ptr.is_ptr());
-        assert!(ptr.is_owned());
-        assert!(!ptr.is_shared());
+        assert!(!ptr.is_owned());
+        assert!(ptr.is_shared());
         assert_eq!(ptr.ty(), Type::Complex);
-        assert_eq!(format!("{:?}", ptr), "ComplexImpl { inner: Complex { re: 1, im: 2 } }");
+        assert_eq!(format!("{:?}", ptr), "Complex(Complex { re: 1, im: 2 })");
     }
 
     #[test]
     fn test_owned_complex_clone_eq() {
         let c0 = ValuePtr::nil();
-        let c1 = Complex::<i64>::new(1, 2).to_value();
-        let c2 = Complex::<i64>::new(1, 3).to_value();
+        let c1 = ComplexValue::new(1, 2).to_value();
+        let c2 = ComplexValue::new(1, 3).to_value();
 
         assert_ne!(c2, c0);
         assert_ne!(c2, c1);
