@@ -13,7 +13,7 @@ use crate::core::Pattern;
 
 pub use crate::vm::error::{DetailRuntimeError, RuntimeError};
 pub use crate::vm::opcode::{Opcode, StoreOp};
-pub use crate::vm::value::{AnyResult, ErrorResult, Function, guard_recursive_hash, IntoDictValue, IntoIterableValue, IntoValue, Iterable, LiteralType, MAX_INT, MIN_INT, Prefix, StructTypeImpl, Type, ValueOption, ValuePtr, ValueResult, Method, ComplexValue};
+pub use crate::vm::value::{AnyResult, ErrorResult, Function, guard_recursive_hash, IntoDictValue, IntoIterableValue, IntoValue, Iterable, LiteralType, MAX_INT, MIN_INT, Prefix, StructTypeImpl, Type, ValueOption, ValuePtr, ValueResult, Method, ComplexValue, PartialNativeFunction};
 
 use Opcode::{*};
 use RuntimeError::{*};
@@ -739,9 +739,8 @@ impl<R : BufRead, W : Write, F : FunctionInterface> VirtualMachine<R, W, F> {
                 // Need to consume the arguments and set up the stack for calling as if all partial arguments were just pushed
                 // Surgically extract the binding via std::mem::replace
                 let i: usize = self.stack.len() - 1 - nargs as usize;
-                let partial = std::mem::replace(&mut self.stack[i], ValuePtr::nil()).as_partial_native().value;
-
-                let ret = core::invoke_partial(partial.func, partial.partial, nargs, self)?;
+                let ptr = std::mem::take(&mut self.stack[i]);
+                let ret = core::invoke_partial(ptr.as_partial_native().borrow_const(), nargs, self)?;
 
                 self.pop();
                 self.push(ret);
