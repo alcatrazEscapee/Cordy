@@ -14,7 +14,7 @@ use range::Enumerate;
 
 use crate::compiler::Fields;
 use crate::core;
-use crate::core::{InvokeArg0, NativeFunction, PartialArgument};
+use crate::core::{InvokeArg0, NativeFunction};
 use crate::util::impl_partial_ord;
 use crate::vm::error::RuntimeError;
 use crate::vm::value::ptr::{RefMut, SharedPrefix};
@@ -77,11 +77,11 @@ pub enum Type {
 
 impl Type {
     fn is_owned(&self) -> bool {
-        matches!(self, Type::PartialNativeFunction | Type::Iter | Type::Error)
+        matches!(self, Type::Iter | Type::Error)
     }
 
     fn is_shared(&self) -> bool {
-        matches!(self, Type::PartialFunction | Type::Complex | Type::LongStr | Type::List | Type::Set | Type::Dict | Type::Heap | Type::Vector | Type::Function | Type::Closure | Type::Memoized | Type::Struct | Type::StructType | Type::Range | Type::Enumerate | Type::Slice)
+        matches!(self, Type::PartialNativeFunction | Type::PartialFunction | Type::Complex | Type::LongStr | Type::List | Type::Set | Type::Dict | Type::Heap | Type::Vector | Type::Function | Type::Closure | Type::Memoized | Type::Struct | Type::StructType | Type::Range | Type::Enumerate | Type::Slice)
     }
 }
 
@@ -284,10 +284,6 @@ impl ValuePtr {
         ptr::from_field(field)
     }
 
-    pub fn partial_native(func: NativeFunction, partial: PartialArgument) -> ValuePtr {
-        PartialNativeFunction { func, partial }.to_value()
-    }
-
     pub fn instance(owner: ValuePtr, values: Vec<ValuePtr>) -> ValuePtr {
         StructImpl { owner, values }.to_value()
     }
@@ -308,7 +304,7 @@ impl ValuePtr {
             Type::Function => Cow::from(self.as_function().borrow_const().name()),
             Type::PartialFunction => self.as_partial_function().borrow_const().to_str(rc),
             Type::NativeFunction => Cow::from(self.as_native().name()),
-            Type::PartialNativeFunction => Cow::from(self.as_partial_native_ref().func.name()),
+            Type::PartialNativeFunction => Cow::from(self.as_partial_native().borrow_const().to_str()),
             Type::Closure => Cow::from(self.as_closure().borrow_func().name().to_string()),
             _ => self.safe_to_repr_str(rc),
         }
@@ -404,8 +400,8 @@ impl ValuePtr {
 
             Type::Function => Cow::from(self.as_function().borrow_const().to_repr_str()),
             Type::PartialFunction => self.as_partial_function().borrow_const().to_repr_str(rc),
-            Type::NativeFunction => Cow::from(self.as_native().repr()),
-            Type::PartialNativeFunction => Cow::from(self.as_partial_native_ref().func.repr()),
+            Type::NativeFunction => Cow::from(self.as_native().to_repr_str()),
+            Type::PartialNativeFunction => Cow::from(self.as_partial_native().borrow_const().to_repr_str()),
             Type::Closure => Cow::from(self.as_closure().borrow_func().to_repr_str()),
 
             Type::Error | Type::None | Type::Never => unreachable!(),
@@ -542,7 +538,7 @@ impl ValuePtr {
             Type::Function => Some(self.as_function().borrow_const().min_args()),
             Type::PartialFunction => Some(self.as_partial_function().borrow_const().min_nargs()),
             Type::NativeFunction => Some(self.as_native().min_nargs()),
-            Type::PartialNativeFunction => Some(self.as_partial_native_ref().partial.min_nargs()),
+            Type::PartialNativeFunction => Some(self.as_partial_native().borrow_const().min_nargs()),
             Type::Closure => Some(self.as_closure().borrow_func().min_args()),
             Type::StructType => Some(self.as_struct_type().borrow_const().num_fields()),
             Type::Slice => Some(1),
@@ -752,12 +748,13 @@ impl SharedValue for () {}
 //impl_owned_value!(Type::Range, Range, as_range, as_range_ref, is_range);
 //impl_owned_value!(Type::Enumerate, Enumerate, as_enumerate, as_enumerate_ref, is_enumerate);
 //impl_owned_value!(Type::PartialFunction, PartialFunctionImpl, as_partial_function, as_partial_function_ref, is_partial_function);
-impl_owned_value!(Type::PartialNativeFunction, PartialNativeFunction, as_partial_native, as_partial_native_ref, is_partial_native);
+//impl_owned_value!(Type::PartialNativeFunction, PartialNativeFunction, as_partial_native, as_partial_native_ref, is_partial_native);
 //impl_owned_value!(Type::Slice, Slice, as_slice, as_slice_ref, is_slice);
 impl_owned_value!(Type::Iter, Iterable, as_iterable, as_iterable_ref, is_iterable);
 impl_owned_value!(Type::Error, RuntimeError, as_err, as_err_ref, is_err);
 
 impl_shared_value!(Type::PartialFunction, PartialFunction, ConstValue, as_partial_function, is_partial_function);
+impl_shared_value!(Type::PartialNativeFunction, PartialNativeFunction, ConstValue, as_partial_native, is_partial_native);
 impl_shared_value!(Type::Slice, Slice, ConstValue, as_slice, is_slice);
 impl_shared_value!(Type::Range, Range, ConstValue, as_range, is_range);
 impl_shared_value!(Type::Enumerate, Enumerate, ConstValue, as_enumerate, is_enumerate);

@@ -6,7 +6,7 @@ use fxhash::FxBuildHasher;
 use indexmap::{IndexMap, IndexSet};
 
 use crate::trace;
-use crate::vm::{ErrorResult, IntoIterableValue, IntoValue, MAX_INT, MIN_INT, operator, RuntimeError, Type, ValueOption, ValuePtr, ValueResult, VirtualInterface};
+use crate::vm::{ErrorResult, IntoIterableValue, IntoValue, MAX_INT, MIN_INT, operator, PartialNativeFunction, RuntimeError, Type, ValueOption, ValuePtr, ValueResult, VirtualInterface};
 use crate::vm::operator::BinaryOp;
 
 pub use crate::core::collections::{get_index, get_slice, set_index, to_index};
@@ -183,7 +183,7 @@ impl NativeFunction {
     pub fn name(&self) -> &'static str { self.info().name }
 
     /// Returns the `repr` string of the function, which is the form `fn <name>(<args> ...)`
-    pub fn repr(&self) -> String { let info = self.info(); format!("fn {}({})", info.name, info.args) }
+    pub fn to_repr_str(&self) -> String { let info = self.info(); format!("fn {}({})", info.name, info.args) }
 
     pub fn is_operator(&self) -> bool { self.swap() != *self }
 
@@ -489,7 +489,7 @@ impl PartialArgument {
 
     #[inline]
     fn to_value(self, f: NativeFunction) -> ValueResult {
-        ValuePtr::partial_native(f, self).ok()
+        PartialNativeFunction::new(f, self).to_value().ok()
     }
 }
 
@@ -577,11 +577,11 @@ impl InvokeArg1 {
                 Invalid => ValueIsNotFunctionEvaluable(f).err(),
             },
             Type::PartialNativeFunction => {
-                let it = f.as_partial_native().value;
-                match it.partial {
-                    PartialArgument::Arg2Par1(arg) => Ok(InvokeArg1::NativePar1(it.func, arg)),
-                    PartialArgument::Arg3Par1(arg) => Ok(InvokeArg1::Arg3Par2(it.func, arg)),
-                    PartialArgument::Arg3Par2(arg1, arg2) => Ok(InvokeArg1::NativePar2(it.func, arg1, arg2)),
+                let (f, partial) = f.as_partial_native().borrow_const().consume();
+                match partial {
+                    PartialArgument::Arg2Par1(arg) => Ok(InvokeArg1::NativePar1(f, arg)),
+                    PartialArgument::Arg3Par1(arg) => Ok(InvokeArg1::Arg3Par2(f, arg)),
+                    PartialArgument::Arg3Par2(arg1, arg2) => Ok(InvokeArg1::NativePar2(f, arg1, arg2)),
                 }
             },
             _ => ValueIsNotFunctionEvaluable(f).err()
@@ -614,11 +614,11 @@ impl InvokeArg2 {
                 Invalid => ValueIsNotFunctionEvaluable(f).err(),
             },
             Type::PartialNativeFunction => {
-                let it = f.as_partial_native().value;
-                match it.partial {
+                let (f, partial) = f.as_partial_native().borrow_const().consume();
+                match partial {
                     PartialArgument::Arg2Par1(_) |
-                    PartialArgument::Arg3Par2(_, _) => IncorrectArgumentsNativeFunction(it.func, 3).err(),
-                    PartialArgument::Arg3Par1(arg) => Ok(InvokeArg2::NativePar1(it.func, arg)),
+                    PartialArgument::Arg3Par2(_, _) => IncorrectArgumentsNativeFunction(f, 3).err(),
+                    PartialArgument::Arg3Par1(arg) => Ok(InvokeArg2::NativePar1(f, arg)),
                 }
             },
             _ => ValueIsNotFunctionEvaluable(f).err()
@@ -776,7 +776,8 @@ pub fn invoke_stack<VM : VirtualInterface>(f: NativeFunction, nargs: u32, vm: &m
 
 
 /// Invokes a partial native function with partial arguments held in the unique `PartialArgument` structure, and additional arguments present on the stack.
-pub fn invoke_partial<VM : VirtualInterface>(f: NativeFunction, partial: PartialArgument, nargs: u32, vm: &mut VM) -> ValueResult {
+pub fn invoke_partial<VM : VirtualInterface>(f: &PartialNativeFunction, nargs: u32, vm: &mut VM) -> ValueResult {
+    let (f, partial) = f.consume();
     trace::trace_interpreter!("core::invoke_partial f={}, nargs={}", f.name(), nargs);
     match partial {
         PartialArgument::Arg2Par1(a1) => match nargs {
@@ -1185,7 +1186,7 @@ mod tests {
         let mut vm = VirtualMachine::default(compiler::default(), SourceView::empty());
 
         fn is_partial(v: &ValuePtr, f: NativeFunction) -> bool {
-            v.is_partial_native() && v.as_partial_native_ref().func == f
+            v.is_partial_native() && v.as_partial_native().borrow_const().consume().0 == f
         }
 
         for f in core::NATIVE_FUNCTIONS.iter() {

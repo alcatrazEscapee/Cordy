@@ -282,8 +282,31 @@ impl Default for UpValue {
 
 #[derive(Debug, Clone)]
 pub struct PartialNativeFunction {
-    pub func: NativeFunction,
-    pub partial: PartialArgument,
+    func: NativeFunction,
+    partial: PartialArgument,
+}
+
+impl PartialNativeFunction {
+    pub fn new(func: NativeFunction, partial: PartialArgument) -> PartialNativeFunction {
+        PartialNativeFunction { func, partial }
+    }
+
+    /// Consumes the partial native function, returning the underlying function and the argument
+    pub fn consume(&self) -> (NativeFunction, PartialArgument) {
+        (self.func, self.partial.clone())
+    }
+
+    pub(super) fn to_str(&self) -> Cow<str> {
+        Cow::from(self.func.name())
+    }
+
+    pub(super) fn to_repr_str(&self) -> Cow<str> {
+        Cow::from(self.func.to_repr_str())
+    }
+
+    pub fn min_nargs(&self) -> u32 {
+        self.func.min_nargs()
+    }
 }
 
 impl Eq for PartialNativeFunction {}
@@ -292,7 +315,6 @@ impl PartialEq<Self> for PartialNativeFunction {
         self.func == other.func
     }
 }
-
 
 impl Hash for PartialNativeFunction {
     fn hash<H: Hasher>(&self, state: &mut H) {
