@@ -432,9 +432,12 @@ impl<R : BufRead, W : Write, F : FunctionInterface> VirtualMachine<R, W, F> {
                 },
                 TestIterable(ip) => {
                     let top: usize = self.stack.len() - 1;
-                    let iter = self.stack[top].as_iterable_mut();
+                    let mut iter = self.stack[top].as_iterable().borrow_mut();
                     match iter.next() {
-                        Some(value) => self.push(value),
+                        Some(value) => {
+                            drop(iter);
+                            self.push(value)
+                        },
                         None => self.ip = self.ip.add_offset(ip),
                     }
                 },
