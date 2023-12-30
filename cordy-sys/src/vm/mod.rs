@@ -605,7 +605,7 @@ impl<R : BufRead, W : Write, F : FunctionInterface> VirtualMachine<R, W, F> {
                 },
                 AssertFailed => {
                     let ret: ValuePtr = self.pop();
-                    return RuntimeAssertFailed(ret.to_str().as_owned()).err()
+                    return RuntimeAssertFailed(ret.to_str().into_owned()).err()
                 },
             }
         }

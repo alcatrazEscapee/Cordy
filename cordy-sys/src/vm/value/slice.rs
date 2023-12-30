@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::VecDeque;
 
 use crate::core;
@@ -5,7 +6,6 @@ use crate::vm::{ErrorResult, IntoValue, Type, ValuePtr, ValueResult};
 use crate::vm::RuntimeError::{TypeErrorArgMustBeInt, TypeErrorArgMustBeSliceable};
 use crate::vm::value::{ListImpl, VectorImpl};
 use crate::vm::value::ptr::Ref;
-use crate::vm::value::str::{IntoRefStr, RefStr};
 
 
 /// # Slice
@@ -45,7 +45,7 @@ impl Slice {
         core::get_slice(arg, self.start.clone(), self.stop.clone(), self.step.clone())
     }
 
-    pub fn to_repr_str(&self) -> RefStr {
+    pub(super) fn to_repr_str(&self) -> Cow<str> {
         #[inline]
         fn to_str(i: &ValuePtr) -> String {
             if i.is_nil() {
@@ -55,10 +55,10 @@ impl Slice {
             }
         }
 
-        match self.step.is_nil() {
+        Cow::from(match self.step.is_nil() {
             false => format!("[{}:{}:{}]", to_str(&self.start), to_str(&self.stop), self.step.as_int()),
             true => format!("[{}:{}]", to_str(&self.start), to_str(&self.stop)),
-        }.to_ref_str()
+        })
     }
 }
 

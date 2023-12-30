@@ -1,8 +1,10 @@
+use std::borrow::Cow;
 use std::cmp::Ordering;
+
 use crate::util::impl_partial_ord;
 use crate::vm::value::OwnedValue;
-use crate::vm::value::str::{IntoRefStr, RefStr};
 use crate::vm::{Prefix, Type, ValuePtr};
+
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct ComplexImpl {
@@ -41,8 +43,7 @@ impl Ord for ComplexImpl {
 }
 
 impl ComplexImpl {
-
-    pub fn to_repr_str(&self) -> RefStr {
+    pub(super) fn to_repr_str(&self) -> Cow<str> {
         let c = self.inner;
         let str = if c.re == 0 {
             format!("{}i", c.im)
@@ -55,6 +56,6 @@ impl ComplexImpl {
             re.push_str(im.as_str());
             re
         };
-        str.to_ref_str()
+        Cow::from(str)
     }
 }
