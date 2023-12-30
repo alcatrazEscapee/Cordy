@@ -577,7 +577,7 @@ impl InvokeArg1 {
                 Invalid => ValueIsNotFunctionEvaluable(f).err(),
             },
             Type::PartialNativeFunction => {
-                let (f, partial) = f.as_partial_native().borrow_const().consume();
+                let (f, partial) = f.as_partial_native().consume();
                 match partial {
                     PartialArgument::Arg2Par1(arg) => Ok(InvokeArg1::NativePar1(f, arg)),
                     PartialArgument::Arg3Par1(arg) => Ok(InvokeArg1::Arg3Par2(f, arg)),
@@ -614,7 +614,7 @@ impl InvokeArg2 {
                 Invalid => ValueIsNotFunctionEvaluable(f).err(),
             },
             Type::PartialNativeFunction => {
-                let (f, partial) = f.as_partial_native().borrow_const().consume();
+                let (f, partial) = f.as_partial_native().consume();
                 match partial {
                     PartialArgument::Arg2Par1(_) |
                     PartialArgument::Arg3Par2(_, _) => IncorrectArgumentsNativeFunction(f, 3).err(),
@@ -1186,7 +1186,7 @@ mod tests {
         let mut vm = VirtualMachine::default(compiler::default(), SourceView::empty());
 
         fn is_partial(v: &ValuePtr, f: NativeFunction) -> bool {
-            v.is_partial_native() && v.as_partial_native().borrow_const().consume().0 == f
+            v.is_partial_native() && v.as_partial_native().consume().0 == f
         }
 
         for f in core::NATIVE_FUNCTIONS.iter() {

@@ -701,7 +701,7 @@ impl<R : BufRead, W : Write, F : FunctionInterface> VirtualMachine<R, W, F> {
                 // - If we don't, then create a new partial function with the combined arguments
                 let i: usize = self.stack.len() - nargs as usize - 1;
                 let ptr = std::mem::take(&mut self.stack[i]);
-                let partial = ptr.as_partial_function().borrow_const();
+                let partial = ptr.as_partial_function();
                 let func = partial.as_function();
                 let total_nargs: u32 = partial.nargs() + nargs;
                 if func.min_args() > total_nargs {
@@ -740,7 +740,7 @@ impl<R : BufRead, W : Write, F : FunctionInterface> VirtualMachine<R, W, F> {
                 // Surgically extract the binding via std::mem::replace
                 let i: usize = self.stack.len() - 1 - nargs as usize;
                 let ptr = std::mem::take(&mut self.stack[i]);
-                let ret = core::invoke_partial(ptr.as_partial_native().borrow_const(), nargs, self)?;
+                let ret = core::invoke_partial(ptr.as_partial_native(), nargs, self)?;
 
                 self.pop();
                 self.push(ret);
@@ -770,11 +770,11 @@ impl<R : BufRead, W : Write, F : FunctionInterface> VirtualMachine<R, W, F> {
                 }
                 let arg = self.pop();
                 let slice = self.pop();
-                self.push(slice.as_slice().borrow_const().apply(&arg)?);
+                self.push(slice.as_slice().apply(&arg)?);
                 Ok(FunctionType::Native)
             }
             Type::StructType => {
-                let owner = f.as_struct_type().borrow_const();
+                let owner = f.as_struct_type();
                 if owner.is_module() {
                     return ValueIsNotFunctionEvaluable(f.clone()).err()
                 }
