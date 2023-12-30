@@ -1,6 +1,6 @@
 use num_integer::Roots;
 
-use crate::vm::{C64, ErrorResult, IntoValue, operator, RuntimeError, Type, ValueOption, ValuePtr, ValueResult};
+use crate::vm::{ErrorResult, IntoValue, operator, RuntimeError, Type, ValueOption, ValuePtr, ValueResult};
 
 use RuntimeError::{*};
 
@@ -26,7 +26,7 @@ pub fn abs(value: ValuePtr) -> ValueResult {
         Type::Bool | Type::Int => value.as_int().abs().to_value().ok(),
         Type::Complex => {
             let c = value.as_precise_complex().value.inner;
-            C64::new(c.re.abs(), c.im.abs()).to_value().ok()
+            num_complex::Complex::new(c.re.abs(), c.im.abs()).to_value().ok()
         },
         Type::Vector => {
             operator::apply_vector_unary(value, abs)

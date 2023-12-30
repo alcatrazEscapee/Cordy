@@ -4,7 +4,7 @@ use crate::core;
 use crate::core::NativeFunction;
 use crate::vm::{ErrorResult, Type, ValuePtr, ValueResult};
 use crate::vm::error::RuntimeError;
-use crate::vm::value::{C64, IntoIterableValue, IntoValue, Prefix};
+use crate::vm::value::{IntoIterableValue, IntoValue, Prefix};
 
 use RuntimeError::{*};
 use Type::{*};
@@ -179,11 +179,11 @@ pub fn binary_div(lhs: ValuePtr, rhs: ValuePtr) -> ValueResult {
 /// The `C64` type provided by `num-complex` defines `div()` using regular rust division.
 /// This is a clone of that but using `floor_div` provided by `num-integer`, which keeps consistency with how we define division for `complex / int`
 #[inline]
-fn c64_div_floor(lhs: C64, rhs: C64) -> C64 {
+fn c64_div_floor(lhs: num_complex::Complex<i64>, rhs: num_complex::Complex<i64>) -> num_complex::Complex<i64> {
     let norm_sqr = rhs.norm_sqr();
     let re = lhs.re * rhs.re + lhs.im * rhs.im;
     let im = lhs.im * rhs.re - lhs.re * rhs.im;
-    C64::new(num_integer::div_floor(re, norm_sqr), num_integer::div_floor(im, norm_sqr))
+    num_complex::Complex::new(num_integer::div_floor(re, norm_sqr), num_integer::div_floor(im, norm_sqr))
 }
 
 pub fn binary_mod(lhs: ValuePtr, rhs: ValuePtr) -> ValueResult {
@@ -202,7 +202,7 @@ pub fn binary_mod(lhs: ValuePtr, rhs: ValuePtr) -> ValueResult {
             if rhs == 0 {
                 ValueErrorValueMustBeNonZero.err()
             } else {
-                C64::new(num_integer::mod_floor(lhs.re, rhs), num_integer::mod_floor(lhs.im, rhs)).to_value().ok()
+                num_complex::Complex::new(num_integer::mod_floor(lhs.re, rhs), num_integer::mod_floor(lhs.im, rhs)).to_value().ok()
             }
         }
         (ShortStr | LongStr, _) => core::format_string(lhs.as_str_slice(), rhs),
@@ -436,7 +436,6 @@ fn apply_vector_binary_scalar_rhs(lhs: ValuePtr, scalar_rhs: ValuePtr, binary_op
 #[cfg(test)]
 mod test {
     use crate::vm::{IntoValue, operator, RuntimeError};
-    use crate::vm::value::C64;
 
     #[test]
     fn test_binary_int_div() {
@@ -465,7 +464,7 @@ mod test {
             ((3, 2), 2, (1, 1)), ((2, 2), 2, (1, 1)), ((1, 2), 2, (0, 1)), ((0, 2), 2, (0, 1)), ((-1, 2), 2, (-1, 1)), ((-2, 2), 2, (-1, 1)), ((-3, 2), 2, (-2, 1)),
             ((3, 3), 2, (1, 1)), ((2, 3), 2, (1, 1)), ((1, 3), 2, (0, 1)), ((0, 3), 2, (0, 1)), ((-1, 3), 2, (-1, 1)), ((-2, 3), 2, (-1, 1)), ((-3, 3), 2, (-2, 1)),
         ] {
-            assert_eq!(operator::binary_div(C64::new(a, ai).to_value(), b.to_value()), C64::new(c, ci).to_value().ok(), "{:?} / {}", (a, ai), b)
+            assert_eq!(operator::binary_div(num_complex::Complex::new(a, ai).to_value(), b.to_value()), num_complex::Complex::new(c, ci).to_value().ok(), "{:?} / {}", (a, ai), b)
         }
     }
 

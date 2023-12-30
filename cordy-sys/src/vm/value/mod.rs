@@ -19,12 +19,13 @@ use crate::util::impl_partial_ord;
 use crate::vm::error::RuntimeError;
 use crate::vm::value::ptr::{RefMut, SharedPrefix};
 use crate::vm::value::str::{IntoRefStr, IterStr, RefStr};
+use crate::vm::value::range::Range;
+use crate::vm::value::slice::Slice;
 
 pub use crate::vm::value::ptr::{MAX_INT, MIN_INT, Prefix, ValuePtr};
 
 use RuntimeError::{*};
-use crate::vm::value::range::Range;
-use crate::vm::value::slice::Slice;
+use crate::vm::value::complex::ComplexImpl;
 
 pub type ErrorResult<T> = Result<T, Box<Prefix<RuntimeError>>>;
 pub type AnyResult = ErrorResult<()>;
@@ -34,6 +35,7 @@ mod ptr;
 mod str;
 mod range;
 mod slice;
+mod complex;
 
 
 /// `Type` is an enumeration of all the possible types (not including user-defined type variants such as `struct`s) possible in Cordy.
@@ -293,8 +295,6 @@ impl ValueFunction {
     }
 }
 
-pub type C64 = num_complex::Complex<i64>;
-
 
 impl ValuePtr {
 
@@ -373,21 +373,7 @@ impl ValuePtr {
             Type::Nil => "nil".to_ref_str(),
             Type::Bool => if self.as_bool() { "true" } else { "false" }.to_ref_str(),
             Type::Int => self.as_int().to_string().to_ref_str(),
-            Type::Complex => {
-                let c = &self.as_precise_complex_ref().inner;
-                let str = if c.re == 0 {
-                    format!("{}i", c.im)
-                } else {
-                    // This complicated-ness handles things like 1 - 1i and 1 + 1i
-                    let mut re = format!("{} ", c.re);
-                    let mut im = format!("{:+}i", c.im);
-
-                    im.insert(1, ' '); // Legal, as the first character should be `+` or `-`
-                    re.push_str(im.as_str());
-                    re
-                };
-                str.to_ref_str()
-            },
+            Type::Complex => self.as_precise_complex_ref().to_repr_str(),
             Type::ShortStr | Type::LongStr => {
                 let escaped = format!("{:?}", self.as_str_slice());
                 format!("'{}'", &escaped[1..escaped.len() - 1]).to_ref_str()
@@ -892,43 +878,6 @@ impl<I> IntoDictValue for I where I : Iterator<Item=(ValuePtr, ValuePtr)> {
         self.collect::<IndexMap<ValuePtr, ValuePtr, FxBuildHasher>>().to_value()
     }
 }
-
-
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
-pub struct ComplexImpl {
-    pub inner: num_complex::Complex<i64>,
-}
-
-impl OwnedValue for ComplexImpl {}
-
-impl ValuePtr {
-    pub fn as_precise_complex(self) -> Box<Prefix<ComplexImpl>> {
-        debug_assert!(self.ty() == Type::Complex);
-        self.as_box()
-    }
-
-    pub fn as_precise_complex_ref(&self) -> &ComplexImpl {
-        debug_assert!(self.ty() == Type::Complex);
-        self.as_ref()
-    }
-
-    pub fn is_precise_complex(&self) -> bool {
-        self.ty() == Type::Complex
-    }
-
-    pub fn is_complex(&self) -> bool {
-        self.is_int() || self.is_precise_complex()
-    }
-}
-
-impl_partial_ord!(ComplexImpl);
-impl Ord for ComplexImpl {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.inner.re.cmp(&other.inner.re)
-            .then(self.inner.im.cmp(&other.inner.im))
-    }
-}
-
 
 
 #[derive(Eq, PartialEq, Debug, Clone)]
