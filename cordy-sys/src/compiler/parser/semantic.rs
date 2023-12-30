@@ -15,7 +15,7 @@ use crate::compiler::parser::{Parser, ParserError, ParserErrorType};
 use crate::core;
 use crate::core::Pattern;
 use crate::reporting::Location;
-use crate::vm::{FunctionImpl, IntoValue, Method, Opcode, StoreOp, StructTypeImpl, ValuePtr};
+use crate::vm::{Function, IntoValue, Method, Opcode, StoreOp, StructTypeImpl, ValuePtr};
 use crate::compiler::parser::core::{BranchType, Code, ForwardBlockId, OpcodeId, ReverseBlockId};
 use crate::compiler::parser::expr::Expr;
 
@@ -632,10 +632,10 @@ pub struct ParserFunctionImpl {
 }
 
 impl ParserFunctionImpl {
-    /// Bakes this parser function into an immutable `FunctionImpl`.
+    /// Bakes this parser function into an immutable `Function`.
     /// The `head` and `tail` pointers are computed based on the surrounding code.
     pub(super) fn bake(self, constants: &mut [ValuePtr], default_args: Vec<usize>, head: usize, tail: usize) {
-        constants[self.constant_id as usize] = FunctionImpl::new(head, tail, self.name, self.args, default_args, self.variadic, self.native, self.instance).to_value();
+        constants[self.constant_id as usize] = Function::new(head, tail, self.name, self.args, default_args, self.variadic, self.native, self.instance).to_value();
     }
 
     pub(super) fn set_native(&mut self) {
