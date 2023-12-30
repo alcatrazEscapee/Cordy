@@ -1861,6 +1861,8 @@ mod tests {
     #[test] fn test_reduce_with_empty() { run_str("[] . reduce(+) . print", "ValueError: Expected value to be a non empty iterable\n  at: line 1 (<test>)\n\n1 | [] . reduce(+) . print\n2 |    ^^^^^^^^^^^\n"); }
     #[test] fn test_sorted() { run_str("[6, 2, 3, 7, 2, 1] . sort . print", "[1, 2, 2, 3, 6, 7]\n"); }
     #[test] fn test_sorted_with_set_of_str() { run_str("'funny' . set . sort . print", "['f', 'n', 'u', 'y']\n"); }
+    #[test] fn test_sorted_with_int_nil_and_bool() { run_str("[true, 0, nil, -2, false, 0, 2, true, 1, false, -1, nil] . sort . print", "[-2, -1, nil, nil, false, false, 0, 0, true, true, 1, 2]\n"); }
+    #[test] fn test_sorted_with_long_and_short_str() { run_str("range(14) . map(fn(f) -> 'abcdefghijklmnop'[:1+f]) . reverse . sort . print", "['a', 'ab', 'abc', 'abcd', 'abcde', 'abcdef', 'abcdefg', 'abcdefgh', 'abcdefghi', 'abcdefghij', 'abcdefghijk', 'abcdefghijkl', 'abcdefghijklm', 'abcdefghijklmn']\n"); }
     #[test] fn test_group_by_int_negative() { run_str("group_by(-1, [1, 2, 3, 4]) . print", "ValueError: Expected value '-1: int' to be positive\n  at: line 1 (<test>)\n\n1 | group_by(-1, [1, 2, 3, 4]) . print\n2 |         ^^^^^^^^^^^^^^^^^^\n"); }
     #[test] fn test_group_by_int_zero() { run_str("group_by(0, [1, 2, 3, 4]) . print", "ValueError: Expected value '0: int' to be positive\n  at: line 1 (<test>)\n\n1 | group_by(0, [1, 2, 3, 4]) . print\n2 |         ^^^^^^^^^^^^^^^^^\n"); }
     #[test] fn test_group_by_int_by_one() { run_str("group_by(1, [1, 2, 3, 4]) . print", "[(1), (2), (3), (4)]\n"); }

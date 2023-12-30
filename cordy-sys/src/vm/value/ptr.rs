@@ -59,6 +59,12 @@ pub union ValuePtr {
 }
 
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum MemoryType {
+    Inline, Shared
+}
+
+
 const TAG_INT: usize       = 0b______00;
 const TAG_NIL: usize       = 0b__000_01;
 const TAG_BOOL: usize      = 0b__001_01;
@@ -278,6 +284,16 @@ impl ValuePtr {
         }
     }
 
+    #[inline(always)]
+    fn memory_ty(&self) -> MemoryType {
+        unsafe {
+            match self.tag & MASK_PTR {
+                TAG_PTR => MemoryType::Shared,
+                _ => MemoryType::Inline,
+            }
+        }
+    }
+
     // Utility, and efficient, functions for checking the type of inline or pointer values.
 
     pub const fn is_nil(&self) -> bool { (unsafe { self.tag } & MASK_NIL) == TAG_NIL }
@@ -334,13 +350,6 @@ impl ValuePtr {
         }
     }
 
-    pub fn as_mut_ref<T : OwnedValue>(&mut self) -> &mut T {
-        debug_assert!(self.is_owned());
-        unsafe {
-            &mut (*(self.as_ptr() as *mut Prefix<T>)).value
-        }
-    }
-
     /// Transmutes this `ValuePtr` into a `&T`, where `T` is a type compatible with `SharedPrefix`
     pub fn as_shared_ref<T: SharedValue>(&self) -> &SharedPrefix<T> {
         debug_assert!(self.is_shared()); // Any shared pointer type can be converted to a shared prefix.
@@ -372,12 +381,6 @@ impl ValuePtr {
         let cloned = copy.clone();
         std::mem::forget(copy);
         ValuePtr { tag: TAG_PTR | (Box::into_raw(cloned) as usize) }
-    }
-
-    /// Just increment the strong reference count, and then return a direct copy of the `ValuePtr`
-    unsafe fn clone_shared<T : SharedValue>(&self) -> ValuePtr {
-        self.as_shared_ref::<T>().inc_strong();
-        self.as_copy()
     }
 
     unsafe fn drop_owned<T: OwnedValue>(&self) {
@@ -412,36 +415,40 @@ impl Default for ValuePtr {
 impl Eq for ValuePtr {}
 impl PartialEq for ValuePtr {
     fn eq(&self, other: &Self) -> bool {
+        macro_rules! eq {
+            ($f:ident) => { self.$f() == other.$f() };
+        }
+
         let ty: Type = self.ty();
         ty == other.ty() && match ty {
-            // Inline types just need to check equality of value
             Type::Nil |
             Type::Bool |
             Type::Int |
             Type::NativeFunction => unsafe { self.tag == other.tag },
+
             Type::GetField |
             Type::ShortStr => unsafe { self.long_tag == other.long_tag },
-            // Owned types check equality based on their ref
-            Type::Complex => self.as_shared_ref::<Complex>() == other.as_shared_ref::<Complex>(),
-            Type::Range => self.as_shared_ref::<Range>() == other.as_shared_ref::<Range>(),
-            Type::Enumerate => self.as_shared_ref::<Enumerate>() == other.as_shared_ref::<Enumerate>(),
-            Type::PartialFunction => self.as_shared_ref::<PartialFunction>() == other.as_shared_ref::<PartialFunction>(),
-            Type::PartialNativeFunction => self.as_shared_ref::<PartialNativeFunction>() == other.as_shared_ref::<PartialNativeFunction>(),
-            Type::Slice => self.as_shared_ref::<Slice>() == other.as_shared_ref::<Slice>(),
-            Type::Error => self.as_ref::<RuntimeError>() == other.as_ref::<RuntimeError>(),
-            // Shared types check equality based on the shared ref
+
+            Type::Complex => eq!(as_complex),
+            Type::Range => eq!(as_range),
+            Type::Enumerate => eq!(as_enumerate),
+            Type::PartialFunction => eq!(as_partial_function),
+            Type::PartialNativeFunction => eq!(as_partial_native),
+            Type::Slice => eq!(as_slice),
             Type::LongStr => self.as_shared_ref::<String>() == other.as_shared_ref::<String>(),
-            Type::List => self.as_shared_ref::<ListImpl>() == other.as_shared_ref::<ListImpl>(),
-            Type::Set => self.as_shared_ref::<SetImpl>() == other.as_shared_ref::<SetImpl>(),
-            Type::Dict => self.as_shared_ref::<DictImpl>() == other.as_shared_ref::<DictImpl>(),
-            Type::Heap => self.as_shared_ref::<HeapImpl>() == other.as_shared_ref::<HeapImpl>(),
-            Type::Vector => self.as_shared_ref::<VectorImpl>() == other.as_shared_ref::<VectorImpl>(),
-            Type::Struct => self.as_shared_ref::<StructImpl>() == other.as_shared_ref::<StructImpl>(),
-            Type::StructType => self.as_shared_ref::<StructTypeImpl>() == other.as_shared_ref::<StructTypeImpl>(),
-            Type::Memoized => self.as_shared_ref::<MemoizedImpl>() == other.as_shared_ref::<MemoizedImpl>(),
-            Type::Function => self.as_shared_ref::<Function>() == other.as_shared_ref::<Function>(),
-            Type::Closure => self.as_shared_ref::<Closure>() == other.as_shared_ref::<Closure>(),
-            // Special types that are not checked for equality
+            Type::List => eq!(as_list),
+            Type::Set => eq!(as_set),
+            Type::Dict => eq!(as_dict),
+            Type::Heap => eq!(as_heap),
+            Type::Vector => eq!(as_vector),
+            Type::Struct => eq!(as_struct),
+            Type::StructType => eq!(as_struct_type),
+            Type::Memoized => eq!(as_memoized),
+            Type::Function => eq!(as_function),
+            Type::Closure => eq!(as_closure),
+
+            Type::Error => self.as_ref::<RuntimeError>() == other.as_ref::<RuntimeError>(),
+
             Type::Iter | Type::None | Type::Never => false,
         }
     }
@@ -453,41 +460,78 @@ impl PartialEq for ValuePtr {
 impl_partial_ord!(ValuePtr);
 impl Ord for ValuePtr {
     fn cmp(&self, other: &Self) -> Ordering {
-        let ty: Type = self.ty();
-        if ty != other.ty() {
-            return Ordering::Equal
+        macro_rules! cmp {
+            ($ty:ident, $inner:ident) => {
+                if other.ty() == Type::$ty { self.as_shared_ref::<$inner>().cmp(&other.as_shared_ref::<$inner>()) } else { Ordering::Equal }
+            };
         }
-        match ty {
-            // Inline types can directly compare the tag value. This works for all except ints and short strings
-            Type::Nil |
-            Type::Bool |
-            Type::NativeFunction |
-            Type::GetField => unsafe { self.tag.cmp(&other.tag) },
-            Type::Int => self.as_precise_int().cmp(&other.as_precise_int()),
-            Type::ShortStr => self.as_str_slice().cmp(other.as_str_slice()),
 
-            // Owned types check equality based on their ref
-            Type::Complex => self.as_shared_ref::<Complex>().cmp(other.as_shared_ref::<Complex>()),
-            Type::Range => self.as_shared_ref::<Range>().cmp(other.as_shared_ref::<Range>()),
-            Type::Enumerate => self.as_shared_ref::<Enumerate>().cmp(other.as_shared_ref::<Enumerate>()),
-            // Shared types check equality based on the shared ref
-            Type::LongStr => self.as_shared_ref::<String>().cmp(other.as_shared_ref::<String>()),
-            Type::List => self.as_shared_ref::<ListImpl>().cmp(other.as_shared_ref::<ListImpl>()),
-            Type::Set => self.as_shared_ref::<SetImpl>().cmp(other.as_shared_ref::<SetImpl>()),
-            Type::Dict => self.as_shared_ref::<DictImpl>().cmp(other.as_shared_ref::<DictImpl>()),
-            Type::Heap => self.as_shared_ref::<HeapImpl>().cmp(other.as_shared_ref::<HeapImpl>()),
-            Type::Vector => self.as_shared_ref::<VectorImpl>().cmp(other.as_shared_ref::<VectorImpl>()),
-            Type::Struct => self.as_shared_ref::<StructImpl>().cmp(other.as_shared_ref::<StructImpl>()),
-            // Function-like types are not checked for ordering
-            Type::StructType |
-            Type::Memoized |
-            Type::Function |
-            Type::PartialFunction |
-            Type::Closure |
-            Type::PartialNativeFunction |
-            Type::Slice => Ordering::Equal,
-            // Special types that are not checked for ordering
-            Type::Iter | Type::Error | Type::None | Type::Never => Ordering::Equal,
+        let ty: Type = self.ty();
+        match ty {
+            // Types that convert to int compare with their integral values, then by the ordinal of their type.
+            // => negative integers < nil < false < 0 < true < 1 < positive integers
+            //
+            // Note that `nil` is special in this case, and *does* coerce to `0`
+            //
+            // Complex numbers compare with their real component first, then their imaginary part
+            // Note that complex numbers will always have im != 0, and thus don't need to additionally order by the type
+            Type::Nil | Type::Bool | Type::Int => {
+                let lhs = match ty {
+                    Type::Nil => 0,
+                    Type::Bool => self.is_true() as i64,
+                    _ => self.as_precise_int()
+                };
+                let other_ty = other.ty();
+                match other.ty() {
+                    Type::Nil | Type::Bool | Type::Int => {
+                        let rhs = match other_ty {
+                            Type::Nil => 0,
+                            Type::Bool => other.is_true() as i64,
+                            _ => other.as_precise_int()
+                        };
+                        lhs.cmp(&rhs).then((ty as u8).cmp(&(other_ty as u8)))
+                    },
+                    Type::Complex => {
+                        let rhs = other.as_complex();
+                        lhs.cmp(&rhs.re).then(0.cmp(&rhs.im))
+                    },
+                    _ => Ordering::Equal,
+                }
+            },
+            Type::Complex => {
+                match other.ty() {
+                    Type::Nil | Type::Bool | Type::Int => other.cmp(self).reverse(),
+                    Type::Complex => {
+                        let lhs = self.as_complex();
+                        let rhs = self.as_complex();
+                        lhs.re.cmp(&rhs.re).then(lhs.im.cmp(&rhs.im))
+                    },
+                    _ => Ordering::Equal
+                }
+            },
+
+            // Strings order by length (ascending), then by natural ordering
+            // Type::ShortStr < Type::LongStr, then, by definition
+            Type::ShortStr | Type::LongStr => {
+                match other.ty() {
+                    Type::ShortStr | Type::LongStr => self.as_str_slice().cmp(other.as_str_slice()),
+                    _ => Ordering::Equal
+                }
+            }
+
+            // Other types first check the other type and require it is the same, and otherwise report unordered
+            // If the type is the same, they check the ordering between the same types
+            Type::Range => cmp!(Range, Range),
+            Type::Enumerate => cmp!(Enumerate, Enumerate),
+            Type::List => cmp!(List, ListImpl),
+            Type::Set => cmp!(Set, SetImpl),
+            Type::Dict => cmp!(Dict, DictImpl),
+            Type::Heap => cmp!(Heap, HeapImpl),
+            Type::Vector => cmp!(Vector, VectorImpl),
+            Type::Struct => cmp!(Struct, StructImpl),
+
+            // Any other types are not explicitly ordered
+            _ => Ordering::Equal
         }
     }
 }
@@ -502,38 +546,16 @@ impl Ord for ValuePtr {
 impl Clone for ValuePtr {
     fn clone(&self) -> Self {
         unsafe {
-            match self.ty() {
-                // Inline types
-                Type::Nil |
-                Type::Bool |
-                Type::Int |
-                Type::ShortStr |
-                Type::NativeFunction |
-                Type::GetField => self.as_copy(),
-                // Owned types
-                Type::Complex => self.clone_shared::<Complex>(),
-                Type::Range => self.clone_shared::<Range>(),
-                Type::Enumerate => self.clone_shared::<Enumerate>(),
-                Type::PartialFunction => self.clone_shared::<PartialFunction>(),
-                Type::PartialNativeFunction => self.clone_shared::<PartialNativeFunction>(),
-                Type::Slice => self.clone_shared::<Slice>(),
-                Type::Iter => self.clone_shared::<Iterable>(),
-                Type::Error => self.clone_owned::<RuntimeError>(),
-                // Shared types
-                Type::LongStr => self.clone_shared::<String>(),
-                Type::List => self.clone_shared::<ListImpl>(),
-                Type::Set => self.clone_shared::<SetImpl>(),
-                Type::Dict => self.clone_shared::<DictImpl>(),
-                Type::Heap => self.clone_shared::<HeapImpl>(),
-                Type::Vector => self.clone_shared::<VectorImpl>(),
-                Type::Struct => self.clone_shared::<StructImpl>(),
-                Type::StructType => self.clone_shared::<StructTypeImpl>(),
-                Type::Memoized => self.clone_shared::<MemoizedImpl>(),
-                Type::Function => self.clone_shared::<Function>(),
-                Type::Closure => self.clone_shared::<Closure>(),
-                // Special types
-                Type::None | Type::Never => ValuePtr::none(),
+            if self.memory_ty() == MemoryType::Shared {
+                // todo: fix this special case
+                if self.ty() == Type::Error {
+                    return self.clone_owned::<RuntimeError>()
+                }
+                // Shared memory types are able to copy by incrementing the strong reference count,
+                // and then just returning the same copy as inline types
+                self.as_shared_ref::<()>().inc_strong();
             }
+            self.as_copy()
         }
     }
 }
@@ -548,13 +570,6 @@ impl Drop for ValuePtr {
     fn drop(&mut self) {
         unsafe {
             match self.ty() {
-                Type::Nil |
-                Type::Bool |
-                Type::Int |
-                Type::ShortStr |
-                Type::NativeFunction |
-                Type::GetField => {},
-                // Owned types
                 Type::Complex => self.drop_shared::<Complex>(),
                 Type::Range => self.drop_shared::<Range>(),
                 Type::Enumerate => self.drop_shared::<Enumerate>(),
@@ -562,8 +577,6 @@ impl Drop for ValuePtr {
                 Type::PartialNativeFunction => self.drop_shared::<PartialNativeFunction>(),
                 Type::Slice => self.drop_shared::<Slice>(),
                 Type::Iter => self.drop_shared::<Iterable>(),
-                Type::Error => self.drop_owned::<RuntimeError>(),
-                // Shared types
                 Type::LongStr => self.drop_shared::<String>(),
                 Type::List => self.drop_shared::<ListImpl>(),
                 Type::Set => self.drop_shared::<SetImpl>(),
@@ -575,7 +588,10 @@ impl Drop for ValuePtr {
                 Type::Memoized => self.drop_shared::<MemoizedImpl>(),
                 Type::Function => self.drop_shared::<Function>(),
                 Type::Closure => self.drop_shared::<Closure>(),
-                Type::None | Type::Never => {}, // No drop behavior
+
+                Type::Error => self.drop_owned::<RuntimeError>(),
+
+                _ => {}
             }
         }
     }
@@ -586,34 +602,35 @@ impl Drop for ValuePtr {
 /// Again, for inline types we can just hash the tag directly.
 impl Hash for ValuePtr {
     fn hash<H: Hasher>(&self, state: &mut H) {
+        macro_rules! hash {
+            ($f:ident) => { self.$f().hash(state) };
+        }
         match self.ty() {
-            // Inline types
             Type::Nil |
             Type::Bool |
             Type::Int |
             Type::ShortStr |
             Type::NativeFunction |
             Type::GetField => unsafe { self.tag }.hash(state),
-            // Owned types
-            Type::Complex => self.as_shared_ref::<Complex>().hash(state),
-            Type::Enumerate => self.as_shared_ref::<Enumerate>().hash(state),
-            Type::PartialFunction => self.as_shared_ref::<PartialFunction>().hash(state),
-            Type::PartialNativeFunction => self.as_shared_ref::<PartialNativeFunction>().hash(state),
-            Type::Slice => self.as_shared_ref::<Slice>().hash(state),
-            // Shared types
-            Type::Range => self.as_shared_ref::<Range>().hash(state),
+
+            Type::Complex => hash!(as_complex),
+            Type::Enumerate => hash!(as_enumerate),
+            Type::PartialFunction => hash!(as_partial_function),
+            Type::PartialNativeFunction => hash!(as_partial_native),
+            Type::Slice => hash!(as_slice),
+            Type::Range => hash!(as_range),
             Type::LongStr => self.as_shared_ref::<String>().hash(state),
-            Type::List => self.as_shared_ref::<ListImpl>().hash(state),
-            Type::Set => self.as_shared_ref::<SetImpl>().hash(state),
-            Type::Dict => self.as_shared_ref::<DictImpl>().hash(state),
-            Type::Heap => self.as_shared_ref::<HeapImpl>().hash(state),
-            Type::Vector => self.as_shared_ref::<VectorImpl>().hash(state),
-            Type::Struct => self.as_shared_ref::<StructImpl>().hash(state),
-            Type::StructType => self.as_shared_ref::<StructTypeImpl>().hash(state),
-            Type::Memoized => self.as_shared_ref::<MemoizedImpl>().hash(state),
-            Type::Function => self.as_shared_ref::<Function>().hash(state),
-            Type::Closure => self.as_shared_ref::<Closure>().hash(state),
-            // Special types with no hash behavior
+            Type::List => hash!(as_list),
+            Type::Set => hash!(as_set),
+            Type::Dict => hash!(as_dict),
+            Type::Heap => hash!(as_heap),
+            Type::Vector => hash!(as_vector),
+            Type::Struct => hash!(as_struct),
+            Type::StructType => hash!(as_struct_type),
+            Type::Memoized => hash!(as_memoized),
+            Type::Function => hash!(as_function),
+            Type::Closure => hash!(as_closure),
+
             Type::Iter | Type::Error | Type::None | Type::Never => {},
         }
     }
@@ -623,6 +640,9 @@ impl Hash for ValuePtr {
 /// `Debug` is fairly straightforward - inline types have a easy, single-line value, and all other types simply call `.fmt()` on the `as_ref()` type.
 impl Debug for ValuePtr {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        macro_rules! fmt {
+            ($f:ident) => { Debug::fmt(self.$f(), f) };
+        }
         match self.ty() {
             Type::Nil => write!(f, "Nil"),
             Type::Bool => Debug::fmt(&self.as_bool(), f),
@@ -630,27 +650,26 @@ impl Debug for ValuePtr {
             Type::ShortStr => Debug::fmt(&self.as_str_slice(), f),
             Type::NativeFunction => Debug::fmt(&self.as_native(), f),
             Type::GetField => f.debug_struct("GetField").field("field_index", &self.as_field()).finish(),
-            // Owned types
-            Type::Complex => Debug::fmt(self.as_shared_ref::<Complex>(), f),
-            Type::Enumerate => Debug::fmt(self.as_shared_ref::<Enumerate>(), f),
-            Type::PartialFunction => Debug::fmt(self.as_shared_ref::<PartialFunction>(), f),
-            Type::PartialNativeFunction => Debug::fmt(self.as_shared_ref::<PartialNativeFunction>(), f),
-            Type::Slice => Debug::fmt(self.as_shared_ref::<Slice>(), f),
-            Type::Error => Debug::fmt(self.as_ref::<RuntimeError>(), f),
-            // Shared types
-            Type::Range => Debug::fmt(self.as_shared_ref::<Range>(), f),
+
+            Type::Complex => fmt!(as_complex),
+            Type::Enumerate => fmt!(as_enumerate),
+            Type::PartialFunction => fmt!(as_partial_function),
+            Type::PartialNativeFunction => fmt!(as_partial_native),
+            Type::Slice => fmt!(as_slice),
+            Type::Range => fmt!(as_range),
             Type::LongStr => Debug::fmt(self.as_shared_ref::<String>(), f),
-            Type::List => Debug::fmt(self.as_shared_ref::<ListImpl>(), f),
-            Type::Set => Debug::fmt(self.as_shared_ref::<SetImpl>(), f),
-            Type::Dict => Debug::fmt(self.as_shared_ref::<DictImpl>(), f),
-            Type::Heap => Debug::fmt(self.as_shared_ref::<HeapImpl>(), f),
-            Type::Vector => Debug::fmt(self.as_shared_ref::<VectorImpl>(), f),
-            Type::Struct => Debug::fmt(self.as_shared_ref::<StructImpl>(), f),
-            Type::StructType => Debug::fmt(self.as_shared_ref::<StructTypeImpl>(), f),
-            Type::Memoized => Debug::fmt(self.as_shared_ref::<MemoizedImpl>(), f),
-            Type::Function => Debug::fmt(self.as_shared_ref::<Function>(), f),
-            Type::Closure => Debug::fmt(self.as_shared_ref::<Closure>(), f),
-            // Special types with no hash behavior
+            Type::List => fmt!(as_list),
+            Type::Set => fmt!(as_set),
+            Type::Dict => fmt!(as_dict),
+            Type::Heap => fmt!(as_heap),
+            Type::Vector => fmt!(as_vector),
+            Type::Struct => fmt!(as_struct),
+            Type::StructType => fmt!(as_struct_type),
+            Type::Memoized => fmt!(as_memoized),
+            Type::Function => fmt!(as_function),
+            Type::Closure => fmt!(as_closure),
+
+            Type::Error => Debug::fmt(self.as_ref::<RuntimeError>(), f),
             Type::Iter => write!(f, "Iter"),
             Type::None => write!(f, "None"),
             Type::Never => write!(f, "Never"),
@@ -940,7 +959,7 @@ mod tests {
     }
 
     #[test]
-    fn test_inline_nil() {
+    fn test_nil() {
         let ptr = ValuePtr::nil();
         assert!(ptr.is_nil());
         assert!(!ptr.is_bool());
@@ -956,7 +975,7 @@ mod tests {
     }
 
     #[test]
-    fn test_inline_true() {
+    fn test_true() {
         let ptr = true.to_value();
         assert!(!ptr.is_nil());
         assert!(ptr.is_bool());
@@ -975,7 +994,7 @@ mod tests {
     }
 
     #[test]
-    fn test_inline_false() {
+    fn test_false() {
         let ptr = false.to_value();
         assert!(!ptr.is_nil());
         assert!(ptr.is_bool());
@@ -994,7 +1013,7 @@ mod tests {
     }
 
     #[test]
-    fn test_inline_int() {
+    fn test_int() {
         for int in -25i64..25 {
             let ptr = int.to_value();
             assert!(!ptr.is_nil());
@@ -1031,7 +1050,7 @@ mod tests {
     }
 
     #[test]
-    fn test_inline_int_compare() {
+    fn test_int_compare() {
         let neg1 = (-1i64).to_value();
         let one = 1i64.to_value();
         let two = 2i64.to_value();
@@ -1050,13 +1069,13 @@ mod tests {
     }
 
     #[test]
-    fn test_inline_int_out_of_bounds() {
+    fn test_int_out_of_bounds() {
         assert_eq!((MIN_INT - 1).to_value().as_int(), MAX_INT);
         assert_eq!((MAX_INT + 1).to_value().as_int(), MIN_INT);
     }
 
     #[test]
-    fn test_inline_native_function() {
+    fn test_native_function() {
         for f in 0..NativeFunction::total() {
             let f: NativeFunction = unsafe { std::mem::transmute(f as u8) };
             let ptr = f.to_value();
@@ -1076,7 +1095,7 @@ mod tests {
     }
 
     #[test]
-    fn test_inline_none() {
+    fn test_none() {
         let ptr = ValuePtr::none();
 
         assert!(!ptr.is_nil());
@@ -1092,7 +1111,7 @@ mod tests {
     }
 
     #[test]
-    fn test_owned_complex() {
+    fn test_complex() {
         let ptr = ComplexValue::new(1, 2).to_value();
 
         assert!(!ptr.is_nil());
@@ -1105,11 +1124,11 @@ mod tests {
         assert!(!ptr.is_owned());
         assert!(ptr.is_shared());
         assert_eq!(ptr.ty(), Type::Complex);
-        assert_eq!(format!("{:?}", ptr), "Complex(Complex { re: 1, im: 2 })");
+        assert_eq!(format!("{:?}", ptr), "Complex { re: 1, im: 2 }");
     }
 
     #[test]
-    fn test_owned_complex_clone_eq() {
+    fn test_complex_clone_eq() {
         let c0 = ValuePtr::nil();
         let c1 = ComplexValue::new(1, 2).to_value();
         let c2 = ComplexValue::new(1, 3).to_value();
@@ -1122,7 +1141,7 @@ mod tests {
     }
 
     #[test]
-    fn test_shared_str() {
+    fn test_str() {
         let ptr = "hello world".to_value();
 
         assert!(!ptr.is_nil());
@@ -1139,7 +1158,7 @@ mod tests {
     }
 
     #[test]
-    fn test_shared_mut_vec_eq() {
+    fn test_vec_eq() {
         let ptr1 = vec![].to_value();
         let ptr2 = vec![].to_value();
 
@@ -1148,7 +1167,7 @@ mod tests {
     }
 
     #[test]
-    fn test_shared_mut_vec_clone() {
+    fn test_vec_clone() {
         let ptr = vec![].to_value();
 
         assert_eq!(ptr, ptr.clone());
@@ -1157,7 +1176,7 @@ mod tests {
 
     #[test]
     #[should_panic]
-    fn test_shared_mut_vec_two_mutable_borrow_panic() {
+    fn test_vec_two_mutable_borrow_panic() {
         let ptr = vec![].to_value();
 
         let _r1 = ptr.as_vector().borrow_mut();
@@ -1166,7 +1185,7 @@ mod tests {
 
     #[test]
     #[should_panic]
-    fn test_shared_mut_vec_mutable_and_normal_borrow_panic() {
+    fn test_vec_mutable_and_normal_borrow_panic() {
         let ptr = vec![].to_value();
 
         let _r1 = ptr.as_vector().borrow();
@@ -1174,7 +1193,7 @@ mod tests {
     }
 
     #[test]
-    fn test_shared_mut_vec_multiple_borrow_no_panic() {
+    fn test_vec_multiple_borrow_no_panic() {
         let ptr = vec![].to_value();
 
         let _r1 = ptr.as_vector().borrow();
