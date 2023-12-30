@@ -1,6 +1,6 @@
 use crate::compiler::scanner::ScanToken;
 use crate::reporting::{AsErrorWithContext, Location};
-use crate::vm::RuntimeError;
+use crate::vm::ErrorPtr;
 
 use ParserErrorType::{*};
 
@@ -122,5 +122,5 @@ pub enum ParserErrorType {
     UnrollNotAllowedInSlice,
     UnrollNotAllowedInPartialOperator,
 
-    Runtime(Box<RuntimeError>),
+    Runtime(ErrorPtr),
 }

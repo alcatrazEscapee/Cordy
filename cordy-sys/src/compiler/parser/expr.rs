@@ -1,7 +1,7 @@
 use crate::compiler::parser::semantic::{LValue, LValueReference};
 use crate::core::NativeFunction;
 use crate::reporting::Location;
-use crate::vm::{ComplexValue, LiteralType, Opcode, RuntimeError, Type, ValuePtr, ValueResult};
+use crate::vm::{ComplexValue, ErrorPtr, LiteralType, Opcode, Type, ValuePtr, ValueResult};
 use crate::vm::operator::{BinaryOp, CompareOp, UnaryOp};
 
 
@@ -63,7 +63,7 @@ pub enum ExprType {
     PatternAssignment(LValue, ExprPtr),
 
     // Error
-    RuntimeError(Box<RuntimeError>),
+    RuntimeError(ErrorPtr),
 }
 
 
@@ -146,14 +146,14 @@ impl Expr {
         }
     }
 
-    pub fn error(loc: Location, error: Box<RuntimeError>) -> Expr {
+    pub fn error(loc: Location, error: ErrorPtr) -> Expr {
         Expr(loc, ExprType::RuntimeError(error))
     }
 
     pub fn value_result(loc: Location, value: ValueResult) -> Expr {
         match value.as_result() {
             Ok(value) => Expr::value(value),
-            Err(e) => Expr::error(loc, Box::new(e.value)),
+            Err(e) => Expr::error(loc, e),
         }
     }
 

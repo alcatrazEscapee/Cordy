@@ -6,7 +6,7 @@ use std::rc::Rc;
 
 use crate::core::{NativeFunction, PartialArgument};
 use crate::vm::{IntoValue, ValuePtr};
-use crate::vm::value::ptr::SharedPrefix;
+use crate::vm::value::ptr::Prefix;
 use crate::vm::value::RecursionGuard;
 
 
@@ -228,7 +228,7 @@ impl Closure {
     }
 }
 
-impl SharedPrefix<Closure> {
+impl Prefix<Closure> {
     pub fn borrow_func(&self) -> &Function {
         unsafe {
             // SAFETY: We only hand out immutable references to `self.func`, and only ever mutate `self.environment`

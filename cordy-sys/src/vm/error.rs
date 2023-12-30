@@ -1,8 +1,8 @@
 use crate::core::NativeFunction;
 use crate::reporting::{AsError, AsErrorWithContext, Location, SourceView};
-use crate::vm::{CallFrame, IntoValue, Type, ValueResult};
+use crate::vm::{CallFrame, ErrorPtr, IntoValue, ValueResult};
 use crate::vm::operator::{BinaryOp, UnaryOp};
-use crate::vm::value::{Function, Prefix, ValuePtr};
+use crate::vm::value::{Function, ValuePtr};
 
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -69,9 +69,9 @@ pub enum RuntimeError {
     TypeErrorArgMustBeReplaceFunction(ValuePtr),
 }
 
-impl<T> From<RuntimeError> for Result<T, Box<Prefix<RuntimeError>>> {
+impl<T> From<RuntimeError> for Result<T, ErrorPtr> {
     fn from(value: RuntimeError) -> Self {
-        Err(Box::new(Prefix::new(Type::Error, value)))
+        Err(ErrorPtr::new(value.to_value()))
     }
 }
 
@@ -87,7 +87,7 @@ impl RuntimeError {
         E::from(self)
     }
 
-    pub fn with_stacktrace(self, ip: usize, call_stack: &[CallFrame], constants: &[ValuePtr], locations: &[Location]) -> DetailRuntimeError {
+    pub fn with_stacktrace(error: ErrorPtr, ip: usize, call_stack: &[CallFrame], constants: &[ValuePtr], locations: &[Location]) -> DetailRuntimeError {
         const REPEAT_LIMIT: usize = 3;
 
         // Top level stack frame refers to the code being executed
@@ -125,14 +125,14 @@ impl RuntimeError {
             stack.push(StackFrame::Repeat(prev_count - REPEAT_LIMIT))
         }
 
-        DetailRuntimeError { error: self, target, stack }
+        DetailRuntimeError { error, target, stack }
     }
 }
 
 /// A `RuntimeError` with a filled-in stack trace, and source location which caused the error.
 #[derive(Debug)]
 pub struct DetailRuntimeError {
-    error: RuntimeError,
+    error: ErrorPtr,
     target: Location,
 
     /// The stack trace elements, including a location (typically of the function call), and the function name itself
@@ -147,7 +147,7 @@ enum StackFrame {
 
 impl AsError for DetailRuntimeError {
     fn as_error(&self) -> String {
-        self.error.as_error()
+        self.error.as_err().as_error()
     }
 }
 

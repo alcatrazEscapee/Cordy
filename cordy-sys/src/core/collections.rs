@@ -228,7 +228,7 @@ pub fn sort_by<VM : VirtualInterface>(vm: &mut VM, by: ValuePtr, args: ValuePtr)
                 util::catch(&mut err, ||
                     Ok(by.invoke(a.clone(), b.clone(), vm)?.check_int()?.as_int().cmp(&0)), Ordering::Equal));
             if let Some(err) = err {
-                return err.value.err();
+                return ValueResult::from(err);
             }
         },
         Some(1) => {
@@ -238,7 +238,7 @@ pub fn sort_by<VM : VirtualInterface>(vm: &mut VM, by: ValuePtr, args: ValuePtr)
                 util::catch(&mut err, ||
                     by.invoke(a.clone(), vm).as_result(), ValuePtr::nil()));
             if let Some(err) = err {
-                return err.value.err();
+                return ValueResult::from(err);
             }
         },
         Some(_) => return TypeErrorArgMustBeCmpOrKeyFunction(by).err(),

@@ -2,7 +2,7 @@ use std::io;
 use std::io::{BufRead, Read};
 use std::ops::{ControlFlow, Try};
 
-use crate::vm::{ErrorResult, Prefix, RuntimeError};
+use crate::vm::{ErrorPtr, ErrorResult};
 
 pub fn strip_line_ending(buffer: &mut String) {
     if buffer.ends_with('\n') {
@@ -17,7 +17,7 @@ pub fn strip_line_ending(buffer: &mut String) {
 ///
 /// N.B. This did not work without specifying the types `Box<RuntimeError>` exactly. I do not know why.
 #[inline(always)]
-pub fn catch<T>(err: &mut Option<Box<Prefix<RuntimeError>>>, f: impl FnOnce() -> ErrorResult<T>, default: T) -> T {
+pub fn catch<T>(err: &mut Option<ErrorPtr>, f: impl FnOnce() -> ErrorResult<T>, default: T) -> T {
     match f().branch() {
         ControlFlow::Continue(e) => e,
         ControlFlow::Break(Err(e)) => {

@@ -437,7 +437,7 @@ impl AsError for ParserError {
             UnrollNotAllowedInSlice => String::from("Unrolled expression with '...' not allowed in slice literal"),
             UnrollNotAllowedInPartialOperator => String::from("Unrolled expression with '...' not allowed to be attached to a implicit partially-evaluated operator"),
 
-            Runtime(e) => e.as_error(),
+            Runtime(e) => e.as_err().as_error(),
         }
     }
 }

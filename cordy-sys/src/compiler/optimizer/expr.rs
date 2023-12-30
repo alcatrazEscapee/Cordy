@@ -1,7 +1,7 @@
 use crate::compiler::optimizer::Optimize;
 use crate::compiler::parser::{Expr, ExprType};
 use crate::core::NativeFunction;
-use crate::vm::{IntoValue, LiteralType, MAX_INT, MIN_INT, RuntimeError, ValuePtr};
+use crate::vm::{ErrorPtr, IntoValue, LiteralType, MAX_INT, MIN_INT, RuntimeError, ValuePtr};
 use crate::vm::operator::BinaryOp;
 
 
@@ -117,7 +117,7 @@ impl Optimize for Expr {
                     Expr(_, ExprType::Literal(LiteralType::List, mut args)) if !any_unroll(&args) => {
                         let nargs: usize = args.len();
                         if nargs != 1 {
-                            Expr::error(loc, Box::new(RuntimeError::ValueErrorEvalListMustHaveUnitLength(nargs)))
+                            Expr::error(loc, ErrorPtr::new(RuntimeError::ValueErrorEvalListMustHaveUnitLength(nargs).to_value()))
                         } else {
                             let index: Expr = args.swap_remove(0);
                             arg.index(loc, index)

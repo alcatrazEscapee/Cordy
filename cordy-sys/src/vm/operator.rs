@@ -2,9 +2,9 @@ use std::collections::VecDeque;
 
 use crate::core;
 use crate::core::NativeFunction;
-use crate::vm::{ComplexValue, ErrorResult, Type, ValuePtr, ValueResult};
+use crate::vm::{ComplexValue, ErrorPtr, ErrorResult, Type, ValuePtr, ValueResult};
 use crate::vm::error::RuntimeError;
-use crate::vm::value::{IntoIterableValue, IntoValue, Prefix};
+use crate::vm::value::{IntoIterableValue, IntoValue};
 
 use RuntimeError::{*};
 use Type::{*};
@@ -402,7 +402,7 @@ type BinaryFn = fn(ValuePtr, ValuePtr) -> ValueResult;
 pub fn apply_vector_unary(vector: ValuePtr, unary_op: UnaryFn) -> ValueResult {
     vector.as_vector().borrow().vector.iter()
         .map(|v| unary_op(v.clone()))
-        .collect::<Result<Vec<ValuePtr>, Box<Prefix<RuntimeError>>>>()?
+        .collect::<Result<Vec<ValuePtr>, ErrorPtr>>()?
         .to_value()
         .ok()
 }
@@ -411,7 +411,7 @@ fn apply_vector_binary(lhs: ValuePtr, rhs: ValuePtr, binary_op: BinaryFn) -> Val
     lhs.as_vector().borrow().vector.iter()
         .zip(rhs.as_vector().borrow().vector.iter())
         .map(|(l, r)| binary_op(l.clone(), r.clone()))
-        .collect::<Result<Vec<ValuePtr>, Box<Prefix<RuntimeError>>>>()?
+        .collect::<Result<Vec<ValuePtr>, ErrorPtr>>()?
         .to_value()
         .ok()
 }

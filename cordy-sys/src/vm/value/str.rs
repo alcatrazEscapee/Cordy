@@ -3,10 +3,10 @@ use std::iter::FusedIterator;
 use std::str::Chars;
 
 use crate::vm::{Type, ValuePtr};
-use crate::vm::value::{ConstValue, SharedValue};
+use crate::vm::value::{ConstValue, Value};
 
 
-impl SharedValue for String {}
+impl Value for String {}
 impl ConstValue for String {}
 
 
@@ -132,7 +132,7 @@ impl ValuePtr {
     /// Don't expose this (or `as_short_str`), only interact through `&str`
     fn as_long_str(&self) -> &String {
         debug_assert!(self.is_long_str());
-        self.as_shared_ref::<String>().borrow_const()
+        self.as_prefix::<String>().borrow_const()
     }
 
     fn is_long_str(&self) -> bool {
@@ -173,7 +173,7 @@ mod tests {
 
     #[test]
     fn test_raw_empty_str() {
-        let empty_str = ValuePtr::empty_str();
+        let empty_str = ValuePtr::str();
 
         assert_eq!(empty_str.as_str_slice(), "");
         assert!(empty_str.is_str());

@@ -13,7 +13,7 @@ use crate::core::Pattern;
 
 pub use crate::vm::error::{DetailRuntimeError, RuntimeError};
 pub use crate::vm::opcode::{Opcode, StoreOp};
-pub use crate::vm::value::{AnyResult, ErrorResult, Function, guard_recursive_hash, IntoDictValue, IntoIterableValue, IntoValue, Iterable, LiteralType, MAX_INT, MIN_INT, Prefix, StructTypeImpl, Type, ValueOption, ValuePtr, ValueResult, Method, ComplexValue, PartialNativeFunction};
+pub use crate::vm::value::{AnyResult, ErrorPtr, ErrorResult, Function, guard_recursive_hash, IntoDictValue, IntoIterableValue, IntoValue, Iterable, LiteralType, MAX_INT, MIN_INT, StructTypeImpl, Type, ValueOption, ValuePtr, ValueResult, Method, ComplexValue, PartialNativeFunction};
 
 use Opcode::{*};
 use RuntimeError::{*};
@@ -73,11 +73,13 @@ impl ExitType {
     }
 
     fn of<R: BufRead, W: Write, F : FunctionInterface>(vm: &VirtualMachine<R, W, F>, result: AnyResult) -> ExitType {
-        match result.map_err(|e| e.value) {
+        match result {
             Ok(_) => ExitType::Return,
-            Err(RuntimeExit) => ExitType::Exit,
-            Err(RuntimeYield) => ExitType::Yield,
-            Err(error) => ExitType::Error(error.with_stacktrace(vm.ip - 1, &vm.call_stack, &vm.constants, &vm.locations)),
+            Err(error) => match error.as_err() {
+                RuntimeExit => ExitType::Exit,
+                RuntimeYield => ExitType::Yield,
+                _ => ExitType::Error(RuntimeError::with_stacktrace(error, vm.ip - 1, &vm.call_stack, &vm.constants, &vm.locations))
+            },
         }
     }
 }
