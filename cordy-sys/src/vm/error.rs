@@ -2,7 +2,7 @@ use crate::core::NativeFunction;
 use crate::reporting::{AsError, AsErrorWithContext, Location, SourceView};
 use crate::vm::{CallFrame, IntoValue, Type, ValueResult};
 use crate::vm::operator::{BinaryOp, UnaryOp};
-use crate::vm::value::{FunctionImpl, Prefix, ValuePtr};
+use crate::vm::value::{Function, Prefix, ValuePtr};
 
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -14,7 +14,7 @@ pub enum RuntimeError {
 
     ValueIsNotFunctionEvaluable(ValuePtr),
 
-    IncorrectArgumentsUserFunction(FunctionImpl, u32),
+    IncorrectArgumentsUserFunction(Function, u32),
     IncorrectArgumentsNativeFunction(NativeFunction, u32),
     IncorrectArgumentsGetField(String, u32),
     IncorrectArgumentsStruct(String, u32),
@@ -87,7 +87,7 @@ impl RuntimeError {
         E::from(self)
     }
 
-    pub fn with_stacktrace(self, ip: usize, call_stack: &[CallFrame], functions: &[ValuePtr], locations: &[Location]) -> DetailRuntimeError {
+    pub fn with_stacktrace(self, ip: usize, call_stack: &[CallFrame], constants: &[ValuePtr], locations: &[Location]) -> DetailRuntimeError {
         const REPEAT_LIMIT: usize = 3;
 
         // Top level stack frame refers to the code being executed
@@ -113,7 +113,7 @@ impl RuntimeError {
                 }
 
                 if prev_count <= REPEAT_LIMIT {
-                    stack.push(StackFrame::Simple(frame_ip, locations[frame_ip], find_owning_function(prev_ip, functions)));
+                    stack.push(StackFrame::Simple(frame_ip, locations[frame_ip], find_owning_function(prev_ip, constants)));
                 }
 
                 prev_frame = Some((frame_ip, prev_ip));
@@ -167,14 +167,16 @@ impl AsErrorWithContext for DetailRuntimeError {
 }
 
 
-/// The owning function for a given IP can be defined as the closest function which encloses the desired instruction
-/// We annotate both head and tail of `FunctionImpl` to make this search easy
-fn find_owning_function(ip: usize, functions: &[ValuePtr]) -> String {
-    functions.iter()
-        .filter(|f| f.is_function())
-        .map(|f| f.as_function().borrow_const())
-        .filter(|f| f.head <= ip && ip <= f.tail)
-        .min_by_key(|f| f.tail - f.head)
-        .map(|f| f.repr())
+fn find_owning_function(ip: usize, constants: &[ValuePtr]) -> String {
+    constants.iter()
+        .find_map(|ptr| {
+            if ptr.is_function() {
+                let f = ptr.as_function().borrow_const();
+                if f.contains_ip(ip) {
+                    return Some(f.to_repr_str())
+                }
+            }
+            None
+        })
         .unwrap_or_else(|| String::from("<script>"))
 }

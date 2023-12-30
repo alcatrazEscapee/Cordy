@@ -3,11 +3,10 @@ use std::cell::Cell;
 use std::cmp::{Ordering, Reverse};
 use std::collections::{BinaryHeap, HashMap, VecDeque};
 use std::convert::Infallible;
-use std::fmt::{Debug, Formatter};
+use std::fmt::Debug;
 use std::hash::{Hash, Hasher};
 use std::iter::{FromIterator, FusedIterator};
 use std::ops::{ControlFlow, FromResidual, Try};
-use std::rc::Rc;
 use fxhash::FxBuildHasher;
 use indexmap::{IndexMap, IndexSet};
 use itertools::Itertools;
@@ -26,6 +25,7 @@ use crate::vm::value::complex::Complex;
 
 pub use crate::vm::value::ptr::{MAX_INT, MIN_INT, Prefix, ValuePtr};
 pub use crate::vm::value::complex::ComplexValue;
+pub use crate::vm::value::func::{Closure, Function, PartialFunction, PartialNativeFunction, UpValue};
 
 use RuntimeError::{*};
 
@@ -35,6 +35,7 @@ pub type AnyResult = ErrorResult<()>;
 
 mod ptr;
 mod str;
+mod func;
 mod range;
 mod slice;
 mod complex;
@@ -76,11 +77,11 @@ pub enum Type {
 
 impl Type {
     fn is_owned(&self) -> bool {
-        matches!(self, Type::PartialFunction | Type::PartialNativeFunction | Type::Iter | Type::Error)
+        matches!(self, Type::PartialNativeFunction | Type::Iter | Type::Error)
     }
 
     fn is_shared(&self) -> bool {
-        matches!(self, Type::Complex | Type::LongStr | Type::List | Type::Set | Type::Dict | Type::Heap | Type::Vector | Type::Function | Type::Closure | Type::Memoized | Type::Struct | Type::StructType | Type::Range | Type::Enumerate | Type::Slice)
+        matches!(self, Type::PartialFunction | Type::Complex | Type::LongStr | Type::List | Type::Set | Type::Dict | Type::Heap | Type::Vector | Type::Function | Type::Closure | Type::Memoized | Type::Struct | Type::StructType | Type::Range | Type::Enumerate | Type::Slice)
     }
 }
 
@@ -275,29 +276,6 @@ impl FromIterator<ValueResult> for ErrorResult<Vec<ValuePtr>> {
 }
 
 
-/// Like `ValueOption` or `ValueResult`, this is a type indicating that the underlying `ValuePtr` has a specific form. In this case, it **must** be a `Type::Function` or `Type::Closure`, and provides methods to unbox the underlying `FunctionImpl`
-#[derive(Debug, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
-pub struct ValueFunction {
-    ptr: ValuePtr
-}
-
-impl ValueFunction {
-    pub fn new(ptr: ValuePtr) -> ValueFunction {
-        debug_assert!(ptr.is_function() || ptr.is_closure());
-        ValueFunction { ptr }
-    }
-
-    /// Returns a reference to the function of this pointer.
-    pub fn get(&self) -> &FunctionImpl {
-        self.ptr.get_function()
-    }
-
-    pub fn inner(self) -> ValuePtr {
-        self.ptr
-    }
-}
-
-
 impl ValuePtr {
 
     // Constructors
@@ -306,12 +284,8 @@ impl ValuePtr {
         ptr::from_field(field)
     }
 
-    pub fn partial(func: ValuePtr, args: Vec<ValuePtr>) -> ValuePtr {
-        PartialFunctionImpl { func: ValueFunction::new(func), args }.to_value()
-    }
-
     pub fn partial_native(func: NativeFunction, partial: PartialArgument) -> ValuePtr {
-        PartialNativeFunctionImpl { func, partial }.to_value()
+        PartialNativeFunction { func, partial }.to_value()
     }
 
     pub fn instance(owner: ValuePtr, values: Vec<ValuePtr>) -> ValuePtr {
@@ -331,11 +305,11 @@ impl ValuePtr {
     fn safe_to_str(&self, rc: &mut RecursionGuard) -> Cow<str> {
         match self.ty() {
             Type::ShortStr | Type::LongStr => Cow::from(self.as_str_slice()),
-            Type::Function => Cow::from(&self.as_function().borrow_const().name),
-            Type::PartialFunction => self.as_partial_function_ref().func.ptr.safe_to_str(rc),
+            Type::Function => Cow::from(self.as_function().borrow_const().name()),
+            Type::PartialFunction => self.as_partial_function().borrow_const().to_str(rc),
             Type::NativeFunction => Cow::from(self.as_native().name()),
             Type::PartialNativeFunction => Cow::from(self.as_partial_native_ref().func.name()),
-            Type::Closure => Cow::from(self.as_closure().borrow().func.get().name.clone()),
+            Type::Closure => Cow::from(self.as_closure().borrow_func().name().to_string()),
             _ => self.safe_to_repr_str(rc),
         }
     }
@@ -428,28 +402,22 @@ impl ValuePtr {
 
             Type::GetField => Cow::from("(->)"),
 
-            Type::Function => Cow::from(self.as_function().borrow_const().repr()),
-            Type::PartialFunction => self.as_partial_function_ref().func.ptr.safe_to_repr_str(rc),
+            Type::Function => Cow::from(self.as_function().borrow_const().to_repr_str()),
+            Type::PartialFunction => self.as_partial_function().borrow_const().to_repr_str(rc),
             Type::NativeFunction => Cow::from(self.as_native().repr()),
             Type::PartialNativeFunction => Cow::from(self.as_partial_native_ref().func.repr()),
-            Type::Closure => Cow::from(self.as_closure().borrow().func.get().repr()),
+            Type::Closure => Cow::from(self.as_closure().borrow_func().to_repr_str()),
 
             Type::Error | Type::None | Type::Never => unreachable!(),
         }
     }
 
     /// Returns the inner user function, either from a `Function` or `Closure` type
-    pub fn get_function(&self) -> &FunctionImpl {
+    pub fn as_function_or_closure(&self) -> &Function {
         match self.is_function() {
             true => self.as_function().borrow_const(),
             false => self.as_closure().borrow_func(),
         }
-    }
-
-    /// Converts a `Function` into a new empty `Closure`
-    pub fn to_closure(self) -> ValuePtr {
-        debug_assert!(self.is_function());
-        ClosureImpl { func: ValueFunction::new(self), environment: Vec::new() }.to_value()
     }
 
     /// Represents the type of this `Value`. This is used for runtime error messages,
@@ -572,13 +540,10 @@ impl ValuePtr {
     pub fn min_nargs(&self) -> Option<u32> {
         match self.ty() {
             Type::Function => Some(self.as_function().borrow_const().min_args()),
-            Type::PartialFunction => {
-                let it = self.as_partial_function_ref();
-                Some(it.func.get().min_args() - it.args.len() as u32)
-            },
+            Type::PartialFunction => Some(self.as_partial_function().borrow_const().min_nargs()),
             Type::NativeFunction => Some(self.as_native().min_nargs()),
             Type::PartialNativeFunction => Some(self.as_partial_native_ref().partial.min_nargs()),
-            Type::Closure => Some(self.as_closure().borrow().func.get().min_args()),
+            Type::Closure => Some(self.as_closure().borrow_func().min_args()),
             Type::StructType => Some(self.as_struct_type().borrow_const().num_fields()),
             Type::Slice => Some(1),
             _ => None,
@@ -615,10 +580,9 @@ impl ValuePtr {
                     Some(offset) if owner.is_instance_method(offset) => {
                         // Method was an instance method, so we can access it
                         // We need to bind the self instance to the method in a partial eval
-                        ValuePtr::partial(
-                            owner.get_method(offset, constants),
-                            vec![self.clone()]
-                        ).ok()
+                        owner.get_method(offset, constants)
+                            .to_partial(vec![self.clone()])
+                            .ok()
                     }
                     _ => err_field_not_found(it.get_constructor(), fields, field_index, true, true)
                 }
@@ -787,12 +751,13 @@ impl SharedValue for () {}
 // Cannot implement for `ComplexImpl` because we need a specialized to_value() which may convert to int
 //impl_owned_value!(Type::Range, Range, as_range, as_range_ref, is_range);
 //impl_owned_value!(Type::Enumerate, Enumerate, as_enumerate, as_enumerate_ref, is_enumerate);
-impl_owned_value!(Type::PartialFunction, PartialFunctionImpl, as_partial_function, as_partial_function_ref, is_partial_function);
-impl_owned_value!(Type::PartialNativeFunction, PartialNativeFunctionImpl, as_partial_native, as_partial_native_ref, is_partial_native);
+//impl_owned_value!(Type::PartialFunction, PartialFunctionImpl, as_partial_function, as_partial_function_ref, is_partial_function);
+impl_owned_value!(Type::PartialNativeFunction, PartialNativeFunction, as_partial_native, as_partial_native_ref, is_partial_native);
 //impl_owned_value!(Type::Slice, Slice, as_slice, as_slice_ref, is_slice);
 impl_owned_value!(Type::Iter, Iterable, as_iterable, as_iterable_ref, is_iterable);
 impl_owned_value!(Type::Error, RuntimeError, as_err, as_err_ref, is_err);
 
+impl_shared_value!(Type::PartialFunction, PartialFunction, ConstValue, as_partial_function, is_partial_function);
 impl_shared_value!(Type::Slice, Slice, ConstValue, as_slice, is_slice);
 impl_shared_value!(Type::Range, Range, ConstValue, as_range, is_range);
 impl_shared_value!(Type::Enumerate, Enumerate, ConstValue, as_enumerate, is_enumerate);
@@ -801,8 +766,8 @@ impl_shared_value!(Type::Set, SetImpl, MutValue, as_set, is_set);
 impl_shared_value!(Type::Dict, DictImpl, MutValue, as_dict, is_dict);
 impl_shared_value!(Type::Heap, HeapImpl, MutValue, as_heap, is_heap);
 impl_shared_value!(Type::Vector, VectorImpl, MutValue, as_vector, is_vector);
-impl_shared_value!(Type::Function, FunctionImpl, ConstValue, as_function, is_function);
-impl_shared_value!(Type::Closure, ClosureImpl, MutValue, as_closure, is_closure);
+impl_shared_value!(Type::Function, Function, ConstValue, as_function, is_function);
+impl_shared_value!(Type::Closure, Closure, MutValue, as_closure, is_closure);
 impl_shared_value!(Type::Memoized, MemoizedImpl, MutValue, as_memoized, is_memoized);
 impl_shared_value!(Type::Struct, StructImpl, MutValue, as_struct, is_struct);
 impl_shared_value!(Type::StructType, StructTypeImpl, ConstValue, as_struct_type, is_struct_type);
@@ -878,176 +843,6 @@ impl<I> IntoDictValue for I where I : Iterator<Item=(ValuePtr, ValuePtr)> {
     }
 }
 
-
-#[derive(Eq, PartialEq, Debug, Clone)]
-pub struct FunctionImpl {
-    pub head: usize, // Pointer to the first opcode of the function's execution
-    pub tail: usize, // Pointer to the final `Return` opcode.
-
-    name: String, // The name of the function, useful to show in stack traces
-    args: Vec<String>, // Names of the arguments
-    default_args: Vec<usize>, // Jump offsets for each default argument
-    variadic: bool, // If the last argument in this function is variadic
-    native: bool, // If the function is a native FFI function
-    is_self: bool, // If the function is a instance function on a struct
-}
-
-impl FunctionImpl {
-    pub fn new(head: usize, tail: usize, name: String, args: Vec<String>, default_args: Vec<usize>, variadic: bool, native: bool, is_self: bool) -> FunctionImpl {
-        FunctionImpl { head, tail, name, args, default_args, variadic, native, is_self }
-    }
-
-    /// The minimum number of required arguments, inclusive.
-    pub fn min_args(&self) -> u32 {
-        (self.args.len() - self.default_args.len()) as u32
-    }
-
-    /// The maximum number of required arguments, inclusive.
-    pub fn max_args(&self) -> u32 {
-        self.args.len() as u32
-    }
-
-    pub fn in_range(&self, nargs: u32) -> bool {
-        self.min_args() <= nargs && (self.variadic || nargs <= self.max_args())
-    }
-
-    /// Returns the number of variadic arguments that need to be collected, before invoking the function, if needed.
-    pub fn num_var_args(&self, nargs: u32) -> Option<u32> {
-        if self.variadic && nargs >= self.max_args() {
-            Some(nargs + 1 - self.max_args())
-        } else {
-            None
-        }
-    }
-
-    /// Returns the jump offset of the function
-    /// For typical functions, this is just the `head`, however when default arguments are present, or not, this is offset by the default argument offsets.
-    /// The `nargs` must be legal (between `[min_args(), max_args()]`
-    pub fn jump_offset(&self, nargs: u32) -> usize {
-        self.head + if nargs == self.min_args() {
-            0
-        } else if self.variadic && nargs >= self.max_args() {
-            *self.default_args.last().unwrap()
-        } else {
-            self.default_args[(nargs - self.min_args() - 1) as usize]
-        }
-    }
-
-    pub fn repr(&self) -> String {
-        format!("{}fn {}({})", if self.native { "native " } else { "" }, self.name, self.args.join(", "))
-    }
-}
-
-impl Hash for FunctionImpl {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.name.hash(state)
-    }
-}
-
-
-#[derive(Debug, Clone)]
-pub struct PartialFunctionImpl {
-    pub func: ValueFunction,
-    pub args: Vec<ValuePtr>,
-}
-
-impl Eq for PartialFunctionImpl {}
-impl PartialEq<Self> for PartialFunctionImpl {
-    fn eq(&self, other: &Self) -> bool {
-        self.func.ptr == other.func.ptr
-    }
-}
-
-impl Hash for PartialFunctionImpl {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.func.hash(state)
-    }
-}
-
-
-#[derive(Debug, Clone)]
-pub struct PartialNativeFunctionImpl {
-    pub func: NativeFunction,
-    pub partial: PartialArgument,
-}
-
-impl Eq for PartialNativeFunctionImpl {}
-impl PartialEq<Self> for PartialNativeFunctionImpl {
-    fn eq(&self, other: &Self) -> bool {
-        self.func == other.func
-    }
-}
-
-
-impl Hash for PartialNativeFunctionImpl {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.func.hash(state);
-    }
-}
-
-
-/// A closure is a combination of a function, and a set of `environment` variables.
-/// These variables are references either to locals in the enclosing function, or captured variables from the enclosing function itself.
-///
-/// A closure also provides *interior mutability* for it's captured upvalues, allowing them to be modified even from the surrounding function.
-/// Unlike with other mutable `ValuePtr` types, this does so using `Rc<Cell<ValuePtr>>`. The reason being:
-///
-/// - A `Mut` cannot be unboxed without creating a borrow, which introduces lifetime restrictions. It also cannot be mutably unboxed without creating a write lock. With a closure, we need to be free to unbox the environment straight onto the stack, so this is off the table.
-/// - The closure's inner value can be thought of as immutable. As `ValuePtr` is immutable, and clone-able, so can the contents of `Cell`. We can then unbox this completely - take a reference to the `Rc`, and call `get()` to unbox the current value of the cell, onto the stack.
-///
-/// This has one problem, which is we can't call `.get()` unless the cell is `Copy`, which `ValuePtr` isn't, and can't be, because `Mut` can't be copy due to the presence of `Rc`... Fortunately, this is just an API limitation, and we can unbox the cell in other ways.
-///
-/// Note we cannot derive most functions, as that also requires `Cell<ValuePtr>` to be `Copy`, due to convoluted trait requirements.
-#[derive(Clone)]
-pub struct ClosureImpl {
-    /// This function must be **never modified**, as we hand out special, non-counted immutable references via `borrow_func()`
-    func: ValueFunction,
-    environment: Vec<Rc<Cell<UpValue>>>,
-}
-
-impl ClosureImpl {
-    pub fn push(&mut self, value: Rc<Cell<UpValue>>) {
-        self.environment.push(value);
-    }
-
-    /// Returns the current environment value for the upvalue index `index.
-    pub fn get(&self, index: usize) -> Rc<Cell<UpValue>> {
-        self.environment[index].clone()
-    }
-}
-
-#[derive(Clone)]
-pub enum UpValue {
-    Open(usize),
-    Closed(ValuePtr)
-}
-
-/// Implement `Default` to have access to `.take()`
-impl Default for UpValue {
-    fn default() -> Self {
-        UpValue::Open(0)
-    }
-}
-
-impl PartialEq for ClosureImpl {
-    fn eq(&self, other: &Self) -> bool {
-        self.func == other.func
-    }
-}
-
-impl Eq for ClosureImpl {}
-
-impl Debug for ClosureImpl {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        Debug::fmt(&self.func, f)
-    }
-}
-
-impl Hash for ClosureImpl {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.func.hash(state)
-    }
-}
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ListImpl {

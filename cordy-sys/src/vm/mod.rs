@@ -13,7 +13,7 @@ use crate::core::Pattern;
 
 pub use crate::vm::error::{DetailRuntimeError, RuntimeError};
 pub use crate::vm::opcode::{Opcode, StoreOp};
-pub use crate::vm::value::{AnyResult, ErrorResult, FunctionImpl, guard_recursive_hash, IntoDictValue, IntoIterableValue, IntoValue, Iterable, LiteralType, MAX_INT, MIN_INT, Prefix, StructTypeImpl, Type, ValueOption, ValuePtr, ValueResult, Method, ComplexValue};
+pub use crate::vm::value::{AnyResult, ErrorResult, Function, guard_recursive_hash, IntoDictValue, IntoIterableValue, IntoValue, Iterable, LiteralType, MAX_INT, MIN_INT, Prefix, StructTypeImpl, Type, ValueOption, ValuePtr, ValueResult, Method, ComplexValue};
 
 use Opcode::{*};
 use RuntimeError::{*};
@@ -556,7 +556,7 @@ impl<R : BufRead, W : Write, F : FunctionInterface> VirtualMachine<R, W, F> {
 
                 GetMethod(index) => {
                     let a1: ValuePtr = self.pop();
-                    let ret: ValuePtr = ValuePtr::partial(self.constants[index as usize].clone(), vec![a1]);
+                    let ret: ValuePtr = self.constants[index as usize].clone().to_partial(vec![a1]);
                     self.push(ret);
                 }
 
@@ -675,7 +675,7 @@ impl<R : BufRead, W : Write, F : FunctionInterface> VirtualMachine<R, W, F> {
         trace::trace_interpreter!("vm::invoke func={:?}, nargs={}", f, nargs);
         match f.ty() {
             Type::Function | Type::Closure => {
-                let func = f.get_function();
+                let func = f.as_function_or_closure();
                 if func.in_range(nargs) {
                     // Evaluate directly
                     self.call_function(func.jump_offset(nargs), nargs, func.num_var_args(nargs));
@@ -686,7 +686,7 @@ impl<R : BufRead, W : Write, F : FunctionInterface> VirtualMachine<R, W, F> {
                     if nargs > 0 {
                         let arg: Vec<ValuePtr> = self.popn(nargs);
                         let func: ValuePtr = self.pop();
-                        let partial: ValuePtr = ValuePtr::partial(func, arg);
+                        let partial: ValuePtr = func.to_partial(arg);
                         self.push(partial);
                     }
                     // Partial functions are already evaluated, so we return native, since we don't need to spin
@@ -696,27 +696,31 @@ impl<R : BufRead, W : Write, F : FunctionInterface> VirtualMachine<R, W, F> {
                 }
             },
             Type::PartialFunction => {
-                // Surgically extract the partial binding from the stack
+                // Extract the partial function from the stack, and then check if we can evaluate it.
+                // - If we have enough arguments, push all arguments onto the stack and evaluate,
+                // - If we don't, then create a new partial function with the combined arguments
                 let i: usize = self.stack.len() - nargs as usize - 1;
-                let mut partial = std::mem::replace(&mut self.stack[i], ValuePtr::nil()).as_partial_function().value;
-                let func = partial.func.get();
-                let total_nargs: u32 = partial.args.len() as u32 + nargs;
+                let ptr = std::mem::take(&mut self.stack[i]);
+                let partial = ptr.as_partial_function().borrow_const();
+                let func = partial.as_function();
+                let total_nargs: u32 = partial.nargs() + nargs;
                 if func.min_args() > total_nargs {
                     // Not enough arguments, so pop the argument and push a new partial function
-                    for arg in splice(&mut self.stack, nargs) {
-                        partial.args.push(arg);
-                    }
+                    let partial = partial.with(splice(&mut self.stack, nargs));
+
                     self.pop(); // Should pop the `Nil` we swapped earlier
                     self.push(partial.to_value());
+
                     // Partial functions are already evaluated, so we return native, since we don't need to spin
                     Ok(FunctionType::Native)
                 } else if func.in_range(total_nargs) {
                     // Exactly enough arguments to invoke the function
-                    // Before we call, we need to pop-push to reorder the arguments and setup partial arguments, so we have the correct calling convention
+                    // We need to set up the stack correctly to call the function
                     let head: usize = func.jump_offset(total_nargs);
                     let num_var_args: Option<u32> = func.num_var_args(nargs);
-                    self.stack[i] = partial.func.inner(); // Replace the `Nil` from earlier
-                    insert(&mut self.stack, partial.args.into_iter(), nargs);
+                    let (ptr, args) = partial.consume();
+                    self.stack[i] = ptr; // Replace the `Nil` from earlier
+                    insert(&mut self.stack, args, nargs);
                     self.call_function(head, total_nargs, num_var_args);
                     Ok(FunctionType::User)
                 } else {

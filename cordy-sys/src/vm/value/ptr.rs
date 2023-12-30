@@ -8,7 +8,7 @@ use std::ptr::NonNull;
 
 use crate::core::NativeFunction;
 use crate::util::impl_partial_ord;
-use crate::vm::{FunctionImpl, Iterable, RuntimeError, StructTypeImpl};
+use crate::vm::{Function, Iterable, RuntimeError, StructTypeImpl};
 use crate::vm::value::{*};
 use crate::vm::value::slice::Slice;
 
@@ -396,6 +396,13 @@ impl ValuePtr {
 }
 
 
+impl Default for ValuePtr {
+    fn default() -> Self {
+        ValuePtr::nil()
+    }
+}
+
+
 /// Implementing `Eq` is done on a type-wide basis. We assume each pointer type implements `Eq` themselves.
 /// First, we check that the types are equal, and if they are, we match on the type and check the underlying value.
 impl Eq for ValuePtr {}
@@ -414,8 +421,8 @@ impl PartialEq for ValuePtr {
             Type::Complex => self.as_shared_ref::<Complex>() == other.as_shared_ref::<Complex>(),
             Type::Range => self.as_shared_ref::<Range>() == other.as_shared_ref::<Range>(),
             Type::Enumerate => self.as_shared_ref::<Enumerate>() == other.as_shared_ref::<Enumerate>(),
-            Type::PartialFunction => self.as_ref::<PartialFunctionImpl>() == other.as_ref::<PartialFunctionImpl>(),
-            Type::PartialNativeFunction => self.as_ref::<PartialNativeFunctionImpl>() == other.as_ref::<PartialNativeFunctionImpl>(),
+            Type::PartialFunction => self.as_shared_ref::<PartialFunction>() == other.as_shared_ref::<PartialFunction>(),
+            Type::PartialNativeFunction => self.as_ref::<PartialNativeFunction>() == other.as_ref::<PartialNativeFunction>(),
             Type::Slice => self.as_shared_ref::<Slice>() == other.as_shared_ref::<Slice>(),
             Type::Error => self.as_ref::<RuntimeError>() == other.as_ref::<RuntimeError>(),
             // Shared types check equality based on the shared ref
@@ -428,8 +435,8 @@ impl PartialEq for ValuePtr {
             Type::Struct => self.as_shared_ref::<StructImpl>() == other.as_shared_ref::<StructImpl>(),
             Type::StructType => self.as_shared_ref::<StructTypeImpl>() == other.as_shared_ref::<StructTypeImpl>(),
             Type::Memoized => self.as_shared_ref::<MemoizedImpl>() == other.as_shared_ref::<MemoizedImpl>(),
-            Type::Function => self.as_shared_ref::<FunctionImpl>() == other.as_shared_ref::<FunctionImpl>(),
-            Type::Closure => self.as_shared_ref::<ClosureImpl>() == other.as_shared_ref::<ClosureImpl>(),
+            Type::Function => self.as_shared_ref::<Function>() == other.as_shared_ref::<Function>(),
+            Type::Closure => self.as_shared_ref::<Closure>() == other.as_shared_ref::<Closure>(),
             // Special types that are not checked for equality
             Type::Iter | Type::None | Type::Never => false,
         }
@@ -503,8 +510,8 @@ impl Clone for ValuePtr {
                 Type::Complex => self.clone_shared::<Complex>(),
                 Type::Range => self.clone_shared::<Range>(),
                 Type::Enumerate => self.clone_shared::<Enumerate>(),
-                Type::PartialFunction => self.clone_owned::<PartialFunctionImpl>(),
-                Type::PartialNativeFunction => self.clone_owned::<PartialNativeFunctionImpl>(),
+                Type::PartialFunction => self.clone_shared::<PartialFunction>(),
+                Type::PartialNativeFunction => self.clone_owned::<PartialNativeFunction>(),
                 Type::Slice => self.clone_shared::<Slice>(),
                 Type::Iter => self.clone_owned::<Iterable>(),
                 Type::Error => self.clone_owned::<RuntimeError>(),
@@ -518,8 +525,8 @@ impl Clone for ValuePtr {
                 Type::Struct => self.clone_shared::<StructImpl>(),
                 Type::StructType => self.clone_shared::<StructTypeImpl>(),
                 Type::Memoized => self.clone_shared::<MemoizedImpl>(),
-                Type::Function => self.clone_shared::<FunctionImpl>(),
-                Type::Closure => self.clone_shared::<ClosureImpl>(),
+                Type::Function => self.clone_shared::<Function>(),
+                Type::Closure => self.clone_shared::<Closure>(),
                 // Special types
                 Type::None | Type::Never => ValuePtr::none(),
             }
@@ -547,8 +554,8 @@ impl Drop for ValuePtr {
                 Type::Complex => self.drop_shared::<Complex>(),
                 Type::Range => self.drop_shared::<Range>(),
                 Type::Enumerate => self.drop_shared::<Enumerate>(),
-                Type::PartialFunction => self.drop_owned::<PartialFunctionImpl>(),
-                Type::PartialNativeFunction => self.drop_owned::<PartialNativeFunctionImpl>(),
+                Type::PartialFunction => self.drop_shared::<PartialFunction>(),
+                Type::PartialNativeFunction => self.drop_owned::<PartialNativeFunction>(),
                 Type::Slice => self.drop_shared::<Slice>(),
                 Type::Iter => self.drop_owned::<Iterable>(),
                 Type::Error => self.drop_owned::<RuntimeError>(),
@@ -562,8 +569,8 @@ impl Drop for ValuePtr {
                 Type::Struct => self.drop_shared::<StructImpl>(),
                 Type::StructType => self.drop_shared::<StructTypeImpl>(),
                 Type::Memoized => self.drop_shared::<MemoizedImpl>(),
-                Type::Function => self.drop_shared::<FunctionImpl>(),
-                Type::Closure => self.drop_shared::<ClosureImpl>(),
+                Type::Function => self.drop_shared::<Function>(),
+                Type::Closure => self.drop_shared::<Closure>(),
                 Type::None | Type::Never => {}, // No drop behavior
             }
         }
@@ -586,8 +593,8 @@ impl Hash for ValuePtr {
             // Owned types
             Type::Complex => self.as_shared_ref::<Complex>().hash(state),
             Type::Enumerate => self.as_shared_ref::<Enumerate>().hash(state),
-            Type::PartialFunction => self.as_ref::<PartialFunctionImpl>().hash(state),
-            Type::PartialNativeFunction => self.as_ref::<PartialNativeFunctionImpl>().hash(state),
+            Type::PartialFunction => self.as_shared_ref::<PartialFunction>().hash(state),
+            Type::PartialNativeFunction => self.as_ref::<PartialNativeFunction>().hash(state),
             Type::Slice => self.as_shared_ref::<Slice>().hash(state),
             // Shared types
             Type::Range => self.as_shared_ref::<Range>().hash(state),
@@ -600,8 +607,8 @@ impl Hash for ValuePtr {
             Type::Struct => self.as_shared_ref::<StructImpl>().hash(state),
             Type::StructType => self.as_shared_ref::<StructTypeImpl>().hash(state),
             Type::Memoized => self.as_shared_ref::<MemoizedImpl>().hash(state),
-            Type::Function => self.as_shared_ref::<FunctionImpl>().hash(state),
-            Type::Closure => self.as_shared_ref::<ClosureImpl>().hash(state),
+            Type::Function => self.as_shared_ref::<Function>().hash(state),
+            Type::Closure => self.as_shared_ref::<Closure>().hash(state),
             // Special types with no hash behavior
             Type::Iter | Type::Error | Type::None | Type::Never => {},
         }
@@ -622,8 +629,8 @@ impl Debug for ValuePtr {
             // Owned types
             Type::Complex => Debug::fmt(self.as_shared_ref::<Complex>(), f),
             Type::Enumerate => Debug::fmt(self.as_shared_ref::<Enumerate>(), f),
-            Type::PartialFunction => Debug::fmt(self.as_ref::<PartialFunctionImpl>(), f),
-            Type::PartialNativeFunction => Debug::fmt(self.as_ref::<PartialNativeFunctionImpl>(), f),
+            Type::PartialFunction => Debug::fmt(self.as_shared_ref::<PartialFunction>(), f),
+            Type::PartialNativeFunction => Debug::fmt(self.as_ref::<PartialNativeFunction>(), f),
             Type::Slice => Debug::fmt(self.as_shared_ref::<Slice>(), f),
             Type::Error => Debug::fmt(self.as_ref::<RuntimeError>(), f),
             // Shared types
@@ -637,8 +644,8 @@ impl Debug for ValuePtr {
             Type::Struct => Debug::fmt(self.as_shared_ref::<StructImpl>(), f),
             Type::StructType => Debug::fmt(self.as_shared_ref::<StructTypeImpl>(), f),
             Type::Memoized => Debug::fmt(self.as_shared_ref::<MemoizedImpl>(), f),
-            Type::Function => Debug::fmt(self.as_shared_ref::<FunctionImpl>(), f),
-            Type::Closure => Debug::fmt(self.as_shared_ref::<ClosureImpl>(), f),
+            Type::Function => Debug::fmt(self.as_shared_ref::<Function>(), f),
+            Type::Closure => Debug::fmt(self.as_shared_ref::<Closure>(), f),
             // Special types with no hash behavior
             Type::Iter => write!(f, "Iter"),
             Type::None => write!(f, "None"),
@@ -783,11 +790,13 @@ impl<T : ConstValue> SharedPrefix<T> {
     }
 }
 
-impl SharedPrefix<ClosureImpl> {
-    pub fn borrow_func(&self) -> &FunctionImpl {
-        unsafe {
-            NonNull::new_unchecked(self.value.get()).as_ref().func.ptr.as_function().borrow_const()
-        }
+impl<T : MutValue> SharedPrefix<T> {
+    /// This is explicitly unsafe, as we are handing out a unchecked, immutable reference to the underlying data.
+    /// It relies on the caller knowing that we take split, or partial borrows (such as closures, having an immutable and mutable part)
+    ///
+    /// SAFETY: The caller must guarantee use of this function does not lead to any other mutable references being taken while this reference is held
+    pub unsafe fn borrow_const_unsafe(&self) -> &T {
+        NonNull::new_unchecked(self.value.get()).as_ref()
     }
 }
 

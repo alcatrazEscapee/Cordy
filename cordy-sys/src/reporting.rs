@@ -283,7 +283,7 @@ impl AsError for RuntimeError {
             RuntimeCompilationError(vec) => format!("Encountered compilation error(s) within 'eval':\n\n{}", vec.join("\n")),
 
             ValueIsNotFunctionEvaluable(v) => format!("Tried to evaluate {} but it is not a function.", v.to_repr_str()),
-            IncorrectArgumentsUserFunction(f, n) => format!("Incorrect number of arguments for {}, got {}", f.repr(), n),
+            IncorrectArgumentsUserFunction(f, n) => format!("Incorrect number of arguments for {}, got {}", f.to_repr_str(), n),
             IncorrectArgumentsNativeFunction(f, n) => format!("Incorrect number of arguments for {}, got {}", f.repr(), n),
             IncorrectArgumentsGetField(s, n) => format!("Incorrect number of arguments for native (->'{}'), got {}", s, n),
             IncorrectArgumentsStruct(s, n) => format!("Incorrect number of arguments for {}, got {}", s, n),
