@@ -77,11 +77,11 @@ pub enum Type {
 
 impl Type {
     fn is_owned(&self) -> bool {
-        matches!(self, Type::Iter | Type::Error)
+        matches!(self, Type::Error)
     }
 
     fn is_shared(&self) -> bool {
-        matches!(self, Type::PartialNativeFunction | Type::PartialFunction | Type::Complex | Type::LongStr | Type::List | Type::Set | Type::Dict | Type::Heap | Type::Vector | Type::Function | Type::Closure | Type::Memoized | Type::Struct | Type::StructType | Type::Range | Type::Enumerate | Type::Slice)
+        matches!(self, Type::Iter | Type::PartialNativeFunction | Type::PartialFunction | Type::Complex | Type::LongStr | Type::List | Type::Set | Type::Dict | Type::Heap | Type::Vector | Type::Function | Type::Closure | Type::Memoized | Type::Struct | Type::StructType | Type::Range | Type::Enumerate | Type::Slice)
     }
 }
 
@@ -201,7 +201,7 @@ impl ValueResult {
     #[inline(always)]
     pub fn as_result(self) -> ErrorResult<ValuePtr> {
         match self.ptr.is_err() {
-            true => Err(self.ptr.as_err()),
+            true => Err(self.ptr.as_box()),
             false => Ok(self.ptr)
         }
     }
@@ -248,7 +248,7 @@ impl Try for ValueResult {
 
     fn branch(self) -> ControlFlow<Box<Prefix<RuntimeError>>, ValuePtr> {
         match self.ptr.is_err() {
-            true => ControlFlow::Break(self.ptr.as_err()),
+            true => ControlFlow::Break(self.ptr.as_box()),
             false => ControlFlow::Continue(self.ptr),
         }
     }
@@ -629,11 +629,6 @@ impl ValuePtr {
         matches!(self.ty(), Type::Function | Type::PartialFunction | Type::NativeFunction | Type::PartialNativeFunction | Type::Closure | Type::StructType | Type::Slice)
     }
 
-    pub fn as_iterable_mut(&mut self) -> &mut Iterable {
-        debug_assert!(self.is_iterable());
-        self.as_mut_ref()
-    }
-
     pub fn ok(self) -> ValueResult {
         ValueResult::ok(self)
     }
@@ -692,27 +687,12 @@ impl RecursionGuard {
 }
 
 
-macro_rules! impl_owned_value {
-    ($ty:expr, $inner:ident, $as_T:ident, $as_T_ref:ident, $is_T:ident) => {
+macro_rules! impl_owned {
+    ($ty:expr, $inner:ident) => {
         impl OwnedValue for $inner {}
-
         impl IntoValue for $inner {
             fn to_value(self) -> ValuePtr {
                 ptr::from_owned(Prefix::new($ty, self))
-            }
-        }
-
-        impl ValuePtr {
-            pub fn $as_T(self) -> Box<Prefix<$inner>> {
-                debug_assert!(self.ty() == $ty);
-                self.as_box()
-            }
-            pub fn $as_T_ref(&self) -> &$inner {
-                debug_assert!(self.ty() == $ty);
-                self.as_ref()
-            }
-            pub fn $is_T(&self) -> bool {
-                self.ty() == $ty
             }
         }
     };
@@ -767,8 +747,8 @@ macro_rules! impl_const {
 impl OwnedValue for () {}
 impl SharedValue for () {}
 
-impl_owned_value!(Type::Iter, Iterable, as_iterable, as_iterable_ref, is_iterable);
-impl_owned_value!(Type::Error, RuntimeError, as_err, as_err_ref, is_err);
+//impl_owned!(Type::Iter, Iterable);
+impl_owned!(Type::Error, RuntimeError);
 
 impl_const!(Type::Function, Function, as_function, is_function);
 impl_const!(Type::PartialFunction, PartialFunction, as_partial_function, is_partial_function);
@@ -786,6 +766,7 @@ impl_mut!(Type::Vector, VectorImpl, as_vector, is_vector);
 impl_mut!(Type::Closure, Closure, as_closure, is_closure);
 impl_mut!(Type::Memoized, MemoizedImpl, as_memoized, is_memoized);
 impl_mut!(Type::Struct, StructImpl, as_struct, is_struct);
+impl_mut!(Type::Iter, Iterable, as_iterable, is_iterable);
 
 
 /// A trait which is responsible for converting native types into a `Value`.

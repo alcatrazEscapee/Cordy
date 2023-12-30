@@ -290,6 +290,10 @@ impl ValuePtr {
     pub const fn is_field(&self) -> bool { (unsafe { self.tag } & MASK_FIELD) == TAG_FIELD }
     pub const fn is_none(&self) -> bool { (unsafe { self.tag } & MASK_NONE) == TAG_NONE }
 
+    pub fn is_err(&self) -> bool {
+        self.ty() == Type::Error
+    }
+
     fn is_ptr(&self) -> bool { (unsafe { self.tag } & MASK_PTR) == TAG_PTR }
     fn is_owned(&self) -> bool { self.ty().is_owned() }
     fn is_shared(&self) -> bool { self.ty().is_shared() }
@@ -513,7 +517,7 @@ impl Clone for ValuePtr {
                 Type::PartialFunction => self.clone_shared::<PartialFunction>(),
                 Type::PartialNativeFunction => self.clone_shared::<PartialNativeFunction>(),
                 Type::Slice => self.clone_shared::<Slice>(),
-                Type::Iter => self.clone_owned::<Iterable>(),
+                Type::Iter => self.clone_shared::<Iterable>(),
                 Type::Error => self.clone_owned::<RuntimeError>(),
                 // Shared types
                 Type::LongStr => self.clone_shared::<String>(),
@@ -557,7 +561,7 @@ impl Drop for ValuePtr {
                 Type::PartialFunction => self.drop_shared::<PartialFunction>(),
                 Type::PartialNativeFunction => self.drop_shared::<PartialNativeFunction>(),
                 Type::Slice => self.drop_shared::<Slice>(),
-                Type::Iter => self.drop_owned::<Iterable>(),
+                Type::Iter => self.drop_shared::<Iterable>(),
                 Type::Error => self.drop_owned::<RuntimeError>(),
                 // Shared types
                 Type::LongStr => self.drop_shared::<String>(),
