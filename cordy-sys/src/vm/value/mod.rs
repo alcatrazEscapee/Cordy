@@ -301,11 +301,11 @@ impl ValuePtr {
     fn safe_to_str(&self, rc: &mut RecursionGuard) -> Cow<str> {
         match self.ty() {
             Type::ShortStr | Type::LongStr => Cow::from(self.as_str_slice()),
-            Type::Function => Cow::from(self.as_function().borrow_const().name()),
-            Type::PartialFunction => self.as_partial_function().borrow_const().to_str(rc),
+            Type::Function => self.as_function().to_str(),
+            Type::PartialFunction => self.as_partial_function().to_str(rc),
             Type::NativeFunction => Cow::from(self.as_native().name()),
-            Type::PartialNativeFunction => Cow::from(self.as_partial_native().borrow_const().to_str()),
-            Type::Closure => Cow::from(self.as_closure().borrow_func().name().to_string()),
+            Type::PartialNativeFunction => Cow::from(self.as_partial_native().to_str()),
+            Type::Closure => self.as_closure().borrow_func().to_str(),
             _ => self.safe_to_repr_str(rc),
         }
     }
@@ -387,21 +387,21 @@ impl ValuePtr {
                         .join(", ")))
                 )
             },
-            Type::StructType => Cow::from(self.as_struct_type().borrow_const().as_str()),
+            Type::StructType => Cow::from(self.as_struct_type().as_str()),
 
-            Type::Range => self.as_range().borrow_const().to_repr_str(),
-            Type::Enumerate => self.as_enumerate().borrow_const().to_repr_str(rc),
-            Type::Slice => self.as_slice().borrow_const().to_repr_str(),
+            Type::Range => self.as_range().to_repr_str(),
+            Type::Enumerate => self.as_enumerate().to_repr_str(rc),
+            Type::Slice => self.as_slice().to_repr_str(),
 
             Type::Iter => Cow::from("<synthetic> iterator"),
             Type::Memoized => Cow::from(format!("@memoize {}", self.as_memoized().borrow().func.safe_to_repr_str(rc))),
 
             Type::GetField => Cow::from("(->)"),
 
-            Type::Function => Cow::from(self.as_function().borrow_const().to_repr_str()),
-            Type::PartialFunction => self.as_partial_function().borrow_const().to_repr_str(rc),
+            Type::Function => Cow::from(self.as_function().to_repr_str()),
+            Type::PartialFunction => self.as_partial_function().to_repr_str(rc),
             Type::NativeFunction => Cow::from(self.as_native().to_repr_str()),
-            Type::PartialNativeFunction => Cow::from(self.as_partial_native().borrow_const().to_repr_str()),
+            Type::PartialNativeFunction => Cow::from(self.as_partial_native().to_repr_str()),
             Type::Closure => Cow::from(self.as_closure().borrow_func().to_repr_str()),
 
             Type::Error | Type::None | Type::Never => unreachable!(),
@@ -411,7 +411,7 @@ impl ValuePtr {
     /// Returns the inner user function, either from a `Function` or `Closure` type
     pub fn as_function_or_closure(&self) -> &Function {
         match self.is_function() {
-            true => self.as_function().borrow_const(),
+            true => self.as_function(),
             false => self.as_closure().borrow_func(),
         }
     }
@@ -464,8 +464,8 @@ impl ValuePtr {
             Type::Dict => !self.as_dict().borrow().dict.is_empty(),
             Type::Heap => !self.as_heap().borrow().heap.is_empty(),
             Type::Vector => !self.as_vector().borrow().vector.is_empty(),
-            Type::Range => !self.as_range().borrow_const().is_empty(),
-            Type::Enumerate => self.as_enumerate().borrow_const().to_bool(),
+            Type::Range => !self.as_range().is_empty(),
+            Type::Enumerate => self.as_enumerate().to_bool(),
             _ => true,
         }
     }
@@ -485,8 +485,8 @@ impl ValuePtr {
                 .cloned().map(|u| u.0)
                 .collect::<Vec<ValuePtr>>())),
 
-            Type::Range => Ok(self.as_range().borrow_const().to_iter()),
-            Type::Enumerate => self.as_enumerate().borrow_const().to_iter(),
+            Type::Range => Ok(self.as_range().to_iter()),
+            Type::Enumerate => self.as_enumerate().to_iter(),
 
             _ => TypeErrorArgMustBeIterable(self.clone()).err(),
         }
@@ -535,12 +535,12 @@ impl ValuePtr {
     /// Returns `Some(nargs)` if this value is a function with the given number of minimum arguments
     pub fn min_nargs(&self) -> Option<u32> {
         match self.ty() {
-            Type::Function => Some(self.as_function().borrow_const().min_args()),
-            Type::PartialFunction => Some(self.as_partial_function().borrow_const().min_nargs()),
+            Type::Function => Some(self.as_function().min_args()),
+            Type::PartialFunction => Some(self.as_partial_function().min_nargs()),
             Type::NativeFunction => Some(self.as_native().min_nargs()),
-            Type::PartialNativeFunction => Some(self.as_partial_native().borrow_const().min_nargs()),
+            Type::PartialNativeFunction => Some(self.as_partial_native().min_nargs()),
             Type::Closure => Some(self.as_closure().borrow_func().min_args()),
-            Type::StructType => Some(self.as_struct_type().borrow_const().num_fields()),
+            Type::StructType => Some(self.as_struct_type().num_fields()),
             Type::Slice => Some(1),
             _ => None,
         }
@@ -555,8 +555,8 @@ impl ValuePtr {
             Type::Dict => Ok(self.as_dict().borrow().dict.len()),
             Type::Heap => Ok(self.as_heap().borrow().heap.len()),
             Type::Vector => Ok(self.as_vector().borrow().vector.len()),
-            Type::Range => Ok(self.as_range().borrow_const().len()),
-            Type::Enumerate => self.as_enumerate().borrow_const().len(),
+            Type::Range => Ok(self.as_range().len()),
+            Type::Enumerate => self.as_enumerate().len(),
             _ => TypeErrorArgMustBeIterable(self.clone()).err()
         }
     }
@@ -584,7 +584,7 @@ impl ValuePtr {
                 }
             }
             Type::StructType => {
-                let it = self.as_struct_type().borrow_const();
+                let it = self.as_struct_type();
                 if let Some(offset) = fields.get_offset(it.constructor_type, field_index) {
                     return it.get_method(offset, constants).ok();
                 }
@@ -718,10 +718,10 @@ macro_rules! impl_owned_value {
     };
 }
 
-macro_rules! impl_shared_value {
-    ($ty:expr, $inner:ident, $const_or_mut:ty, $as_T:ident, $is_T:ident) => {
+macro_rules! impl_mut {
+    ($ty:expr, $inner:ident, $as_T:ident, $is_T:ident) => {
         impl SharedValue for $inner {}
-        impl $const_or_mut for $inner {}
+        impl MutValue for $inner {}
 
         impl IntoValue for $inner {
             fn to_value(self) -> ValuePtr {
@@ -741,33 +741,51 @@ macro_rules! impl_shared_value {
     };
 }
 
+macro_rules! impl_const {
+    ($ty:expr, $inner:ident, $as_T:ident, $is_T:ident) => {
+        impl SharedValue for $inner {}
+        impl ConstValue for $inner {}
+
+        impl IntoValue for $inner {
+            fn to_value(self) -> ValuePtr {
+                ptr::from_shared(SharedPrefix::new($ty, self))
+            }
+        }
+
+        impl ValuePtr {
+            pub fn $as_T(&self) -> &$inner {
+                debug_assert!(self.ty() == $ty);
+                self.as_shared_ref::<$inner>().borrow_const()
+            }
+            pub fn $is_T(&self) -> bool {
+                self.ty() == $ty
+            }
+        }
+    };
+}
+
 impl OwnedValue for () {}
 impl SharedValue for () {}
 
-// Cannot implement for `ComplexImpl` because we need a specialized to_value() which may convert to int
-//impl_owned_value!(Type::Range, Range, as_range, as_range_ref, is_range);
-//impl_owned_value!(Type::Enumerate, Enumerate, as_enumerate, as_enumerate_ref, is_enumerate);
-//impl_owned_value!(Type::PartialFunction, PartialFunctionImpl, as_partial_function, as_partial_function_ref, is_partial_function);
-//impl_owned_value!(Type::PartialNativeFunction, PartialNativeFunction, as_partial_native, as_partial_native_ref, is_partial_native);
-//impl_owned_value!(Type::Slice, Slice, as_slice, as_slice_ref, is_slice);
 impl_owned_value!(Type::Iter, Iterable, as_iterable, as_iterable_ref, is_iterable);
 impl_owned_value!(Type::Error, RuntimeError, as_err, as_err_ref, is_err);
 
-impl_shared_value!(Type::PartialFunction, PartialFunction, ConstValue, as_partial_function, is_partial_function);
-impl_shared_value!(Type::PartialNativeFunction, PartialNativeFunction, ConstValue, as_partial_native, is_partial_native);
-impl_shared_value!(Type::Slice, Slice, ConstValue, as_slice, is_slice);
-impl_shared_value!(Type::Range, Range, ConstValue, as_range, is_range);
-impl_shared_value!(Type::Enumerate, Enumerate, ConstValue, as_enumerate, is_enumerate);
-impl_shared_value!(Type::List, ListImpl, MutValue, as_list, is_list);
-impl_shared_value!(Type::Set, SetImpl, MutValue, as_set, is_set);
-impl_shared_value!(Type::Dict, DictImpl, MutValue, as_dict, is_dict);
-impl_shared_value!(Type::Heap, HeapImpl, MutValue, as_heap, is_heap);
-impl_shared_value!(Type::Vector, VectorImpl, MutValue, as_vector, is_vector);
-impl_shared_value!(Type::Function, Function, ConstValue, as_function, is_function);
-impl_shared_value!(Type::Closure, Closure, MutValue, as_closure, is_closure);
-impl_shared_value!(Type::Memoized, MemoizedImpl, MutValue, as_memoized, is_memoized);
-impl_shared_value!(Type::Struct, StructImpl, MutValue, as_struct, is_struct);
-impl_shared_value!(Type::StructType, StructTypeImpl, ConstValue, as_struct_type, is_struct_type);
+impl_const!(Type::Function, Function, as_function, is_function);
+impl_const!(Type::PartialFunction, PartialFunction, as_partial_function, is_partial_function);
+impl_const!(Type::PartialNativeFunction, PartialNativeFunction, as_partial_native, is_partial_native);
+impl_const!(Type::Slice, Slice, as_slice, is_slice);
+impl_const!(Type::Range, Range, as_range, is_range);
+impl_const!(Type::Enumerate, Enumerate, as_enumerate, is_enumerate);
+impl_const!(Type::StructType, StructTypeImpl, as_struct_type, is_struct_type);
+
+impl_mut!(Type::List, ListImpl, as_list, is_list);
+impl_mut!(Type::Set, SetImpl, as_set, is_set);
+impl_mut!(Type::Dict, DictImpl, as_dict, is_dict);
+impl_mut!(Type::Heap, HeapImpl, as_heap, is_heap);
+impl_mut!(Type::Vector, VectorImpl, as_vector, is_vector);
+impl_mut!(Type::Closure, Closure, as_closure, is_closure);
+impl_mut!(Type::Memoized, MemoizedImpl, as_memoized, is_memoized);
+impl_mut!(Type::Struct, StructImpl, as_struct, is_struct);
 
 
 /// A trait which is responsible for converting native types into a `Value`.
@@ -1008,7 +1026,7 @@ impl StructImpl {
 
     /// Returns the owner (constructor type) as a reference to the `StructTypeImpl`
     pub fn get_owner(&self) -> &StructTypeImpl {
-        self.owner.as_struct_type().borrow_const()
+        self.owner.as_struct_type()
     }
 
     fn get_field(&self, field_offset: usize) -> ValuePtr {

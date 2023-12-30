@@ -171,7 +171,7 @@ fn find_owning_function(ip: usize, constants: &[ValuePtr]) -> String {
     constants.iter()
         .find_map(|ptr| {
             if ptr.is_function() {
-                let f = ptr.as_function().borrow_const();
+                let f = ptr.as_function();
                 if f.contains_ip(ip) {
                     return Some(f.to_repr_str())
                 }

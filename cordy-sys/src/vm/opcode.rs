@@ -160,8 +160,8 @@ impl Opcode {
                 match constant.ty() {
                     Type::Nil => String::from("Nil"),
                     Type::Bool => String::from(if constant.is_true() { "True" } else { "False" }),
-                    Type::Function => constant.as_function().borrow_const().to_asm_str(),
-                    Type::StructType => format!("StructType({})", constant.as_struct_type().borrow_const().as_str()),
+                    Type::Function => constant.as_function().to_asm_str(),
+                    Type::StructType => format!("StructType({})", constant.as_struct_type().as_str()),
                     ty => format!("{}({})", match ty {
                         Type::Int => "Int",
                         Type::ShortStr | Type::LongStr => "Str",
@@ -186,7 +186,7 @@ impl Opcode {
                 }
             },
             GetField(fid) | SetField(fid) | GetFieldFunction(fid) => format!("{:?} -> {}", self, fields.get_name(*fid)),
-            GetMethod(cid) => format!("{:?} -> {}", self, constants[*cid as usize].as_function().borrow_const().to_repr_str()),
+            GetMethod(cid) => format!("{:?} -> {}", self, constants[*cid as usize].as_function().to_repr_str()),
             JumpIfFalse(offset) | JumpIfFalsePop(offset) | JumpIfTrue(offset) | JumpIfTruePop(offset) | Jump(offset) | TestIterable(offset) => format!("{}({})", match self {
                 JumpIfFalse(_) => "JumpIfFalse",
                 JumpIfFalsePop(_) => "JumpIfFalsePop",

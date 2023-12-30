@@ -4,7 +4,6 @@ use std::str::Chars;
 
 use crate::vm::{Type, ValuePtr};
 use crate::vm::value::{ConstValue, SharedValue};
-use crate::vm::value::ptr::SharedPrefix;
 
 
 impl SharedValue for String {}
@@ -32,7 +31,7 @@ pub enum StrPtr {
 impl StrPtr {
     fn as_str(&self) -> &String {
         match self {
-            StrPtr::Shared(ptr) => ptr.as_long_str().borrow_const(),
+            StrPtr::Shared(ptr) => ptr.as_long_str(),
             StrPtr::Owned(ptr) => ptr
         }
     }
@@ -100,7 +99,7 @@ impl ValuePtr {
         if self.is_short_str() { // Faster path (doesn't have to check `.ty()`)
             self.as_short_str()
         } else {
-            self.as_long_str().borrow_const().as_str()
+            self.as_long_str().as_str()
         }
     }
 
@@ -131,9 +130,9 @@ impl ValuePtr {
     }
 
     /// Don't expose this (or `as_short_str`), only interact through `&str`
-    fn as_long_str(&self) -> &SharedPrefix<String> {
+    fn as_long_str(&self) -> &String {
         debug_assert!(self.is_long_str());
-        self.as_shared_ref()
+        self.as_shared_ref::<String>().borrow_const()
     }
 
     fn is_long_str(&self) -> bool {

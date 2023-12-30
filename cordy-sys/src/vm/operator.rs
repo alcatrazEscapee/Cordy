@@ -242,7 +242,7 @@ pub fn binary_pow(lhs: ValuePtr, rhs: ValuePtr) -> ValueResult {
 pub fn binary_is(lhs: ValuePtr, rhs: ValuePtr, invert: bool) -> ValueResult {
     (match rhs.ty() {
         Nil => lhs.is_nil(),
-        StructType => lhs.is_struct() && lhs.as_struct().borrow().is_instance_of(rhs.as_struct_type().borrow_const()),
+        StructType => lhs.is_struct() && lhs.as_struct().borrow().is_instance_of(rhs.as_struct_type()),
         NativeFunction => match rhs.as_native() {
             NativeFunction::Bool => lhs.is_bool(),
             NativeFunction::Int => lhs.is_int(),
@@ -266,7 +266,7 @@ pub fn binary_is(lhs: ValuePtr, rhs: ValuePtr, invert: bool) -> ValueResult {
 pub fn binary_in(lhs: ValuePtr, rhs: ValuePtr, invert: bool) -> ValueResult {
     (match (lhs.ty(), rhs.ty()) {
         (ShortStr | LongStr, ShortStr | LongStr) => rhs.as_str_slice().contains(lhs.as_str_slice()),
-        (Int | Bool, Range) => rhs.as_range().borrow_const().contains(lhs.as_int()),
+        (Int | Bool, Range) => rhs.as_range().contains(lhs.as_int()),
         (_, List) => rhs.as_list().borrow().list.contains(&lhs),
         (_, Set) => rhs.as_set().borrow().set.contains(&lhs),
         (_, Dict) => rhs.as_dict().borrow().dict.contains_key(&lhs),

@@ -95,14 +95,14 @@ impl Function {
         self.head <= ip && ip <= self.tail
     }
 
-    /// Returns the function name
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-
     /// Returns the disassembly representation for a `Function` opcode featuring this function, which also includes a reference to the `head` and `tail` of this function.
     pub fn to_asm_str(&self) -> String {
         format!("Function({} -> L[{}, {}])", self.to_repr_str(), self.head, self.tail)
+    }
+
+    /// Returns the name of the function.
+    pub fn to_str(&self) -> Cow<str> {
+        Cow::from(&self.name)
     }
 
     /// Returns the `repr` representation of this function, including `native? fn <name>(<args>...)`
@@ -232,7 +232,7 @@ impl SharedPrefix<Closure> {
     pub fn borrow_func(&self) -> &Function {
         unsafe {
             // SAFETY: We only hand out immutable references to `self.func`, and only ever mutate `self.environment`
-            self.borrow_const_unsafe().func.as_function().borrow_const()
+            self.borrow_const_unsafe().func.as_function()
         }
     }
 }
