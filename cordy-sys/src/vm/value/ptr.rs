@@ -282,7 +282,7 @@ impl ValuePtr {
     fn is_ptr(&self) -> bool { (unsafe { self.tag } & MASK_PTR) == TAG_PTR }
 
     /// Transmutes this `ValuePtr` into a `usize`, providing reference equality semantics by comparing the tag value
-    pub(super) fn as_ptr_value(&self) -> usize {
+    pub fn as_ptr_value(&self) -> usize {
         unsafe { self.tag }
     }
 

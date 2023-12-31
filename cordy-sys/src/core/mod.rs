@@ -132,6 +132,7 @@ pub enum NativeFunction {
     Intersect,
     Difference,
     Counter,
+    Copy,
 
     Peek, // Peek first value
     Pop, // Remove value at end
@@ -388,6 +389,7 @@ const fn load_native_functions() -> [NativeFunctionInfo; NativeFunction::total()
         new(Intersect, "intersect", "other, this", Arg2),
         new(Difference, "difference", "other, this", Arg2),
         new(Counter, "counter", "it", Arg1),
+        new(Copy, "copy", "it", Arg1),
 
         new(Peek, "peek", "collection", Arg1),
         new(Pop, "pop", "collection", Arg1),
@@ -891,6 +893,7 @@ fn invoke_arg1<VM : VirtualInterface>(f: NativeFunction, a1: ValuePtr, vm: &mut 
         Concat => collections::flat_map(vm, None, a1),
         Memoize => collections::create_memoized(a1),
         Counter => collections::counter(a1),
+        Copy => collections::copy(a1),
 
         Peek => collections::peek(a1),
         Pop => collections::pop(a1),

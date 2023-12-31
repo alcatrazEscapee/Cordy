@@ -1864,7 +1864,7 @@ mod tests {
     #[test] fn test_assert_fail_with_test() { run_str("assert false", "Assertion Failed:\n  at: line 1 (<test>)\n\n1 | assert false\n2 |        ^^^^^\n"); }
     #[test] fn test_assert_fail_with_test_and_message() { run_str("assert false : 'oh nose'", "Assertion Failed: oh nose\n  at: line 1 (<test>)\n\n1 | assert false : 'oh nose'\n2 |        ^^^^^\n"); }
     #[test] fn test_assert_fail_with_compare() { run_str("assert 1 + 2 != 3", "Assertion Failed: Expected 3 != 3\n  at: line 1 (<test>)\n\n1 | assert 1 + 2 != 3\n2 |        ^^^^^^^^^^\n"); }
-    #[test] fn test_assert_fail_with_compare_and_message() { run_str("assert 2 * 4 > 3 * 3 : ['did', 'we', 'do', 'math', 'wrong?'] . join ' '", "Assertion Failed: didwedomathwrong?\n                : Expected 8 > 9\n  at: line 1 (<test>)\n\n1 | assert 2 * 4 > 3 * 3 : ['did', 'we', 'do', 'math', 'wrong?'] . join ''\n2 |        ^^^^^^^^^^^^^\n"); }
+    #[test] fn test_assert_fail_with_compare_and_message() { run_str("assert 2 * 4 > 3 * 3 : ['did', 'we', 'do', 'math', 'wrong?'] . join ' '", "Assertion Failed: did we do math wrong?\nExpected 8 > 9\n  at: line 1 (<test>)\n\n1 | assert 2 * 4 > 3 * 3 : ['did', 'we', 'do', 'math', 'wrong?'] . join ' '\n2 |        ^^^^^^^^^^^^^\n"); }
     #[test] fn test_assert_fail_with_unusual_compare() { run_str("assert 'here' in 'the goose is gone'", "Assertion Failed:\n  at: line 1 (<test>)\n\n1 | assert 'here' in 'the goose is gone'\n2 |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n"); }
     #[test] fn test_assert_fail_with_unusual_compare_and_message() { run_str("assert 'here' in 'the goose is gone' : 'goose issues are afoot'", "Assertion Failed: goose issues are afoot\n  at: line 1 (<test>)\n\n1 | assert 'here' in 'the goose is gone' : 'goose issues are afoot'\n2 |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n"); }
     #[test] fn test_assert_messages_are_lazy() { run_str("assert true : exit ; print('should reach here')", "should reach here\n"); }
@@ -2067,6 +2067,14 @@ mod tests {
     #[test] fn test_counter_of_str_1() { run_str("'hello the world!!!!' . counter . print", "{'h': 2, 'e': 2, 'l': 3, 'o': 2, ' ': 2, 't': 1, 'w': 1, 'r': 1, 'd': 1, '!': 4}\n"); }
     #[test] fn test_counter_of_str_2() { run_str("'hello world' . counter . print", "{'h': 1, 'e': 1, 'l': 3, 'o': 2, ' ': 1, 'w': 1, 'r': 1, 'd': 1}\n"); }
     #[test] fn test_counter_of_empty() { run_str("[] . counter . print", "{}\n"); }
+    #[test] fn test_copy_of_primitives() { run_str("[nil, 123, true, 'abc', 'finally this works'] . map copy . print", "[nil, 123, true, 'abc', 'finally this works']\n"); }
+    #[test] fn test_copy_of_list_is_unique() { run_str("let a = [1, 2, 3] ; let b = copy a ; a.push(4) ; print(a, b)", "[1, 2, 3, 4] [1, 2, 3]\n"); }
+    #[test] fn test_copy_of_nested_lists_are_unique() { run_str("let a = [[1], [2], [3]] ; let b = copy a ; a[1].push(2) ; print(a, b)", "[[1], [2, 2], [3]] [[1], [2], [3]]\n"); }
+    #[test] fn test_copy_of_same_identity_lists_preserve_identity() { run_str("let a = [[]] * 4 ; let b = copy a ; a[0].push(1) ; b[1].push(2) ; print(a, b)", "[[1], [1], [1], [1]] [[2], [2], [2], [2]]\n"); }
+    #[test] fn test_copy_of_recursive_lists_works() { run_str("let a = [1, 2] ; a.push(a) ; let b = copy a ; a.push(3) ; b.push(4) ; print(a, b)", "[1, 2, [...], 3] [1, 2, [...], 4]\n"); }
+    #[test] fn test_copy_of_nested_collections_works() { run_str("let x = set(), y = dict(), z = (1, 2) ; let a = [x, {y: [x, y], z: z}, x] ; let b = copy a ; x.push(3) ; y[4] = 5 ; z[0] = 6 ; print(a, b)", "[{3}, {{4: 5}: [{3}, {4: 5}], (6, 2): (6, 2)}, {3}] [{}, {{}: [{}, {}], (1, 2): (1, 2)}, {}]\n"); }
+    #[test] fn test_copy_heap_keeps_same_order() { run_str("let a = heap(6, 5, 2, 7, 3, 1, 9, 0, -1, -6, -4, -7, -2, -8) ; let b = copy a ; print(b, a == b)", "[-8, -6, -7, -1, -4, -2, 2, 0, 7, 3, 5, 1, 6, 9] true\n"); }
+    #[test] fn test_copy_enumerate_preserve_identity() { run_str("let x = [1, 2, 3] ; let a = [enumerate x, x, enumerate x] ; let b = copy a ; x.push(4) ; b[1].push(5) ; print(a, b)", "[enumerate([1, 2, 3, 4]), [1, 2, 3, 4], enumerate([1, 2, 3, 4])] [enumerate([1, 2, 3, 5]), [1, 2, 3, 5], enumerate([1, 2, 3, 5])]\n"); }
 
 
     #[test] fn test_aoc_2022_01_01() { run("aoc_2022_01_01"); }
