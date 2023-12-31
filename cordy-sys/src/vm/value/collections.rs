@@ -9,7 +9,8 @@ use indexmap::{IndexMap, IndexSet};
 use crate::core::InvokeArg0;
 use crate::util::{impl_deref, impl_partial_ord};
 use crate::vm::value::ptr::Prefix;
-use crate::vm::ValuePtr;
+use crate::vm::{AnyResult, ValuePtr};
+use crate::vm::RuntimeError::ValueErrorRecursiveHash;
 
 
 type ListType = VecDeque<ValuePtr>;
@@ -74,6 +75,13 @@ impl Set {
     pub(super) fn new(set: SetType) -> Set {
         Set { set }
     }
+
+    pub fn insert_checked(&mut self, value: ValuePtr) -> AnyResult {
+        match guard_recursive_hash(|| self.insert(value)) {
+            false => Ok(()),
+            true => ValueErrorRecursiveHash.err()
+        }
+    }
 }
 
 impl_partial_ord!(Set);
@@ -134,6 +142,13 @@ impl Dict {
         Dict { dict, default: None }
     }
 
+    pub fn insert_checked(&mut self, key: ValuePtr, value: ValuePtr) -> AnyResult {
+        match guard_recursive_hash(|| self.insert(key, value)) {
+            false => Ok(()),
+            true => ValueErrorRecursiveHash.err()
+        }
+    }
+
     pub fn set_default(&mut self, default: InvokeArg0) {
         self.default = Some(default)
     }
@@ -179,12 +194,12 @@ thread_local! {
     static FLAG_RECURSIVE_HASH: Cell<bool> = Cell::new(false);
 }
 
-/// Returns `Err` if a recursive hash error occurred, `Ok` otherwise.
+/// Returns `true` if a recursive hash error occurred.
 #[inline]
-pub fn guard_recursive_hash<T, F : FnOnce() -> T>(f: F) -> Result<(), ()> {
+fn guard_recursive_hash<T, F : FnOnce() -> T>(f: F) -> bool {
     FLAG_RECURSIVE_HASH.with(|cell| cell.set(false));
     f();
-    if FLAG_RECURSIVE_HASH.with(|cell| cell.get()) { Err(()) } else { Ok(()) }
+    FLAG_RECURSIVE_HASH.with(|cell| cell.get())
 }
 
 

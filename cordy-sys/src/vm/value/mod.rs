@@ -19,15 +19,14 @@ use crate::vm::value::str::IterStr;
 use crate::vm::value::range::Range;
 use crate::vm::value::slice::Slice;
 use crate::vm::value::complex::Complex;
+use crate::vm::value::collections::{Dict, Heap, List, Set, Vector};
 
 pub use crate::vm::value::ptr::{MAX_INT, MIN_INT, ValuePtr};
 pub use crate::vm::value::complex::ComplexValue;
 pub use crate::vm::value::func::{Closure, Function, PartialFunction, PartialNativeFunction, UpValue};
 pub use crate::vm::value::error::{AnyResult, ErrorPtr, ErrorResult, ValueResult};
-pub use crate::vm::value::collections::guard_recursive_hash;
 
 use RuntimeError::{*};
-use crate::vm::value::collections::{Dict, Heap, List, Set, Vector};
 
 
 mod ptr;
