@@ -13,7 +13,7 @@ use Type::{*};
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
 pub enum UnaryOp {
-    Neg, Not
+    Neg, Not, LogicalNot
 }
 
 #[repr(u8)]
@@ -33,6 +33,7 @@ impl UnaryOp {
         match self {
             UnaryOp::Neg => unary_sub(arg),
             UnaryOp::Not => unary_not(arg),
+            UnaryOp::LogicalNot => unary_logical_not(arg)
         }
     }
 }
@@ -109,6 +110,10 @@ pub fn unary_not(a1: ValuePtr) -> ValueResult {
         Vector => apply_vector_unary(a1, unary_not),
         _ => TypeErrorUnaryOp(UnaryOp::Not, a1).err(),
     }
+}
+
+pub fn unary_logical_not(a1: ValuePtr) -> ValueResult {
+    (!a1.to_bool()).to_value().ok()
 }
 
 

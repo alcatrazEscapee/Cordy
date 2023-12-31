@@ -1263,11 +1263,17 @@ impl Parser<'_> {
             Some(Pow) => binary = Some(OperatorPow),
             Some(Mod) => binary = Some(OperatorMod),
             Some(KeywordIn) => binary = Some(OperatorIn),
-            Some(KeywordNot) => if let Some(KeywordIn) = self.peek2() { // Lookahead two for `not in`
-                binary = Some(OperatorNotIn);
-                long = true;
+            Some(KeywordNot) => match self.peek2() { // Lookahead two for `not in` or `not`
+                Some(KeywordIn) => {
+                    binary = Some(OperatorNotIn);
+                    long = true;
+                },
+                Some(_) => {
+                    unary = Some(OperatorUnaryLogicalNot)
+                },
+                None => {},
             },
-            Some(KeywordIs) => match self.peek2() { // Lookahead two for `is not`
+            Some(KeywordIs) => match self.peek2() { // Lookahead two for `is not` or `is`
                 Some(KeywordNot) => {
                     binary = Some(OperatorIsNot);
                     long = true;
@@ -1586,6 +1592,10 @@ impl Parser<'_> {
                     let loc = self.advance_with();
                     stack.push((loc, UnaryOp::Not));
                 },
+                Some(KeywordNot) => {
+                    let loc = self.advance_with();
+                    stack.push((loc, UnaryOp::LogicalNot))
+                }
                 _ => return stack
             }
         }

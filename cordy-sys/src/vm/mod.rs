@@ -1536,6 +1536,11 @@ mod tests {
     #[test] fn test_operator_eq_chained_short_circuit_yes_no() { run_str("(print(1) == print(2) != print(3)) . print", "1\n2\n3\nfalse\n") }
     #[test] fn test_operator_eq_chained_short_circuit_no_yes() { run_str("(print(1) != print(2) == print(3)) . print", "1\n2\nfalse\n") }
     #[test] fn test_operator_eq_chained_short_circuit_no_no() { run_str("(print(1) != print(2) != print(3)) . print", "1\n2\nfalse\n") }
+    #[test] fn test_operator_logical_not_of_bool() { run_str("not true . print ; not false . print", "false\ntrue\n"); }
+    #[test] fn test_operator_logical_not_coerces_to_bool() { run_str("not [] . print ; not [1, 2, 3] . print ; not 123 . print ; not 0 . print", "true\nfalse\nfalse\ntrue\n"); }
+    #[test] fn test_operator_logical_not_is_not_elementwise_on_vector() { run_str("not ( vector() ) . print ; not (1,) . print ; not (1, 2, 3) . print", "true\nfalse\nfalse\n"); }
+    #[test] fn test_operator_logical_not_as_operator_function_raw() { run_str("let f = (not) ; (1 + 1i) . f . print", "false\n"); }
+    #[test] fn test_operator_logical_not_as_operator_function_argument() { run_str("['', 'a', 'ab', 'abc'] . map(not) . print", "[true, false, false, false]\n"); }
     #[test] fn test_arrow_functions_01() { run_str("fn foo() -> 3 ; foo() . print", "3\n"); }
     #[test] fn test_arrow_functions_02() { run_str("fn foo() -> 3 ; foo() . print", "3\n"); }
     #[test] fn test_arrow_functions_03() { run_str("fn foo(a) -> 3 * a ; 5 . foo . print", "15\n"); }
