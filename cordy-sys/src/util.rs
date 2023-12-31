@@ -56,7 +56,25 @@ macro_rules! impl_partial_ord {
     };
 }
 
-pub(crate) use impl_partial_ord;
+macro_rules! impl_deref {
+    ($ty:ty, $deref:ty, $f:ident) => {
+        impl Deref for $ty {
+            type Target = $deref;
+
+            fn deref(&self) -> &Self::Target {
+                &self.$f
+            }
+        }
+
+        impl DerefMut for $ty {
+            fn deref_mut(&mut self) -> &mut Self::Target {
+                &mut self.$f
+            }
+        }
+    };
+}
+
+pub(crate) use {impl_partial_ord, impl_deref};
 
 
 pub struct Noop;

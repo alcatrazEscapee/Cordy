@@ -1,5 +1,4 @@
 use std::borrow::Cow;
-use std::cell::Cell;
 use std::cmp::{Ordering, Reverse};
 use std::collections::{BinaryHeap, HashMap, VecDeque};
 use std::fmt::Debug;
@@ -12,7 +11,7 @@ use range::Enumerate;
 
 use crate::compiler::Fields;
 use crate::core;
-use crate::core::{InvokeArg0, NativeFunction};
+use crate::core::NativeFunction;
 use crate::util::impl_partial_ord;
 use crate::vm::error::RuntimeError;
 use crate::vm::value::ptr::{RefMut, Prefix};
@@ -25,8 +24,10 @@ pub use crate::vm::value::ptr::{MAX_INT, MIN_INT, ValuePtr};
 pub use crate::vm::value::complex::ComplexValue;
 pub use crate::vm::value::func::{Closure, Function, PartialFunction, PartialNativeFunction, UpValue};
 pub use crate::vm::value::error::{AnyResult, ErrorPtr, ErrorResult, ValueResult};
+pub use crate::vm::value::collections::guard_recursive_hash;
 
 use RuntimeError::{*};
+use crate::vm::value::collections::{Dict, Heap, List, Set, Vector};
 
 
 mod ptr;
@@ -36,6 +37,7 @@ mod range;
 mod slice;
 mod error;
 mod complex;
+mod collections;
 
 
 /// `Type` is an enumeration of all the possible types (not including user-defined type variants such as `struct`s) possible in Cordy.
@@ -204,28 +206,27 @@ impl ValuePtr {
 
             Type::List => recursive_guard!(
                 Cow::from("[...]"),
-                map_join(rc, self.as_list().borrow().list.iter(), '[', ']', "[]", ", ")
+                map_join(rc, self.as_list().borrow().iter(), '[', ']', "[]", ", ")
             ),
             Type::Set => recursive_guard!(
                 Cow::from("{...}"),
-                map_join(rc, self.as_set().borrow().set.iter(), '{', '}', "{}", ", ")
+                map_join(rc, self.as_set().borrow().iter(), '{', '}', "{}", ", ")
             ),
             Type::Dict => recursive_guard!(
                 Cow::from("{...}"),
                 Cow::from(format!("{{{}}}", self.as_dict()
                     .borrow()
-                    .dict
                     .iter()
                     .map(|(k, v)| format!("{}: {}", k.safe_to_repr_str(rc), v.safe_to_repr_str(rc)))
                     .join(", ")))
             ),
             Type::Heap => recursive_guard!(
                 Cow::from("[...]"),
-                map_join(rc, self.as_heap().borrow().heap.iter().map(|u| &u.0), '[', ']', "[]",  ", ")
+                map_join(rc, self.as_heap().borrow().iter().map(|u| &u.0), '[', ']', "[]",  ", ")
             ),
             Type::Vector => recursive_guard!(
                 Cow::from("(...)"),
-                map_join(rc, self.as_vector().borrow().vector.iter(), '(', ')', "()", ", ")
+                map_join(rc, self.as_vector().borrow().iter(), '(', ')', "()", ", ")
             ),
 
             Type::Struct => {
@@ -283,11 +284,11 @@ impl ValuePtr {
             Type::Bool => self.as_bool(),
             Type::Int => self.as_int() != 0,
             Type::ShortStr | Type::LongStr => !self.as_str_slice().is_empty(),
-            Type::List => !self.as_list().borrow().list.is_empty(),
-            Type::Set => !self.as_set().borrow().set.is_empty(),
-            Type::Dict => !self.as_dict().borrow().dict.is_empty(),
-            Type::Heap => !self.as_heap().borrow().heap.is_empty(),
-            Type::Vector => !self.as_vector().borrow().vector.is_empty(),
+            Type::List => !self.as_list().borrow().is_empty(),
+            Type::Set => !self.as_set().borrow().is_empty(),
+            Type::Dict => !self.as_dict().borrow().is_empty(),
+            Type::Heap => !self.as_heap().borrow().is_empty(),
+            Type::Vector => !self.as_vector().borrow().is_empty(),
             Type::Range => !self.as_range().is_empty(),
             Type::Enumerate => self.as_enumerate().to_bool(),
             _ => true,
@@ -302,7 +303,8 @@ impl ValuePtr {
             Type::List | Type::Set | Type::Dict | Type::Vector => Ok(Iterable::Collection(0, self)),
 
             // Heaps completely unbox themselves to be iterated over
-            Type::Heap => Ok(Iterable::RawVector(0, self.as_heap().borrow().heap
+            Type::Heap => Ok(Iterable::RawVector(0, self.as_heap()
+                .borrow()
                 .iter()
                 .cloned().map(|u| u.0)
                 .collect::<Vec<ValuePtr>>())),
@@ -341,8 +343,8 @@ impl ValuePtr {
     /// Converts this value into a `(ValuePtr, ValuePtr)` if possible, supported for two-element `List` and `Vector`s
     pub fn to_pair(self) -> ErrorResult<(ValuePtr, ValuePtr)> {
         match match self.ty() {
-            Type::List => self.as_list().borrow().list.iter().cloned().collect_tuple(),
-            Type::Vector => self.as_vector().borrow().vector.iter().cloned().collect_tuple(),
+            Type::List => self.as_list().borrow().iter().cloned().collect_tuple(),
+            Type::Vector => self.as_vector().borrow().iter().cloned().collect_tuple(),
             _ => None
         } {
             Some(it) => Ok(it),
@@ -369,11 +371,11 @@ impl ValuePtr {
     pub fn len(&self) -> ErrorResult<usize> {
         match self.ty() {
             Type::ShortStr | Type::LongStr => Ok(self.as_str_slice().chars().count()),
-            Type::List => Ok(self.as_list().borrow().list.len()),
-            Type::Set => Ok(self.as_set().borrow().set.len()),
-            Type::Dict => Ok(self.as_dict().borrow().dict.len()),
-            Type::Heap => Ok(self.as_heap().borrow().heap.len()),
-            Type::Vector => Ok(self.as_vector().borrow().vector.len()),
+            Type::List => Ok(self.as_list().borrow().len()),
+            Type::Set => Ok(self.as_set().borrow().len()),
+            Type::Dict => Ok(self.as_dict().borrow().len()),
+            Type::Heap => Ok(self.as_heap().borrow().len()),
+            Type::Vector => Ok(self.as_vector().borrow().len()),
             Type::Range => Ok(self.as_range().len()),
             Type::Enumerate => self.as_enumerate().len(),
             _ => TypeErrorArgMustBeIterable(self.clone()).err()
@@ -469,7 +471,7 @@ impl ValuePtr {
     }
 
     #[inline(always)]
-    pub fn as_list_checked(&self) -> ErrorResult<&Prefix<ListImpl>> {
+    pub fn as_list_checked(&self) -> ErrorResult<&Prefix<List>> {
         match self.is_list() {
             true => Ok(self.as_list()),
             false => TypeErrorArgMustBeList(self.clone()).err()
@@ -477,7 +479,7 @@ impl ValuePtr {
     }
 
     #[inline(always)]
-    pub fn as_dict_checked(&self) -> ErrorResult<&Prefix<DictImpl>> {
+    pub fn as_dict_checked(&self) -> ErrorResult<&Prefix<Dict>> {
         match self.is_dict() {
             true => Ok(self.as_dict()),
             false => TypeErrorArgMustBeDict(self.clone()).err()
@@ -568,11 +570,11 @@ impl_const!(Type::Enumerate, Enumerate, as_enumerate, is_enumerate);
 impl_const!(Type::StructType, StructTypeImpl, as_struct_type, is_struct_type);
 impl_const!(Type::Error, RuntimeError, as_err, is_err);
 
-impl_mut!(Type::List, ListImpl, as_list, is_list);
-impl_mut!(Type::Set, SetImpl, as_set, is_set);
-impl_mut!(Type::Dict, DictImpl, as_dict, is_dict);
-impl_mut!(Type::Heap, HeapImpl, as_heap, is_heap);
-impl_mut!(Type::Vector, VectorImpl, as_vector, is_vector);
+impl_mut!(Type::List, List, as_list, is_list);
+impl_mut!(Type::Set, Set, as_set, is_set);
+impl_mut!(Type::Dict, Dict, as_dict, is_dict);
+impl_mut!(Type::Heap, Heap, as_heap, is_heap);
+impl_mut!(Type::Vector, Vector, as_vector, is_vector);
 impl_mut!(Type::Closure, Closure, as_closure, is_closure);
 impl_mut!(Type::Memoized, MemoizedImpl, as_memoized, is_memoized);
 impl_mut!(Type::Struct, StructImpl, as_struct, is_struct);
@@ -604,12 +606,12 @@ impl_into!(&str, self, ptr::from_str(self));
 impl_into!(String, self, ptr::from_str(self.as_str()));
 impl_into!(Cow<'_, str>, self, ptr::from_str(&self));
 impl_into!(NativeFunction, self, ptr::from_native(self));
-impl_into!(VecDeque<ValuePtr>, self, ListImpl { list: self }.to_value());
-impl_into!(Vec<ValuePtr>, self, VectorImpl { vector: self }.to_value());
+impl_into!(VecDeque<ValuePtr>, self, List::new(self).to_value());
+impl_into!(Vec<ValuePtr>, self, Vector::new(self).to_value());
 impl_into!((ValuePtr, ValuePtr), self, vec![self.0, self.1].to_value());
-impl_into!(IndexSet<ValuePtr, FxBuildHasher>, self, SetImpl { set: self }.to_value());
-impl_into!(IndexMap<ValuePtr, ValuePtr, FxBuildHasher>, self, DictImpl { dict: self, default: None }.to_value());
-impl_into!(BinaryHeap<Reverse<ValuePtr>>, self, HeapImpl { heap: self }.to_value());
+impl_into!(IndexSet<ValuePtr, FxBuildHasher>, self, Set::new(self).to_value());
+impl_into!(IndexMap<ValuePtr, ValuePtr, FxBuildHasher>, self, Dict::new(self).to_value());
+impl_into!(BinaryHeap<Reverse<ValuePtr>>, self, Heap::new(self).to_value());
 
 
 /// A trait which is responsible for wrapping conversions from a `Iterator<Item=Value>` into `IntoValue`, which then converts to a `ValuePtr`.
@@ -649,150 +651,6 @@ impl<I> IntoDictValue for I where I : Iterator<Item=(ValuePtr, ValuePtr)> {
     }
 }
 
-
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ListImpl {
-    pub list: VecDeque<ValuePtr>
-}
-
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct VectorImpl {
-    pub vector: Vec<ValuePtr>
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub struct SetImpl {
-    pub set: IndexSet<ValuePtr, FxBuildHasher>
-}
-
-impl PartialOrd for SetImpl {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for SetImpl {
-    fn cmp(&self, other: &Self) -> Ordering {
-        for (l, r) in self.set.iter().zip(other.set.iter()) {
-            match l.cmp(r) {
-                Ordering::Equal => {},
-                ord => return ord,
-            }
-        }
-        self.set.len().cmp(&other.set.len())
-    }
-}
-
-/// `set()` is one object which can enter into a recursive hash situation:
-/// ```cordy
-/// let x = set()
-/// x.push(x)
-/// ```
-///
-/// This will take a mutable borrow on `x`, in the implementation of `push`, but then need to compute the hash of `x` to insert it into the set.
-/// It can also apply to nested structures, as long as any recursive entry is formed.
-///
-/// The resolution is twofold:
-///
-/// - We don't implement `Hash` for `SetImpl`, instead implementing for `Mut<SetImpl>`, as before unboxing we need to do a borrow check
-/// - If the borrow check fails, we set a global flag that we've entered this pathological case, which is checked by `ArrayStore` before yielding back to user code
-///
-/// Note this also applies to `DictImpl` / `dict()`, although only when used as a key.
-impl Hash for Prefix<SetImpl> {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        match self.try_borrow() {
-            Some(it) => {
-                for v in &it.set {
-                    v.hash(state)
-                }
-            },
-            None => FLAG_RECURSIVE_HASH.with(|cell| cell.set(true)),
-        }
-    }
-}
-
-
-// Support for `set` and `dict` recursive hash exceptions
-thread_local! {
-    static FLAG_RECURSIVE_HASH: Cell<bool> = Cell::new(false);
-}
-
-/// Returns `Err` if a recursive hash error occurred, `Ok` otherwise.
-#[inline]
-pub fn guard_recursive_hash<T, F : FnOnce() -> T>(f: F) -> Result<(), ()> {
-    FLAG_RECURSIVE_HASH.with(|cell| cell.set(false));
-    f();
-    if FLAG_RECURSIVE_HASH.with(|cell| cell.get()) { Err(()) } else { Ok(()) }
-}
-
-
-#[derive(Debug, Clone)]
-pub struct DictImpl {
-    pub dict: IndexMap<ValuePtr, ValuePtr, FxBuildHasher>,
-    pub default: Option<InvokeArg0>
-}
-
-impl Eq for DictImpl {}
-impl PartialEq<Self> for DictImpl { fn eq(&self, other: &Self) -> bool { self.dict == other.dict } }
-impl PartialOrd for DictImpl { fn partial_cmp(&self, other: &Self) -> Option<Ordering> { Some(self.cmp(other)) } }
-
-impl Ord for DictImpl {
-    fn cmp(&self, other: &Self) -> Ordering {
-        for (l, r) in self.dict.keys().zip(other.dict.keys()) {
-            match l.cmp(r) {
-                Ordering::Equal => {},
-                ord => return ord,
-            }
-        }
-        self.dict.len().cmp(&other.dict.len())
-    }
-}
-
-/// See justification for the unique `Hash` implementation on `SetImpl`
-impl Hash for Prefix<DictImpl> {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        match self.try_borrow() {
-            Some(it) => {
-                for v in &it.dict {
-                    v.hash(state)
-                }
-            },
-            None => FLAG_RECURSIVE_HASH.with(|cell| cell.set(true))
-        }
-    }
-}
-
-
-/// As `BinaryHeap` is missing `Eq`, `PartialEq`, and `Hash` implementations
-/// We also wrap values in `Reverse` as we want to expose a min-heap by default
-#[derive(Debug, Clone)]
-pub struct HeapImpl {
-    pub heap: BinaryHeap<Reverse<ValuePtr>>
-}
-
-impl Eq for HeapImpl {}
-impl PartialEq<Self> for HeapImpl {
-    fn eq(&self, other: &Self) -> bool {
-        self.heap.len() == other.heap.len() && self.heap.iter().zip(other.heap.iter()).all(|(x, y)| x == y)
-    }
-}
-
-// Heap ordering is, much like the heap itself, just based on the lowest (top) value of the heap.
-// Empty heaps will return `None`, and this is implicit less than `Some`. So empty heap < non-empty heap
-impl_partial_ord!(HeapImpl);
-impl Ord for HeapImpl {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.heap.peek().cmp(&other.heap.peek())
-    }
-}
-
-impl Hash for HeapImpl {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        for v in &self.heap {
-            v.hash(state)
-        }
-    }
-}
 
 /// The implementation type for an instance of a struct.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -1011,10 +869,10 @@ impl Iterable {
     /// Returns the next element from a collection-like `ValuePtr` acting as an iterable
     fn get(ptr: &ValuePtr, index: usize) -> Option<ValuePtr> {
         match ptr.ty() {
-            Type::List => ptr.as_list().borrow().list.get(index).cloned(),
-            Type::Set => ptr.as_set().borrow().set.get_index(index).cloned(),
-            Type::Dict => ptr.as_dict().borrow().dict.get_index(index).map(|(l, r)| (l.clone(), r.clone()).to_value()),
-            Type::Vector => ptr.as_vector().borrow().vector.get(index).cloned(),
+            Type::List => ptr.as_list().borrow().get(index).cloned(),
+            Type::Set => ptr.as_set().borrow().get_index(index).cloned(),
+            Type::Dict => ptr.as_dict().borrow().get_index(index).map(|(l, r)| (l.clone(), r.clone()).to_value()),
+            Type::Vector => ptr.as_vector().borrow().get(index).cloned(),
             _ => unreachable!(),
         }
     }
@@ -1098,8 +956,8 @@ impl Hash for MemoizedImpl {
 
 pub enum Indexable<'a> {
     Str(&'a str),
-    List(RefMut<'a, ListImpl>),
-    Vector(RefMut<'a, VectorImpl>),
+    List(RefMut<'a, List>),
+    Vector(RefMut<'a, Vector>),
 }
 
 impl<'a> Indexable<'a> {
@@ -1107,8 +965,8 @@ impl<'a> Indexable<'a> {
     pub fn len(&self) -> usize {
         match self {
             Indexable::Str(it) => it.len(),
-            Indexable::List(it) => it.list.len(),
-            Indexable::Vector(it) => it.vector.len(),
+            Indexable::List(it) => it.len(),
+            Indexable::Vector(it) => it.len(),
         }
     }
 
@@ -1127,8 +985,8 @@ impl<'a> Indexable<'a> {
     pub fn get_index(&self, index: usize) -> ValuePtr {
         match self {
             Indexable::Str(it) => it.chars().nth(index).unwrap().to_value(),
-            Indexable::List(it) => it.list[index].clone(),
-            Indexable::Vector(it) => it.vector[index].clone(),
+            Indexable::List(it) => it[index].clone(),
+            Indexable::Vector(it) => it[index].clone(),
         }
     }
 
@@ -1137,11 +995,11 @@ impl<'a> Indexable<'a> {
         match self {
             Indexable::Str(it) => TypeErrorArgMustBeIndexable(it.to_value()).err(),
             Indexable::List(it) => {
-                it.list[index] = value;
+                it[index] = value;
                 Ok(())
             },
             Indexable::Vector(it) => {
-                it.vector[index] = value;
+                it[index] = value;
                 Ok(())
             },
         }

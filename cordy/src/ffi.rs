@@ -142,8 +142,8 @@ fn to_value(ptr: ValuePtr) -> Result<CordyValue, String> {
                 Err(e) => Err(format!("String is not FFI compatible : {}", e))
             }
         },
-        Type::Vector => to_value_array(ptr.as_vector().borrow().vector.iter().cloned()),
-        Type::List => to_value_array(ptr.as_list().borrow().list.iter().cloned()),
+        Type::Vector => to_value_array(ptr.as_vector().borrow().iter().cloned()),
+        Type::List => to_value_array(ptr.as_list().borrow().iter().cloned()),
         _ => Err(String::from("FFI Type must be a primitive nil, bool, or int")),
     }
 }

@@ -33,15 +33,15 @@ fn get_dict_index<VM : VirtualInterface>(vm: &mut VM, dict: &ValuePtr, key: Valu
     let default_factory: InvokeArg0;
     {
         let dict = dict.borrow();
-        match &dict.default {
-            Some(default) => match dict.dict.get(&key) {
+        match &dict.get_default() {
+            Some(default) => match dict.get(&key) {
                 Some(existing_value) => return existing_value.clone().ok(),
                 None => {
                     // We need to insert, so fallthrough as we need to drop the borrow on `dict`
                     default_factory = default.clone();
                 },
             },
-            None => return match dict.dict.get(&key) {
+            None => return match dict.get(&key) {
                 Some(existing_value) => existing_value.clone().ok(),
                 None => ValueErrorKeyNotPresent(key).err()
             },
@@ -53,7 +53,7 @@ fn get_dict_index<VM : VirtualInterface>(vm: &mut VM, dict: &ValuePtr, key: Valu
     let new_value: ValuePtr = default_factory.invoke(vm)?;
     let mut dict = dict.borrow_mut();
 
-    dict.dict.entry(key)
+    dict.entry(key)
         .or_insert(new_value)
         .clone()
         .ok()
@@ -61,7 +61,7 @@ fn get_dict_index<VM : VirtualInterface>(vm: &mut VM, dict: &ValuePtr, key: Valu
 
 pub fn set_index(target: &ValuePtr, index: ValuePtr, value: ValuePtr) -> AnyResult {
     if target.is_dict() {
-        match vm::guard_recursive_hash(|| target.as_dict().borrow_mut().dict.insert(index, value)) {
+        match vm::guard_recursive_hash(|| target.as_dict().borrow_mut().insert(index, value)) {
             Err(_) => ValueErrorRecursiveHash(target.clone()).err(),
             Ok(_) => Ok(())
         }
@@ -292,8 +292,7 @@ pub fn group_by<VM : VirtualInterface>(vm: &mut VM, by: ValuePtr, args: ValuePtr
                     .or_insert_with(|| Vec::with_capacity(size / 4).to_value()) // Rough guess
                     .as_vector() // This is safe because we should only have vectors in the map
                     .borrow_mut()
-                    .vector.
-                    push(value);
+                    .push(value);
             }
             groups.to_value().ok()
         }
@@ -434,11 +433,11 @@ pub fn reduce<VM: VirtualInterface>(vm: &mut VM, f: ValuePtr, args: ValuePtr) ->
 
 pub fn peek(target: ValuePtr) -> ValueResult {
     match match target.ty() {
-        Type::List => target.as_list().borrow().list.front().cloned(),
-        Type::Set => target.as_set().borrow().set.first().cloned(),
-        Type::Dict => target.as_dict().borrow().dict.first().map(|(l, r)| (l.clone(), r.clone()).to_value()),
-        Type::Heap => target.as_heap().borrow().heap.peek().map(|u| u.clone().0),
-        Type::Vector => target.as_vector().borrow().vector.first().cloned(),
+        Type::List => target.as_list().borrow().front().cloned(),
+        Type::Set => target.as_set().borrow().first().cloned(),
+        Type::Dict => target.as_dict().borrow().first().map(|(l, r)| (l.clone(), r.clone()).to_value()),
+        Type::Heap => target.as_heap().borrow().peek().map(|u| u.clone().0),
+        Type::Vector => target.as_vector().borrow().first().cloned(),
         _ => return TypeErrorArgMustBeIterable(target).err(),
     } {
         Some(v) => v.ok(),
@@ -448,10 +447,10 @@ pub fn peek(target: ValuePtr) -> ValueResult {
 
 pub fn pop(target: ValuePtr) -> ValueResult {
     match match target.ty() {
-        Type::List => target.as_list().borrow_mut().list.pop_back(),
-        Type::Set => target.as_set().borrow_mut().set.pop(),
-        Type::Dict => target.as_dict().borrow_mut().dict.pop().map(|u| u.to_value()),
-        Type::Heap => target.as_heap().borrow_mut().heap.pop().map(|t| t.0),
+        Type::List => target.as_list().borrow_mut().pop_back(),
+        Type::Set => target.as_set().borrow_mut().pop(),
+        Type::Dict => target.as_dict().borrow_mut().pop().map(|u| u.to_value()),
+        Type::Heap => target.as_heap().borrow_mut().pop().map(|t| t.0),
         _ => return TypeErrorArgMustBeIterable(target).err()
     } {
         Some(v) => v.ok(),
@@ -460,7 +459,7 @@ pub fn pop(target: ValuePtr) -> ValueResult {
 }
 
 pub fn pop_front(target: ValuePtr) -> ValueResult {
-    match target.as_list_checked()?.borrow_mut().list.pop_front() {
+    match target.as_list_checked()?.borrow_mut().pop_front() {
         Some(v) => v.ok(),
         None => ValueErrorValueMustBeNonEmpty.err()
     }
@@ -469,15 +468,15 @@ pub fn pop_front(target: ValuePtr) -> ValueResult {
 pub fn push(value: ValuePtr, target: ValuePtr) -> ValueResult {
     match target.ty() {
         Type::List => {
-            target.as_list().borrow_mut().list.push_back(value);
+            target.as_list().borrow_mut().push_back(value);
             target.ok()
         }
-        Type::Set => match vm::guard_recursive_hash(|| target.as_set().borrow_mut().set.insert(value)) {
+        Type::Set => match vm::guard_recursive_hash(|| target.as_set().borrow_mut().insert(value)) {
             Err(_) => ValueErrorRecursiveHash(target).err(),
             Ok(_) => target.ok()
         }
         Type::Heap => {
-            target.as_heap().borrow_mut().heap.push(Reverse(value));
+            target.as_heap().borrow_mut().push(Reverse(value));
             target.ok()
         }
         _ => TypeErrorArgMustBeIterable(target).err()
@@ -485,7 +484,7 @@ pub fn push(value: ValuePtr, target: ValuePtr) -> ValueResult {
 }
 
 pub fn push_front(value: ValuePtr, target: ValuePtr) -> ValueResult {
-    target.as_list_checked()?.borrow_mut().list.push_front(value);
+    target.as_list_checked()?.borrow_mut().push_front(value);
     target.ok()
 }
 
@@ -495,18 +494,18 @@ pub fn insert(index: ValuePtr, value: ValuePtr, target: ValuePtr) -> ValueResult
             {
                 let mut it = target.as_list().borrow_mut();
                 let index = index.as_int_checked()?;
-                let len = it.list.len();
+                let len = it.len();
                 if 0 <= index && index < len as i64 {
-                    it.list.insert(index as usize, value);
+                    it.insert(index as usize, value);
                 } else if index == len as i64 {
-                    it.list.push_back(value);
+                    it.push_back(value);
                 } else {
                     return ValueErrorIndexOutOfBounds(index, len).err()
                 }
             }
             target.ok()
         },
-        Type::Dict => match vm::guard_recursive_hash(|| target.as_dict().borrow_mut().dict.insert(index, value)) {
+        Type::Dict => match vm::guard_recursive_hash(|| target.as_dict().borrow_mut().insert(index, value)) {
             Err(_) => ValueErrorRecursiveHash(target).err(),
             Ok(_) => target.ok()
         },
@@ -519,9 +518,9 @@ pub fn remove(needle: ValuePtr, target: ValuePtr) -> ValueResult {
         Type::List => {
             let mut it = target.as_list().borrow_mut();
             let index = needle.as_int_checked()?;
-            let len = it.list.len();
+            let len = it.len();
             if 0 <= index && index < len as i64 {
-                it.list.remove(index as usize)
+                it.remove(index as usize)
                     .unwrap() // .unwrap() is safe, as we pre-checked the index
                     .ok()
             } else {
@@ -532,32 +531,21 @@ pub fn remove(needle: ValuePtr, target: ValuePtr) -> ValueResult {
         // `remove()` is not a particularly common op (`in` or access) is, so this is a fair tradeoff to make
         //
         // For reference, Python >=3.7 makes the same guarantee, see https://docs.python.org/3/reference/datamodel.html, 3.2.7.1
-        Type::Set => target.as_set().borrow_mut().set.shift_remove(&needle).to_value().ok(),
-        Type::Dict => target.as_dict().borrow_mut().dict.shift_remove(&needle).is_some().to_value().ok(),
+        Type::Set => target.as_set().borrow_mut().shift_remove(&needle).to_value().ok(),
+        Type::Dict => target.as_dict().borrow_mut().shift_remove(&needle).is_some().to_value().ok(),
         _ => TypeErrorArgMustBeIterable(target).err(),
     }
 }
 
 pub fn clear(target: ValuePtr) -> ValueResult {
     match target.ty() {
-        Type::List => {
-            target.as_list().borrow_mut().list.clear();
-            target.ok()
-        },
-        Type::Set => {
-            target.as_set().borrow_mut().set.clear();
-            target.ok()
-        },
-        Type::Dict => {
-            target.as_dict().borrow_mut().dict.clear();
-            target.ok()
-        },
-        Type::Heap => {
-            target.as_heap().borrow_mut().heap.clear();
-            target.ok()
-        },
-        _ => TypeErrorArgMustBeIterable(target).err(),
+        Type::List => target.as_list().borrow_mut().clear(),
+        Type::Set => target.as_set().borrow_mut().clear(),
+        Type::Dict => target.as_dict().borrow_mut().clear(),
+        Type::Heap => target.as_heap().borrow_mut().clear(),
+        _ => return TypeErrorArgMustBeIterable(target).err(),
     }
+    target.ok()
 }
 
 
@@ -570,18 +558,19 @@ pub fn collect_into_dict(iter: impl Iterator<Item=ValuePtr>) -> ValueResult {
 }
 
 pub fn dict_set_default(def: ValuePtr, target: ValuePtr) -> ValueResult {
-    target.as_dict_checked()?.borrow_mut().default = Some(if def.is_evaluable() {
-        InvokeArg0::from(def)?
-    } else {
-        InvokeArg0::Noop(def) // Treat single argument defaults still as a function, which is optimized to just copy its value
-    });
+    target.as_dict_checked()?
+        .borrow_mut()
+        .set_default(match def.is_evaluable() {
+            true => InvokeArg0::from(def)?,
+            false => InvokeArg0::Noop(def) // Treat single argument defaults still as a function, which is optimized to just copy its value
+        });
     target.ok()
 }
 
 pub fn dict_keys(target: ValuePtr) -> ValueResult {
     target.as_dict_checked()?
         .borrow()
-        .dict.keys()
+        .keys()
         .cloned()
         .to_set()
         .ok()
@@ -590,7 +579,7 @@ pub fn dict_keys(target: ValuePtr) -> ValueResult {
 pub fn dict_values(target: ValuePtr) -> ValueResult {
     target.as_dict_checked()?
         .borrow()
-        .dict.values()
+        .values()
         .cloned()
         .to_list()
         .ok()
@@ -657,7 +646,7 @@ pub fn set_union(other: ValuePtr, this: ValuePtr) -> ValueResult {
             // this.union(other) := add everything from other to this
             let mut set = this.as_set().borrow_mut();
             for e in other.to_iter()? {
-                set.set.insert(e);
+                set.insert(e);
             }
             drop(set);
             this.ok()
@@ -673,7 +662,7 @@ pub fn set_intersect(other: ValuePtr, this: ValuePtr) -> ValueResult {
             // Since we have just an iterator, we need to compute a set of `other`, then repeatedly check `contains()` for each element in `this`
             let mut set = this.as_set().borrow_mut();
             let other = other.to_iter()?.collect::<IndexSet<ValuePtr, FxBuildHasher>>();
-            set.set.retain(|e| other.contains(e));
+            set.retain(|e| other.contains(e));
             drop(set);
             this.ok()
         },
@@ -687,7 +676,7 @@ pub fn set_difference(other: ValuePtr, this: ValuePtr) -> ValueResult {
             // this.difference(other) := remove everything from this that is in other
             let mut set = this.as_set().borrow_mut();
             for e in other.to_iter()? {
-                set.set.remove(&e);
+                set.remove(&e);
             }
             drop(set);
             this.ok()

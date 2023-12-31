@@ -761,10 +761,10 @@ impl<R : BufRead, W : Write, F : FunctionInterface> VirtualMachine<R, W, F> {
                 let arg = self.pop();
                 let func = self.pop();
                 let list = func.as_list().borrow();
-                if list.list.len() != 1 {
-                    return ValueErrorEvalListMustHaveUnitLength(list.list.len()).err()
+                if list.len() != 1 {
+                    return ValueErrorEvalListMustHaveUnitLength(list.len()).err()
                 }
-                let index = list.list[0].clone();
+                let index = list[0].clone();
                 let result = core::get_index(self, &arg, index)?;
                 self.push(result);
                 Ok(FunctionType::Native)
