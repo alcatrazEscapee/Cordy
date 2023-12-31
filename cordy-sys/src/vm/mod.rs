@@ -13,7 +13,7 @@ use crate::core::Pattern;
 
 pub use crate::vm::error::{DetailRuntimeError, RuntimeError};
 pub use crate::vm::opcode::{Opcode, StoreOp};
-pub use crate::vm::value::{AnyResult, ErrorPtr, ErrorResult, Function, guard_recursive_hash, IntoDictValue, IntoIterableValue, IntoValue, Iterable, LiteralType, MAX_INT, MIN_INT, StructTypeImpl, Type, ValueOption, ValuePtr, ValueResult, Method, ComplexValue, PartialNativeFunction};
+pub use crate::vm::value::{AnyResult, ErrorPtr, ErrorResult, Function, guard_recursive_hash, IntoDictValue, IntoIterableValue, IntoValue, Iterable, LiteralType, MAX_INT, MIN_INT, StructTypeImpl, Type, ValuePtr, ValueResult, Method, ComplexValue, PartialNativeFunction};
 
 use Opcode::{*};
 use RuntimeError::{*};

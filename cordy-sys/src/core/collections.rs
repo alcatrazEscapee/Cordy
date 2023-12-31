@@ -150,7 +150,7 @@ fn rev_range(start_high_inclusive: i64, stop_low_exclusive: i64, step_size: i64)
 pub fn sum(args: impl Iterator<Item=ValuePtr>) -> ValueResult {
     let mut sum: i64 = 0;
     for v in args {
-        sum += v.check_int()?.as_int();
+        sum += v.as_int_checked()?;
     }
     sum.to_value().ok()
 }
@@ -167,7 +167,7 @@ pub fn min_by<VM: VirtualInterface>(vm: &mut VM, by: ValuePtr, args: ValuePtr) -
             let mut err = None;
             let ret = iter.min_by(|a, b|
                 util::catch(&mut err, ||
-                    Ok(by.invoke((*a).clone(), (*b).clone(), vm)?.check_int()?.as_int().cmp(&0)), Ordering::Equal));
+                    Ok(by.invoke((*a).clone(), (*b).clone(), vm)?.as_int_checked()?.cmp(&0)), Ordering::Equal));
             util::join(non_empty(ret)?, err)
         },
         Some(1) => {
@@ -195,7 +195,7 @@ pub fn max_by<VM: VirtualInterface>(vm: &mut VM, by: ValuePtr, args: ValuePtr) -
             let mut err = None;
             let ret = iter.max_by(|a, b|
                 util::catch(&mut err, ||
-                    Ok(by.invoke((*a).clone(), (*b).clone(), vm)?.check_int()?.as_int().cmp(&0)), Ordering::Equal));
+                    Ok(by.invoke((*a).clone(), (*b).clone(), vm)?.as_int_checked()?.cmp(&0)), Ordering::Equal));
             util::join(non_empty(ret)?, err)
         },
         Some(1) => {
@@ -226,7 +226,7 @@ pub fn sort_by<VM : VirtualInterface>(vm: &mut VM, by: ValuePtr, args: ValuePtr)
             let mut err = None;
             sorted.sort_unstable_by(|a, b|
                 util::catch(&mut err, ||
-                    Ok(by.invoke(a.clone(), b.clone(), vm)?.check_int()?.as_int().cmp(&0)), Ordering::Equal));
+                    Ok(by.invoke(a.clone(), b.clone(), vm)?.as_int_checked()?.cmp(&0)), Ordering::Equal));
             if let Some(err) = err {
                 return ValueResult::from(err);
             }
@@ -307,7 +307,7 @@ pub fn reverse(args: impl Iterator<Item=ValuePtr>) -> ValuePtr {
 }
 
 pub fn permutations(n: ValuePtr, args: ValuePtr) -> ValueResult {
-    let n = n.check_int()?.as_int();
+    let n = n.as_int_checked()?;
     if n <= 0 {
         return ValueErrorValueMustBeNonNegative(n).err();
     }
@@ -319,7 +319,7 @@ pub fn permutations(n: ValuePtr, args: ValuePtr) -> ValueResult {
 }
 
 pub fn combinations(n: ValuePtr, args: ValuePtr) -> ValueResult {
-    let n = n.check_int()?.as_int();
+    let n = n.as_int_checked()?;
     if n <= 0 {
         return ValueErrorValueMustBeNonNegative(n).err();
     }
@@ -460,12 +460,10 @@ pub fn pop(target: ValuePtr) -> ValueResult {
 }
 
 pub fn pop_front(target: ValuePtr) -> ValueResult {
-    let target = target.check_list()?;
-    let ret = match target.as_list().borrow_mut().list.pop_front() {
+    match target.as_list_checked()?.borrow_mut().list.pop_front() {
         Some(v) => v.ok(),
         None => ValueErrorValueMustBeNonEmpty.err()
-    };
-    ret
+    }
 }
 
 pub fn push(value: ValuePtr, target: ValuePtr) -> ValueResult {
@@ -487,11 +485,7 @@ pub fn push(value: ValuePtr, target: ValuePtr) -> ValueResult {
 }
 
 pub fn push_front(value: ValuePtr, target: ValuePtr) -> ValueResult {
-    let target = target.check_list()?;
-    target.as_list()
-        .borrow_mut()
-        .list
-        .push_front(value);
+    target.as_list_checked()?.borrow_mut().list.push_front(value);
     target.ok()
 }
 
@@ -500,7 +494,7 @@ pub fn insert(index: ValuePtr, value: ValuePtr, target: ValuePtr) -> ValueResult
         Type::List => {
             {
                 let mut it = target.as_list().borrow_mut();
-                let index = index.check_int()?.as_int();
+                let index = index.as_int_checked()?;
                 let len = it.list.len();
                 if 0 <= index && index < len as i64 {
                     it.list.insert(index as usize, value);
@@ -524,7 +518,7 @@ pub fn remove(needle: ValuePtr, target: ValuePtr) -> ValueResult {
     match target.ty() {
         Type::List => {
             let mut it = target.as_list().borrow_mut();
-            let index = needle.check_int()?.as_int();
+            let index = needle.as_int_checked()?;
             let len = it.list.len();
             if 0 <= index && index < len as i64 {
                 it.list.remove(index as usize)
@@ -576,8 +570,7 @@ pub fn collect_into_dict(iter: impl Iterator<Item=ValuePtr>) -> ValueResult {
 }
 
 pub fn dict_set_default(def: ValuePtr, target: ValuePtr) -> ValueResult {
-    let target = target.check_dict()?;
-    target.as_dict().borrow_mut().default = Some(if def.is_evaluable() {
+    target.as_dict_checked()?.borrow_mut().default = Some(if def.is_evaluable() {
         InvokeArg0::from(def)?
     } else {
         InvokeArg0::Noop(def) // Treat single argument defaults still as a function, which is optimized to just copy its value
@@ -586,8 +579,7 @@ pub fn dict_set_default(def: ValuePtr, target: ValuePtr) -> ValueResult {
 }
 
 pub fn dict_keys(target: ValuePtr) -> ValueResult {
-    target.check_dict()?
-        .as_dict()
+    target.as_dict_checked()?
         .borrow()
         .dict.keys()
         .cloned()
@@ -596,8 +588,7 @@ pub fn dict_keys(target: ValuePtr) -> ValueResult {
 }
 
 pub fn dict_values(target: ValuePtr) -> ValueResult {
-    target.check_dict()?
-        .as_dict()
+    target.as_dict_checked()?
         .borrow()
         .dict.values()
         .cloned()

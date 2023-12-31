@@ -2,11 +2,9 @@ use std::borrow::Cow;
 use std::cell::Cell;
 use std::cmp::{Ordering, Reverse};
 use std::collections::{BinaryHeap, HashMap, VecDeque};
-use std::convert::Infallible;
 use std::fmt::Debug;
 use std::hash::{Hash, Hasher};
-use std::iter::{FromIterator, FusedIterator};
-use std::ops::{ControlFlow, FromResidual, Try};
+use std::iter::FusedIterator;
 use fxhash::FxBuildHasher;
 use indexmap::{IndexMap, IndexSet};
 use itertools::Itertools;
@@ -26,32 +24,9 @@ use crate::vm::value::complex::Complex;
 pub use crate::vm::value::ptr::{MAX_INT, MIN_INT, ValuePtr};
 pub use crate::vm::value::complex::ComplexValue;
 pub use crate::vm::value::func::{Closure, Function, PartialFunction, PartialNativeFunction, UpValue};
+pub use crate::vm::value::error::{AnyResult, ErrorPtr, ErrorResult, ValueResult};
 
 use RuntimeError::{*};
-
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ErrorPtr(ValuePtr);
-
-impl ErrorPtr {
-    pub fn new(ptr: ValuePtr) -> ErrorPtr {
-        debug_assert!(ptr.is_err());
-        ErrorPtr(ptr)
-    }
-
-    pub fn as_err(&self) -> &RuntimeError {
-        self.0.as_err()
-    }
-}
-
-impl From<ErrorPtr> for ValueResult {
-    fn from(value: ErrorPtr) -> Self {
-        ValueResult::err(value.0)
-    }
-}
-
-pub type ErrorResult<T> = Result<T, ErrorPtr>;
-pub type AnyResult = ErrorResult<()>;
 
 
 mod ptr;
@@ -59,6 +34,7 @@ mod str;
 mod func;
 mod range;
 mod slice;
+mod error;
 mod complex;
 
 
@@ -72,9 +48,9 @@ pub enum Type {
     Int,
     NativeFunction,
     GetField,
-    Complex,
     ShortStr,
     LongStr,
+    Complex,
     List,
     Set,
     Dict,
@@ -92,7 +68,6 @@ pub enum Type {
     PartialNativeFunction,
     Closure,
     Error,
-    None, // Useful when we would otherwise hold an `Option<ValuePtr>` - this compresses the `None` state
     Never, // Optimization for type-checking code, to avoid code paths containing `unreachable!()` or similar patterns.
 }
 
@@ -124,7 +99,6 @@ impl Type {
             PartialNativeFunction => "partial native function",
             Closure => "closure",
             Error => "error",
-            None => "none",
             Never => "never"
         }
     }
@@ -134,7 +108,7 @@ impl Type {
 /// A trait which marks types as values which may be contained by a `Prefix<T>` pointer.
 ///
 /// All values pointed to in this manner are memory managed by `ValuePtr`, with reference counting for clone/drop,
-/// and provide interior mutability via `borrow()`, `borrow_mut`()
+/// and provide interior mutability via `borrow()`, `borrow_mut()`
 pub trait Value {}
 
 /// Before we know the type of an object, we must interpret it as a `Prefix<()>`, thus `()` needs to be a `Value`
@@ -151,176 +125,6 @@ impl Value for () {}
 /// **N.B.** With negative trait bounds, we could refine `borrow()` and `borrow_mut()` to be `Value + !ConstValue`, preventing the above issue
 /// at compile time, instead of relying on a contract.
 pub trait ConstValue : Value {}
-
-
-/// A specialized reference-equality version of `ValuePtr`. Unlike `ValuePtr`, this does not manage any memory, and can be created multiple times from a `ValuePtr`
-///
-/// This only is for tracking reference equality between two values. Note that because this is a direct copy of the _pointer_, there is no
-/// guarantee that it stays valid, and converting back to a `ValuePtr` is explicitly undefined behavior.
-#[derive(Debug, Eq, PartialEq)]
-pub struct ValueRef {
-    ptr: usize
-}
-
-impl ValueRef {
-    pub(super) fn new(ptr: usize) -> ValueRef {
-        ValueRef { ptr }
-    }
-}
-
-
-/// An explicit wrapper for `Option<ValuePtr>`. Note that due to unused bit patterns, we don't need to ever wrap `ValuePtr` in an `Option<T>` (as that would waste bytes.
-/// However, it is _very unclear_, and bad coding style, to always have `ValuePtr` when it's unclear if it should be optional. So, in all situations where a `ValuePtr` should be treated as a `Option<ValuePtr>`, we box it in this struct instead.
-///
-/// The contract here ensures that when we match against this, as an optional (which should be completely inline-able, and zero cost), we unwrap something that is not `None`
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct ValueOption {
-    ptr: ValuePtr
-}
-
-impl ValueOption {
-    pub fn none() -> ValueOption {
-        ValueOption { ptr: ValuePtr::none() }
-    }
-
-    pub fn some(ptr: ValuePtr) -> ValueOption {
-        debug_assert!(!ptr.is_none()); // Should never create a `some()` from a `none()`
-        ValueOption { ptr }
-    }
-
-    #[inline(always)]
-    pub fn as_option(self) -> Option<ValuePtr> {
-        match self.ptr.is_none() {
-            true => None,
-            false => Some(self.ptr)
-        }
-    }
-
-    #[inline]
-    pub fn is_none(&self) -> bool {
-        self.ptr.is_none()
-    }
-
-    #[inline]
-    pub fn is_some(&self) -> bool {
-        !self.ptr.is_none()
-    }
-
-    /// Takes the value out of the option, leaving `None` in its place.
-    #[inline]
-    pub fn take(&mut self) -> ValueOption {
-        std::mem::replace(self, ValueOption::none())
-    }
-}
-
-impl From<Option<ValuePtr>> for ValueOption {
-    fn from(value: Option<ValuePtr>) -> Self {
-        match value {
-            Some(ptr) => ValueOption::some(ptr),
-            None => ValueOption::none(),
-        }
-    }
-}
-
-/// Like `Result<ValuePtr, Err>`, but again, since `ValuePtr` boxes the error inside it, this makes it explicit.
-#[derive(Debug, Eq, PartialEq)]
-pub struct ValueResult {
-    ptr: ValuePtr
-}
-
-impl ValueResult {
-    pub fn ok(ptr: ValuePtr) -> ValueResult {
-        debug_assert!(!ptr.is_err()); // Should never have an error-type in `ok()`
-        ValueResult { ptr }
-    }
-
-    #[cold]
-    pub fn err(ptr: ValuePtr) -> ValueResult {
-        debug_assert!(ptr.is_err());
-        ValueResult { ptr }
-    }
-
-    pub fn new(ptr: ValuePtr) -> ValueResult {
-        ValueResult { ptr }
-    }
-
-    /// Boxes this `ValueResult` into a traditional Rust `Result<T, E>`. The left will be guaranteed to contain a non-error type, and the right will be guaranteed to contain an error.
-    #[inline(always)]
-    pub fn as_result(self) -> ErrorResult<ValuePtr> {
-        match self.ptr.is_err() {
-            true => Err(ErrorPtr::new(self.ptr)),
-            false => Ok(self.ptr)
-        }
-    }
-
-    #[inline]
-    pub fn is_ok(&self) -> bool {
-        !self.ptr.is_err()
-    }
-
-    #[inline]
-    pub fn is_err(&self) -> bool {
-        self.ptr.is_err()
-    }
-}
-
-
-/// Converts a `ErrorResult<T>` returned from a `?` expression into a `ValueResult`
-impl FromResidual<ErrorResult<Infallible>> for ValueResult {
-    fn from_residual(residual: ErrorResult<Infallible>) -> Self {
-        match residual {
-            Err(err) => ValueResult::err(err.0),
-            _ => unreachable!(),
-        }
-    }
-}
-
-/// Converts a `ErrorPtr` returned as the residual from a `ValueResult?` into a `ErrorResult<T>`
-impl<T> FromResidual<ErrorPtr> for ErrorResult<T> {
-    fn from_residual(residual: ErrorPtr) -> Self {
-        Err(residual)
-    }
-}
-
-/// Allows us to use `?` operator on `check_<T>()?` expressions, which assert that the value is of a given type, and early return if not.
-/// This does, unfortunately, require nightly unstable rust, but the code clarity is worth having (and it allows us to seamlessly use `ValueResult`
-/// as a zero-cost (memory layout) wise abstraction for `Result<ValuePtr, ErrorPtr>` (which would otherwise be twice the stack size.
-impl Try for ValueResult {
-    type Output = ValuePtr;
-    type Residual = ErrorPtr;
-
-    fn from_output(ptr: ValuePtr) -> ValueResult {
-        ValueResult { ptr }
-    }
-
-    fn branch(self) -> ControlFlow<ErrorPtr, ValuePtr> {
-        match self.ptr.is_err() {
-            true => ControlFlow::Break(ErrorPtr(self.ptr)),
-            false => ControlFlow::Continue(self.ptr),
-        }
-    }
-}
-
-/// Associated type for `Try`
-impl FromResidual for ValueResult {
-    fn from_residual(residual: ErrorPtr) -> ValueResult {
-        ValueResult { ptr: residual.0 }
-    }
-}
-
-impl FromIterator<ValueResult> for ErrorResult<Vec<ValuePtr>> {
-    fn from_iter<T: IntoIterator<Item=ValueResult>>(iter: T) -> Self {
-        let iter = iter.into_iter();
-        let mut vec: Vec<ValuePtr> = Vec::with_capacity(iter.size_hint().0);
-        for ptr in iter {
-            match ptr.as_result() {
-                Ok(ptr) => vec.push(ptr),
-                Err(err) => return Err(err),
-            }
-        }
-        Ok(vec)
-    }
-}
 
 
 impl ValuePtr {
@@ -451,7 +255,7 @@ impl ValuePtr {
             Type::PartialNativeFunction => Cow::from(self.as_partial_native().to_repr_str()),
             Type::Closure => Cow::from(self.as_closure().borrow_func().to_repr_str()),
 
-            Type::Error | Type::None | Type::Never => unreachable!(),
+            Type::Error | Type::Never => unreachable!(),
         }
     }
 
@@ -492,8 +296,6 @@ impl ValuePtr {
 
     /// Unwraps the value as an `iterable`, or raises a type error.
     /// For all value types except `Heap`, this is a O(1) and lazy operation. It also requires no persistent borrows of mutable types that outlast the call to `as_iter()`.
-    ///
-    /// Guaranteed to return either a `Error` or `Iter`
     pub fn to_iter(self) -> ErrorResult<Iterable> {
         match self.ty() {
             Type::ShortStr | Type::LongStr => Ok(Iterable::Str(self.as_str_iter())),
@@ -512,20 +314,17 @@ impl ValuePtr {
         }
     }
 
-    /// Unwraps the value as an `iterable`, or if it is not, yields an iterable of the single element
-    /// Note that this takes a `str` to be a non-iterable primitive type, unlike `is_iter()` and `as_iter()`
-    pub fn as_iter_or_unit(self) -> Iterable {
+    /// Converts this value to a _sequence_, which is exclusively used by string formatting.
+    ///
+    /// - Lists, vectors, are treated as iterables and produce an ordered set of values.
+    ///   This is intended to provide future support for numbered string formatting arguments.
+    /// - Any other value is treated as a single argument for string formatting.
+    ///
+    /// Returns an `Iterable` for now, as it's the easiest mechanism - lacking numbered format arguments - to provide for arbitrary values.
+    pub fn as_sequence(self) -> Iterable {
         match self.ty() {
-            Type::List | Type::Set | Type::Dict | Type::Vector => Iterable::Collection(0, self),
-
-            // Heaps completely unbox themselves to be iterated over
-            Type::Heap => Iterable::RawVector(0, self.as_heap().borrow().heap
-                .iter()
-                .cloned()
-                .map(|u| u.0)
-                .collect::<Vec<ValuePtr>>()),
-
-            _ => Iterable::Unit(ValueOption::some(self)),
+            Type::List | Type::Vector => Iterable::Collection(0, self),
+            _ => Iterable::Unit(Some(self)),
         }
     }
 
@@ -539,7 +338,7 @@ impl ValuePtr {
         }
     }
 
-    /// Converts this value into a `(ValuePTr, ValuePtr)` if possible, supported for two-element `List` and `Vector`s
+    /// Converts this value into a `(ValuePtr, ValuePtr)` if possible, supported for two-element `List` and `Vector`s
     pub fn to_pair(self) -> ErrorResult<(ValuePtr, ValuePtr)> {
         match match self.ty() {
             Type::List => self.as_list().borrow().list.iter().cloned().collect_tuple(),
@@ -653,31 +452,35 @@ impl ValuePtr {
         ValueResult::ok(self)
     }
 
-    pub fn check_int(self) -> ValueResult {
+    #[inline(always)]
+    pub fn as_int_checked(self) -> ErrorResult<i64> {
         match self.is_int() {
-            true => self.ok(),
-            false => TypeErrorArgMustBeInt(self).err(),
+            true => Ok(self.as_int()),
+            false => TypeErrorArgMustBeInt(self).err()
         }
     }
 
-    pub fn check_str(self) -> ValueResult {
+    #[inline(always)]
+    pub fn as_str_checked(&self) -> ErrorResult<&str> {
         match self.is_str() {
-            true => self.ok(),
-            false => TypeErrorArgMustBeStr(self).err()
+            true => Ok(self.as_str_slice()),
+            false => TypeErrorArgMustBeStr(self.clone()).err()
         }
     }
 
-    pub fn check_list(self) -> ValueResult {
+    #[inline(always)]
+    pub fn as_list_checked(&self) -> ErrorResult<&Prefix<ListImpl>> {
         match self.is_list() {
-            true => self.ok(),
-            false => TypeErrorArgMustBeList(self).err()
+            true => Ok(self.as_list()),
+            false => TypeErrorArgMustBeList(self.clone()).err()
         }
     }
 
-    pub fn check_dict(self) -> ValueResult {
+    #[inline(always)]
+    pub fn as_dict_checked(&self) -> ErrorResult<&Prefix<DictImpl>> {
         match self.is_dict() {
-            true => self.ok(),
-            false => TypeErrorArgMustBeDict(self).err()
+            true => Ok(self.as_dict()),
+            false => TypeErrorArgMustBeDict(self.clone()).err()
         }
     }
 }
@@ -687,15 +490,18 @@ fn err_field_not_found(value: ValuePtr, fields: &Fields, field_index: u32, repr:
     TypeErrorFieldNotPresentOnValue { value, field: fields.get_name(field_index), repr, access }.err()
 }
 
+
 /// A type used to prevent recursive `repr()` and `str()` calls.
-struct RecursionGuard(Vec<ValueRef>);
+///
+/// This stores a pointer representation of the object in question, to properly prevent recursive structures, while providing easy equality checks.
+struct RecursionGuard(Vec<usize>);
 
 impl RecursionGuard {
     pub fn new() -> RecursionGuard { RecursionGuard(Vec::new()) }
 
     /// Returns `true` if the value has been seen before, triggering an early exit
     pub fn enter(&mut self, value: &ValuePtr) -> bool {
-        let boxed = value.as_value_ref();
+        let boxed = value.as_ptr_value();
         let ret = self.0.contains(&boxed);
         self.0.push(boxed);
         ret
@@ -1155,7 +961,7 @@ impl Method {
 #[derive(Debug, Clone)]
 pub enum Iterable {
     Str(IterStr),
-    Unit(ValueOption),
+    Unit(Option<ValuePtr>),
     Collection(usize, ValuePtr),
     RawVector(usize, Vec<ValuePtr>),
     Range(i64, Range),
@@ -1221,7 +1027,7 @@ impl Iterator for Iterable {
     fn next(&mut self) -> Option<Self::Item> {
         match self {
             Iterable::Str(it) => it.next().map(|u| u.to_value()),
-            Iterable::Unit(it) => it.take().as_option(),
+            Iterable::Unit(it) => it.take(),
             Iterable::Collection(index, it) => {
                 let ret = Iterable::get(it, *index);
                 *index += 1;
@@ -1248,7 +1054,7 @@ impl Iterator for IterableRev {
     fn next(&mut self) -> Option<Self::Item> {
         match &mut self.0 {
             Iterable::Str(it) => it.next_back().map(|u| u.to_value()),
-            Iterable::Unit(it) => it.take().as_option(),
+            Iterable::Unit(it) => it.take(),
             Iterable::Collection(index, it) => {
                 if *index == 0 {
                     return None
@@ -1308,7 +1114,7 @@ impl<'a> Indexable<'a> {
 
     /// Takes a convertable-to-int value, representing a bounded index in `[-len, len)`, and converts to a real index in `[0, len)`, or raises an error.
     pub fn check_index(&self, value: ValuePtr) -> ErrorResult<usize> {
-        let index: i64 = value.check_int()?.as_int();
+        let index: i64 = value.as_int_checked()?;
         let len: usize = self.len();
         let raw: usize = core::to_index(len as i64, index) as usize;
         if raw < len {
@@ -1405,7 +1211,7 @@ impl IntoValue for Literal {
 
 #[cfg(test)]
 mod test {
-    use crate::vm::{ValueOption, ValuePtr, ValueResult};
+    use crate::vm::{ValuePtr, ValueResult};
     use crate::vm::error::RuntimeError;
     use crate::vm::value::{IntoIterableValue, IntoValue};
 
@@ -1413,7 +1219,6 @@ mod test {
     fn test_layout() {
         // Should be no size overhead, since both error and none states are already represented by `ValuePtr`
         assert_eq!(std::mem::size_of::<ValueResult>(), std::mem::size_of::<ValuePtr>());
-        assert_eq!(std::mem::size_of::<ValueOption>(), std::mem::size_of::<ValuePtr>());
     }
 
     #[test]
@@ -1433,28 +1238,10 @@ mod test {
         assert_eq!(ptr1, ptr3); // Same value, different reference
         assert_eq!(ptr1, ptr4);
 
-        assert_eq!(ptr1.as_value_ref(), ptr1.as_value_ref());
-        assert_ne!(ptr1.as_value_ref(), ptr2.as_value_ref());
-        assert_ne!(ptr1.as_value_ref(), ptr3.as_value_ref()); // Same value, different reference
-        assert_eq!(ptr1.as_value_ref(), ptr4.as_value_ref());
-    }
-
-    #[test]
-    fn test_value_option() {
-        let some = ValueOption::some(ValuePtr::nil());
-        let none = ValueOption::none();
-
-        assert!(some.is_some());
-        assert!(none.is_none());
-
-        assert_eq!(some.as_option(), Some(ValuePtr::nil()));
-        assert_eq!(none.as_option(), None);
-    }
-
-    #[test]
-    #[should_panic]
-    fn test_value_option_some_of_none() {
-        let _ = ValueOption::some(ValuePtr::none());
+        assert_eq!(ptr1.as_ptr_value(), ptr1.as_ptr_value());
+        assert_ne!(ptr1.as_ptr_value(), ptr2.as_ptr_value());
+        assert_ne!(ptr1.as_ptr_value(), ptr3.as_ptr_value()); // Same value, different reference
+        assert_eq!(ptr1.as_ptr_value(), ptr4.as_ptr_value());
     }
 
     #[test]

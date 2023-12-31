@@ -6,7 +6,7 @@ use fxhash::FxBuildHasher;
 use indexmap::{IndexMap, IndexSet};
 
 use crate::trace;
-use crate::vm::{ErrorResult, IntoIterableValue, IntoValue, MAX_INT, MIN_INT, operator, PartialNativeFunction, RuntimeError, Type, ValueOption, ValuePtr, ValueResult, VirtualInterface};
+use crate::vm::{ErrorResult, IntoIterableValue, IntoValue, MAX_INT, MIN_INT, operator, PartialNativeFunction, RuntimeError, Type, ValuePtr, ValueResult, VirtualInterface};
 use crate::vm::operator::BinaryOp;
 
 pub use crate::core::collections::{get_index, get_slice, set_index, to_index};
@@ -841,16 +841,16 @@ fn invoke_arg1<VM : VirtualInterface>(f: NativeFunction, a1: ValuePtr, vm: &mut 
             ValuePtr::nil().ok()
         },
         ReadText => {
-            let path = a1.check_str()?;
-            match fs::read_to_string::<&str>(path.as_str_slice().as_ref()) {
+            let path = a1.as_str_checked()?;
+            match fs::read_to_string::<&str>(path) {
                 Ok(text) => text.replace('\r', "").to_value().ok(),
                 Err(err) => IOError(err.to_string()).err(),
             }
         },
-        Env => vm.get_env(&a1.check_str()?.as_str_slice()).ok(),
+        Env => vm.get_env(a1.as_str_checked()?).ok(),
 
         Bool => a1.to_bool().to_value().ok(),
-        Int => math::convert_to_int(a1, ValueOption::none()),
+        Int => math::convert_to_int(a1, None),
         Str => a1.to_str().to_value().ok(),
         Vector => if a1.is_complex() {  // Handle `a + bi . vector` as a special case here, along with all integral types
             let it = a1.to_complex(); // Must call `to_complex()` to handle `bool`, `int`
@@ -859,9 +859,9 @@ fn invoke_arg1<VM : VirtualInterface>(f: NativeFunction, a1: ValuePtr, vm: &mut 
             a1.to_iter()?.to_vector().ok()
         },
         Repr => a1.to_repr_str().to_value().ok(),
-        Eval => vm.invoke_eval(a1.check_str()?.as_str_owned()),
+        Eval => vm.invoke_eval(String::from(a1.as_str_checked()?)),
         TypeOf => type_of(a1).ok(),
-        Monitor => vm.invoke_monitor(a1.check_str()?.as_str_slice()),
+        Monitor => vm.invoke_monitor(a1.as_str_checked()?),
 
         OperatorSub => operator::unary_sub(a1),
         OperatorUnaryNot => operator::unary_not(a1),
@@ -875,7 +875,7 @@ fn invoke_arg1<VM : VirtualInterface>(f: NativeFunction, a1: ValuePtr, vm: &mut 
         Bin => strings::bin(a1),
 
         Len => a1.len()?.to_value().ok(),
-        Range => ValuePtr::range(0, a1.check_int()?.as_int(), 1),
+        Range => ValuePtr::range(0, a1.as_int_checked()?, 1),
         Enumerate => ValuePtr::enumerate(a1).ok(),
         Min => match a1.is_native() {
             true if a1.as_native() == Int => MIN_INT.to_value().ok(),
@@ -910,15 +910,11 @@ fn invoke_arg1<VM : VirtualInterface>(f: NativeFunction, a1: ValuePtr, vm: &mut 
 
 fn invoke_arg2<VM : VirtualInterface>(f: NativeFunction, a1: ValuePtr, a2: ValuePtr, vm: &mut VM) -> ValueResult {
     match f {
-        WriteText => {
-            let path = a1.check_str()?;
-            let text = a2.check_str()?;
-            match fs::write(path.as_str_slice(), text.as_str_slice()) {
-                Ok(_) => ValuePtr::nil().ok(),
-                Err(err) => IOError(err.to_string()).err(),
-            }
+        WriteText => match fs::write(a1.as_str_checked()?, a2.as_str_checked()?) {
+            Ok(_) => ValuePtr::nil().ok(),
+            Err(err) => IOError(err.to_string()).err(),
         },
-        Int => math::convert_to_int(a1, ValueOption::some(a2)),
+        Int => math::convert_to_int(a1, Some(a2)),
 
         OperatorSub => operator::binary_sub(a1, a2),
         OperatorMul => operator::binary_mul(a1, a2),
@@ -960,7 +956,7 @@ fn invoke_arg2<VM : VirtualInterface>(f: NativeFunction, a1: ValuePtr, a2: Value
         Split => strings::split(a1, a2),
         Join => strings::join(a1, a2),
 
-        Range => ValuePtr::range(a1.check_int()?.as_int(), a2.check_int()?.as_int(), 1),
+        Range => ValuePtr::range(a1.as_int_checked()?, a2.as_int_checked()?, 1),
         MinBy => collections::min_by(vm, a1, a2),
         MaxBy => collections::max_by(vm, a1, a2),
         Map => collections::map(vm, a1, a2),
@@ -993,7 +989,7 @@ fn invoke_arg2<VM : VirtualInterface>(f: NativeFunction, a1: ValuePtr, a2: Value
 fn invoke_arg3<VM : VirtualInterface>(f: NativeFunction, a1: ValuePtr, a2: ValuePtr, a3: ValuePtr, vm: &mut VM) -> ValueResult {
     match f {
         Replace => strings::replace(vm, a1, a2, a3),
-        Range => ValuePtr::range(a1.check_int()?.as_int(), a2.check_int()?.as_int(), a3.check_int()?.as_int()),
+        Range => ValuePtr::range(a1.as_int_checked()?, a2.as_int_checked()?, a3.as_int_checked()?),
         Insert => collections::insert(a1, a2, a3),
 
         _ => panic!("core::invoke_arg3() not supported for {:?}", f),
@@ -1092,7 +1088,6 @@ fn type_of(value: ValuePtr) -> ValuePtr {
         Type::GetField => Function.to_value(),
 
         Type::Error |
-        Type::None |
         Type::Never => panic!("{:?} is synthetic and cannot have type_of() called on it", value),
     }
 }
