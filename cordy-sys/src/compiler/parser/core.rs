@@ -80,7 +80,7 @@ impl BlockEnd {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum BranchType {
-    Jump, JumpIfTrue, JumpIfFalse, JumpIfTruePop, JumpIfFalsePop, Compare(CompareOp), TestIterable
+    Jump, JumpIfTrue, JumpIfFalse, JumpIfTruePop, JumpIfFalsePop, Compare(CompareOp), TestIterable, AssertTest, AssertCompare(CompareOp)
 }
 
 /// Enough information to uniquely identify any given opcode within a function:
@@ -180,6 +180,8 @@ impl Code {
                 BranchType::JumpIfFalsePop => JumpIfFalsePop(offset),
                 BranchType::Compare(op) => Compare(op, offset),
                 BranchType::TestIterable => TestIterable(offset),
+                BranchType::AssertTest => AssertTest(offset),
+                BranchType::AssertCompare(op) => AssertCompare(op, offset),
             }
         }
 

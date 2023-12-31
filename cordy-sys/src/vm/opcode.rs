@@ -138,6 +138,9 @@ pub enum Opcode {
     // Special
     Exit,
     Yield,
+
+    AssertTest(i32),
+    AssertCompare(CompareOp, i32),
     AssertFailed,
 }
 
@@ -198,7 +201,7 @@ impl Opcode {
             }, ip.add_offset(*offset + 1)),
             Unary(op) => format!("{:?}", op),
             Binary(op) => format!("{:?}", op),
-            Compare(op, offset) => format!("{:?}Compare({})", op.to_binary(), ip.add_offset(*offset + 1)),
+            Compare(op, offset) => format!("{:?}Compare({})", BinaryOp::from(*op), ip.add_offset(*offset + 1)),
             NativeFunction(op) => format!("{:?}", op),
             Unroll(_) => String::from("Unroll"),
             Call(nargs, unroll) => format!("Call{}({})", if *unroll { "..." } else { "" }, nargs),

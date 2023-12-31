@@ -33,7 +33,7 @@ pub enum ExprType {
     /// 1. The arguments `lhs` and `rhs` will be evaluated in the opposite semantic order
     /// 2. A `Swap` opcode will be emitted.
     ///
-    /// This means that a `binary_with(op, lhs, rhs, swap)` is equivalent to saying that "rhs needs to be evaluated before lhs in the operation op(lhs, rhs)"
+    /// This means that a `binary_with(op, lhs, rhs, true)` is equivalent to saying that "rhs needs to be evaluated before lhs in the operation op(lhs, rhs)"
     ///
     /// **The side (right vs left) of each argument is still correct!!!**
     Binary(BinaryOp, ExprPtr, ExprPtr, bool),
@@ -110,7 +110,7 @@ impl Expr {
             0 => self,
             1 => {
                 let (loc, op, rhs) = ops.pop().unwrap();
-                self.binary(loc, op.to_binary(), rhs, false)
+                self.binary(loc, BinaryOp::from(op), rhs, false)
             }
             _ => Expr(Location::empty(), ExprType::Compare(Box::new(self), ops))
         }

@@ -279,7 +279,20 @@ impl AsError for RuntimeError {
         use RuntimeError::{*};
         match self {
             RuntimeExit | RuntimeYield => panic!("Not a real error"),
-            RuntimeAssertFailed(reason) => format!("Assertion Failed: {}", reason),
+            RuntimeAssertFailed(reason, message) => {
+                let mut error = String::from("Assertion Failed:");
+                let mut any = false;
+                if !reason.is_nil() {
+                    error.push(' ');
+                    error.push_str(reason.as_str_slice());
+                    any = true;
+                }
+                if !message.is_nil() {
+                    error.push(if any { '\n' } else { ' '});
+                    error.push_str(message.as_str_slice())
+                }
+                error
+            },
             RuntimeCompilationError(vec) => format!("Encountered compilation error(s) within 'eval':\n\n{}", vec.join("\n")),
 
             ValueIsNotFunctionEvaluable(v) => format!("Tried to evaluate {} but it is not a function.", v.to_repr_str()),

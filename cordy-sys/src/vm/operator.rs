@@ -68,6 +68,19 @@ impl BinaryOp {
     }
 }
 
+impl From<CompareOp> for BinaryOp {
+    fn from(value: CompareOp) -> Self {
+        match value {
+            CompareOp::LessThan => BinaryOp::LessThan,
+            CompareOp::LessThanEqual => BinaryOp::LessThanEqual,
+            CompareOp::GreaterThan => BinaryOp::GreaterThan,
+            CompareOp::GreaterThanEqual => BinaryOp::GreaterThanEqual,
+            CompareOp::Equal => BinaryOp::Equal,
+            CompareOp::NotEqual => BinaryOp::NotEqual,
+        }
+    }
+}
+
 impl CompareOp {
     pub fn apply(self, lhs: &ValuePtr, rhs: &ValuePtr) -> bool {
         match self {
@@ -79,15 +92,18 @@ impl CompareOp {
             CompareOp::NotEqual => lhs != rhs,
         }
     }
+}
 
-    pub fn to_binary(self) -> BinaryOp {
-        match self {
-            CompareOp::LessThan => BinaryOp::LessThan,
-            CompareOp::LessThanEqual => BinaryOp::LessThanEqual,
-            CompareOp::GreaterThan => BinaryOp::GreaterThan,
-            CompareOp::GreaterThanEqual => BinaryOp::GreaterThanEqual,
-            CompareOp::Equal => BinaryOp::Equal,
-            CompareOp::NotEqual => BinaryOp::NotEqual,
+impl From<BinaryOp> for CompareOp {
+    fn from(value: BinaryOp) -> Self {
+        match value {
+            BinaryOp::LessThan => CompareOp::LessThan,
+            BinaryOp::LessThanEqual => CompareOp::LessThanEqual,
+            BinaryOp::GreaterThan => CompareOp::GreaterThan,
+            BinaryOp::GreaterThanEqual => CompareOp::GreaterThanEqual,
+            BinaryOp::Equal => CompareOp::Equal,
+            BinaryOp::NotEqual => CompareOp::NotEqual,
+            op => panic!("Cannot convert {:?} to a CompareOp", op)
         }
     }
 }

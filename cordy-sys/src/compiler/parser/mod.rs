@@ -975,11 +975,25 @@ impl Parser<'_> {
         // `assert x : y` is effectively
         // `if x {} else { throw an exception with description `y` }
         let mut loc = self.next_location();
-        self.parse_expression();
+
+        // If we parse an expression that has a top-level compare operation, we use AssertCompare, which performs the comparison (and thus can report both sides of the assert value)
+        let branch_type = match self.parse_expr_top_level() {
+            Expr(_, ExprType::Binary(op @ (BinaryOp::Equal | BinaryOp::NotEqual | BinaryOp::GreaterThan | BinaryOp::GreaterThanEqual | BinaryOp::LessThan | BinaryOp::LessThanEqual), lhs, rhs, swap)) => {
+                self.emit_binary_op_args(*lhs, *rhs, swap);
+                BranchType::AssertCompare(CompareOp::from(op))
+            }
+            e => {
+                self.emit_optimized_expr(e);
+                BranchType::AssertTest
+            }
+        };
+
         if !self.error_recovery {
             loc |= self.prev_location();
         }
+
         let branch = self.branch_forward();
+
         match self.peek() {
             Some(Colon) => {
                 // Optional error message, that is lazily evaluated
@@ -993,7 +1007,7 @@ impl Parser<'_> {
         }
 
         self.push_at(AssertFailed, loc); // Make sure the `AssertFailed` token has the same location as the original expression that failed
-        self.join_forward(branch, BranchType::JumpIfTruePop)
+        self.join_forward(branch, branch_type)
     }
 
     // ===== Variables + Expressions ===== //

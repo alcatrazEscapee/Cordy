@@ -60,14 +60,7 @@ impl<'a> Parser<'a> {
                 self.push_at(Unary(op), loc);
             },
             Expr(loc, ExprType::Binary(op, lhs, rhs, swap)) => {
-                if swap {
-                    self.emit_expr(*rhs);
-                    self.emit_expr(*lhs);
-                    self.push(Swap);
-                } else {
-                    self.emit_expr(*lhs);
-                    self.emit_expr(*rhs);
-                }
+                self.emit_binary_op_args(*lhs, *rhs, swap);
                 self.push_at(Binary(op), loc);
             },
             Expr(_, ExprType::Compare(lhs, mut ops)) => {
@@ -94,7 +87,7 @@ impl<'a> Parser<'a> {
                 // <- fix all jumps to jump to here
                 let (loc, op, rhs) = ops.pop().unwrap();
                 self.emit_expr(rhs);
-                self.push_at(Binary(op.to_binary()), loc);
+                self.push_at(Binary(BinaryOp::from(op)), loc);
 
                 for (op, cmp) in compare_ops {
                     self.join_forward(cmp, BranchType::Compare(op));
@@ -237,6 +230,17 @@ impl<'a> Parser<'a> {
             Expr(loc, ExprType::RuntimeError(e)) => {
                 self.semantic_error_at(loc, ParserErrorType::Runtime(e));
             }
+        }
+    }
+
+    pub fn emit_binary_op_args(&mut self, lhs: Expr, rhs: Expr, swap: bool) {
+        if swap {
+            self.emit_expr(rhs);
+            self.emit_expr(lhs);
+            self.push(Swap);
+        } else {
+            self.emit_expr(lhs);
+            self.emit_expr(rhs);
         }
     }
 

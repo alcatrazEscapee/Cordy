@@ -9,7 +9,7 @@ use crate::vm::value::{Function, ValuePtr};
 pub enum RuntimeError {
     RuntimeExit,
     RuntimeYield,
-    RuntimeAssertFailed(String),
+    RuntimeAssertFailed(ValuePtr, ValuePtr),
     RuntimeCompilationError(Vec<String>),
 
     ValueIsNotFunctionEvaluable(ValuePtr),

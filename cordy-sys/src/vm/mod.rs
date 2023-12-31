@@ -4,7 +4,7 @@ use std::io::{BufRead, Write};
 use std::rc::Rc;
 use fxhash::FxBuildHasher;
 
-use crate::{compiler, core, trace, util};
+use crate::{AsError, compiler, core, trace, util};
 use crate::compiler::{CompileParameters, CompileResult, Fields, FunctionLibrary, IncrementalCompileResult, Locals};
 use crate::reporting::{Location, SourceView};
 use crate::util::{Noop, OffsetAdd};
@@ -17,6 +17,7 @@ pub use crate::vm::value::{AnyResult, ErrorPtr, ErrorResult, Function, IntoDictV
 
 use Opcode::{*};
 use RuntimeError::{*};
+use crate::vm::operator::BinaryOp;
 
 
 pub mod operator;
@@ -609,9 +610,30 @@ impl<R : BufRead, W : Write, F : FunctionInterface> VirtualMachine<R, W, F> {
                     self.ip = self.code.len();
                     return RuntimeYield.err()
                 },
+
+                AssertTest(ip) => {
+                    let ret = self.pop();
+                    if ret.to_bool() {
+                        let jump: usize = self.ip.add_offset(ip);
+                        self.ip = jump;
+                    } else {
+                        self.push(ValuePtr::nil()); // No additional message
+                    }
+                },
+                AssertCompare(op, ip) => {
+                    let rhs = self.pop();
+                    let lhs = self.pop();
+                    if op.apply(&lhs, &rhs) {
+                        let jump: usize = self.ip.add_offset(ip);
+                        self.ip = jump;
+                    } else {
+                        self.push(format!("Expected {} {} {}", lhs.to_repr_str(), BinaryOp::from(op).as_error(), rhs.to_repr_str()).to_value());
+                    }
+                },
                 AssertFailed => {
                     let ret: ValuePtr = self.pop();
-                    return RuntimeAssertFailed(ret.to_str().into_owned()).err()
+                    let message: ValuePtr = self.pop();
+                    return RuntimeAssertFailed(ret, message).err()
                 },
             }
         }
@@ -1839,8 +1861,12 @@ mod tests {
     #[test] fn test_exit_in_ternary() { run_str("print(if 3 > 2 then exit else 'hello')", ""); }
     #[test] fn test_assert_pass() { run_str("assert [1, 2] . len . (==2) ; print('yes!')", "yes!\n")}
     #[test] fn test_assert_pass_with_no_message() { run_str("assert [1, 2] .len . (==2) : print('should not show') ; print('should show')", "should show\n"); }
-    #[test] fn test_assert_fail() { run_str("assert 1 + 2 != 3", "Assertion Failed: nil\n  at: line 1 (<test>)\n\n1 | assert 1 + 2 != 3\n2 |        ^^^^^^^^^^\n"); }
-    #[test] fn test_assert_fail_with_message() { run_str("assert 'here' in 'the goose is gone' : 'goose issues are afoot'", "Assertion Failed: goose issues are afoot\n  at: line 1 (<test>)\n\n1 | assert 'here' in 'the goose is gone' : 'goose issues are afoot'\n2 |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n"); }
+    #[test] fn test_assert_fail_with_test() { run_str("assert false", "Assertion Failed:\n  at: line 1 (<test>)\n\n1 | assert false\n2 |        ^^^^^\n"); }
+    #[test] fn test_assert_fail_with_test_and_message() { run_str("assert false : 'oh nose'", "Assertion Failed: oh nose\n  at: line 1 (<test>)\n\n1 | assert false : 'oh nose'\n2 |        ^^^^^\n"); }
+    #[test] fn test_assert_fail_with_compare() { run_str("assert 1 + 2 != 3", "Assertion Failed: Expected 3 != 3\n  at: line 1 (<test>)\n\n1 | assert 1 + 2 != 3\n2 |        ^^^^^^^^^^\n"); }
+    #[test] fn test_assert_fail_with_compare_and_message() { run_str("assert 2 * 4 > 3 * 3 : ['did', 'we', 'do', 'math', 'wrong?'] . join ' '", "Assertion Failed: didwedomathwrong?\n                : Expected 8 > 9\n  at: line 1 (<test>)\n\n1 | assert 2 * 4 > 3 * 3 : ['did', 'we', 'do', 'math', 'wrong?'] . join ''\n2 |        ^^^^^^^^^^^^^\n"); }
+    #[test] fn test_assert_fail_with_unusual_compare() { run_str("assert 'here' in 'the goose is gone'", "Assertion Failed:\n  at: line 1 (<test>)\n\n1 | assert 'here' in 'the goose is gone'\n2 |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n"); }
+    #[test] fn test_assert_fail_with_unusual_compare_and_message() { run_str("assert 'here' in 'the goose is gone' : 'goose issues are afoot'", "Assertion Failed: goose issues are afoot\n  at: line 1 (<test>)\n\n1 | assert 'here' in 'the goose is gone' : 'goose issues are afoot'\n2 |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n"); }
     #[test] fn test_assert_messages_are_lazy() { run_str("assert true : exit ; print('should reach here')", "should reach here\n"); }
     #[test] fn test_monitor_stack() { run_str("let x = 1, b = [], c ; monitor 'stack' . print", "[1, [], nil, fn print(...), fn monitor(cmd)]\n") }
     #[test] fn test_monitor_stack_modification() { run_str("let x = [false] ; ( monitor 'stack' )[0][0] = true ; x . print", "[true]\n") }
