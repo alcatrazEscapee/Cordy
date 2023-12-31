@@ -142,9 +142,9 @@ fn binary_list_repeat(list: ValuePtr, repeat: ValuePtr) -> ValueResult {
         ValueErrorValueMustBeNonNegative(i).err()
     } else {
         let list = list.as_list().borrow();
-        list.list.iter()
+        list.iter()
             .cycle()
-            .take(i as usize * list.list.len())
+            .take(i as usize * list.len())
             .cloned()
             .to_list()
             .ok()
@@ -267,11 +267,11 @@ pub fn binary_in(lhs: ValuePtr, rhs: ValuePtr, invert: bool) -> ValueResult {
     (match (lhs.ty(), rhs.ty()) {
         (ShortStr | LongStr, ShortStr | LongStr) => rhs.as_str_slice().contains(lhs.as_str_slice()),
         (Int | Bool, Range) => rhs.as_range().contains(lhs.as_int()),
-        (_, List) => rhs.as_list().borrow().list.contains(&lhs),
-        (_, Set) => rhs.as_set().borrow().set.contains(&lhs),
-        (_, Dict) => rhs.as_dict().borrow().dict.contains_key(&lhs),
-        (_, Heap) => rhs.as_heap().borrow().heap.iter().any(|v|v.0 == lhs),
-        (_, Vector) => rhs.as_vector().borrow().vector.contains(&lhs),
+        (_, List) => rhs.as_list().borrow().contains(&lhs),
+        (_, Set) => rhs.as_set().borrow().contains(&lhs),
+        (_, Dict) => rhs.as_dict().borrow().contains_key(&lhs),
+        (_, Heap) => rhs.as_heap().borrow().iter().any(|v|v.0 == lhs),
+        (_, Vector) => rhs.as_vector().borrow().contains(&lhs),
         _ => return TypeErrorBinaryOp(BinaryOp::In, lhs, rhs).err()
     } != invert).to_value().ok()
 }
@@ -283,9 +283,9 @@ pub fn binary_add(lhs: ValuePtr, rhs: ValuePtr) -> ValueResult {
         (List, List) => {
             let lhs = lhs.as_list().borrow();
             let rhs = rhs.as_list().borrow();
-            let mut ret: VecDeque<ValuePtr> = VecDeque::with_capacity(lhs.list.len() + rhs.list.len());
-            ret.extend(lhs.list.iter().cloned());
-            ret.extend(rhs.list.iter().cloned());
+            let mut ret: VecDeque<ValuePtr> = VecDeque::with_capacity(lhs.len() + rhs.len());
+            ret.extend(lhs.iter().cloned());
+            ret.extend(rhs.iter().cloned());
             ret.to_value().ok()
         }
         (ShortStr | LongStr, _) => format!("{}{}", lhs.as_str_slice(), rhs.to_str()).to_value().ok(),
@@ -304,7 +304,7 @@ pub fn binary_sub(lhs: ValuePtr, rhs: ValuePtr) -> ValueResult {
         (Set, Set) => {
             let lhs = lhs.as_set().borrow();
             let rhs = rhs.as_set().borrow();
-            lhs.set.difference(&rhs.set).cloned().to_set().ok()
+            lhs.difference(&rhs).cloned().to_set().ok()
         },
         (Vector, Vector) => apply_vector_binary(lhs, rhs, binary_sub),
         (Vector, _) => apply_vector_binary_scalar_rhs(lhs, rhs, binary_sub),
@@ -353,7 +353,7 @@ pub fn binary_bitwise_and(lhs: ValuePtr, rhs: ValuePtr) -> ValueResult {
         (Set, Set) => {
             let lhs = lhs.as_set().borrow();
             let rhs = rhs.as_set().borrow();
-            lhs.set.intersection(&rhs.set).cloned().to_set().ok()
+            lhs.intersection(&rhs).cloned().to_set().ok()
         }
         (Vector, Vector) => apply_vector_binary(lhs, rhs, binary_bitwise_and),
         (Vector, _) => apply_vector_binary_scalar_rhs(lhs, rhs, binary_bitwise_and),
@@ -369,7 +369,7 @@ pub fn binary_bitwise_or(lhs: ValuePtr, rhs: ValuePtr) -> ValueResult {
         (Set, Set) => {
             let lhs = lhs.as_set().borrow();
             let rhs = rhs.as_set().borrow();
-            lhs.set.union(&rhs.set).cloned().to_set().ok()
+            lhs.union(&rhs).cloned().to_set().ok()
         },
         (Vector, Vector) => apply_vector_binary(lhs, rhs, binary_bitwise_or),
         (Vector, _) => apply_vector_binary_scalar_rhs(lhs, rhs, binary_bitwise_or),
@@ -385,7 +385,7 @@ pub fn binary_bitwise_xor(lhs: ValuePtr, rhs: ValuePtr) -> ValueResult {
         (Set, Set) => {
             let lhs = lhs.as_set().borrow();
             let rhs = rhs.as_set().borrow();
-            lhs.set.symmetric_difference(&rhs.set).cloned().to_set().ok()
+            lhs.symmetric_difference(&rhs).cloned().to_set().ok()
         }
         (Vector, Vector) => apply_vector_binary(lhs, rhs, binary_bitwise_xor),
         (Vector, _) => apply_vector_binary_scalar_rhs(lhs, rhs, binary_bitwise_xor),
@@ -400,7 +400,7 @@ type BinaryFn = fn(ValuePtr, ValuePtr) -> ValueResult;
 
 /// Helpers for `Vector` operations, which all apply elementwise
 pub fn apply_vector_unary(vector: ValuePtr, unary_op: UnaryFn) -> ValueResult {
-    vector.as_vector().borrow().vector.iter()
+    vector.as_vector().borrow().iter()
         .map(|v| unary_op(v.clone()))
         .collect::<Result<Vec<ValuePtr>, ErrorPtr>>()?
         .to_value()
@@ -408,8 +408,8 @@ pub fn apply_vector_unary(vector: ValuePtr, unary_op: UnaryFn) -> ValueResult {
 }
 
 fn apply_vector_binary(lhs: ValuePtr, rhs: ValuePtr, binary_op: BinaryFn) -> ValueResult {
-    lhs.as_vector().borrow().vector.iter()
-        .zip(rhs.as_vector().borrow().vector.iter())
+    lhs.as_vector().borrow().iter()
+        .zip(rhs.as_vector().borrow().iter())
         .map(|(l, r)| binary_op(l.clone(), r.clone()))
         .collect::<Result<Vec<ValuePtr>, ErrorPtr>>()?
         .to_value()
@@ -417,7 +417,7 @@ fn apply_vector_binary(lhs: ValuePtr, rhs: ValuePtr, binary_op: BinaryFn) -> Val
 }
 
 fn apply_vector_binary_scalar_lhs(scalar_lhs: ValuePtr, rhs: ValuePtr, binary_op: BinaryFn) -> ValueResult {
-    rhs.as_vector().borrow().vector.iter()
+    rhs.as_vector().borrow().iter()
         .map(|r| binary_op(scalar_lhs.clone(), r.clone()))
         .collect::<ErrorResult<Vec<ValuePtr>>>()?
         .to_value()
@@ -425,7 +425,7 @@ fn apply_vector_binary_scalar_lhs(scalar_lhs: ValuePtr, rhs: ValuePtr, binary_op
 }
 
 fn apply_vector_binary_scalar_rhs(lhs: ValuePtr, scalar_rhs: ValuePtr, binary_op: BinaryFn) -> ValueResult {
-    lhs.as_vector().borrow().vector.iter()
+    lhs.as_vector().borrow().iter()
         .map(|l| binary_op(l.clone(), scalar_rhs.clone()))
         .collect::<ErrorResult<Vec<ValuePtr>>>()?
         .to_value()

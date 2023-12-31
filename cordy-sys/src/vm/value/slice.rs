@@ -4,7 +4,7 @@ use std::collections::VecDeque;
 use crate::core;
 use crate::vm::{ErrorResult, IntoValue, Type, ValuePtr, ValueResult};
 use crate::vm::RuntimeError::{TypeErrorArgMustBeInt, TypeErrorArgMustBeSliceable};
-use crate::vm::value::{ListImpl, VectorImpl};
+use crate::vm::value::{List, Vector};
 use crate::vm::value::ptr::Ref;
 
 
@@ -71,8 +71,8 @@ impl Slice {
 /// Thus, each variant of `Sliceable` contains a reference to a value, capable of being sliced, plus a builder for new values.
 pub enum Sliceable<'a> {
     Str(&'a str, String),
-    List(Ref<'a, ListImpl>, VecDeque<ValuePtr>),
-    Vector(Ref<'a, VectorImpl>, Vec<ValuePtr>),
+    List(Ref<'a, List>, VecDeque<ValuePtr>),
+    Vector(Ref<'a, Vector>, Vec<ValuePtr>),
 }
 
 impl ValuePtr {
@@ -102,8 +102,8 @@ impl Sliceable<'_> {
     pub fn len(&self) -> usize {
         match self {
             Sliceable::Str(it, _) => it.len(),
-            Sliceable::List(it, _) => it.list.len(),
-            Sliceable::Vector(it, _) => it.vector.len(),
+            Sliceable::List(it, _) => it.len(),
+            Sliceable::Vector(it, _) => it.len(),
         }
     }
 
@@ -113,8 +113,8 @@ impl Sliceable<'_> {
             let index = index as usize;
             match self {
                 Sliceable::Str(src, dest) => dest.push(src.chars().nth(index).unwrap()),
-                Sliceable::List(src, dest) => dest.push_back(src.list[index].clone()),
-                Sliceable::Vector(src, dest) => dest.push(src.vector[index].clone()),
+                Sliceable::List(src, dest) => dest.push_back(src[index].clone()),
+                Sliceable::Vector(src, dest) => dest.push(src[index].clone()),
             }
         }
     }

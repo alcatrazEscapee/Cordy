@@ -10,6 +10,7 @@ use crate::core::NativeFunction;
 use crate::util::impl_partial_ord;
 use crate::vm::{Function, Iterable, RuntimeError, StructTypeImpl};
 use crate::vm::value::{*};
+use crate::vm::value::collections::{Heap, Set};
 use crate::vm::value::slice::Slice;
 
 
@@ -429,11 +430,11 @@ impl Ord for ValuePtr {
             // If the type is the same, they check the ordering between the same types
             Type::Range => cmp!(Range, Range),
             Type::Enumerate => cmp!(Enumerate, Enumerate),
-            Type::List => cmp!(List, ListImpl),
-            Type::Set => cmp!(Set, SetImpl),
-            Type::Dict => cmp!(Dict, DictImpl),
-            Type::Heap => cmp!(Heap, HeapImpl),
-            Type::Vector => cmp!(Vector, VectorImpl),
+            Type::List => cmp!(List, List),
+            Type::Set => cmp!(Set, Set),
+            Type::Dict => cmp!(Dict, Dict),
+            Type::Heap => cmp!(Heap, Heap),
+            Type::Vector => cmp!(Vector, Vector),
             Type::Struct => cmp!(Struct, StructImpl),
 
             // Any other types are not explicitly ordered
@@ -483,11 +484,11 @@ impl Drop for ValuePtr {
                         Type::Slice => self.drop_value::<Slice>(),
                         Type::Iter => self.drop_value::<Iterable>(),
                         Type::LongStr => self.drop_value::<String>(),
-                        Type::List => self.drop_value::<ListImpl>(),
-                        Type::Set => self.drop_value::<SetImpl>(),
-                        Type::Dict => self.drop_value::<DictImpl>(),
-                        Type::Heap => self.drop_value::<HeapImpl>(),
-                        Type::Vector => self.drop_value::<VectorImpl>(),
+                        Type::List => self.drop_value::<List>(),
+                        Type::Set => self.drop_value::<Set>(),
+                        Type::Dict => self.drop_value::<Dict>(),
+                        Type::Heap => self.drop_value::<Heap>(),
+                        Type::Vector => self.drop_value::<Vector>(),
                         Type::Struct => self.drop_value::<StructImpl>(),
                         Type::StructType => self.drop_value::<StructTypeImpl>(),
                         Type::Memoized => self.drop_value::<MemoizedImpl>(),
@@ -619,6 +620,10 @@ pub struct Prefix<T : Value> {
     value: UnsafeCell<T>,
 }
 
+const BORROW_MUT: u16 = 0;
+const BORROW_NONE: u16 = 1;
+
+
 /// **N.B.** With negative trait bounds, the `borrow()` methods could be split to require `T : Value + !ConstValue`
 impl<T : Value> Prefix<T> {
     pub fn new(ty: Type, value: T) -> Prefix<T> {
@@ -628,6 +633,14 @@ impl<T : Value> Prefix<T> {
             refs: Cell::new(1),
             value: UnsafeCell::new(value)
         }
+    }
+
+    /// This is explicitly unsafe, as we are handing out a unchecked, immutable reference to the underlying data.
+    /// It relies on the caller knowing that we take split, or partial borrows (such as closures, having an immutable and mutable part)
+    ///
+    /// SAFETY: The caller must guarantee use of this function does not lead to any other mutable references being taken while this reference is held
+    pub unsafe fn borrow_const_unsafe(&self) -> &T {
+        NonNull::new_unchecked(self.value.get()).as_ref()
     }
 
     /// Copied from the implementation in `RefCell`.
@@ -649,6 +662,21 @@ impl<T : Value> Prefix<T> {
         }
     }
 
+    pub fn borrow_mut(&self) -> RefMut<'_, T> {
+        self.try_borrow_mut().expect("already borrowed")
+    }
+
+    pub fn try_borrow_mut(&self) -> Option<RefMut<'_, T>> {
+        match self.lock.get() {
+            BORROW_NONE => {
+                let value = unsafe { NonNull::new_unchecked(self.value.get()) };
+                self.lock.set(BORROW_MUT);
+                Some(RefMut { value, lock: &self.lock, marker: PhantomData })
+            }
+            _ => None, // Already borrowed,
+        }
+    }
+
     /// Copied from the implementation of `Rc`. Minus the core intrinsics, as they aren't stable.
     fn inc_strong(&self) {
         let strong: u32 = self.refs.get() + 1;
@@ -660,8 +688,6 @@ impl<T : Value> Prefix<T> {
     }
 }
 
-
-/// `ConstValue` implementations
 impl<T : ConstValue> Prefix<T> {
     /// For const values, we know the underlying value is never mutable, and thus a mutable borrow is never taken.
     /// Thus, we can hand out unchecked references to the underlying value, which avoids the overhead of useless borrow checking.
@@ -669,16 +695,6 @@ impl<T : ConstValue> Prefix<T> {
         unsafe {
             NonNull::new_unchecked(self.value.get()).as_ref()
         }
-    }
-}
-
-impl<T : Value> Prefix<T> {
-    /// This is explicitly unsafe, as we are handing out a unchecked, immutable reference to the underlying data.
-    /// It relies on the caller knowing that we take split, or partial borrows (such as closures, having an immutable and mutable part)
-    ///
-    /// SAFETY: The caller must guarantee use of this function does not lead to any other mutable references being taken while this reference is held
-    pub unsafe fn borrow_const_unsafe(&self) -> &T {
-        NonNull::new_unchecked(self.value.get()).as_ref()
     }
 }
 
@@ -716,27 +732,6 @@ impl<T : Hash + Value> Hash for Prefix<T> {
 impl<T : Debug + Value> Debug for Prefix<T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         Debug::fmt(&*self.borrow(), f)
-    }
-}
-
-const BORROW_MUT: u16 = 0;
-const BORROW_NONE: u16 = 1;
-
-impl<T : Value> Prefix<T> {
-
-    pub fn borrow_mut(&self) -> RefMut<'_, T> {
-        self.try_borrow_mut().expect("already borrowed")
-    }
-
-    pub fn try_borrow_mut(&self) -> Option<RefMut<'_, T>> {
-        match self.lock.get() {
-            BORROW_NONE => {
-                let value = unsafe { NonNull::new_unchecked(self.value.get()) };
-                self.lock.set(BORROW_MUT);
-                Some(RefMut { value, lock: &self.lock, marker: PhantomData })
-            }
-            _ => None, // Already borrowed,
-        }
     }
 }
 
