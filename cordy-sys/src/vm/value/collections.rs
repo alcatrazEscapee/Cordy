@@ -13,11 +13,11 @@ use crate::vm::{AnyResult, ValuePtr};
 use crate::vm::RuntimeError::ValueErrorRecursiveHash;
 
 
-type ListType = VecDeque<ValuePtr>;
-type VectorType = Vec<ValuePtr>;
-type SetType = IndexSet<ValuePtr, FxBuildHasher>;
-type DictType = IndexMap<ValuePtr, ValuePtr, FxBuildHasher>;
-type HeapType = BinaryHeap<Reverse<ValuePtr>>;
+pub type ListType = VecDeque<ValuePtr>;
+pub type VectorType = Vec<ValuePtr>;
+pub type SetType = IndexSet<ValuePtr, FxBuildHasher>;
+pub type DictType = IndexMap<ValuePtr, ValuePtr, FxBuildHasher>;
+pub type HeapType = BinaryHeap<Reverse<ValuePtr>>;
 
 impl_deref!(List, ListType, list);
 impl_deref!(Vector, VectorType, vector);
