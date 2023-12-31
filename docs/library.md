@@ -933,6 +933,14 @@ fn counter(it) {
 }
 ```
 
+### Copy `<T> copy(it: T) -> T`
+
+Computes a deep copy of a given value. This has a few additional notes:
+
+- Recursive and self-referential structures are copied correctly, producing identical references
+- Any mutable collections will be recursively copied, so mutations to the copy will never affect the original
+- It will always be true that `copy a == a` for any value of `a`
+
 #### (Dict) Default `<K, V> default(x: V, it: dict<K, V>) -> dict<K, V>`
 
 Sets the default value of `it` to `x`, and then returns `it`. This means that any future queries into `it` via the index syntax, if the key is not in the dictionary, will return `x`.

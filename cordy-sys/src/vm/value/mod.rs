@@ -62,12 +62,12 @@ pub enum Type {
     Range,
     Enumerate,
     Slice,
-    Iter,
     Memoized,
     Function,
     PartialFunction,
     PartialNativeFunction,
     Closure,
+    Iter,
     Error,
     Never, // Optimization for type-checking code, to avoid code paths containing `unreachable!()` or similar patterns.
 }
@@ -706,6 +706,14 @@ impl StructImpl {
 
     fn set_field(&mut self, field_offset: usize, value: ValuePtr) {
         self.values[field_offset] = value;
+    }
+
+    pub fn fields(&self) -> impl Iterator<Item=&ValuePtr> {
+        self.values.iter()
+    }
+
+    pub fn fields_mut(&mut self) -> &mut Vec<ValuePtr> {
+        &mut self.values
     }
 }
 

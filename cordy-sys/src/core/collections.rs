@@ -1,5 +1,6 @@
 use std::cmp::{Ordering, Reverse};
-use std::collections::VecDeque;
+use std::collections::{BinaryHeap, HashMap, VecDeque};
+use std::collections::hash_map::Entry;
 use fxhash::FxBuildHasher;
 use indexmap::{IndexMap, IndexSet};
 use itertools::Itertools;
@@ -693,4 +694,131 @@ pub fn counter(it: ValuePtr) -> ValueResult {
             .or_insert(1i64.to_value());
     }
     counter.to_value().ok()
+}
+
+/// Copies a value, recursively, and preserving identity relationships.
+/// The complexity of this method is in properly handling a number of edge cases:
+///
+/// - Recursive structures (i.e. a list that contains itself)
+/// - Objects with the same identity (i.e. a list containing seven references to the same list)
+/// - Deep nested objects (i.e. lists containing vectors containing structs containing fields, etc.)
+pub fn copy(it: ValuePtr) -> ValueResult {
+    copy_recursive(&it, &mut HashMap::with_hasher(FxBuildHasher::default())).ok()
+}
+
+fn copy_recursive(it: &ValuePtr, objects: &mut HashMap<usize, ValuePtr, FxBuildHasher>) -> ValuePtr {
+    use Type::{*};
+
+    macro_rules! copy_collection {
+        ($as_T:ident, $insert:ident, $default:expr) => {
+            copy_collection!($as_T, $insert, $default, copy_recursive, ValuePtr)
+        };
+        ($as_T:ident, $insert:ident, $default:expr, $copy:ident, $elem_ty:ty) => {
+            match objects.entry(it.as_ptr_value()) {
+                Entry::Occupied(e) => e.get().clone(), // If the object already exists, copy it directly
+                Entry::Vacant(e) => {
+                    // Otherwise,
+                    // 1. insert a empty 'dummy' list into the `object` map, to preserve the identity
+                    // 2. call copy_recursive() on all children of the original collection, saving them in a temporary `Vec<ValuePtr``
+                    // 3. insert all children in order into the copied collection
+                    e.insert($default.to_value());
+
+                    let elements: Vec<$elem_ty> = it.$as_T()
+                        .borrow()
+                        .iter()
+                        .map(|e| $copy(&e, objects))
+                        .collect();
+                    let ptr = objects.get_mut(&it.as_ptr_value())
+                        .unwrap(); // This should always exist in the map, since we only insert and just inserted this above
+
+                    let mut copy = ptr.$as_T().borrow_mut();
+                    for e in elements {
+                        copy.$insert(e);
+                    }
+
+                    ptr.clone()
+                }
+            }
+        };
+    }
+
+    match it.ty() {
+        // These types do not contain any further types, and have no concept of identity
+        // We can freely clone them without worrying about other references to the object
+        //
+        // - Range, partial functions, etc. are all immutable, and thus have no identity, so we can re-use the same pointer
+        // - Slice contains `ValuePtr`s, but they are ensured to be `int` or `nil`, so we can copy directly
+        // - Closures have a mutable environment, but that is not considered within *reach* of `copy()`
+        Nil | Bool | Int | NativeFunction | GetField | ShortStr | LongStr | Complex | StructType | Range | Slice | Function | PartialFunction | PartialNativeFunction | Closure | Memoized
+            => it.clone(),
+
+        // Collections all have identity, and are mutable, so we need to clone their contents, but remember the collection in the objects map
+        // If the collection already exists in the objects map, we use that instead
+        List => copy_collection!(as_list, push_back, VecDeque::new()),
+        Vector => copy_collection!(as_vector, push, Vec::new()),
+        Set => copy_collection!(as_set, insert, IndexSet::with_hasher(FxBuildHasher::default())),
+        Heap => copy_collection!(as_heap, push, BinaryHeap::new(), copy_recursive_rev, Reverse<ValuePtr>),
+
+        // Dict is a bit different, and needs a custom implementation, as we need to copy *both* keys and values
+        Dict => match objects.entry(it.as_ptr_value()) {
+            Entry::Occupied(e) => e.get().clone(), // If the object already exists, copy it directly
+            Entry::Vacant(e) => {
+                // Otherwise,
+                // 1. insert a empty 'dummy' list into the `object` map, to preserve the identity
+                // 2. call copy_recursive() on all children of the original collection, saving them in a temporary `Vec<ValuePtr``
+                // 3. insert all children in order into the copied collection
+                e.insert(IndexMap::with_hasher(FxBuildHasher::default()).to_value());
+
+                let elements: Vec<(ValuePtr, ValuePtr)> = it.as_dict()
+                    .borrow()
+                    .iter()
+                    .map(|(key, value)| (copy_recursive(key, objects), copy_recursive(value, objects)))
+                    .collect();
+                let ptr = objects.get_mut(&it.as_ptr_value())
+                    .unwrap(); // This should always exist in the map, since we only insert and just inserted this above
+
+                let mut copy = ptr.as_dict().borrow_mut();
+                for (key, value) in elements {
+                    copy.insert(key, value);
+                }
+
+                ptr.clone()
+            }
+        },
+
+        // Structs are mutable, and have identity, and need to copy much like collection types.
+        Struct => match objects.entry(it.as_ptr_value()) {
+            Entry::Occupied(e) => e.get().clone(),
+            Entry::Vacant(e) => {
+                let owner = it.as_struct().borrow().get_constructor();
+
+                e.insert(ValuePtr::instance(owner, vec![]));
+
+                let fields: Vec<ValuePtr> = it.as_struct()
+                    .borrow()
+                    .fields()
+                    .map(|f| copy_recursive(f, objects))
+                    .collect();
+                let ptr = objects.get_mut(&it.as_ptr_value())
+                    .unwrap(); // This should always exist in the map, since we only insert and just inserted this above
+
+                let mut copy = ptr.as_struct().borrow_mut();
+                for f in fields {
+                    copy.fields_mut().push(f)
+                }
+
+                ptr.clone()
+            }
+        },
+
+        // Enumerate is immutable, provided it has a reference to the correct underlying value
+        // Thus, we just need to recursively call copy() for the inner value, but can create separate instances of the enumerate itself
+        Enumerate => ValuePtr::enumerate(copy_recursive(it.as_enumerate().inner(), objects)),
+
+        Iter | Error | Never => panic!("should not copy a synthetic type")
+    }
+}
+
+fn copy_recursive_rev(it: &Reverse<ValuePtr>, objects: &mut HashMap<usize, ValuePtr, FxBuildHasher>) -> Reverse<ValuePtr> {
+    Reverse(copy_recursive(&it.0, objects)) // To support the `Reverse` boxing that heaps do
 }

@@ -132,6 +132,12 @@ pub struct Enumerate {
     inner: ValuePtr
 }
 
+impl Enumerate {
+    pub fn inner(&self) -> &ValuePtr {
+        &self.inner
+    }
+}
+
 impl ValuePtr {
     pub fn enumerate(inner: ValuePtr) -> ValuePtr {
         Enumerate::new(inner)
