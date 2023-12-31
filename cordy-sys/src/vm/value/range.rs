@@ -129,7 +129,7 @@ impl Range {
 /// `Enumerate` is considered immutable, and shared.
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct Enumerate {
-    pub inner: ValuePtr
+    inner: ValuePtr
 }
 
 impl ValuePtr {

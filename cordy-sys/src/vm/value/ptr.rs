@@ -52,16 +52,18 @@ enum MemoryType {
 }
 
 
-const TAG_INT: usize       = 0b______00;
-const TAG_NIL: usize       = 0b__000_01;
-const TAG_BOOL: usize      = 0b__001_01;
-const TAG_FALSE: usize     = 0b0_001_01;
-const TAG_TRUE: usize      = 0b1_001_01;
-const TAG_NATIVE: usize    = 0b__010_01;
-const TAG_NONE: usize      = 0b__011_01;
-const TAG_FIELD: usize     = 0b__100_01;
-const TAG_STR: usize       = 0b__101_01;
-const TAG_PTR: usize       = 0b______11;
+const TAG_INT      : usize = 0b______00;
+const TAG_NIL      : usize = 0b__000_01;
+const TAG_BOOL     : usize = 0b__001_01;
+const TAG_FALSE    : usize = 0b0_001_01;
+const TAG_TRUE     : usize = 0b1_001_01;
+const TAG_NATIVE   : usize = 0b__010_01;
+const TAG_FIELD    : usize = 0b__011_01;
+const TAG_STR      : usize = 0b__100_01;
+//    UNUSED               = 0b__101_01
+//    UNUSED               = 0b__110_01
+//    UNUSED               = 0b__111_01
+const TAG_PTR      : usize = 0b______11;
 
 const MASK_INT: usize      = 0b_______1;
 const MASK_NIL: usize      = 0b__111_11;
@@ -69,7 +71,6 @@ const MASK_BOOL: usize     = 0b__111_11;
 const MASK_NATIVE: usize   = 0b__111_11;
 const MASK_FIELD: usize    = 0b__111_11;
 const MASK_STR: usize      = 0b__111_11;
-const MASK_NONE: usize     = 0b__111_11;
 const MASK_PTR: usize      = 0b______11;
 
 const PTR_MASK: usize = !0b11;
@@ -167,10 +168,6 @@ impl ValuePtr {
         ValuePtr { tag: TAG_NIL }
     }
 
-    pub const fn none() -> ValuePtr {
-        ValuePtr { tag: TAG_NONE }
-    }
-
     pub const fn str() -> ValuePtr {
         ValuePtr { tag: TAG_STR }
     }
@@ -250,7 +247,6 @@ impl ValuePtr {
                     TAG_NIL => Type::Nil,
                     TAG_BOOL => Type::Bool,
                     TAG_NATIVE => Type::NativeFunction,
-                    TAG_NONE => Type::None,
                     TAG_FIELD => Type::GetField,
                     TAG_STR => Type::ShortStr,
                     _ => Type::Never,
@@ -281,13 +277,12 @@ impl ValuePtr {
     pub const fn is_short_str(&self) -> bool { (unsafe { self.tag } & MASK_STR) == TAG_STR }
     pub const fn is_native(&self) -> bool { (unsafe { self.tag } & MASK_NATIVE) == TAG_NATIVE }
     pub const fn is_field(&self) -> bool { (unsafe { self.tag } & MASK_FIELD) == TAG_FIELD }
-    pub const fn is_none(&self) -> bool { (unsafe { self.tag } & MASK_NONE) == TAG_NONE }
 
     fn is_ptr(&self) -> bool { (unsafe { self.tag } & MASK_PTR) == TAG_PTR }
 
-    /// Transmutes this `ValuePtr` into a `ValueRef`, providing reference equality semantics
-    pub(super) fn as_value_ref(&self) -> ValueRef {
-        ValueRef::new(unsafe { self.tag })
+    /// Transmutes this `ValuePtr` into a `usize`, providing reference equality semantics by comparing the tag value
+    pub(super) fn as_ptr_value(&self) -> usize {
+        unsafe { self.tag }
     }
 
     /// Transmutes this `ValuePtr` into a `&T`, provided we have already checked the type is of the type `T`.
@@ -360,7 +355,7 @@ impl PartialEq for ValuePtr {
             Type::Closure => eq!(as_closure),
             Type::Error => eq!(as_err),
 
-            Type::Iter | Type::None | Type::Never => false,
+            Type::Iter | Type::Never => false,
         }
     }
 }
@@ -542,7 +537,7 @@ impl Hash for ValuePtr {
             Type::Function => hash!(as_function),
             Type::Closure => hash!(as_closure),
 
-            Type::Iter | Type::Error | Type::None | Type::Never => {},
+            Type::Iter | Type::Error | Type::Never => {},
         }
     }
 }
@@ -582,7 +577,6 @@ impl Debug for ValuePtr {
             Type::Error => fmt!(as_err),
 
             Type::Iter => write!(f, "Iter"),
-            Type::None => write!(f, "None"),
             Type::Never => write!(f, "Never"),
         }
     }
@@ -827,7 +821,6 @@ mod tests {
         assert!(!ptr.is_bool());
         assert!(!ptr.is_int());
         assert!(!ptr.is_native());
-        assert!(!ptr.is_none());
         assert!(!ptr.is_err());
         assert!(!ptr.is_ptr());
         assert_eq!(ptr.ty(), Type::Nil);
@@ -842,7 +835,6 @@ mod tests {
         assert!(ptr.is_int());
         assert!(!ptr.is_precise_int());
         assert!(!ptr.is_native());
-        assert!(!ptr.is_none());
         assert!(!ptr.is_err());
         assert!(!ptr.is_ptr());
         assert_eq!(ptr.ty(), Type::Bool);
@@ -859,7 +851,6 @@ mod tests {
         assert!(ptr.is_int());
         assert!(!ptr.is_precise_int());
         assert!(!ptr.is_native());
-        assert!(!ptr.is_none());
         assert!(!ptr.is_err());
         assert!(!ptr.is_ptr());
         assert_eq!(ptr.ty(), Type::Bool);
@@ -876,7 +867,6 @@ mod tests {
             assert!(!ptr.is_bool());
             assert!(ptr.is_int());
             assert!(!ptr.is_native());
-            assert!(!ptr.is_none());
             assert!(!ptr.is_err());
             assert!(!ptr.is_ptr());
             assert_eq!(ptr.ty(), Type::Int);
@@ -891,7 +881,6 @@ mod tests {
             assert!(!ptr.is_bool());
             assert!(ptr.is_int());
             assert!(!ptr.is_native());
-            assert!(!ptr.is_none());
             assert!(!ptr.is_err());
             assert!(!ptr.is_ptr());
             assert_eq!(ptr.ty(), Type::Int);
@@ -935,27 +924,12 @@ mod tests {
             assert!(!ptr.is_bool());
             assert!(!ptr.is_int());
             assert!(ptr.is_native());
-            assert!(!ptr.is_none());
             assert!(!ptr.is_err());
             assert!(!ptr.is_ptr());
             assert_eq!(ptr.ty(), Type::NativeFunction);
             assert_eq!(ptr.as_native(), f);
             assert_eq!(format!("{:?}", ptr), format!("{:?}", f));
         }
-    }
-
-    #[test]
-    fn test_none() {
-        let ptr = ValuePtr::none();
-
-        assert!(!ptr.is_nil());
-        assert!(!ptr.is_bool());
-        assert!(!ptr.is_int());
-        assert!(!ptr.is_native());
-        assert!(ptr.is_none());
-        assert!(!ptr.is_err());
-        assert!(!ptr.is_ptr());
-        assert_eq!(ptr.ty(), Type::None);
     }
 
     #[test]
@@ -966,7 +940,6 @@ mod tests {
         assert!(!ptr.is_bool());
         assert!(!ptr.is_int());
         assert!(!ptr.is_native());
-        assert!(!ptr.is_none());
         assert!(!ptr.is_err());
         assert!(ptr.is_ptr());
         assert_eq!(ptr.ty(), Type::Complex);
@@ -994,7 +967,6 @@ mod tests {
         assert!(!ptr.is_bool());
         assert!(!ptr.is_int());
         assert!(!ptr.is_native());
-        assert!(!ptr.is_none());
         assert!(!ptr.is_err());
         assert!(ptr.is_ptr());
         assert_eq!(ptr.ty(), Type::LongStr);

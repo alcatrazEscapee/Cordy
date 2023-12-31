@@ -10,24 +10,21 @@ use RuntimeError::{*};
 
 
 pub fn to_lower(value: ValuePtr) -> ValueResult {
-    value.check_str()?
-        .as_str_slice()
+    value.as_str_checked()?
         .to_lowercase()
         .to_value()
         .ok()
 }
 
 pub fn to_upper(value: ValuePtr) -> ValueResult {
-    value.check_str()?
-        .as_str_slice()
+    value.as_str_checked()?
         .to_uppercase()
         .to_value()
         .ok()
 }
 
 pub fn trim(value: ValuePtr) -> ValueResult {
-    value.check_str()?
-        .as_str_slice()
+    value.as_str_checked()?
         .trim()
         .to_value()
         .ok()
@@ -35,21 +32,19 @@ pub fn trim(value: ValuePtr) -> ValueResult {
 
 pub fn replace<VM: VirtualInterface>(vm: &mut VM, pattern: ValuePtr, replacer: ValuePtr, target: ValuePtr) -> ValueResult {
     let regex: Regex = compile_regex(pattern)?;
-    let target = target.check_str()?;
-    let text = target.as_str_slice();
+    let text = target.as_str_checked()?;
     if replacer.is_evaluable() {
         let replacer: InvokeArg1 = InvokeArg1::from(replacer)?;
         let mut err = None;
         let replaced: ValuePtr = regex.replace_all(text, |captures: &Captures| {
             let arg: ValuePtr = as_result(captures);
-            util::catch::<String>(&mut err, || Ok(replacer.invoke(arg, vm)?
-                .check_str()?
-                .as_str_owned()),
+            util::catch::<String>(&mut err,
+                || Ok(String::from(replacer.invoke(arg, vm)?.as_str_checked()?)),
                 String::new())
         }).to_value();
         util::join::<ValuePtr, ErrorPtr, ValueResult>(replaced, err)
     } else {
-        regex.replace_all(text, replacer.check_str()?.as_str_slice())
+        regex.replace_all(text, replacer.as_str_checked()?)
             .to_value()
             .ok()
     }
@@ -57,8 +52,7 @@ pub fn replace<VM: VirtualInterface>(vm: &mut VM, pattern: ValuePtr, replacer: V
 
 pub fn search(pattern: ValuePtr, target: ValuePtr) -> ValueResult {
     let regex: Regex = compile_regex(pattern)?;
-    let target = target.check_str()?;
-    let text: &str = target.as_str_slice();
+    let text: &str = target.as_str_checked()?;
 
     let mut start: usize = 0;
     std::iter::from_fn(move || {
@@ -81,11 +75,8 @@ pub fn search(pattern: ValuePtr, target: ValuePtr) -> ValueResult {
 }
 
 pub fn split(pattern: ValuePtr, target: ValuePtr) -> ValueResult {
-    let pattern = pattern.check_str()?;
-    let target = target.check_str()?;
-
-    if pattern.as_str_slice().is_empty() { // Special case for empty string
-        return target.as_str_slice()
+    if pattern.as_str_checked()?.is_empty() { // Special case for empty string
+        return target.as_str_checked()?
             .chars()
             .map(|u| u.to_value())
             .to_list()
@@ -94,7 +85,7 @@ pub fn split(pattern: ValuePtr, target: ValuePtr) -> ValueResult {
 
     let regex: Regex = compile_regex(pattern)?;
 
-    fancy_split(&regex, target.as_str_slice())
+    fancy_split(&regex, target.as_str_checked()?)
         .map(|u| u.to_value())
         .to_list()
         .ok()
@@ -112,7 +103,7 @@ fn as_result(captures: &Captures) -> ValuePtr {
 }
 
 fn compile_regex(a1: ValuePtr) -> ErrorResult<Regex> {
-    let raw = escape_regex(a1.check_str()?.as_str_slice());
+    let raw = escape_regex(a1.as_str_checked()?);
     match Regex::new(&raw) {
         Ok(regex) => Ok(regex),
         Err(e) => ValueErrorCannotCompileRegex(raw, e.to_string()).err()
@@ -177,7 +168,7 @@ impl<'r, 't> FusedIterator for FancySplit<'r, 't> {}
 
 
 pub fn join(joiner: ValuePtr, it: ValuePtr) -> ValueResult {
-    map_join(it.to_iter()?, joiner.check_str()?.as_str_slice()).ok()
+    map_join(it.to_iter()?, joiner.as_str_checked()?).ok()
 }
 
 
@@ -200,7 +191,7 @@ fn map_join<'a, I : Iterator<Item=ValuePtr>>(mut iter: I, sep: &str) -> ValuePtr
 
 
 pub fn chr(value: ValuePtr) -> ValueResult {
-    let i = value.check_int()?.as_int();
+    let i = value.as_int_checked()?;
     if i <= 0 {
         return ValueErrorInvalidCharacterOrdinal(i).err()
     }
@@ -211,10 +202,9 @@ pub fn chr(value: ValuePtr) -> ValueResult {
 }
 
 pub fn ord(value: ValuePtr) -> ValueResult {
-    let value = value.check_str()?;
-    let s = value.as_str_slice();
-    match s.len() {
-        1 => (s.chars().next().unwrap() as u32 as i64)
+    let text = value.as_str_checked()?;
+    match text.len() {
+        1 => (text.chars().next().unwrap() as u32 as i64)
             .to_value()
             .ok(),
         _ => TypeErrorArgMustBeChar(value).err(),
@@ -257,7 +247,7 @@ struct StringFormatter<'a> {
 impl<'a> StringFormatter<'a> {
 
     fn format(literal: &str, args: ValuePtr) -> ValueResult {
-        let args = args.as_iter_or_unit();
+        let args = args.as_sequence();
         let len = literal.len();
 
         let formatter = StringFormatter {
@@ -308,12 +298,12 @@ impl<'a> StringFormatter<'a> {
                     let padding: usize = if buffer.is_empty() { 0 } else { buffer.parse::<usize>().unwrap() };
 
                     let text = match (self.peek(), is_zero_padded) {
-                        (Some('d'), false) => format!("{:width$}", self.arg()?.check_int()?.as_int(), width = padding),
-                        (Some('d'), true) => format!("{:0width$}", self.arg()?.check_int()?.as_int(), width = padding),
-                        (Some('x'), false) => format!("{:width$x}", self.arg()?.check_int()?.as_int(), width = padding),
-                        (Some('x'), true) => format!("{:0width$x}", self.arg()?.check_int()?.as_int(), width = padding),
-                        (Some('b'), false) => format!("{:width$b}", self.arg()?.check_int()?.as_int(), width = padding),
-                        (Some('b'), true) => format!("{:0width$b}", self.arg()?.check_int()?.as_int(), width = padding),
+                        (Some('d'), false) => format!("{:width$}", self.arg()?.as_int_checked()?, width = padding),
+                        (Some('d'), true) => format!("{:0width$}", self.arg()?.as_int_checked()?, width = padding),
+                        (Some('x'), false) => format!("{:width$x}", self.arg()?.as_int_checked()?, width = padding),
+                        (Some('x'), true) => format!("{:0width$x}", self.arg()?.as_int_checked()?, width = padding),
+                        (Some('b'), false) => format!("{:width$b}", self.arg()?.as_int_checked()?, width = padding),
+                        (Some('b'), true) => format!("{:0width$b}", self.arg()?.as_int_checked()?, width = padding),
                         (Some('s'), true) => format!("{:width$}", self.arg()?.to_str(), width = padding),
                         (Some('s'), false) => format!("{:0width$}", self.arg()?.to_str(), width = padding),
                         (c, _) => return ValueErrorInvalidFormatCharacter(c.cloned()).err(),

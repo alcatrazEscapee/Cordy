@@ -1,18 +1,18 @@
 use num_integer::Roots;
 
-use crate::vm::{ComplexValue, ErrorResult, IntoValue, operator, RuntimeError, Type, ValueOption, ValuePtr, ValueResult};
+use crate::vm::{ComplexValue, IntoValue, operator, RuntimeError, Type, ValuePtr, ValueResult};
 
 use RuntimeError::{*};
 
 
-pub fn convert_to_int(target: ValuePtr, default: ValueOption) -> ValueResult {
+pub fn convert_to_int(target: ValuePtr, default: Option<ValuePtr>) -> ValueResult {
     match target.ty() {
         Type::Nil => 0i64.to_value().ok(),
         Type::Bool => target.as_int().to_value().ok(),
         Type::Int => target.ok(),
         Type::ShortStr | Type::LongStr => match target.as_str_slice().parse::<i64>() {
             Ok(i) => i.to_value().ok(),
-            Err(_) => match default.as_option() {
+            Err(_) => match default {
                 Some(a2) => a2.ok(),
                 None => TypeErrorCannotConvertToInt(target).err(),
             },
@@ -36,7 +36,7 @@ pub fn abs(value: ValuePtr) -> ValueResult {
 }
 
 pub fn sqrt(value: ValuePtr) -> ValueResult {
-    let i = value.check_int()?.as_int();
+    let i = value.as_int_checked()?;
     if i < 0 {
         ValueErrorValueMustBeNonNegative(i).err()
     } else {
@@ -44,36 +44,40 @@ pub fn sqrt(value: ValuePtr) -> ValueResult {
     }
 }
 
-pub fn gcd(args: impl Iterator<Item=ValuePtr>) -> ValueResult {
-    args.map(|v| v.check_int())
-        .collect::<ErrorResult<Vec<ValuePtr>>>()?
-        .into_iter()
-        .map(|u| u.as_int())
-        .reduce(num_integer::gcd)
-        .map_or_else(|| ValueErrorValueMustBeNonEmpty.err(), |v| v.to_value().ok())
+pub fn gcd(mut args: impl Iterator<Item=ValuePtr>) -> ValueResult {
+    let mut acc = match args.next() {
+        Some(it) => it.as_int_checked()?,
+        None => return ValueErrorValueMustBeNonEmpty.err()
+    };
+
+    for arg in args {
+        acc = num_integer::gcd(acc, arg.as_int_checked()?);
+    }
+
+    acc.to_value().ok()
 }
 
-pub fn lcm(args: impl Iterator<Item=ValuePtr>) -> ValueResult {
-    args.map(|v| v.check_int())
-        .collect::<ErrorResult<Vec<ValuePtr>>>()?
-        .into_iter()
-        .map(|u| u.as_int())
-        .reduce(num_integer::lcm)
-        .map_or_else(|| ValueErrorValueMustBeNonEmpty.err(), |v| v.to_value().ok())
+pub fn lcm(mut args: impl Iterator<Item=ValuePtr>) -> ValueResult {
+    let mut acc = match args.next() {
+        Some(it) => it.as_int_checked()?,
+        None => return ValueErrorValueMustBeNonEmpty.err()
+    };
+
+    for arg in args {
+        acc = num_integer::lcm(acc, arg.as_int_checked()?);
+    }
+
+    acc.to_value().ok()
 }
 
 pub fn count_ones(value: ValuePtr) -> ValueResult {
-    (value.check_int()?
-        .as_int()
-        .count_ones() as i64)
+    (value.as_int_checked()?.count_ones() as i64)
         .to_value()
         .ok()
 }
 
 pub fn count_zeros(value: ValuePtr) -> ValueResult {
-    (value.check_int()?
-        .as_int()
-        .count_zeros() as i64)
+    (value.as_int_checked()?.count_zeros() as i64)
         .to_value()
         .ok()
 }
