@@ -354,6 +354,7 @@ impl AsError for UnaryOp {
         String::from(match self {
             Neg => "-",
             Not => "!",
+            LogicalNot => "not",
         })
     }
 }

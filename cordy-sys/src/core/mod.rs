@@ -54,6 +54,7 @@ pub enum NativeFunction {
     // Native Operators
     OperatorSub,
     OperatorUnaryNot,
+    OperatorUnaryLogicalNot,
 
     OperatorMul,
     OperatorDiv,
@@ -279,7 +280,7 @@ static NATIVE_FUNCTIONS: [NativeFunctionInfo; NativeFunction::total()] = load_na
 
 const fn load_native_functions() -> [NativeFunctionInfo; NativeFunction::total()] {
 
-    const fn op1(f: NativeFunction, name: &'static str, args: &'static str, arg: Argument) -> NativeFunctionInfo { NativeFunctionInfo::new(f, name, args, arg, true) }
+    const fn op1(f: NativeFunction, name: &'static str, arg: Argument) -> NativeFunctionInfo { NativeFunctionInfo::new(f, name, "x", arg, true) }
     const fn op2(f: NativeFunction, name: &'static str) -> NativeFunctionInfo { NativeFunctionInfo::new(f, name, "lhs, rhs", Arg2, true) }
     const fn new(f: NativeFunction, name: &'static str, args: &'static str, arg: Argument) -> NativeFunctionInfo { NativeFunctionInfo::new(f, name, args, arg, false) }
 
@@ -308,8 +309,9 @@ const fn load_native_functions() -> [NativeFunctionInfo; NativeFunction::total()
         new(Monitor, "monitor", "cmd", Arg1),
 
         // operator
-        op1(OperatorSub, "(-)", "x", Arg1To2),
-        op1(OperatorUnaryNot, "(!)", "x", Arg1),
+        op1(OperatorSub, "(-)", Arg1To2),
+        op1(OperatorUnaryNot, "(!)", Arg1),
+        op1(OperatorUnaryLogicalNot, "(not)", Arg1),
 
         op2(OperatorMul, "(*)"),
         op2(OperatorDiv, "(/)"),
@@ -865,6 +867,7 @@ fn invoke_arg1<VM : VirtualInterface>(f: NativeFunction, a1: ValuePtr, vm: &mut 
 
         OperatorSub => operator::unary_sub(a1),
         OperatorUnaryNot => operator::unary_not(a1),
+        OperatorUnaryLogicalNot => operator::unary_logical_not(a1),
 
         ToLower => strings::to_lower(a1),
         ToUpper => strings::to_upper(a1),
