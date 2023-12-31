@@ -4,7 +4,7 @@ use fxhash::FxBuildHasher;
 use indexmap::{IndexMap, IndexSet};
 use itertools::Itertools;
 
-use crate::{util, vm};
+use crate::util;
 use crate::core::{InvokeArg0, InvokeArg1, InvokeArg2};
 use crate::vm::{AnyResult, ErrorResult, IntoDictValue, IntoIterableValue, IntoValue, Iterable, RuntimeError, Type, ValuePtr, ValueResult, VirtualInterface};
 
@@ -61,10 +61,9 @@ fn get_dict_index<VM : VirtualInterface>(vm: &mut VM, dict: &ValuePtr, key: Valu
 
 pub fn set_index(target: &ValuePtr, index: ValuePtr, value: ValuePtr) -> AnyResult {
     if target.is_dict() {
-        match vm::guard_recursive_hash(|| target.as_dict().borrow_mut().insert(index, value)) {
-            Err(_) => ValueErrorRecursiveHash(target.clone()).err(),
-            Ok(_) => Ok(())
-        }
+        target.as_dict()
+            .borrow_mut()
+            .insert_checked(index, value)
     } else {
         let mut indexable = target.to_index()?;
         let index: usize = indexable.check_index(index)?;
@@ -467,20 +466,15 @@ pub fn pop_front(target: ValuePtr) -> ValueResult {
 
 pub fn push(value: ValuePtr, target: ValuePtr) -> ValueResult {
     match target.ty() {
-        Type::List => {
-            target.as_list().borrow_mut().push_back(value);
-            target.ok()
+        Type::List => target.as_list().borrow_mut().push_back(value),
+        Type::Set => match target.as_set().borrow_mut().insert_checked(value) {
+            Ok(_) => {},
+            Err(e) => return ValueResult::from(e),
         }
-        Type::Set => match vm::guard_recursive_hash(|| target.as_set().borrow_mut().insert(value)) {
-            Err(_) => ValueErrorRecursiveHash(target).err(),
-            Ok(_) => target.ok()
-        }
-        Type::Heap => {
-            target.as_heap().borrow_mut().push(Reverse(value));
-            target.ok()
-        }
-        _ => TypeErrorArgMustBeIterable(target).err()
+        Type::Heap => target.as_heap().borrow_mut().push(Reverse(value)),
+        _ => return TypeErrorArgMustBeIterable(target).err()
     }
+    target.ok()
 }
 
 pub fn push_front(value: ValuePtr, target: ValuePtr) -> ValueResult {
@@ -505,10 +499,13 @@ pub fn insert(index: ValuePtr, value: ValuePtr, target: ValuePtr) -> ValueResult
             }
             target.ok()
         },
-        Type::Dict => match vm::guard_recursive_hash(|| target.as_dict().borrow_mut().insert(index, value)) {
-            Err(_) => ValueErrorRecursiveHash(target).err(),
-            Ok(_) => target.ok()
-        },
+        Type::Dict => {
+            match target.as_dict().borrow_mut().insert_checked(index, value) {
+                Ok(_) => {},
+                Err(e) => return ValueResult::from(e)
+            }
+            target.ok()
+        }
         _ => TypeErrorArgMustBeIndexable(target).err()
     }
 }

@@ -13,10 +13,11 @@ use crate::core::Pattern;
 
 pub use crate::vm::error::{DetailRuntimeError, RuntimeError};
 pub use crate::vm::opcode::{Opcode, StoreOp};
-pub use crate::vm::value::{AnyResult, ErrorPtr, ErrorResult, Function, guard_recursive_hash, IntoDictValue, IntoIterableValue, IntoValue, Iterable, LiteralType, MAX_INT, MIN_INT, StructTypeImpl, Type, ValuePtr, ValueResult, Method, ComplexValue, PartialNativeFunction};
+pub use crate::vm::value::{AnyResult, ErrorPtr, ErrorResult, Function, IntoDictValue, IntoIterableValue, IntoValue, Iterable, LiteralType, MAX_INT, MIN_INT, StructTypeImpl, Type, ValuePtr, ValueResult, Method, ComplexValue, PartialNativeFunction};
 
 use Opcode::{*};
 use RuntimeError::{*};
+
 
 pub mod operator;
 
@@ -1775,9 +1776,9 @@ mod tests {
     #[test] fn test_set_remove_no() { run_str("let x = {1, 2, 3}, y = x . remove(5) ; (x, y) . print", "({1, 2, 3}, false)\n"); }
     #[test] fn test_set_clear() { run_str("let x = {1, 2, 3} ; x . clear ; x . print", "{}\n"); }
     #[test] fn test_set_peek() { run_str("let x = {1, 2, 3}, y = x . peek ; (x, y) . print", "({1, 2, 3}, 1)\n"); }
-    #[test] fn test_set_insert_self() { run_str("let x = set() ; x.push(x)", "ValueError: Cannot create recursive hash based collection from '{{...}}' of type 'set'\n  at: line 1 (<test>)\n\n1 | let x = set() ; x.push(x)\n2 |                  ^^^^^^^^\n"); }
-    #[test] fn test_set_indirect_insert_self() { run_str("let x = set() ; x.push([x])", "ValueError: Cannot create recursive hash based collection from '{[{...}]}' of type 'set'\n  at: line 1 (<test>)\n\n1 | let x = set() ; x.push([x])\n2 |                  ^^^^^^^^^^\n"); }
-    #[test] fn test_set_recursive_repr() { run_str("let x = set() ; x.push(x) ; x.print", "ValueError: Cannot create recursive hash based collection from '{{...}}' of type 'set'\n  at: line 1 (<test>)\n\n1 | let x = set() ; x.push(x) ; x.print\n2 |                  ^^^^^^^^\n"); }
+    #[test] fn test_set_insert_self() { run_str("let x = set() ; x.push(x)", "ValueError: Cannot create recursive hash-based collection\n  at: line 1 (<test>)\n\n1 | let x = set() ; x.push(x)\n2 |                  ^^^^^^^^\n"); }
+    #[test] fn test_set_indirect_insert_self() { run_str("let x = set() ; x.push([x])", "ValueError: Cannot create recursive hash-based collection\n  at: line 1 (<test>)\n\n1 | let x = set() ; x.push([x])\n2 |                  ^^^^^^^^^^\n"); }
+    #[test] fn test_set_recursive_repr() { run_str("let x = set() ; x.push(x) ; x.print", "ValueError: Cannot create recursive hash-based collection\n  at: line 1 (<test>)\n\n1 | let x = set() ; x.push(x) ; x.print\n2 |                  ^^^^^^^^\n"); }
     #[test] fn test_set_union() { run_str("{1, 2, 3} . union({5, 6, 7}) . print", "{1, 2, 3, 5, 6, 7}\n"); }
     #[test] fn test_set_union_with_list() { run_str("{1, 2, 3} . union([5, 6, 7]) . print", "{1, 2, 3, 5, 6, 7}\n"); }
     #[test] fn test_set_union_mutates_self() { run_str("let x = {1, 2, 3} ; x . union([5, 6, 7]) ; x . print", "{1, 2, 3, 5, 6, 7}\n"); }
@@ -1814,10 +1815,10 @@ mod tests {
     #[test] fn test_dict_default_with_mutable_default() { run_str("let d = dict() . default([]) ; d[0].push(2) ; d[1].push(3) ; d.print", "{0: [2, 3], 1: [2, 3]}\n"); }
     #[test] fn test_dict_default_with_self_entry() { run_str("let d ; d = dict() . default(fn() { d['count'] += 1 ; d['hello'] = 'special' ; 'otherwise' }) ; d['count'] = 0 ; d['hello'] ; d['world'] ; d.print", "{'count': 2, 'hello': 'special', 'world': 'otherwise'}\n"); }
     #[test] fn test_dict_increment() { run_str("let d = dict() . default(fn() -> 3) ; d[0] . print ; d[0] += 1 ; d . print ; d[0] += 1 ; d . print", "3\n{0: 4}\n{0: 5}\n"); }
-    #[test] fn test_dict_insert_self_as_key() { run_str("let x = dict() ; x[x] = 'yes'", "ValueError: Cannot create recursive hash based collection from '{{...}: 'yes'}' of type 'dict'\n  at: line 1 (<test>)\n\n1 | let x = dict() ; x[x] = 'yes'\n2 |                       ^\n"); }
+    #[test] fn test_dict_insert_self_as_key() { run_str("let x = dict() ; x[x] = 'yes'", "ValueError: Cannot create recursive hash-based collection\n  at: line 1 (<test>)\n\n1 | let x = dict() ; x[x] = 'yes'\n2 |                       ^\n"); }
     #[test] fn test_dict_insert_self_as_value() { run_str("let x = dict() ; x['yes'] = x", ""); }
-    #[test] fn test_dict_recursive_key_index() { run_str("let x = dict() ; x[x] = 'yes' ; x.print", "ValueError: Cannot create recursive hash based collection from '{{...}: 'yes'}' of type 'dict'\n  at: line 1 (<test>)\n\n1 | let x = dict() ; x[x] = 'yes' ; x.print\n2 |                       ^\n"); }
-    #[test] fn test_dict_recursive_key_insert() { run_str("let x = dict() ; x.insert(x, 'yes') ; x.print", "ValueError: Cannot create recursive hash based collection from '{{...}: 'yes'}' of type 'dict'\n  at: line 1 (<test>)\n\n1 | let x = dict() ; x.insert(x, 'yes') ; x.print\n2 |                   ^^^^^^^^^^^^^^^^^\n"); }
+    #[test] fn test_dict_recursive_key_index() { run_str("let x = dict() ; x[x] = 'yes' ; x.print", "ValueError: Cannot create recursive hash-based collection\n  at: line 1 (<test>)\n\n1 | let x = dict() ; x[x] = 'yes' ; x.print\n2 |                       ^\n"); }
+    #[test] fn test_dict_recursive_key_insert() { run_str("let x = dict() ; x.insert(x, 'yes') ; x.print", "ValueError: Cannot create recursive hash-based collection\n  at: line 1 (<test>)\n\n1 | let x = dict() ; x.insert(x, 'yes') ; x.print\n2 |                   ^^^^^^^^^^^^^^^^^\n"); }
     #[test] fn test_dict_recursive_value_repr() { run_str("let x = dict() ; x['yes'] = x ; x.print", "{'yes': {...}}\n"); }
     #[test] fn test_heap_empty_constructor() { run_str("heap() . print", "[]\n"); }
     #[test] fn test_heap_from_list() { run_str("let h = [1, 7, 3, 2, 7, 6] . heap; h . print", "[1, 2, 3, 7, 7, 6]\n"); }
