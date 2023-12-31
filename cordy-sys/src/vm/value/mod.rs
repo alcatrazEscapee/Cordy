@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 use std::cmp::{Ordering, Reverse};
-use std::collections::{BinaryHeap, HashMap, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::fmt::Debug;
 use std::hash::{Hash, Hasher};
 use std::iter::FusedIterator;
@@ -19,7 +19,7 @@ use crate::vm::value::str::IterStr;
 use crate::vm::value::range::Range;
 use crate::vm::value::slice::Slice;
 use crate::vm::value::complex::Complex;
-use crate::vm::value::collections::{Dict, Heap, List, Set, Vector};
+use crate::vm::value::collections::{Dict, DictType, Heap, HeapType, List, ListType, Set, SetType, Vector, VectorType};
 
 pub use crate::vm::value::ptr::{MAX_INT, MIN_INT, ValuePtr};
 pub use crate::vm::value::complex::ComplexValue;
@@ -103,6 +103,27 @@ impl Type {
             Never => "never"
         }
     }
+
+    /// Returns `true` if this type is considered **iterable**, aka `(typeof T) is iterable` would return `true`.
+    fn is_iterable(self) -> bool {
+        use Type::{*};
+        match self {
+            ShortStr | LongStr | List | Set | Dict | Heap | Vector | Range | Enumerate => true,
+            _ => false
+        }
+    }
+
+    /// Returns `true` if this type is considered **function-evaluable**, aka if `(typeof T) is function` would return `true`.
+    ///
+    /// **N.B.** This is not identical to if `T()` is legal, as some types are not considered functions, but are still evaluable,
+    /// such as single element lists (as `list` in general as a type, is not function evaluable).
+    fn is_evaluable(self) -> bool {
+        use Type::{*};
+        match self {
+            Function | PartialFunction | NativeFunction | PartialNativeFunction | Closure | StructType | Slice => true,
+            _ => false
+        }
+    }
 }
 
 
@@ -148,7 +169,9 @@ impl ValuePtr {
     }
 
     /// Converts the `Value` to a `String`. This is equivalent to the stdlib function `str()`
-    pub fn to_str(&self) -> Cow<str> { self.safe_to_str(&mut RecursionGuard::new()) }
+    pub fn to_str(&self) -> Cow<str> {
+        self.safe_to_str(&mut RecursionGuard::new())
+    }
 
     fn safe_to_str(&self, rc: &mut RecursionGuard) -> Cow<str> {
         match self.ty() {
@@ -163,7 +186,9 @@ impl ValuePtr {
     }
 
     /// Converts the `Value` to a representative `String`. This is equivalent to the stdlib function `repr()`, and meant to be an inverse of `eval()`
-    pub fn to_repr_str(&self) -> Cow<str> { self.safe_to_repr_str(&mut RecursionGuard::new()) }
+    pub fn to_repr_str(&self) -> Cow<str> {
+        self.safe_to_repr_str(&mut RecursionGuard::new())
+    }
 
     fn safe_to_repr_str(&self, rc: &mut RecursionGuard) -> Cow<str> {
         macro_rules! recursive_guard {
@@ -244,7 +269,7 @@ impl ValuePtr {
             Type::Enumerate => self.as_enumerate().to_repr_str(rc),
             Type::Slice => self.as_slice().to_repr_str(),
 
-            Type::Iter => Cow::from("<synthetic> iterator"),
+            Type::Iter => Cow::from("synthetic iterator"),
             Type::Memoized => Cow::from(format!("@memoize {}", self.as_memoized().borrow().func.safe_to_repr_str(rc))),
 
             Type::GetField => Cow::from("(->)"),
@@ -439,16 +464,15 @@ impl ValuePtr {
         }
     }
 
-    /// Returns if the value is iterable.
-    pub fn is_iter(&self) -> bool {
-        matches!(self.ty(), Type::ShortStr | Type::LongStr | Type::List | Type::Set | Type::Dict | Type::Heap | Type::Vector | Type::Range | Type::Enumerate)
+    pub fn is_iterable(&self) -> bool {
+        self.ty().is_iterable()
     }
 
-    /// Returns if the value is function-evaluable. Note that single-element lists are not considered functions here.
     pub fn is_evaluable(&self) -> bool {
-        matches!(self.ty(), Type::Function | Type::PartialFunction | Type::NativeFunction | Type::PartialNativeFunction | Type::Closure | Type::StructType | Type::Slice)
+        self.ty().is_evaluable()
     }
 
+    #[inline(always)]
     pub fn ok(self) -> ValueResult {
         ValueResult::ok(self)
     }
@@ -577,11 +601,10 @@ impl_mut!(Type::Vector, Vector, as_vector, is_vector);
 impl_mut!(Type::Closure, Closure, as_closure, is_closure);
 impl_mut!(Type::Memoized, MemoizedImpl, as_memoized, is_memoized);
 impl_mut!(Type::Struct, StructImpl, as_struct, is_struct);
-impl_mut!(Type::Iter, Iterable, as_iterable, is_iterable);
+impl_mut!(Type::Iter, Iterable, as_synthetic_iterable, is_synthetic_iterable);
 
 
-/// A trait which is responsible for converting native types into a `Value`.
-/// It is preferred to boxing these types directly using `Value::Foo()`, as most types have inner complexity that needs to be managed.
+/// A trait which converts instances of Rust types into a Cordy `ValuePtr`
 pub trait IntoValue {
     fn to_value(self) -> ValuePtr;
 }
@@ -605,15 +628,15 @@ impl_into!(&str, self, ptr::from_str(self));
 impl_into!(String, self, ptr::from_str(self.as_str()));
 impl_into!(Cow<'_, str>, self, ptr::from_str(&self));
 impl_into!(NativeFunction, self, ptr::from_native(self));
-impl_into!(VecDeque<ValuePtr>, self, List::new(self).to_value());
-impl_into!(Vec<ValuePtr>, self, Vector::new(self).to_value());
+impl_into!(ListType, self, List::new(self).to_value());
+impl_into!(VectorType, self, Vector::new(self).to_value());
 impl_into!((ValuePtr, ValuePtr), self, vec![self.0, self.1].to_value());
-impl_into!(IndexSet<ValuePtr, FxBuildHasher>, self, Set::new(self).to_value());
-impl_into!(IndexMap<ValuePtr, ValuePtr, FxBuildHasher>, self, Dict::new(self).to_value());
-impl_into!(BinaryHeap<Reverse<ValuePtr>>, self, Heap::new(self).to_value());
+impl_into!(SetType, self, Set::new(self).to_value());
+impl_into!(DictType, self, Dict::new(self).to_value());
+impl_into!(HeapType, self, Heap::new(self).to_value());
 
 
-/// A trait which is responsible for wrapping conversions from a `Iterator<Item=Value>` into `IntoValue`, which then converts to a `ValuePtr`.
+/// A trait which is responsible for wrapping conversions from a `Iterator<Item=ValuePtr>` into `IntoValue`, which then converts to a `ValuePtr`.
 pub trait IntoIterableValue {
     fn to_list(self) -> ValuePtr;
     fn to_vector(self) -> ValuePtr;
@@ -623,19 +646,19 @@ pub trait IntoIterableValue {
 
 impl<I> IntoIterableValue for I where I : Iterator<Item=ValuePtr> {
     fn to_list(self) -> ValuePtr {
-        self.collect::<VecDeque<ValuePtr>>().to_value()
+        self.collect::<ListType>().to_value()
     }
 
     fn to_vector(self) -> ValuePtr {
-        self.collect::<Vec<ValuePtr>>().to_value()
+        self.collect::<VectorType>().to_value()
     }
 
     fn to_set(self) -> ValuePtr {
-        self.collect::<IndexSet<ValuePtr, FxBuildHasher>>().to_value()
+        self.collect::<SetType>().to_value()
     }
 
     fn to_heap(self) -> ValuePtr {
-        self.map(Reverse).collect::<BinaryHeap<Reverse<ValuePtr>>>().to_value()
+        self.map(Reverse).collect::<HeapType>().to_value()
     }
 }
 
@@ -646,7 +669,7 @@ pub trait IntoDictValue {
 
 impl<I> IntoDictValue for I where I : Iterator<Item=(ValuePtr, ValuePtr)> {
     fn to_dict(self) -> ValuePtr {
-        self.collect::<IndexMap<ValuePtr, ValuePtr, FxBuildHasher>>().to_value()
+        self.collect::<DictType>().to_value()
     }
 }
 
@@ -711,6 +734,7 @@ pub struct StructTypeImpl {
     constructor_type: u32,
 
     /// Flag that specifies this constructor object is a **module**. This affects a few properties:
+    ///
     /// - Modules are not invokable as functions, and raise an error upon doing so
     /// - Modules canonical string representation is `module X` whereas structs return themselves as `struct X(... fields ...)`
     module: bool,

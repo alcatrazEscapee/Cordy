@@ -435,7 +435,7 @@ impl<R : BufRead, W : Write, F : FunctionInterface> VirtualMachine<R, W, F> {
                 },
                 TestIterable(ip) => {
                     let top: usize = self.stack.len() - 1;
-                    let mut iter = self.stack[top].as_iterable().borrow_mut();
+                    let mut iter = self.stack[top].as_synthetic_iterable().borrow_mut();
                     match iter.next() {
                         Some(value) => {
                             drop(iter);
