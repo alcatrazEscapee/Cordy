@@ -139,8 +139,8 @@ pub fn binary_mul(lhs: ValuePtr, rhs: ValuePtr) -> ValueResult {
         (Bool | Int | Complex, Bool | Int | Complex) => (lhs.to_complex() * rhs.to_complex()).to_value().ok(),
         (ShortStr | LongStr, Int) => binary_str_repeat(lhs, rhs),
         (Int, ShortStr | LongStr) => binary_str_repeat(rhs, lhs),
-        (List, Int) => binary_list_repeat(lhs, rhs),
-        (Int, List) => binary_list_repeat(rhs, lhs),
+        (List, Int) => binary_list_repeat(lhs, rhs, false),
+        (Int, List) => binary_list_repeat(rhs, lhs, false),
         (Vector, Vector) => apply_vector_binary(lhs, rhs, binary_mul),
         (Vector, _) => apply_vector_binary_scalar_rhs(lhs, rhs, binary_mul),
         (_, Vector) => apply_vector_binary_scalar_lhs(lhs, rhs, binary_mul),
@@ -157,18 +157,21 @@ fn binary_str_repeat(string: ValuePtr, repeat: ValuePtr) -> ValueResult {
     }
 }
 
-fn binary_list_repeat(list: ValuePtr, repeat: ValuePtr) -> ValueResult {
+fn binary_list_repeat(list: ValuePtr, repeat: ValuePtr, deep: bool) -> ValueResult {
     let i = repeat.as_int();
     if i < 0 {
         ValueErrorValueMustBeNonNegative(i).err()
     } else {
         let list = list.as_list().borrow();
-        list.iter()
+        let iter = list.iter()
             .cycle()
             .take(i as usize * list.len())
-            .cloned()
-            .to_list()
-            .ok()
+            .cloned();
+
+        match deep {
+            true => iter.map(|e| core::copy(e)).to_list(),
+            false => iter.to_list()
+        }.ok()
     }
 }
 
@@ -252,6 +255,8 @@ pub fn binary_pow(lhs: ValuePtr, rhs: ValuePtr) -> ValueResult {
                 ValueErrorValueMustBeNonNegative(rhs).err()
             }
         },
+        (List, Int) => binary_list_repeat(lhs, rhs, true),
+        (Int, List) => binary_list_repeat(rhs, lhs, true),
         (Vector, Vector) => apply_vector_binary(lhs, rhs, binary_pow),
         (Vector, _) => apply_vector_binary_scalar_rhs(lhs, rhs, binary_pow),
         (_, Vector) => apply_vector_binary_scalar_lhs(lhs, rhs, binary_pow),

@@ -99,10 +99,12 @@ Operators in Cordy are similar to procedural languages, with all operators being
 
 - `+`, `-`, `*`, `/`: Addition, Subtraction, Multiplication, and Division.
   - Multiplying a `str` and an `int` repeats the string by the int number of times, as in Python.
+  - Multiplying a `list` and an `int` repeats the elements in the list by the int number of times, also as in Python. Note that this does not deep copy the elements, be careful with mutable values (see `**` instead).
   - Addition with `str` will convert other arguments to a string and concatenate them.
   - `/` for integers and complex numbers is floor division, rounding to negative infinity.
 - `**`: Exponentiation
   - With integral arguments, `a ** b` computes `a` raised to the power of `b`.
+  - With a `list` and an `int`, this performs a deep copy on the elements of the list by the int number of times.
 - `%`: Modulo / String formatting.
   - With integer arguments, `a % b` computes the mathematical modulo `a mod b` and will always return a value in `[0, b)`.
   - When `a` is a string, this behaves like Python's string formatting `%` operator.

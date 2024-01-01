@@ -1691,6 +1691,10 @@ mod tests {
     #[test] fn test_list_multiply_left() { run_str("[1, 2, 3] * 3 . print", "[1, 2, 3, 1, 2, 3, 1, 2, 3]\n"); }
     #[test] fn test_list_multiply_right() { run_str("3 * [1, 2, 3] . print", "[1, 2, 3, 1, 2, 3, 1, 2, 3]\n"); }
     #[test] fn test_list_multiply_nested() { run_str("let a = [[1]] * 3; a[0][0] = 2; a . print", "[[2], [2], [2]]\n"); }
+    #[test] fn test_list_power_left() { run_str("[1, 2, []] ** 3 . print", "[1, 2, [], 1, 2, [], 1, 2, []]\n"); }
+    #[test] fn test_list_power_left_is_deep_copy() { run_str("let a = [[1]] ** 3 ; a[0].push(2) ; print(a)", "[[1, 2], [1], [1]]\n"); }
+    #[test] fn test_list_power_right() { run_str("3 ** [1, 2, []] . print", "[1, 2, [], 1, 2, [], 1, 2, []]\n"); }
+    #[test] fn test_list_power_right_is_deep_copy() { run_str("let a = 3 ** [[1]] ; a[0].push(2) ; print(a)", "[[1, 2], [1], [1]]\n"); }
     #[test] fn test_list_operator_in_yes() { run_str("13 in [10, 11, 12, 13, 14, 15] . print", "true\n"); }
     #[test] fn test_list_operator_in_no() { run_str("3 in [10, 11, 12, 13, 14, 15] . print", "false\n"); }
     #[test] fn test_list_operator_not_in_yes() { run_str("3 not in [1, 2, 3] . print", "false\n"); }

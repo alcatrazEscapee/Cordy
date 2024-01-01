@@ -9,7 +9,7 @@ use crate::trace;
 use crate::vm::{ErrorResult, IntoIterableValue, IntoValue, MAX_INT, MIN_INT, operator, PartialNativeFunction, RuntimeError, Type, ValuePtr, ValueResult, VirtualInterface};
 use crate::vm::operator::BinaryOp;
 
-pub use crate::core::collections::{get_index, get_slice, set_index, to_index};
+pub use crate::core::collections::{get_index, get_slice, set_index, to_index, copy};
 pub use crate::core::strings::format_string;
 pub use crate::core::pattern::Pattern;
 
@@ -893,7 +893,7 @@ fn invoke_arg1<VM : VirtualInterface>(f: NativeFunction, a1: ValuePtr, vm: &mut 
         Concat => collections::flat_map(vm, None, a1),
         Memoize => collections::create_memoized(a1),
         Counter => collections::counter(a1),
-        Copy => collections::copy(a1),
+        Copy => copy(a1).ok(),
 
         Peek => collections::peek(a1),
         Pop => collections::pop(a1),
