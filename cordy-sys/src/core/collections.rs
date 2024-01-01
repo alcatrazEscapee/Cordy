@@ -702,8 +702,8 @@ pub fn counter(it: ValuePtr) -> ValueResult {
 /// - Recursive structures (i.e. a list that contains itself)
 /// - Objects with the same identity (i.e. a list containing seven references to the same list)
 /// - Deep nested objects (i.e. lists containing vectors containing structs containing fields, etc.)
-pub fn copy(it: ValuePtr) -> ValueResult {
-    copy_recursive(&it, &mut HashMap::with_hasher(FxBuildHasher::default())).ok()
+pub fn copy(it: ValuePtr) -> ValuePtr {
+    copy_recursive(&it, &mut HashMap::with_hasher(FxBuildHasher::default()))
 }
 
 fn copy_recursive(it: &ValuePtr, objects: &mut HashMap<usize, ValuePtr, FxBuildHasher>) -> ValuePtr {
