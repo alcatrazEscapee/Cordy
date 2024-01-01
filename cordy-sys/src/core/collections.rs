@@ -749,7 +749,7 @@ fn copy_recursive(it: &ValuePtr, objects: &mut HashMap<usize, ValuePtr, FxBuildH
         // - Range, partial functions, etc. are all immutable, and thus have no identity, so we can re-use the same pointer
         // - Slice contains `ValuePtr`s, but they are ensured to be `int` or `nil`, so we can copy directly
         // - Closures have a mutable environment, but that is not considered within *reach* of `copy()`
-        Nil | Bool | Int | NativeFunction | GetField | ShortStr | LongStr | Complex | StructType | Range | Slice | Function | PartialFunction | PartialNativeFunction | Closure | Memoized
+        Nil | Bool | Int | NativeFunction | GetField | ShortStr | LongStr | Complex | Rational | StructType | Range | Slice | Function | PartialFunction | PartialNativeFunction | Closure | Memoized
             => it.clone(),
 
         // Collections all have identity, and are mutable, so we need to clone their contents, but remember the collection in the objects map

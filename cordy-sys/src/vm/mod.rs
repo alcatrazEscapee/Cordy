@@ -13,7 +13,7 @@ use crate::core::Pattern;
 
 pub use crate::vm::error::{DetailRuntimeError, RuntimeError};
 pub use crate::vm::opcode::{Opcode, StoreOp};
-pub use crate::vm::value::{AnyResult, ErrorPtr, ErrorResult, Function, IntoDictValue, IntoIterableValue, IntoValue, Iterable, LiteralType, MAX_INT, MIN_INT, StructTypeImpl, Type, ValuePtr, ValueResult, Method, ComplexValue, PartialNativeFunction};
+pub use crate::vm::value::{AnyResult, ErrorPtr, ErrorResult, Function, IntoDictValue, IntoIterableValue, IntoValue, Iterable, LiteralType, MAX_INT, MIN_INT, StructTypeImpl, Type, ValuePtr, ValueResult, Method, ComplexType, PartialNativeFunction};
 
 use Opcode::{*};
 use RuntimeError::{*};
@@ -1607,6 +1607,11 @@ mod tests {
     #[test] fn test_slice_in_expr_1() { run_str("'1234' . [::-1] . print", "4321\n"); }
     #[test] fn test_slice_in_expr_2() { run_str("let x = [::-1] ; '1234' . x . print", "4321\n"); }
     #[test] fn test_slice_in_expr_3() { run_str("'hello the world!' . split(' ') . map([2:]) . print", "['llo', 'e', 'rld!']\n"); }
+    #[test] fn test_bool_comparisons_1() { run_str("print(false < false, false < true, true < false, true < true)", "false true false false\n"); }
+    #[test] fn test_bool_comparisons_2() { run_str("print(false <= false, false >= true, true >= false, true <= true)", "true false true true\n"); }
+    #[test] fn test_bool_operator_add() { run_str("true + true + false + false . print", "2\n"); }
+    #[test] fn test_bool_sum() { run_str("range(10) . map(>3) . sum . print", "6\n"); }
+    #[test] fn test_bool_reduce_add() { run_str("range(10) . map(>3) . reduce(+) . print", "6\n"); }
     #[test] fn test_int_operators() { run_str("print(5 - 3, 12 + 5, 3 * 9, 16 / 3)", "2 17 27 5\n"); }
     #[test] fn test_int_div_mod() { run_str("print(3 / 2, 3 / 3, -3 / 2, 10 % 3, 11 % 3, 12 % 3)", "1 1 -2 1 2 0\n"); }
     #[test] fn test_int_mod_by_zero() { run_str("1 % 0", "Compile Error:\n\nValueError: Expected value to be non-zero\n  at: line 1 (<test>)\n\n1 | 1 % 0\n2 |   ^\n"); }
@@ -1643,11 +1648,19 @@ mod tests {
     #[test] fn test_complex_mod() { run_str("(15i + -9) % 4 . print", "3 + 3i\n"); }
     #[test] fn test_complex_mod_by_zero() { run_str("(15i + -9) % 0", "Compile Error:\n\nValueError: Expected value to be non-zero\n  at: line 1 (<test>)\n\n1 | (15i + -9) % 0\n2 |            ^\n"); }
     #[test] fn test_complex_mod_by_negative() { run_str("(15i + -9) % -4 . print", "-1 - 1i\n"); }
-    #[test] fn test_bool_comparisons_1() { run_str("print(false < false, false < true, true < false, true < true)", "false true false false\n"); }
-    #[test] fn test_bool_comparisons_2() { run_str("print(false <= false, false >= true, true >= false, true <= true)", "true false true true\n"); }
-    #[test] fn test_bool_operator_add() { run_str("true + true + false + false . print", "2\n"); }
-    #[test] fn test_bool_sum() { run_str("range(10) . map(>3) . sum . print", "6\n"); }
-    #[test] fn test_bool_reduce_add() { run_str("range(10) . map(>3) . reduce(+) . print", "6\n"); }
+    #[test] fn test_complex_compare_with_integers() { run_str("[1, -1 - 1i, 1 + 1i, -1, 1i, 0, -1i, -1 + 1i, 1 - 1i] . sort . print", "[-1 - 1i, -1i, 1 - 1i, -1, 0, 1, -1 + 1i, 1i, 1 + 1i]\n"); }
+    #[test] fn test_rational_zero() { run_str("rational 0 . print", "0 / 1\n"); }
+    #[test] fn test_rational_zero_div_by_non_one() { run_str("rational(0, -5) . print", "0 / 1\n"); }
+    #[test] fn test_rational_one() { run_str("rational 1 . print", "1 / 1\n"); }
+    #[test] fn test_rational_one_always_in_lowest_form() { run_str("rational(-25, 25) . print", "-1 / 1\n"); }
+    #[test] fn test_rational_compare_with_integers() { run_str("[rational(3, 2), rational 0, 1, rational 2, 5, rational(4, 3), 2, rational(5, 2), 4, rational 4, 3, rational(1, 3), 0, rational 1, rational(7, 3)] . sort . print", "[0 / 1, 0, 1 / 3, 1, 1 / 1, 4 / 3, 3 / 2, 2 / 1, 2, 7 / 3, 5 / 2, 3, 4, 4 / 1, 5]\n"); }
+    #[test] fn test_rational_compare_with_complex() { run_str("[0, rational(1, 3), -3i, rational 1, 1 + 1i, rational(-1, 2)] . sort . print", "[-3i, -1 / 2, 0, 1 / 3, 1 / 1, 1 + 1i]\n"); }
+    #[test] fn test_rational_converts_div_by_zero() { run_str("rational(123, 0) . print", "ValueError: Expected value to be non-zero\n  at: line 1 (<test>)\n\n1 | rational(123, 0) . print\n2 |         ^^^^^^^^\n"); }
+    #[test] fn test_rational_converts_div_by_false() { run_str("rational(123, false) . print", "ValueError: Expected value to be non-zero\n  at: line 1 (<test>)\n\n1 | rational(123, false) . print\n2 |         ^^^^^^^^^^^^\n"); }
+    #[test] fn test_rational_converts_int_like() { run_str("rational(false, true) . print", "0 / 1\n"); }
+    #[test] fn test_rational_converts_rationals_1() { run_str("rational(rational 1, rational 3) . print", "1 / 3\n"); }
+    #[test] fn test_rational_converts_rationals_2() { run_str("rational(rational(3, 5), rational(2, 7)) . print", "21 / 10\n"); }
+    #[test] fn test_rational_typeof() { run_str("rational(3, 2) . typeof . print ; rational 1 . typeof . print", "rational\nrational\n"); }
     #[test] fn test_str_empty() { run_str("'' . print", "\n"); }
     #[test] fn test_str_add() { run_str("print(('a' + 'b') + (3 + 4) + (' hello' + 3) + (' and' + true + nil))", "ab7 hello3 andtruenil\n"); }
     #[test] fn test_str_partial_left_add() { run_str("'world ' . (+'hello') . print", "world hello\n"); }

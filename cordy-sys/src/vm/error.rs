@@ -46,6 +46,7 @@ pub enum RuntimeError {
     TypeErrorBinaryOp(BinaryOp, ValuePtr, ValuePtr),
     TypeErrorBinaryIs(ValuePtr, ValuePtr),
     TypeErrorCannotConvertToInt(ValuePtr),
+    TypeErrorCannotConvertToRational(ValuePtr),
     TypeErrorFieldNotPresentOnValue {
         value: ValuePtr,
         field: String,

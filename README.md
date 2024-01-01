@@ -38,8 +38,9 @@ This language is inspired by parts from Python, Rust, Haskell, Java, and JavaScr
 Below is a solution to [Advent of Code 2022 Day 1 Part 1](https://adventofcode.com/2022/day/1), written in a functional style:
 
 ```rust
-"input.txt" . read_text . split ("\n\n")
-    . map(fn(g) -> g . split("\n") . map(int) . sum)
+read_text "input.txt"
+    . split "\n\n"
+    . map(fn(g) -> g . split "\n" . map int . sum)
     . max
     . print
 ```
@@ -76,9 +77,28 @@ Options:
   -o --optimize     : Enables compiler optimizations and transformations.
   --no-line-numbers : In disassembly view, omits the leading '0001' style line numbers
 ```
- 
-For additional debugging information, compile with optional trace features enabled, i.e. `--features "trace_parser,trace_interpreter,trace_interpreter_stack"`
+
+### Building
+
+This project requires a rust nightly toolchain due to use of two unstable features:
+
+- `try_trait_v2` : Used for the implementation of `?` for `ValueResult`, and is fairly critical to code clarity and avoiding overhead of `Result<ValuePtr, ErrorPtr>`
+- `variant_count` : Used for the automatic implementation of `NativeFunction::total()`, rather than supplying a constant.
+
+The `gmp-mpfr-sys` crate requires the `GMP` library, built from source. This requires [additional setup (Windows)](https://docs.rs/gmp-mpfr-sys/1.6.1/gmp_mpfr_sys/index.html#building-on-windows), and also seems to require a `nightly-gnu` toolchain (as opposed to the default `msvc`):
+
+```bash
+$ rustup install nightly-gnu
+$ rustup default nightly-gnu
+```
+
+Debug features can be enabled, which provide trace output, primarily intended for use during debugging tests:
 
 - `trace_parser` traces the parser execution, logging tokens accepted, pushed, and rules entered.
 - `trace_interpreter` traces the virtual machine execution, logging instructions, and key events such as function invocations.
 - `trace_interpreter_stack` traces the virtual machine's stack, including a full view of the stack after every `pop` and `push`.
+  - Note that this will cause some tests to fail due to excessive output, only use on small, targeted tests.
+
+Verification features can be enabled to run a much wider suite of possible test cases:
+
+- `verify_parser` causes every compilation to compile every prefix of the input first. This does not check the output (and the vast majority of these will result in expected compile errors anyway), but instead this is intended to catch pathological cases where the parser error handling does not function correctly and hangs, or crashes.

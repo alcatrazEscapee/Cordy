@@ -5,6 +5,7 @@ use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 use std::ptr::NonNull;
+use rug::rational::SmallRational;
 
 use crate::core::NativeFunction;
 use crate::util::impl_partial_ord;
@@ -338,6 +339,7 @@ impl PartialEq for ValuePtr {
             Type::ShortStr => unsafe { self.long_tag == other.long_tag },
 
             Type::Complex => eq!(as_complex),
+            Type::Rational => eq!(as_rational),
             Type::Range => eq!(as_range),
             Type::Enumerate => eq!(as_enumerate),
             Type::PartialFunction => eq!(as_partial_function),
@@ -399,9 +401,17 @@ impl Ord for ValuePtr {
                         lhs.cmp(&rhs).then((ty as u8).cmp(&(other_ty as u8)))
                     },
                     Type::Complex => {
-                        let rhs = other.as_complex();
-                        lhs.cmp(&rhs.re).then(0.cmp(&rhs.im))
+                        // Complex types order by imaginary component FIRST, then by REAL
+                        // Here, we have a complex compared to a real, so we only need to check the complex imaginary component,
+                        // as it will never be equal to zero
+                        0.cmp(&other.as_complex().im)
                     },
+                    Type::Rational => {
+                        // Comparing rational vs. non-rational integral, so compare the equivalent rational values
+                        // Note that we cannot enforce any order on rationals that equal their integral counterparts, as we would
+                        // break the symmetry of Ord + Eq
+                        SmallRational::from((lhs, 1)).cmp(other.as_rational())
+                    }
                     _ => Ordering::Equal,
                 }
             },
@@ -409,13 +419,26 @@ impl Ord for ValuePtr {
                 match other.ty() {
                     Type::Nil | Type::Bool | Type::Int => other.cmp(self).reverse(),
                     Type::Complex => {
+                        // Compare imaginary, then real, as it simplifies comparisons with real-only integers and rationals
                         let lhs = self.as_complex();
-                        let rhs = self.as_complex();
-                        lhs.re.cmp(&rhs.re).then(lhs.im.cmp(&rhs.im))
+                        let rhs = other.as_complex();
+                        lhs.im.cmp(&rhs.im).then(lhs.re.cmp(&rhs.re))
                     },
+                    Type::Rational => {
+                        // Like comparing complex with integral types, we just check the imaginary component of the complex - no need to check the rational at all,
+                        // since we know all im = 0 components will be expressed as integral types.
+                        self.as_complex().im.cmp(&0)
+                    }
                     _ => Ordering::Equal
                 }
             },
+            Type::Rational => {
+                match other.ty() {
+                    Type::Nil | Type::Bool | Type::Int | Type::Complex => other.cmp(self).reverse(),
+                    Type::Rational => self.as_rational().cmp(other.as_rational()),
+                    _ => Ordering::Equal
+                }
+            }
 
             // Strings order by length (ascending), then by natural ordering
             // Type::ShortStr < Type::LongStr, then, by definition
@@ -477,6 +500,7 @@ impl Drop for ValuePtr {
                 unsafe {
                     match self.ty() {
                         Type::Complex => self.drop_value::<Complex>(),
+                        Type::Rational => self.drop_value::<Rational>(),
                         Type::Range => self.drop_value::<Range>(),
                         Type::Enumerate => self.drop_value::<Enumerate>(),
                         Type::PartialFunction => self.drop_value::<PartialFunction>(),
@@ -521,6 +545,7 @@ impl Hash for ValuePtr {
             Type::GetField => unsafe { self.tag }.hash(state),
 
             Type::Complex => hash!(as_complex),
+            Type::Rational => hash!(as_rational),
             Type::Enumerate => hash!(as_enumerate),
             Type::PartialFunction => hash!(as_partial_function),
             Type::PartialNativeFunction => hash!(as_partial_native),
@@ -559,6 +584,7 @@ impl Debug for ValuePtr {
             Type::GetField => f.debug_struct("GetField").field("field_index", &self.as_field()).finish(),
 
             Type::Complex => fmt!(as_complex),
+            Type::Rational => fmt!(as_rational),
             Type::Enumerate => fmt!(as_enumerate),
             Type::PartialFunction => fmt!(as_partial_function),
             Type::PartialNativeFunction => fmt!(as_partial_native),
@@ -799,7 +825,7 @@ mod tests {
     use std::cmp::Ordering;
 
     use crate::core::NativeFunction;
-    use crate::vm::{ComplexValue, IntoValue};
+    use crate::vm::{ComplexType, IntoValue};
     use crate::vm::value::ptr::{MAX_INT, MIN_INT, Prefix, ValuePtr};
     use crate::vm::value::Type;
 
@@ -929,7 +955,7 @@ mod tests {
 
     #[test]
     fn test_complex() {
-        let ptr = ComplexValue::new(1, 2).to_value();
+        let ptr = ComplexType::new(1, 2).to_value();
 
         assert!(!ptr.is_nil());
         assert!(!ptr.is_bool());
@@ -944,8 +970,8 @@ mod tests {
     #[test]
     fn test_complex_clone_eq() {
         let c0 = ValuePtr::nil();
-        let c1 = ComplexValue::new(1, 2).to_value();
-        let c2 = ComplexValue::new(1, 3).to_value();
+        let c1 = ComplexType::new(1, 2).to_value();
+        let c2 = ComplexType::new(1, 3).to_value();
 
         assert_ne!(c2, c0);
         assert_ne!(c2, c1);

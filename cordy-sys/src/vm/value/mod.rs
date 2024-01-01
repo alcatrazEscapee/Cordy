@@ -18,11 +18,11 @@ use crate::vm::value::ptr::{RefMut, Prefix};
 use crate::vm::value::str::IterStr;
 use crate::vm::value::range::Range;
 use crate::vm::value::slice::Slice;
-use crate::vm::value::complex::Complex;
+use crate::vm::value::number::{Complex, Rational};
 use crate::vm::value::collections::{Dict, DictType, Heap, HeapType, List, ListType, Set, SetType, Vector, VectorType};
 
 pub use crate::vm::value::ptr::{MAX_INT, MIN_INT, ValuePtr};
-pub use crate::vm::value::complex::ComplexValue;
+pub use crate::vm::value::number::ComplexType;
 pub use crate::vm::value::func::{Closure, Function, PartialFunction, PartialNativeFunction, UpValue};
 pub use crate::vm::value::error::{AnyResult, ErrorPtr, ErrorResult, ValueResult};
 
@@ -35,7 +35,7 @@ mod func;
 mod range;
 mod slice;
 mod error;
-mod complex;
+mod number;
 mod collections;
 
 
@@ -52,6 +52,7 @@ pub enum Type {
     ShortStr,
     LongStr,
     Complex,
+    Rational,
     List,
     Set,
     Dict,
@@ -80,6 +81,7 @@ impl Type {
             Bool => "bool",
             Int => "int",
             Complex => "complex",
+            Rational => "rational",
             ShortStr | LongStr => "str",
             List => "list",
             Set => "set",
@@ -223,6 +225,7 @@ impl ValuePtr {
             Type::Bool => Cow::from(if self.is_true() { "true" } else { "false" }),
             Type::Int => Cow::from(self.as_int().to_string()),
             Type::Complex => Complex::to_repr_str(self.as_complex()),
+            Type::Rational => Rational::to_repr_str(&self.as_rational()),
             Type::ShortStr | Type::LongStr => {
                 let escaped = format!("{:?}", self.as_str_slice());
                 Cow::from(format!("'{}'", &escaped[1..escaped.len() - 1]))
@@ -619,7 +622,8 @@ macro_rules! impl_into {
     };
 }
 
-impl_into!(ValuePtr, self, self);
+pub(crate) use impl_into;
+
 impl_into!(usize, self, ptr::from_i64(self as i64));
 impl_into!(i64, self, ptr::from_i64(self));
 impl_into!(bool, self, ptr::from_bool(self));

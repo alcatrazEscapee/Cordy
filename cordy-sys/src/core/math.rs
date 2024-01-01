@@ -1,6 +1,6 @@
 use num_integer::Roots;
 
-use crate::vm::{ComplexValue, IntoValue, operator, RuntimeError, Type, ValuePtr, ValueResult};
+use crate::vm::{ComplexType, IntoValue, operator, RuntimeError, Type, ValuePtr, ValueResult};
 
 use RuntimeError::{*};
 
@@ -21,12 +21,29 @@ pub fn convert_to_int(target: ValuePtr, default: Option<ValuePtr>) -> ValueResul
     }
 }
 
+pub fn convert_to_rational(numer: ValuePtr, denom: Option<ValuePtr>) -> ValueResult {
+    match numer.is_rational() {
+        true => match denom {
+            Some(denom) if denom.is_rational() => {
+                let denom = denom.to_rational();
+                match denom.is_zero() {
+                    true => ValueErrorValueMustBeNonZero.err(),
+                    false => (numer.to_rational() / denom).to_value().ok()
+                }
+            },
+            Some(denom) => TypeErrorCannotConvertToRational(denom).err(),
+            None => numer.to_rational().to_value().ok(),
+        }
+        false => TypeErrorCannotConvertToRational(numer).err(),
+    }
+}
+
 pub fn abs(value: ValuePtr) -> ValueResult {
     match value.ty() {
         Type::Bool | Type::Int => value.as_int().abs().to_value().ok(),
         Type::Complex => {
             let c = value.as_complex();
-            ComplexValue::new(c.re.abs(), c.im.abs()).to_value().ok()
+            ComplexType::new(c.re.abs(), c.im.abs()).to_value().ok()
         },
         Type::Vector => {
             operator::apply_vector_unary(value, abs)
