@@ -757,11 +757,9 @@ impl Parser<'_> {
         // Note that unlike `if { }`, an `if then else` **does** count as an expression, and leaves a value on the stack, so we set the flag for delay pop = true
         let condition: Expr = self.parse_expr_top_level();
         if let Some(KeywordThen) = self.peek() {
-            self.advance(); // Consume `then`
-            let if_true: Expr = self.parse_expr_top_level();
-            self.expect(KeywordElse);
-            let if_false: Expr = self.parse_expr_top_level();
-            self.emit_optimized_expr(condition.if_then_else(loc, if_true, if_false));
+            let expr = self.parse_expr_1_inline_then_else(loc, condition);
+
+            self.emit_optimized_expr(expr);
             self.delay_pop_from_expression_statement = true;
             return;
         }
@@ -1568,10 +1566,27 @@ impl Parser<'_> {
 
         let loc = self.advance_with(); // Consume `if`
         let condition = self.parse_expr_top_level(); // condition
+
+        self.parse_expr_1_inline_then_else(loc, condition)
+    }
+
+    fn parse_expr_1_inline_then_else(&mut self, loc: Location, condition: Expr) -> Expr {
+        trace::trace_parser!("rule <expr-1-inline-then-else>");
+
         self.expect(KeywordThen);
+
         let if_true = self.parse_expr_top_level(); // Value if true
-        self.expect(KeywordElse);
-        let if_false = self.parse_expr_top_level(); // Value if false
+        let if_false = match self.peek() {  // Value if false
+            Some(KeywordElif) => {
+                self.advance(); // consume `elif`
+                let sub_condition = self.parse_expr_top_level();
+                self.parse_expr_1_inline_then_else(Location::empty(), sub_condition)
+            }
+            _ => {
+                self.expect(KeywordElse);
+                self.parse_expr_top_level()
+            }
+        };
 
         condition.if_then_else(loc, if_true, if_false)
     }

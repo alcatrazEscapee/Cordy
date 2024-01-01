@@ -1059,6 +1059,14 @@ mod tests {
     #[test] fn test_if_then_else_5() { run_str("(if false then (fn() -> 'hello' . print)() else 'nope') . print", "nope\n"); }
     #[test] fn test_if_then_else_top_level() { run_str("if true then print('hello') else print('goodbye')", "hello\n"); }
     #[test] fn test_if_then_else_top_level_in_loop() { run_str("for x in range(2) { if x then x else x }", ""); }
+    #[test] fn test_if_then_elif_else_true_true() { run_str("print(if true then 1 elif true then 2 else 3)", "1\n"); }
+    #[test] fn test_if_then_elif_else_true_false() { run_str("print(if true then 1 elif false then 2 else 3)", "1\n"); }
+    #[test] fn test_if_then_elif_else_false_true() { run_str("print(if false then 1 elif true then 2 else 3)", "2\n"); }
+    #[test] fn test_if_then_elif_else_false_false() { run_str("print(if false then 1 elif false then 2 else 3)", "3\n"); }
+    #[test] fn test_if_then_elif_top_level_else_true_true() { run_str("if true then print 1 elif true then print 2 else print 3", "1\n"); }
+    #[test] fn test_if_then_elif_top_level_else_true_false() { run_str("if true then print 1 elif false then print 2 else print 3", "1\n"); }
+    #[test] fn test_if_then_elif_top_level_else_false_true() { run_str("if false then print 1 elif true then print 2 else print 3", "2\n"); }
+    #[test] fn test_if_then_elif_top_level_else_false_false() { run_str("if false then print 1 elif false then print 2 else print 3", "3\n"); }
     #[test] fn test_loop_has_nested_scope() { run_str("let x ; loop { let x ; break }", ""); }
     #[test] fn test_loop_2x_nested_with_break_1() { run_str("loop { break ; loop { } }", ""); }
     #[test] fn test_loop_2x_nested_with_break_2() { run_str("let x ; loop { break ; loop { } }", ""); }

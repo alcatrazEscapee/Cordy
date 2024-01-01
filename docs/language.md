@@ -116,6 +116,7 @@ Operators in Cordy are similar to procedural languages, with all operators being
   - Every value in Cordy can be compared for equality or ordering. However, objects of different type will always order as equal.
   - Chained comparison operators behave intuitively like in Python: `a < b < c` is equivalent to `(a < b) and (b < c)` (without evaluating `b` twice).
 - `if condition then value_if_true else value_if_false` is a short-circuiting ternary operator.
+  - This can also be chained with `elif` in place of `else if`, i.e. `if condition1 then value1 elif condition2 then value2 else value3`
 - `is` (along with `is not`) is an operator used to check if a value (left hand operand) is of a given type (right hand operand).
 - `in` (along with `not in`) is used for checking if the left hand side is _contained in_ the right hand side.
   - When the right hand side is a string, this performs a substring check.
