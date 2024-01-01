@@ -38,6 +38,7 @@ pub enum NativeFunction {
     Bool,
     Int,
     Complex,
+    Rational,
     Str,
     List,
     Set,
@@ -296,6 +297,7 @@ const fn load_native_functions() -> [NativeFunctionInfo; NativeFunction::total()
         new(Bool, "bool", "x", Arg1),
         new(Int, "int", "x, default?", Arg1To2),
         new(Complex, "complex", "", Invalid),
+        new(Rational, "rational", "x", Arg1To2),
         new(Str, "str", "x", Arg1),
         new(List, "list", "...", Iter),
         new(Set, "set", "...", Iter),
@@ -856,6 +858,7 @@ fn invoke_arg1<VM : VirtualInterface>(f: NativeFunction, a1: ValuePtr, vm: &mut 
         Bool => a1.to_bool().to_value().ok(),
         Int => math::convert_to_int(a1, None),
         Str => a1.to_str().to_value().ok(),
+        Rational => math::convert_to_rational(a1, None),
         Vector => if a1.is_complex() {  // Handle `a + bi . vector` as a special case here, along with all integral types
             let it = a1.to_complex(); // Must call `to_complex()` to handle `bool`, `int`
             (it.re.to_value(), it.im.to_value()).to_value().ok()
@@ -921,6 +924,7 @@ fn invoke_arg2<VM : VirtualInterface>(f: NativeFunction, a1: ValuePtr, a2: Value
             Err(err) => IOError(err.to_string()).err(),
         },
         Int => math::convert_to_int(a1, Some(a2)),
+        Rational => math::convert_to_rational(a1, Some(a2)),
 
         OperatorSub => operator::binary_sub(a1, a2),
         OperatorMul => operator::binary_mul(a1, a2),
@@ -1069,6 +1073,7 @@ fn type_of(value: ValuePtr) -> ValuePtr {
         Type::Bool => Bool.to_value(),
         Type::Int => Int.to_value(),
         Type::Complex => Complex.to_value(),
+        Type::Rational => Rational.to_value(),
         Type::ShortStr | Type::LongStr => Str.to_value(),
 
         Type::List => List.to_value(),

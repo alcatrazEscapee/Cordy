@@ -331,6 +331,7 @@ impl AsError for RuntimeError {
             TypeErrorBinaryOp(op, l, r) => format!("TypeError: Cannot {} {} and {}", op.as_error(), l.as_error(), r.as_error()),
             TypeErrorBinaryIs(l, r) => format!("TypeError: {} is not a type and cannot be used with binary 'is' on {}", r.as_error(), l.as_error()),
             TypeErrorCannotConvertToInt(v) => format!("TypeError: Cannot convert {} to an int", v.as_error()),
+            TypeErrorCannotConvertToRational(v) => format!("TypeError: Cannot convert {} to an rational", v.as_error()),
             TypeErrorFieldNotPresentOnValue { value, field, repr, access} => format!(
                 "TypeError: Cannot {} field '{}' on {}",
                 if *access { "get" } else { "set" },

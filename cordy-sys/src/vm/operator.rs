@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 
 use crate::core;
 use crate::core::NativeFunction;
-use crate::vm::{ComplexValue, ErrorPtr, ErrorResult, Type, ValuePtr, ValueResult};
+use crate::vm::{ComplexType, ErrorPtr, ErrorResult, Type, ValuePtr, ValueResult};
 use crate::vm::error::RuntimeError;
 use crate::vm::value::{IntoIterableValue, IntoValue};
 
@@ -203,11 +203,11 @@ pub fn binary_div(lhs: ValuePtr, rhs: ValuePtr) -> ValueResult {
 /// The `C64` type provided by `num-complex` defines `div()` using regular rust division.
 /// This is a clone of that but using `floor_div` provided by `num-integer`, which keeps consistency with how we define division for `complex / int`
 #[inline]
-fn c64_div_floor(lhs: ComplexValue, rhs: ComplexValue) -> ComplexValue {
+fn c64_div_floor(lhs: ComplexType, rhs: ComplexType) -> ComplexType {
     let norm_sqr = rhs.norm_sqr();
     let re = lhs.re * rhs.re + lhs.im * rhs.im;
     let im = lhs.im * rhs.re - lhs.re * rhs.im;
-    ComplexValue::new(num_integer::div_floor(re, norm_sqr), num_integer::div_floor(im, norm_sqr))
+    ComplexType::new(num_integer::div_floor(re, norm_sqr), num_integer::div_floor(im, norm_sqr))
 }
 
 pub fn binary_mod(lhs: ValuePtr, rhs: ValuePtr) -> ValueResult {
@@ -226,7 +226,7 @@ pub fn binary_mod(lhs: ValuePtr, rhs: ValuePtr) -> ValueResult {
             if rhs == 0 {
                 ValueErrorValueMustBeNonZero.err()
             } else {
-                ComplexValue::new(num_integer::mod_floor(lhs.re, rhs), num_integer::mod_floor(lhs.im, rhs)).to_value().ok()
+                ComplexType::new(num_integer::mod_floor(lhs.re, rhs), num_integer::mod_floor(lhs.im, rhs)).to_value().ok()
             }
         }
         (ShortStr | LongStr, _) => core::format_string(lhs.as_str_slice(), rhs),
@@ -461,7 +461,7 @@ fn apply_vector_binary_scalar_rhs(lhs: ValuePtr, scalar_rhs: ValuePtr, binary_op
 
 #[cfg(test)]
 mod test {
-    use crate::vm::{ComplexValue, IntoValue, operator, RuntimeError};
+    use crate::vm::{ComplexType, IntoValue, operator, RuntimeError};
 
     #[test]
     fn test_binary_int_div() {
@@ -490,7 +490,7 @@ mod test {
             ((3, 2), 2, (1, 1)), ((2, 2), 2, (1, 1)), ((1, 2), 2, (0, 1)), ((0, 2), 2, (0, 1)), ((-1, 2), 2, (-1, 1)), ((-2, 2), 2, (-1, 1)), ((-3, 2), 2, (-2, 1)),
             ((3, 3), 2, (1, 1)), ((2, 3), 2, (1, 1)), ((1, 3), 2, (0, 1)), ((0, 3), 2, (0, 1)), ((-1, 3), 2, (-1, 1)), ((-2, 3), 2, (-1, 1)), ((-3, 3), 2, (-2, 1)),
         ] {
-            assert_eq!(operator::binary_div(ComplexValue::new(a, ai).to_value(), b.to_value()), ComplexValue::new(c, ci).to_value().ok(), "{:?} / {}", (a, ai), b)
+            assert_eq!(operator::binary_div(ComplexType::new(a, ai).to_value(), b.to_value()), ComplexType::new(c, ci).to_value().ok(), "{:?} / {}", (a, ai), b)
         }
     }
 

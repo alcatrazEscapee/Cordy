@@ -1,7 +1,7 @@
 use crate::compiler::parser::semantic::{LValue, LValueReference};
 use crate::core::NativeFunction;
 use crate::reporting::Location;
-use crate::vm::{ComplexValue, ErrorPtr, LiteralType, Opcode, Type, ValuePtr, ValueResult};
+use crate::vm::{ComplexType, ErrorPtr, LiteralType, Opcode, Type, ValuePtr, ValueResult};
 use crate::vm::operator::{BinaryOp, CompareOp, UnaryOp};
 
 
@@ -17,7 +17,7 @@ pub enum ExprType {
     Exit,
     Bool(bool),
     Int(i64),
-    Complex(ComplexValue),
+    Complex(ComplexType),
     Str(String),
     LValue(LValueReference),
     NativeFunction(NativeFunction),
@@ -79,8 +79,8 @@ impl Expr {
     pub fn exit() -> Expr { Expr(Location::empty(), ExprType::Exit) }
     pub fn bool(it: bool) -> Expr { Expr(Location::empty(), ExprType::Bool(it)) }
     pub fn int(it: i64) -> Expr { Expr(Location::empty(), ExprType::Int(it)) }
-    pub fn complex(it: i64) -> Expr { Expr::c64(ComplexValue::new(0, it)) }
-    pub fn c64(it: ComplexValue) -> Expr { Expr(Location::empty(), ExprType::Complex(it)) }
+    pub fn complex(it: i64) -> Expr { Expr::c64(ComplexType::new(0, it)) }
+    pub fn c64(it: ComplexType) -> Expr { Expr(Location::empty(), ExprType::Complex(it)) }
     pub fn str(it: String) -> Expr { Expr(Location::empty(), ExprType::Str(it)) }
     pub fn lvalue(loc: Location, lvalue: LValueReference) -> Expr {
         match lvalue {
