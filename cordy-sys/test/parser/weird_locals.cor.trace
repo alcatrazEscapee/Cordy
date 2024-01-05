@@ -1,5 +1,5 @@
 Undeclared identifier: 'x'
-  at: line 1 (weird_locals.cor)
+  at: line 1 (<test>)
 
 1 | do { let x = x }
 2 |              ^

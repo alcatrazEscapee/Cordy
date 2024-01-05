@@ -1,40 +1,31 @@
-=== Scan Tokens ===
-
-NewLine
-NewLine
-NewLine
-NewLine
-NewLine
-NewLine
-
-=== Scan Errors ===
+NewLine NewLine NewLine NewLine NewLine NewLine
 
 Invalid character: '$'
-  at: line 2 (invalid_character.cor)
+  at: line 2 (<test>)
 
 2 | $
 3 | ^
 
 Invalid character: '#'
-  at: line 3 (invalid_character.cor)
+  at: line 3 (<test>)
 
 3 | #
 4 | ^
 
 Invalid character: '#'
-  at: line 4 (invalid_character.cor)
+  at: line 4 (<test>)
 
 4 | /* this one is fine $#@ */ # /* that one is not */
 5 |                            ^
 
 Invalid character: '$'
-  at: line 6 (invalid_character.cor)
+  at: line 6 (<test>)
 
 6 | $ // at the beginning of a line
 7 | ^
 
 Invalid character: '$'
-  at: line 7 (invalid_character.cor)
+  at: line 7 (<test>)
 
 7 | /* and as the last character of a line -> */ $
 8 |                                              ^

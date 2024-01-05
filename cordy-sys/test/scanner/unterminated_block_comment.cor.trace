@@ -1,23 +1,7 @@
-=== Scan Tokens ===
-
-KeywordLet
-Identifier("x")
-Equals
-NewLine
-NewLine
-NewLine
-IntLiteral(1)
-NewLine
-KeywordLet
-Identifier("y")
-Equals
-NewLine
-NewLine
-
-=== Scan Errors ===
+KeywordLet Identifier(x) Equals NewLine NewLine NewLine IntLiteral(1) NewLine KeywordLet Identifier(y) Equals NewLine NewLine
 
 Unterminated block comment (missing a closing '*/')
-  at: line 5 - 7 (unterminated_block_comment.cor)
+  at: line 5 - 7 (<test>)
 
 5 | let y = /* but this one
 6 | doesn't

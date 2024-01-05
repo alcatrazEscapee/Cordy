@@ -1,5 +1,5 @@
 Undeclared identifier: 'undeclared'
-  at: line 4 (weird_opcode_id.cor)
+  at: line 4 (<test>)
 
 4 |     foo undeclared
 5 |         ^^^^^^^^^^

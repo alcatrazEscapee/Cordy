@@ -2162,7 +2162,36 @@ impl Parser<'_> {
 mod tests {
     use crate::{compiler, util};
     use crate::reporting::SourceView;
-    use crate::util::Resource;
+
+
+    fn run_expr(text: &'static str, expected: &'static str) {
+        run(text, format!("{}\nPop\nExit", expected.replace(" ", "\n")), false)
+    }
+
+    fn run_err(text: &'static str, expected: &'static str) {
+        run(text, String::from(expected), false)
+    }
+
+    fn run(text: &'static str, expected: String, use_full_disassembly: bool) {
+        let view: SourceView = SourceView::new(String::from("<test>"), String::from(text));
+        let actual = match compiler::compile(false, &view) {
+            Ok(compile) if use_full_disassembly => compile.disassemble(&view, true).join("\n"),
+            Ok(compile) => compile.raw_disassembly(),
+            Err(errors) => errors.join("\n")
+        };
+
+        util::assert_eq(actual, expected);
+    }
+
+    macro_rules! run {
+        ($path:literal) => {
+            run(
+                include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/test/parser/", $path, ".cor")),
+                include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/test/parser/", $path, ".cor.trace")).replace("\r", ""),
+                true
+            )
+        };
+    }
 
     #[test] fn test_nil() { run_expr("nil", "Nil") }
     #[test] fn test_true() { run_expr("true", "True") }
@@ -2307,93 +2336,66 @@ mod tests {
     #[test] fn test_native_module_with_function_impl_mismatching_braces() { run_err("native module Foo { fn boo() {}", "Expected a function within module body, got '{' token instead\n  at: line 1 (<test>)\n\n1 | native module Foo { fn boo() {}\n2 |                              ^\n") }
     #[test] fn test_assert_eof() { run_err("assert", "Expected an expression terminal, got end of input instead\n  at: line 1 (<test>)\n\n1 | assert\n2 |       ^^^\n"); }
 
-    #[test] fn test_array_access_after_newline() { run("array_access_after_newline"); }
-    #[test] fn test_array_access_no_newline() { run("array_access_no_newline"); }
-    #[test] fn test_bare_eval() { run("bare_eval"); }
-    #[test] fn test_break_past_locals() { run("break_past_locals"); }
-    #[test] fn test_constants() { run("constants"); }
-    #[test] fn test_continue_past_locals() { run("continue_past_locals"); }
-    #[test] fn test_empty() { run("empty"); }
-    #[test] fn test_expressions() { run("expressions"); }
-    #[test] fn test_for_else() { run("for_else"); }
-    #[test] fn test_for_range_start_stop() { run("for_range_start_stop"); }
-    #[test] fn test_for_range_start_stop_no_var() { run("for_range_start_stop_no_var"); }
-    #[test] fn test_for_range_start_stop_step() { run("for_range_start_stop_step"); }
-    #[test] fn test_for_range_start_stop_step_no_var() { run("for_range_start_stop_step_no_var"); }
-    #[test] fn test_for_range_stop() { run("for_range_stop"); }
-    #[test] fn test_for_range_stop_no_var() { run("for_range_stop_no_var"); }
-    #[test] fn test_for_string() { run("for_string"); }
-    #[test] fn test_function() { run("function"); }
-    #[test] fn test_function_call_after_newline() { run("function_call_after_newline"); }
-    #[test] fn test_function_call_no_newline() { run("function_call_no_newline"); }
-    #[test] fn test_function_early_return() { run("function_early_return"); }
-    #[test] fn test_function_early_return_nested_scope() { run("function_early_return_nested_scope"); }
-    #[test] fn test_function_implicit_return() { run("function_implicit_return"); }
-    #[test] fn test_function_with_parameters() { run("function_with_parameters"); }
-    #[test] fn test_global_variables() { run("global_variables"); }
-    #[test] fn test_global_assignments() { run("global_assignments"); }
-    #[test] fn test_hello_world() { run("hello_world"); }
-    #[test] fn test_if_statement_1() { run("if_statement_1"); }
-    #[test] fn test_if_statement_2() { run("if_statement_2"); }
-    #[test] fn test_if_statement_3() { run("if_statement_3"); }
-    #[test] fn test_if_statement_4() { run("if_statement_4"); }
-    #[test] fn test_invalid_expressions() { run("invalid_expressions"); }
-    #[test] fn test_local_assignments() { run("local_assignments"); }
-    #[test] fn test_local_variable_reference() { run("local_variable_reference"); }
-    #[test] fn test_local_variables() { run("local_variables"); }
-    #[test] fn test_loop_1() { run("loop_1"); }
-    #[test] fn test_loop_2() { run("loop_2"); }
-    #[test] fn test_loop_3() { run("loop_3"); }
-    #[test] fn test_loop_4() { run("loop_4"); }
-    #[test] fn test_modules() { run("modules"); }
-    #[test] fn test_modules_method_binding() { run("modules_method_binding"); }
-    #[test] fn test_modules_method_late_binding() { run("modules_method_late_binding"); }
-    #[test] fn test_multiple_undeclared_variables() { run("multiple_undeclared_variables"); }
-    #[test] fn test_native_modules() { run("native_modules") }
-    #[test] fn test_pattern_expression() { run("pattern_expression"); }
-    #[test] fn test_pattern_expression_nested() { run("pattern_expression_nested"); }
-    #[test] fn test_struct_with_methods() { run("struct_with_methods"); }
-    #[test] fn test_struct_with_self_methods() { run("struct_with_self_methods"); }
-    #[test] fn test_trailing_commas() { run("trailing_commas"); }
-    #[test] fn test_weird_expression_statements() { run("weird_expression_statements"); }
-    #[test] fn test_weird_closure_not_a_closure() { run("weird_closure_not_a_closure"); }
-    #[test] fn test_weird_locals() { run("weird_locals"); }
-    #[test] fn test_weird_loop_nesting_in_functions() { run("weird_loop_nesting_in_functions"); }
-    #[test] fn test_weird_opcode_id() { run("weird_opcode_id"); }
-    #[test] fn test_weird_structs() { run("weird_structs"); }
-    #[test] fn test_weird_upvalue_index() { run("weird_upvalue_index"); }
-    #[test] fn test_weird_upvalue_index_with_parameter() { run("weird_upvalue_index_with_parameter"); }
-    #[test] fn test_while_1() { run("while_1"); }
-    #[test] fn test_while_2() { run("while_2"); }
-    #[test] fn test_while_3() { run("while_3"); }
-    #[test] fn test_while_4() { run("while_4"); }
-    #[test] fn test_while_else() { run("while_else"); }
-    #[test] fn test_while_false_if_false() { run("while_false_if_false"); }
-
-
-    fn run_expr(text: &'static str, expected: &'static str) {
-        let expected: String = format!("{}\nPop\nExit", expected.replace(" ", "\n"));
-        let actual: String = compiler::compile(false, &SourceView::new(String::new(), String::from(text)))
-            .expect("Failed to compile")
-            .raw_disassembly();
-
-        util::assert_eq(actual, expected);
-    }
-
-    fn run_err(text: &'static str, expected: &'static str) {
-        let view: SourceView = SourceView::new(String::from("<test>"), String::from(text));
-        let actual: String = compiler::compile(false, &view).expect_err("Expected a parser error").join("\n");
-
-        util::assert_eq(actual, String::from(expected));
-    }
-
-    fn run(path: &'static str) {
-        let (resource, view) = Resource::new("parser", path);
-        let actual: Vec<String> = match compiler::compile(false, &view) {
-            Ok(compile) => compile.disassemble(&view, true),
-            Err(err) => err
-        };
-
-        resource.assert_eq(actual)
-    }
+    #[test] fn test_array_access_after_newline() { run!("array_access_after_newline"); }
+    #[test] fn test_array_access_no_newline() { run!("array_access_no_newline"); }
+    #[test] fn test_bare_eval() { run!("bare_eval"); }
+    #[test] fn test_break_past_locals() { run!("break_past_locals"); }
+    #[test] fn test_constants() { run!("constants"); }
+    #[test] fn test_continue_past_locals() { run!("continue_past_locals"); }
+    #[test] fn test_empty() { run!("empty"); }
+    #[test] fn test_expressions() { run!("expressions"); }
+    #[test] fn test_for_else() { run!("for_else"); }
+    #[test] fn test_for_range_start_stop() { run!("for_range_start_stop"); }
+    #[test] fn test_for_range_start_stop_no_var() { run!("for_range_start_stop_no_var"); }
+    #[test] fn test_for_range_start_stop_step() { run!("for_range_start_stop_step"); }
+    #[test] fn test_for_range_start_stop_step_no_var() { run!("for_range_start_stop_step_no_var"); }
+    #[test] fn test_for_range_stop() { run!("for_range_stop"); }
+    #[test] fn test_for_range_stop_no_var() { run!("for_range_stop_no_var"); }
+    #[test] fn test_for_string() { run!("for_string"); }
+    #[test] fn test_function() { run!("function"); }
+    #[test] fn test_function_call_after_newline() { run!("function_call_after_newline"); }
+    #[test] fn test_function_call_no_newline() { run!("function_call_no_newline"); }
+    #[test] fn test_function_early_return() { run!("function_early_return"); }
+    #[test] fn test_function_early_return_nested_scope() { run!("function_early_return_nested_scope"); }
+    #[test] fn test_function_implicit_return() { run!("function_implicit_return"); }
+    #[test] fn test_function_with_parameters() { run!("function_with_parameters"); }
+    #[test] fn test_global_variables() { run!("global_variables"); }
+    #[test] fn test_global_assignments() { run!("global_assignments"); }
+    #[test] fn test_hello_world() { run!("hello_world"); }
+    #[test] fn test_if_statement_1() { run!("if_statement_1"); }
+    #[test] fn test_if_statement_2() { run!("if_statement_2"); }
+    #[test] fn test_if_statement_3() { run!("if_statement_3"); }
+    #[test] fn test_if_statement_4() { run!("if_statement_4"); }
+    #[test] fn test_invalid_expressions() { run!("invalid_expressions"); }
+    #[test] fn test_local_assignments() { run!("local_assignments"); }
+    #[test] fn test_local_variable_reference() { run!("local_variable_reference"); }
+    #[test] fn test_local_variables() { run!("local_variables"); }
+    #[test] fn test_loop_1() { run!("loop_1"); }
+    #[test] fn test_loop_2() { run!("loop_2"); }
+    #[test] fn test_loop_3() { run!("loop_3"); }
+    #[test] fn test_loop_4() { run!("loop_4"); }
+    #[test] fn test_modules() { run!("modules"); }
+    #[test] fn test_modules_method_binding() { run!("modules_method_binding"); }
+    #[test] fn test_modules_method_late_binding() { run!("modules_method_late_binding"); }
+    #[test] fn test_multiple_undeclared_variables() { run!("multiple_undeclared_variables"); }
+    #[test] fn test_native_modules() { run!("native_modules") }
+    #[test] fn test_pattern_expression() { run!("pattern_expression"); }
+    #[test] fn test_pattern_expression_nested() { run!("pattern_expression_nested"); }
+    #[test] fn test_struct_with_methods() { run!("struct_with_methods"); }
+    #[test] fn test_struct_with_self_methods() { run!("struct_with_self_methods"); }
+    #[test] fn test_trailing_commas() { run!("trailing_commas"); }
+    #[test] fn test_weird_expression_statements() { run!("weird_expression_statements"); }
+    #[test] fn test_weird_closure_not_a_closure() { run!("weird_closure_not_a_closure"); }
+    #[test] fn test_weird_locals() { run!("weird_locals"); }
+    #[test] fn test_weird_loop_nesting_in_functions() { run!("weird_loop_nesting_in_functions"); }
+    #[test] fn test_weird_opcode_id() { run!("weird_opcode_id"); }
+    #[test] fn test_weird_structs() { run!("weird_structs"); }
+    #[test] fn test_weird_upvalue_index() { run!("weird_upvalue_index"); }
+    #[test] fn test_weird_upvalue_index_with_parameter() { run!("weird_upvalue_index_with_parameter"); }
+    #[test] fn test_while_1() { run!("while_1"); }
+    #[test] fn test_while_2() { run!("while_2"); }
+    #[test] fn test_while_3() { run!("while_3"); }
+    #[test] fn test_while_4() { run!("while_4"); }
+    #[test] fn test_while_else() { run!("while_else"); }
+    #[test] fn test_while_false_if_false() { run!("while_false_if_false"); }
 }
