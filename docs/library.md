@@ -13,6 +13,7 @@ The below type signatures are entirely for documentation purposes, as Cordy does
 - `...` is used to indicate a function has multiple possible signatures, which will be noted below.
 - `f(T, ...)` is used to indicate the function `f` can take any number of arguments of the type `T`
 - `|` is used to indicate an argument can be one of multiple types, i.e. `it: A | B` indicates `it` can be of type `A` or `B`.
+- `bool` is considered a subtype of `int`, and `int` is considered a subtype of both `complex` and `rational`
 
 ---
 
@@ -88,14 +89,16 @@ Returns the argument as a boolean. `nil`, `0`, `false`, `''`, and empty collecti
 
 The keyword `bool` can also be used in an `is` expression, to check if a value is of the type `bool`.
 
-#### Int `int(...) -> int`
+#### Int `<T> int(x: any, def?: T) -> int | T`
 
-**Possible Signatures**
+Attempts to convert the first argument to an integer.
 
-- `int(x: any) -> int`
-- `<T> int(x: any, def: T) -> int | T`
-
-Returns the argument as an integer. `nil` and `false` evaluate to `0`, where strings will be parsed as an integer or raise an error. If a second argument is provided, will instead return the `def` value instead of raising an error.
+- `nil`, `false` will return `0`
+- `true` will return `1`
+- `int` values will return themselves
+- `rational` values will return their numerator, if the denominator is equal to `1`, and the numerator is small enough to fit in an `int` without loss of precision
+- `str` values will attempt to parse as an integer, and raise an error if the string is not parsable as an integer.
+  - If a second argument is provided, in the case of an error it will return `def` instead
 
 The keyword `int` can also be used in an `is` expression, to check if a value is of the type `int`.
 
@@ -110,12 +113,34 @@ true
 false
 ```
 
+#### Complex
+
+The keyword `complex` can be used in an `is` expression, to check if a value is of the type `complex` Note that due to subtype relationships, `bool` and `int` values are also considered to be `is complex`.
+
+#### Rational `rational(numer: rational, denom: rational = 1) -> rational`
+
+`rational` is used to produce rational numbers from rational-like integers. When provided with one argument, this returns the rational form of that integer, so `rational(x)` produces `x / 1`. When provided with two arguments, this returns the rational of the given numerator and denominator, so `rational(x, y)` produces `x / y`.
+
+`rational` can also be used to parse strings representing rational numbers, much like `int`. These take the form of either `'N'` or `'N/D'`, where `N` and `D` can be parsed as arbitrary precision integers.
+
+The keyword `rational` can also be used in an `is` expression, to check if a value is of the type `complex` Note that due to subtype relationships, `bool` and `int` values are also considered to be `is complex`.
+
+**Example**
+
+```
+>>> rational(1)
+1 / 1
+>>> rational(2, 7)
+2 / 7
+>>> rational('123/345')
+41 / 152
+```
+
 #### Str `str(x: any) -> str`
 
 Returns the argument as a string. See also `repr`.
 
 The keyword `str` can also be used in an `is` expression, to check if a value is of the type `str`.
-
 
 #### List `list(...) -> list`
 
@@ -671,9 +696,9 @@ Returns the number of ones in the 63-bit, signed, binary representation of `x`
 
 Returns the number of zeros in the 63-bit, signed, binary representation of `x`
 
-#### Real `real(x: bool | int | complex) -> int`
+#### (Complex) Real `real(x: complex) -> int`
 
-With an int-like argument, returns the real part. For `bool` and `int`, this is the same as invoking `int`. For `complex`, this will return the real component as an integer.
+With a complex-like argument, returns the real part. For `bool` and `int`, this is the same as invoking `int`. For `complex`, this will return the real component as an integer.
 
 **Example**
 
@@ -686,9 +711,9 @@ With an int-like argument, returns the real part. For `bool` and `int`, this is 
 7
 ```
 
-#### Imag `imag(x: bool | int | complex) -> int`
+#### (Complex) Imag `imag(x: complex) -> int`
 
-With an int-like argument, returns the imaginary part. For `bool` and `int`, this will always return `0`. For `complex`, this will return the imaginary component as an integer.
+With a complex-like argument, returns the imaginary part. For `bool` and `int`, this will always return `0`. For `complex`, this will return the imaginary component as an integer.
 
 **Example**
 
@@ -700,6 +725,33 @@ With an int-like argument, returns the imaginary part. For `bool` and `int`, thi
 >>> 7 + 13i . imag
 13
 ```
+
+#### (Rational) Numer `numer(x: rational) -> rational`
+
+Returns the numerator of a rational number as another rational. Note that this will return a `rational` type, as it can express larger numbers than an `int`
+
+**Examples**
+
+```
+>>> numer(rational 1)
+1 / 1
+>>> numer(rational(6, 7))
+6 / 1
+```
+
+#### (Rational) Denom `denom(x: rational) -> rational`
+
+Returns the denominator of a rational number as another rational. Note that this will return a `rational` type, as it can express larger numbers than an `int`
+
+**Examples**
+
+```
+>>> denom(rational 1)
+1 / 1
+>>> denom(rational(6, 7))
+7 / 1
+```
+
 
 #### Lcm `lcm(...) -> int`
 

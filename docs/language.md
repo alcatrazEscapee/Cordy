@@ -48,8 +48,10 @@ Expressions in Cordy are similar to expressions in many other procedural languag
 
 - Nil: `nil`. This is the null/None/empty value, and is the default value of any uninitialized variable.
 - Boolean: `bool`. This is a type which can take the values `true` or `false`.
+  - Like in Python, `bool` is considered a subtype of `int`, with `true` and `false` coercing in many cases to `1` and `0`
 - Integers: `int`. Integers in Cordy are 63-bit, 2's compliment signed integers. They can be expressed as decimal numbers (e.g. `13`), binary with a `0b` prefix (e.g. `0b1101`), or hexadecimal with a `0x` prefix (e.g. `0xD`).
 - Complex Integers: `complex`. These are a pair of a 64-bit, 2's compliment signed integer, with one real and one imaginary component.
+- Rational Integers: `rational` These are infinite precision rational integers. Operations between rational and other integral types always produce rationals, and are computed without any loss of precision.
 - Strings: `str`. These are a sequence of characters encoded in UTF-8. Like in Python, there is no separate single-character data type. Strings can be declared using either `'single quotes'` or `"double quotes"` Strings can also include newlines:
 
 ```

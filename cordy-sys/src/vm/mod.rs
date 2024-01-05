@@ -13,7 +13,7 @@ use crate::core::Pattern;
 
 pub use crate::vm::error::{DetailRuntimeError, RuntimeError};
 pub use crate::vm::opcode::{Opcode, StoreOp};
-pub use crate::vm::value::{AnyResult, ErrorPtr, ErrorResult, Function, IntoDictValue, IntoIterableValue, IntoValue, Iterable, LiteralType, MAX_INT, MIN_INT, StructTypeImpl, Type, ValuePtr, ValueResult, Method, ComplexType, PartialNativeFunction};
+pub use crate::vm::value::{AnyResult, ErrorPtr, ErrorResult, Function, IntoDictValue, IntoIterableValue, IntoValue, Iterable, LiteralType, MAX_INT, MIN_INT, StructTypeImpl, Type, ValuePtr, ValueResult, Method, ComplexType, PartialNativeFunction, RationalType};
 
 use Opcode::{*};
 use RuntimeError::{*};
@@ -1614,9 +1614,9 @@ mod tests {
     #[test] fn test_bool_reduce_add() { run_str("range(10) . map(>3) . reduce(+) . print", "6\n"); }
     #[test] fn test_int_operators() { run_str("print(5 - 3, 12 + 5, 3 * 9, 16 / 3)", "2 17 27 5\n"); }
     #[test] fn test_int_div_mod() { run_str("print(3 / 2, 3 / 3, -3 / 2, 10 % 3, 11 % 3, 12 % 3)", "1 1 -2 1 2 0\n"); }
-    #[test] fn test_int_mod_by_zero() { run_str("1 % 0", "Compile Error:\n\nValueError: Expected value to be non-zero\n  at: line 1 (<test>)\n\n1 | 1 % 0\n2 |   ^\n"); }
+    #[test] fn test_int_mod_by_zero() { run_str("1 % 0", "Compile Error:\n\nValueError: Modulo by zero\n  at: line 1 (<test>)\n\n1 | 1 % 0\n2 |   ^\n"); }
     #[test] fn test_int_mod_by_negative() { run_str("5 % -2 . print", "-1\n"); }
-    #[test] fn test_int_div_by_zero() { run_str("print(15 / 0)", "Compile Error:\n\nValueError: Expected value to be non-zero\n  at: line 1 (<test>)\n\n1 | print(15 / 0)\n2 |          ^\n"); }
+    #[test] fn test_int_div_by_zero() { run_str("print(15 / 0)", "Compile Error:\n\nValueError: Division by zero\n  at: line 1 (<test>)\n\n1 | print(15 / 0)\n2 |          ^\n"); }
     #[test] fn test_int_left_right_shift() { run_str("print(1 << 10, 16 >> 1, 16 << -1, 1 >> -10)", "1024 8 8 1024\n"); }
     #[test] fn test_int_comparisons_1() { run_str("print(1 < 3, -5 < -10, 6 > 7, 6 > 4)", "true false false true\n"); }
     #[test] fn test_int_comparisons_2() { run_str("print(1 <= 3, -5 < -10, 3 <= 3, 2 >= 2, 6 >= 7, 6 >= 4, 6 <= 6, 8 >= 8)", "true false true true false true true true\n"); }
@@ -1637,6 +1637,7 @@ mod tests {
     #[test] fn test_int_min_and_max_no_opt() { run_str_with(false, "[int.min, max(int)] . print", "[-4611686018427387904, 4611686018427387903]\n") }
     #[test] fn test_int_min_negative_underflow() { run_str("min(int) - 1 . print", "4611686018427387903\n"); }
     #[test] fn test_int_max_positive_overflow() { run_str("max(int) + 1 . print", "-4611686018427387904\n"); }
+    #[test] fn test_int_max_pow_by_negative() { run_str("123 ** -3", "Compile Error:\n\nValueError: Power of an integral value by '-3' which is negative\n  at: line 1 (<test>)\n\n1 | 123 ** -3\n2 |     ^^\n"); }
     #[test] fn test_complex_add() { run_str("(1 + 2i) + (3 + 4j) . print", "4 + 6i\n"); }
     #[test] fn test_complex_mul() { run_str("(1 + 2i) * (3 + 4j) . print", "-5 + 10i\n"); }
     #[test] fn test_complex_str() { run_str("1 + 1i . print", "1 + 1i\n"); }
@@ -1646,21 +1647,50 @@ mod tests {
     #[test] fn test_complex_no_real_part_is_int() { run_str("1i * 1i . typeof . print", "int\n"); }
     #[test] fn test_complex_to_vector() { run_str("1 + 3i . vector . print", "(1, 3)\n"); }
     #[test] fn test_complex_mod() { run_str("(15i + -9) % 4 . print", "3 + 3i\n"); }
-    #[test] fn test_complex_mod_by_zero() { run_str("(15i + -9) % 0", "Compile Error:\n\nValueError: Expected value to be non-zero\n  at: line 1 (<test>)\n\n1 | (15i + -9) % 0\n2 |            ^\n"); }
+    #[test] fn test_complex_mod_by_zero() { run_str("(15i + -9) % 0", "Compile Error:\n\nValueError: Modulo by zero\n  at: line 1 (<test>)\n\n1 | (15i + -9) % 0\n2 |            ^\n"); }
     #[test] fn test_complex_mod_by_negative() { run_str("(15i + -9) % -4 . print", "-1 - 1i\n"); }
+    #[test] fn test_complex_pow_by_negative() { run_str("(15i + -9) ** -3 . print", "Compile Error:\n\nValueError: Power of an integral value by '-3' which is negative\n  at: line 1 (<test>)\n\n1 | (15i + -9) ** -3 . print\n2 |            ^^\n"); }
     #[test] fn test_complex_compare_with_integers() { run_str("[1, -1 - 1i, 1 + 1i, -1, 1i, 0, -1i, -1 + 1i, 1 - 1i] . sort . print", "[-1 - 1i, -1i, 1 - 1i, -1, 0, 1, -1 + 1i, 1i, 1 + 1i]\n"); }
     #[test] fn test_rational_zero() { run_str("rational 0 . print", "0 / 1\n"); }
     #[test] fn test_rational_zero_div_by_non_one() { run_str("rational(0, -5) . print", "0 / 1\n"); }
     #[test] fn test_rational_one() { run_str("rational 1 . print", "1 / 1\n"); }
-    #[test] fn test_rational_one_always_in_lowest_form() { run_str("rational(-25, 25) . print", "-1 / 1\n"); }
+    #[test] fn test_rational_one_always_in_lowest_form() { run_str("rational(25, -25) . print", "-1 / 1\n"); }
     #[test] fn test_rational_compare_with_integers() { run_str("[rational(3, 2), rational 0, 1, rational 2, 5, rational(4, 3), 2, rational(5, 2), 4, rational 4, 3, rational(1, 3), 0, rational 1, rational(7, 3)] . sort . print", "[0 / 1, 0, 1 / 3, 1, 1 / 1, 4 / 3, 3 / 2, 2 / 1, 2, 7 / 3, 5 / 2, 3, 4, 4 / 1, 5]\n"); }
     #[test] fn test_rational_compare_with_complex() { run_str("[0, rational(1, 3), -3i, rational 1, 1 + 1i, rational(-1, 2)] . sort . print", "[-3i, -1 / 2, 0, 1 / 3, 1 / 1, 1 + 1i]\n"); }
-    #[test] fn test_rational_converts_div_by_zero() { run_str("rational(123, 0) . print", "ValueError: Expected value to be non-zero\n  at: line 1 (<test>)\n\n1 | rational(123, 0) . print\n2 |         ^^^^^^^^\n"); }
-    #[test] fn test_rational_converts_div_by_false() { run_str("rational(123, false) . print", "ValueError: Expected value to be non-zero\n  at: line 1 (<test>)\n\n1 | rational(123, false) . print\n2 |         ^^^^^^^^^^^^\n"); }
+    #[test] fn test_rational_eq_with_integers() { run_str("print(rational 0 == 0, rational(1, 3) == 3, rational(5, 1) == 5)", "true false true\n"); }
+    #[test] fn test_rational_converts_div_by_zero() { run_str("rational(123, 0) . print", "ValueError: Division by zero\n  at: line 1 (<test>)\n\n1 | rational(123, 0) . print\n2 |         ^^^^^^^^\n"); }
+    #[test] fn test_rational_converts_div_by_false() { run_str("rational(123, false) . print", "ValueError: Division by zero\n  at: line 1 (<test>)\n\n1 | rational(123, false) . print\n2 |         ^^^^^^^^^^^^\n"); }
     #[test] fn test_rational_converts_int_like() { run_str("rational(false, true) . print", "0 / 1\n"); }
     #[test] fn test_rational_converts_rationals_1() { run_str("rational(rational 1, rational 3) . print", "1 / 3\n"); }
     #[test] fn test_rational_converts_rationals_2() { run_str("rational(rational(3, 5), rational(2, 7)) . print", "21 / 10\n"); }
+    #[test] fn test_rational_parses_integers() { run_str("rational '1234' . print", "1234 / 1\n"); }
+    #[test] fn test_rational_parses_big_integers() { run_str("rational '10000000000000000000000000000000000000000' . print", "10000000000000000000000000000000000000000 / 1\n"); }
+    #[test] fn test_rational_parses_rationals() { run_str("rational '3/5' . print", "3 / 5\n"); }
+    #[test] fn test_rational_parses_big_rationals() { run_str("rational '10000000000000000000000000000000000000000/20000000000000000000000000000000000000000' . print", "1 / 2\n"); }
+    #[test] fn test_rational_parses_zero() { run_str("rational '0/123' . print", "0 / 1\n"); }
+    #[test] fn test_rational_parses_divide_by_zero() { run_str("rational '123/0' . print", "ValueError: Cannot convert '123/0' of type 'str' to an rational: string has zero denominator\n  at: line 1 (<test>)\n\n1 | rational '123/0' . print\n2 |          ^^^^^^^\n"); }
     #[test] fn test_rational_typeof() { run_str("rational(3, 2) . typeof . print ; rational 1 . typeof . print", "rational\nrational\n"); }
+    #[test] fn test_rational_unary_sub() { run_str("print( - rational(1, -3) )", "1 / 3\n"); }
+    #[test] fn test_rational_binary_mul_with_int() { run_str("print( rational(5, 6) * 4 )", "10 / 3\n"); }
+    #[test] fn test_rational_binary_mul_with_rational() { run_str("print( rational(2, 3) * rational(7, 2) )", "7 / 3\n"); }
+    #[test] fn test_rational_binary_div_with_int() { run_str("print( rational(1, 2) / 6 )", "1 / 12\n"); }
+    #[test] fn test_rational_binary_div_with_rational() { run_str("print( rational(2, 3) / rational(7, 2) )", "4 / 21\n"); }
+    #[test] fn test_rational_binary_div_with_rational_zero() { run_str("print( rational(2, 3) / rational(0, 5) )", "ValueError: Division by zero\n  at: line 1 (<test>)\n\n1 | print( rational(2, 3) / rational(0, 5) )\n2 |                       ^\n"); }
+    #[test] fn test_rational_binary_pow_with_int() { run_str("print( rational(2, 3) ** 5 )", "32 / 243\n"); }
+    #[test] fn test_rational_binary_pow_with_bigger_int() { run_str("print( rational(1, 2) ** 20 )", "1 / 1048576\n"); }
+    #[test] fn test_rational_binary_pow_with_even_bigger_int() { run_str("print( rational(10) ** 80 )", "100000000000000000000000000000000000000000000000000000000000000000000000000000000 / 1\n"); }
+    #[test] fn test_rational_binary_pow_with_unreasonably_bigger_int() { run_str("print( rational(1, 2) ** (max int) )", "ValueError: value would be too large!\n  at: line 1 (<test>)\n\n1 | print( rational(1, 2) ** (max int) )\n2 |                       ^^\n"); }
+    #[test] fn test_rational_binary_is() { run_str("[nil, true, 1, 1 + 1i, 1 / 1, 3 / 2] . map(is rational) . print", "[false, true, true, false, true, true]\n"); }
+    #[test] fn test_rational_numer_of_rational() { run_str("print(numer(rational(1, 3)), numer(rational 5), rational(7, 3) . numer)", "1 / 1 5 / 1 7 / 1\n"); }
+    #[test] fn test_rational_numer_of_non_rational() { run_str("print(numer 3, numer false)", "3 / 1 0 / 1\n"); }
+    #[test] fn test_rational_numer_of_non_integer() { run_str("print(numer(1 + 1i))", "TypeError: Expected '1 + 1i' of type 'complex' to be a rational\n  at: line 1 (<test>)\n\n1 | print(numer(1 + 1i))\n2 |            ^^^^^^^^\n"); }
+    #[test] fn test_rational_denom_of_rational() { run_str("[rational 3, rational(1, 6), rational(7, 3)] . map denom . print", "[1 / 1, 6 / 1, 3 / 1]\n"); }
+    #[test] fn test_rational_denom_of_non_rational() { run_str("[rational true, rational 7] . map denom . print", "[1 / 1, 1 / 1]\n"); }
+    #[test] fn test_rational_denom_of_non_integer() { run_str("denom('yes')", "TypeError: Expected 'yes' of type 'str' to be a rational\n  at: line 1 (<test>)\n\n1 | denom('yes')\n2 |      ^^^^^^^\n"); }
+    #[test] fn test_rational_to_int() { run_str("rational(25, 1) . int . print", "25\n"); }
+    #[test] fn test_rational_to_int_of_non_integral() { run_str("rational(7, 3) . int . print", "ValueError: Cannot convert rational ''7 / 3' of type 'rational'' to an integer as it is not an integral value.\n  at: line 1 (<test>)\n\n1 | rational(7, 3) . int . print\n2 |                ^^^^^\n"); }
+    #[test] fn test_rational_to_int_of_too_large() { run_str("rational(10, 1) ** 30 . int . print", "ValueError: Cannot convert rational ''1000000000000000000000000000000 / 1' of type 'rational'' to an integer as it is too large for the target type\n  at: line 1 (<test>)\n\n1 | rational(10, 1) ** 30 . int . print\n2 |                       ^^^^^\n"); }
+    #[test] fn test_rational_to_int_of_fits_in_i64_not_in_i63() { run_str("rational(min int) - 2 . int . print", "ValueError: Cannot convert rational ''-4611686018427387906 / 1' of type 'rational'' to an integer as it is too large for the target type\n  at: line 1 (<test>)\n\n1 | rational(min int) - 2 . int . print\n2 |                       ^^^^^\n"); }
     #[test] fn test_str_empty() { run_str("'' . print", "\n"); }
     #[test] fn test_str_add() { run_str("print(('a' + 'b') + (3 + 4) + (' hello' + 3) + (' and' + true + nil))", "ab7 hello3 andtruenil\n"); }
     #[test] fn test_str_partial_left_add() { run_str("'world ' . (+'hello') . print", "world hello\n"); }
@@ -1772,9 +1802,9 @@ mod tests {
     #[test] fn test_list_slice_47() { run_str("[1, 2, 3, 4][:0] . print", "[]\n"); }
     #[test] fn test_list_slice_48() { run_str("[1, 2, 3, 4][:1] . print", "[1]\n"); }
     #[test] fn test_list_slice_49() { run_str("[1, 2, 3, 4][5:] . print", "[]\n"); }
-    #[test] fn test_list_pop_empty() { run_str("let x = [] , y = x . pop ; (x, y) . print", "ValueError: Expected value to be a non empty iterable\n  at: line 1 (<test>)\n\n1 | let x = [] , y = x . pop ; (x, y) . print\n2 |                    ^^^^^\n"); }
+    #[test] fn test_list_pop_empty() { run_str("let x = [] , y = x . pop ; (x, y) . print", "ValueError: Expected 'pop' argument to be a non-empty iterable\n  at: line 1 (<test>)\n\n1 | let x = [] , y = x . pop ; (x, y) . print\n2 |                    ^^^^^\n"); }
     #[test] fn test_list_pop() { run_str("let x = [1, 2, 3] , y = x . pop ; (x, y) . print", "([1, 2], 3)\n"); }
-    #[test] fn test_list_pop_front_empty() { run_str("let x = [], y = x . pop_front ; (x, y) . print", "ValueError: Expected value to be a non empty iterable\n  at: line 1 (<test>)\n\n1 | let x = [], y = x . pop_front ; (x, y) . print\n2 |                   ^^^^^^^^^^^\n"); }
+    #[test] fn test_list_pop_front_empty() { run_str("let x = [], y = x . pop_front ; (x, y) . print", "ValueError: Expected 'pop_front' argument to be a non-empty iterable\n  at: line 1 (<test>)\n\n1 | let x = [], y = x . pop_front ; (x, y) . print\n2 |                   ^^^^^^^^^^^\n"); }
     #[test] fn test_list_pop_front() { run_str("let x = [1, 2, 3], y = x . pop_front ; (x, y) . print", "([2, 3], 1)\n"); }
     #[test] fn test_list_push() { run_str("let x = [1, 2, 3] ; x . push(4) ; x . print", "[1, 2, 3, 4]\n"); }
     #[test] fn test_list_push_front() { run_str("let x = [1, 2, 3] ; x . push_front(4) ; x . print", "[4, 1, 2, 3]\n"); }
@@ -1821,7 +1851,7 @@ mod tests {
     #[test] fn test_set_literal_unroll_from_dict_implicit() { run_str("{...{(1, 1), (2, 2)}} . print", "{(1, 1), (2, 2)}\n"); }
     #[test] fn test_set_literal_unroll_from_dict_explicit() { run_str("{...{(1, 1), (2, 2)}, 3} . print", "{(1, 1), (2, 2), 3}\n"); }
     #[test] fn test_set_from_str() { run_str("'funny beans' . set . print", "{'f', 'u', 'n', 'y', ' ', 'b', 'e', 'a', 's'}\n"); }
-    #[test] fn test_set_pop_empty() { run_str("let x = set() , y = x . pop ; (x, y) . print", "ValueError: Expected value to be a non empty iterable\n  at: line 1 (<test>)\n\n1 | let x = set() , y = x . pop ; (x, y) . print\n2 |                       ^^^^^\n"); }
+    #[test] fn test_set_pop_empty() { run_str("let x = set() , y = x . pop ; (x, y) . print", "ValueError: Expected 'pop' argument to be a non-empty iterable\n  at: line 1 (<test>)\n\n1 | let x = set() , y = x . pop ; (x, y) . print\n2 |                       ^^^^^\n"); }
     #[test] fn test_set_pop() { run_str("let x = {1, 2, 3} , y = x . pop ; (x, y) . print", "({1, 2}, 3)\n"); }
     #[test] fn test_set_push() { run_str("let x = {1, 2, 3} ; x . push(4) ; x . print", "{1, 2, 3, 4}\n"); }
     #[test] fn test_set_remove_yes() { run_str("let x = {1, 2, 3}, y = x . remove(2) ; (x, y) . print", "({1, 3}, true)\n"); }
@@ -1854,7 +1884,7 @@ mod tests {
     #[test] fn test_dict_get_when_not_present_with_default() { run_str("let d = dict() . default('haha') ; d['hello'] . print", "haha\n"); }
     #[test] fn test_dict_keys() { run_str("[[1, 'a'], [2, 'b'], [3, 'c']] . dict . keys . print", "{1, 2, 3}\n"); }
     #[test] fn test_dict_values() { run_str("[[1, 'a'], [2, 'b'], [3, 'c']] . dict . values . print", "['a', 'b', 'c']\n"); }
-    #[test] fn test_dict_pop_empty() { run_str("let x = dict() , y = x . pop ; (x, y) . print", "ValueError: Expected value to be a non empty iterable\n  at: line 1 (<test>)\n\n1 | let x = dict() , y = x . pop ; (x, y) . print\n2 |                        ^^^^^\n"); }
+    #[test] fn test_dict_pop_empty() { run_str("let x = dict() , y = x . pop ; (x, y) . print", "ValueError: Expected 'pop' argument to be a non-empty iterable\n  at: line 1 (<test>)\n\n1 | let x = dict() , y = x . pop ; (x, y) . print\n2 |                        ^^^^^\n"); }
     #[test] fn test_dict_pop() { run_str("let x = {1: 'a', 2: 'b', 3: 'c'} , y = x . pop ; (x, y) . print", "({1: 'a', 2: 'b'}, (3, 'c'))\n"); }
     #[test] fn test_dict_insert() { run_str("let x = {1: 'a', 2: 'b', 3: 'c'} ; x . insert(4, 'd') ; x . print", "{1: 'a', 2: 'b', 3: 'c', 4: 'd'}\n"); }
     #[test] fn test_dict_remove_yes() { run_str("let x = {1: 'a', 2: 'b', 3: 'c'}, y = x . remove(2) ; (x, y) . print", "({1: 'a', 3: 'c'}, true)\n"); }
@@ -1917,7 +1947,7 @@ mod tests {
     #[test] fn test_reduce_with_function() { run_str("[1, 2, 3, 4, 5, 6] . reduce (fn(a, b) -> a * b) . print", "720\n"); }
     #[test] fn test_reduce_with_unary_operator() { run_str("[1, 2, 3] . reduce (!) . print", "Incorrect number of arguments for fn (!)(x), got 2\n  at: line 1 (<test>)\n\n1 | [1, 2, 3] . reduce (!) . print\n2 |           ^^^^^^^^^^^^\n"); }
     #[test] fn test_reduce_with_sum() { run_str("[1, 2, 3, 4, 5, 6] . reduce (sum) . print", "21\n"); }
-    #[test] fn test_reduce_with_empty() { run_str("[] . reduce(+) . print", "ValueError: Expected value to be a non empty iterable\n  at: line 1 (<test>)\n\n1 | [] . reduce(+) . print\n2 |    ^^^^^^^^^^^\n"); }
+    #[test] fn test_reduce_with_empty() { run_str("[] . reduce(+) . print", "ValueError: Expected 'reduce' argument to be a non-empty iterable\n  at: line 1 (<test>)\n\n1 | [] . reduce(+) . print\n2 |    ^^^^^^^^^^^\n"); }
     #[test] fn test_sorted() { run_str("[6, 2, 3, 7, 2, 1] . sort . print", "[1, 2, 2, 3, 6, 7]\n"); }
     #[test] fn test_sorted_with_set_of_str() { run_str("'funny' . set . sort . print", "['f', 'n', 'u', 'y']\n"); }
     #[test] fn test_sorted_with_int_nil_and_bool() { run_str("[true, 0, nil, -2, false, 0, 2, true, 1, false, -1, nil] . sort . print", "[-2, -1, nil, nil, false, false, 0, 0, true, true, 1, 2]\n"); }
@@ -2062,8 +2092,8 @@ mod tests {
     #[test] fn test_eval_zero_equals_zero() { run_str("'0==0' . eval . print", "true\n"); }
     #[test] fn test_eval_create_new_function() { run_str("eval('fn() { print . print }')()", "print\n"); }
     #[test] fn test_eval_overwrite_function() { run_str("fn foo() {} ; foo = eval('fn() { print . print }') ; foo()", "print\n"); }
-    #[test] fn test_eval_with_runtime_error_in_different_source() { run_str("eval('%sprint + 1' % (' ' * 100))", "TypeError: Cannot add 'print' of type 'native function' and '1' of type 'int'\n  at: line 1 (<eval>)\n  at: `<script>` (line 1)\n\n1 |                                                                                                     print + 1\n2 |                                                                                                           ^\n"); }
-    #[test] fn test_eval_function_with_runtime_error_in_different_source() { run_str("eval('%sfn() -> print + 1' % (' ' * 100))()", "TypeError: Cannot add 'print' of type 'native function' and '1' of type 'int'\n  at: line 1 (<eval>)\n  at: `fn _()` (line 1)\n\n1 |                                                                                                     fn() -> print + 1\n2 |                                                                                                                   ^\n"); }
+    #[test] fn test_eval_with_runtime_error_in_different_source() { run_str("eval('%sprint + 1' % (' ' * 100))", "TypeError: Operator '+' is not supported for arguments of type native function and int\n  at: line 1 (<eval>)\n  at: `<script>` (line 1)\n\n1 |                                                                                                     print + 1\n2 |                                                                                                           ^\n"); }
+    #[test] fn test_eval_function_with_runtime_error_in_different_source() { run_str("eval('%sfn() -> print + 1' % (' ' * 100))()", "TypeError: Operator '+' is not supported for arguments of type native function and int\n  at: line 1 (<eval>)\n  at: `fn _()` (line 1)\n\n1 |                                                                                                     fn() -> print + 1\n2 |                                                                                                                   ^\n"); }
     #[test] fn test_all_yes_all() { run_str("[1, 3, 4, 5] . all(>0) . print", "true\n"); }
     #[test] fn test_all_yes_some() { run_str("[1, 3, 4, 5] . all(>3) . print", "false\n"); }
     #[test] fn test_all_yes_none() { run_str("[1, 3, 4, 5] . all(<0) . print", "false\n"); }

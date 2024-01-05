@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use rug::ops::Pow;
 
 use crate::core;
 use crate::core::NativeFunction;
@@ -113,6 +114,7 @@ pub fn unary_sub(a1: ValuePtr) -> ValueResult {
     match a1.ty() {
         Bool | Int => (-a1.as_int()).to_value().ok(),
         Complex => (-a1.as_complex()).to_value().ok(),
+        Rational => (-a1.as_rational().clone()).to_value().ok(),
         Vector => apply_vector_unary(a1, unary_sub),
         _ => TypeErrorUnaryOp(UnaryOp::Neg, a1).err(),
     }
@@ -137,6 +139,7 @@ pub fn binary_mul(lhs: ValuePtr, rhs: ValuePtr) -> ValueResult {
     match (lhs.ty(), rhs.ty()) {
         (Bool | Int, Bool | Int) => (lhs.as_int() * rhs.as_int()).to_value().ok(),
         (Bool | Int | Complex, Bool | Int | Complex) => (lhs.to_complex() * rhs.to_complex()).to_value().ok(),
+        (Bool | Int | Rational, Bool | Int | Rational) => (lhs.to_rational() * rhs.to_rational()).to_value().ok(),
         (ShortStr | LongStr, Int) => binary_str_repeat(lhs, rhs),
         (Int, ShortStr | LongStr) => binary_str_repeat(rhs, lhs),
         (List, Int) => binary_list_repeat(lhs, rhs, false),
@@ -151,7 +154,7 @@ pub fn binary_mul(lhs: ValuePtr, rhs: ValuePtr) -> ValueResult {
 fn binary_str_repeat(string: ValuePtr, repeat: ValuePtr) -> ValueResult {
     let i = repeat.as_int();
     if i < 0 {
-        ValueErrorValueMustBeNonNegative(i).err()
+        ValueErrorBinaryOpMustNotBeNegative(string, BinaryOp::Mul, i).err()
     } else {
         string.as_str_slice().repeat(i as usize).to_value().ok()
     }
@@ -160,7 +163,7 @@ fn binary_str_repeat(string: ValuePtr, repeat: ValuePtr) -> ValueResult {
 fn binary_list_repeat(list: ValuePtr, repeat: ValuePtr, deep: bool) -> ValueResult {
     let i = repeat.as_int();
     if i < 0 {
-        ValueErrorValueMustBeNonNegative(i).err()
+        ValueErrorBinaryOpMustNotBeNegative(list, if deep { BinaryOp::Pow } else { BinaryOp::Mul }, i).err()
     } else {
         let list = list.as_list().borrow();
         let iter = list.iter()
@@ -178,21 +181,25 @@ fn binary_list_repeat(list: ValuePtr, repeat: ValuePtr, deep: bool) -> ValueResu
 pub fn binary_div(lhs: ValuePtr, rhs: ValuePtr) -> ValueResult {
     match (lhs.ty(), rhs.ty()) {
         (Bool | Int, Bool | Int) => {
-            if rhs.as_int() == 0 {
-                ValueErrorValueMustBeNonZero.err()
-            } else {
-                num_integer::div_floor(lhs.as_int(), rhs.as_int()).to_value().ok()
+            match rhs.as_int() == 0 {
+                true => ValueErrorDivideByZero.err(),
+                false => num_integer::div_floor(lhs.as_int(), rhs.as_int()).to_value().ok()
             }
         },
         (Bool | Int | Complex, Bool | Int | Complex) => {
-            let lhs = lhs.to_complex();
             let rhs = rhs.to_complex();
-            if rhs.norm_sqr() == 0 {
-                ValueErrorValueMustBeNonZero.err()
-            } else {
-                c64_div_floor(lhs, rhs).to_value().ok()
+            match rhs.norm_sqr() == 0 {
+                true => ValueErrorDivideByZero.err(),
+                false => c64_div_floor(lhs.to_complex(), rhs).to_value().ok()
             }
         },
+        (Bool | Int | Rational, Bool | Int | Rational) => {
+            let rhs = rhs.to_rational();
+            match rhs.is_zero() {
+                true => ValueErrorDivideByZero.err(),
+                false => (lhs.to_rational() / rhs).to_value().ok(),
+            }
+        }
         (Vector, Vector) => apply_vector_binary(lhs, rhs, binary_div),
         (Vector, _) => apply_vector_binary_scalar_rhs(lhs, rhs, binary_div),
         (_, Vector) => apply_vector_binary_scalar_lhs(lhs, rhs, binary_div),
@@ -214,19 +221,19 @@ pub fn binary_mod(lhs: ValuePtr, rhs: ValuePtr) -> ValueResult {
     match (lhs.ty(), rhs.ty()) {
         (Bool | Int, Bool | Int) => {
             let rhs = rhs.as_int();
-            if rhs == 0 {
-                ValueErrorValueMustBeNonZero.err()
-            } else {
-                num_integer::mod_floor(lhs.as_int(), rhs).to_value().ok()
+            match rhs == 0 {
+                true => ValueErrorModuloByZero.err(),
+                false => num_integer::mod_floor(lhs.as_int(), rhs).to_value().ok()
             }
         },
         (Complex, Bool | Int) => {
-            let lhs = lhs.as_complex();
             let rhs = rhs.as_int();
-            if rhs == 0 {
-                ValueErrorValueMustBeNonZero.err()
-            } else {
-                ComplexType::new(num_integer::mod_floor(lhs.re, rhs), num_integer::mod_floor(lhs.im, rhs)).to_value().ok()
+            match rhs == 0 {
+                true => ValueErrorModuloByZero.err(),
+                false => {
+                    let lhs = lhs.as_complex();
+                    ComplexType::new(num_integer::mod_floor(lhs.re, rhs), num_integer::mod_floor(lhs.im, rhs)).to_value().ok()
+                }
             }
         }
         (ShortStr | LongStr, _) => core::format_string(lhs.as_str_slice(), rhs),
@@ -241,26 +248,31 @@ pub fn binary_pow(lhs: ValuePtr, rhs: ValuePtr) -> ValueResult {
     match (lhs.ty(), rhs.ty()) {
         (Bool | Int, Bool | Int) => {
             let rhs = rhs.as_int();
-            if rhs >= 0 {
-                lhs.as_int().pow(rhs as u32).to_value().ok()
-            } else {
-                ValueErrorValueMustBeNonNegative(rhs).err()
+            match rhs >= 0 {
+                true => lhs.as_int().pow(rhs as u32).to_value().ok(),
+                false => ValueErrorPowerByNegative(rhs).err()
             }
         },
         (Complex, Bool | Int) => {
             let rhs = rhs.as_int();
-            if rhs >= 0 {
-                lhs.as_complex().powu(rhs as u32).to_value().ok()
-            } else {
-                ValueErrorValueMustBeNonNegative(rhs).err()
+            match rhs >= 0 {
+                true => lhs.as_complex().powu(rhs as u32).to_value().ok(),
+                false => ValueErrorPowerByNegative(rhs).err()
             }
         },
+        (Rational, Bool | Int) => {
+            let lhs = lhs.to_rational();
+            match i32::try_from(rhs.as_int()) {
+                Ok(rhs) => lhs.pow(rhs).to_value().ok(),
+                Err(_) => ValueErrorValueWouldBeTooLarge.err()
+            }
+        }
         (List, Int) => binary_list_repeat(lhs, rhs, true),
         (Int, List) => binary_list_repeat(rhs, lhs, true),
         (Vector, Vector) => apply_vector_binary(lhs, rhs, binary_pow),
         (Vector, _) => apply_vector_binary_scalar_rhs(lhs, rhs, binary_pow),
         (_, Vector) => apply_vector_binary_scalar_lhs(lhs, rhs, binary_pow),
-        _ => TypeErrorBinaryOp(BinaryOp::Mod, lhs, rhs).err()
+        _ => TypeErrorBinaryOp(BinaryOp::Pow, lhs, rhs).err()
     }
 }
 
@@ -273,6 +285,7 @@ pub fn binary_is(lhs: ValuePtr, rhs: ValuePtr, invert: bool) -> ValueResult {
             NativeFunction::Bool => lhs.is_bool(),
             NativeFunction::Int => lhs.is_int(),
             NativeFunction::Complex => lhs.is_complex(),
+            NativeFunction::Rational => lhs.is_rational(),
             NativeFunction::Str => lhs.is_str(),
             NativeFunction::Function => lhs.is_evaluable(),
             NativeFunction::List => lhs.is_list(),
@@ -306,6 +319,7 @@ pub fn binary_add(lhs: ValuePtr, rhs: ValuePtr) -> ValueResult {
     match (lhs.ty(), rhs.ty()) {
         (Bool | Int, Bool | Int) => (lhs.as_int() + rhs.as_int()).to_value().ok(),
         (Bool | Int | Complex, Bool | Int | Complex) => (lhs.to_complex() + rhs.to_complex()).to_value().ok(),
+        (Bool | Int | Rational, Bool | Int | Rational) => (lhs.to_rational() + rhs.to_rational()).to_value().ok(),
         (List, List) => {
             let lhs = lhs.as_list().borrow();
             let rhs = rhs.as_list().borrow();
@@ -327,6 +341,7 @@ pub fn binary_sub(lhs: ValuePtr, rhs: ValuePtr) -> ValueResult {
     match (lhs.ty(), rhs.ty()) {
         (Bool | Int, Bool | Int) => (lhs.as_int() - rhs.as_int()).to_value().ok(),
         (Bool | Int | Complex, Bool | Int | Complex) => (lhs.to_complex() - rhs.to_complex()).to_value().ok(),
+        (Bool | Int | Rational, Bool | Int | Rational) => (lhs.to_rational() - rhs.to_rational()).to_value().ok(),
         (Set, Set) => {
             let lhs = lhs.as_set().borrow();
             let rhs = rhs.as_set().borrow();
@@ -475,7 +490,7 @@ mod test {
         }
 
         for a in -5i64..=-5 {
-            assert_eq!(operator::binary_div(a.to_value(), 0i64.to_value()), RuntimeError::ValueErrorValueMustBeNonZero.err())
+            assert_eq!(operator::binary_div(a.to_value(), 0i64.to_value()), RuntimeError::ValueErrorDivideByZero.err())
         }
     }
 

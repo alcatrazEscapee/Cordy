@@ -22,7 +22,7 @@ use crate::vm::value::number::{Complex, Rational};
 use crate::vm::value::collections::{Dict, DictType, Heap, HeapType, List, ListType, Set, SetType, Vector, VectorType};
 
 pub use crate::vm::value::ptr::{MAX_INT, MIN_INT, ValuePtr};
-pub use crate::vm::value::number::ComplexType;
+pub use crate::vm::value::number::{ComplexType, RationalType};
 pub use crate::vm::value::func::{Closure, Function, PartialFunction, PartialNativeFunction, UpValue};
 pub use crate::vm::value::error::{AnyResult, ErrorPtr, ErrorResult, ValueResult};
 

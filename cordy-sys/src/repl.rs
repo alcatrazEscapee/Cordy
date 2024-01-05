@@ -209,7 +209,7 @@ print(1)
 'stack'.monitor
 ", "\
 >>> print + 1
-TypeError: Cannot add 'print' of type 'native function' and '1' of type 'int'
+TypeError: Operator '+' is not supported for arguments of type native function and int
   at: line 1 (<stdin>)
 
 1 | print + 1
@@ -228,7 +228,7 @@ foo()
 ", "\
 >>> fn foo() -> print + 1
 >>> foo()
-TypeError: Cannot add 'print' of type 'native function' and '1' of type 'int'
+TypeError: Operator '+' is not supported for arguments of type native function and int
   at: line 1 (<stdin>)
   at: `fn foo()` (line 1)
 
