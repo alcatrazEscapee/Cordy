@@ -5,6 +5,7 @@ use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 use std::ptr::NonNull;
+use rug::integer::SmallInteger;
 use rug::rational::SmallRational;
 
 use crate::core::NativeFunction;
@@ -166,6 +167,9 @@ pub(super) fn from_shared<T : Value>(value: Prefix<T>) -> ValuePtr {
 
 impl ValuePtr {
 
+    pub const MIN_INT: i64 = MIN_INT;
+    pub const MAX_INT: i64 = MAX_INT;
+
     pub const fn nil() -> ValuePtr {
         ValuePtr { tag: TAG_NIL }
     }
@@ -324,28 +328,45 @@ impl Default for ValuePtr {
 impl Eq for ValuePtr {}
 impl PartialEq for ValuePtr {
     fn eq(&self, other: &Self) -> bool {
+        let ty: Type = self.ty();
+        let other_ty: Type = other.ty();
+
         macro_rules! eq {
-            ($f:ident) => { self.$f() == other.$f() };
+            ($f:ident) => { other_ty == ty && self.$f() == other.$f() };
         }
 
-        let ty: Type = self.ty();
-        ty == other.ty() && match ty {
+        match ty {
             Type::Nil |
             Type::Bool |
-            Type::Int |
-            Type::NativeFunction => unsafe { self.tag == other.tag },
+            Type::NativeFunction => ty == other_ty && unsafe { self.tag == other.tag },
+
+            Type::Int => match other_ty {
+                Type::Int => unsafe { self.long_tag == other.long_tag },
+                Type::Rational => {
+                    // Rational + Int have some overlap, and need to return equal
+                    &SmallRational::from(self.as_precise_int()) == other.as_rational()
+                },
+                _ => false,
+            }
 
             Type::GetField |
             Type::ShortStr => unsafe { self.long_tag == other.long_tag },
 
             Type::Complex => eq!(as_complex),
-            Type::Rational => eq!(as_rational),
+            Type::Rational => match other_ty {
+                Type::Int => {
+                    // Rational + Int have some overlap, and need to return equal
+                    self.as_rational() == &SmallRational::from(other.as_precise_int())
+                },
+                Type::Rational => self.as_rational() == other.as_rational(),
+                _ => false
+            },
             Type::Range => eq!(as_range),
             Type::Enumerate => eq!(as_enumerate),
             Type::PartialFunction => eq!(as_partial_function),
             Type::PartialNativeFunction => eq!(as_partial_native),
             Type::Slice => eq!(as_slice),
-            Type::LongStr => self.as_prefix::<String>() == other.as_prefix::<String>(),
+            Type::LongStr => ty == other_ty && self.as_prefix::<String>() == other.as_prefix::<String>(),
             Type::List => eq!(as_list),
             Type::Set => eq!(as_set),
             Type::Dict => eq!(as_dict),
@@ -539,13 +560,20 @@ impl Hash for ValuePtr {
         match self.ty() {
             Type::Nil |
             Type::Bool |
-            Type::Int |
-            Type::ShortStr |
             Type::NativeFunction |
             Type::GetField => unsafe { self.tag }.hash(state),
 
+            Type::Int | Type::ShortStr => unsafe { self.long_tag }.hash(state),
+
             Type::Complex => hash!(as_complex),
-            Type::Rational => hash!(as_rational),
+            Type::Rational => {
+                // If rationals are expressible as 64-bit integers, they must hash identical to those
+                let value = self.as_rational();
+                match value.numer().to_i64() {
+                    Some(int) if value.denom() == &SmallInteger::from(0) => (int as u64).hash(state),
+                    _ => value.hash(state),
+                }
+            },
             Type::Enumerate => hash!(as_enumerate),
             Type::PartialFunction => hash!(as_partial_function),
             Type::PartialNativeFunction => hash!(as_partial_native),

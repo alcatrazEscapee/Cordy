@@ -1,7 +1,7 @@
 in h()
 in g()
 in f()
-TypeError: Cannot add 'print' of type 'native function' and '1' of type 'int'
+TypeError: Operator '+' is not supported for arguments of type native function and int
   at: line 6 (runtime_error_with_trace.cor)
   at: `fn f()` (line 11)
   at: `fn g()` (line 16)

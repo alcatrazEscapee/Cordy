@@ -6,7 +6,7 @@ use fxhash::FxBuildHasher;
 use indexmap::{IndexMap, IndexSet};
 
 use crate::trace;
-use crate::vm::{ErrorResult, IntoIterableValue, IntoValue, MAX_INT, MIN_INT, operator, PartialNativeFunction, RuntimeError, Type, ValuePtr, ValueResult, VirtualInterface};
+use crate::vm::{ErrorResult, IntoIterableValue, IntoValue, operator, PartialNativeFunction, RuntimeError, Type, ValuePtr, ValueResult, VirtualInterface};
 use crate::vm::operator::BinaryOp;
 
 pub use crate::core::collections::{get_index, get_slice, set_index, to_index, copy};
@@ -160,6 +160,8 @@ pub enum NativeFunction {
     CountZeros,
     Real,
     Imag,
+    Numer,
+    Denom,
 }
 
 
@@ -418,6 +420,8 @@ const fn load_native_functions() -> [NativeFunctionInfo; NativeFunction::total()
         new(CountZeros, "count_zeros", "x", Arg1),
         new(Real, "real", "x", Arg1),
         new(Imag, "imag", "x", Arg1),
+        new(Numer, "numer", "x", Arg1),
+        new(Denom, "denom", "x", Arg1),
     ]
 }
 
@@ -886,11 +890,11 @@ fn invoke_arg1<VM : VirtualInterface>(f: NativeFunction, a1: ValuePtr, vm: &mut 
         Range => ValuePtr::range(0, a1.as_int_checked()?, 1),
         Enumerate => ValuePtr::enumerate(a1).ok(),
         Min => match a1.is_native() {
-            true if a1.as_native() == Int => MIN_INT.to_value().ok(),
+            true if a1.as_native() == Int => ValuePtr::MIN_INT.to_value().ok(),
             _ => collections::min(a1.to_iter()?),
         },
         Max => match a1.is_native() {
-            true if a1.as_native() == Int => MAX_INT.to_value().ok(),
+            true if a1.as_native() == Int => ValuePtr::MAX_INT.to_value().ok(),
             _ => collections::max(a1.to_iter()?),
         },
         Concat => collections::flat_map(vm, None, a1),
@@ -912,6 +916,8 @@ fn invoke_arg1<VM : VirtualInterface>(f: NativeFunction, a1: ValuePtr, vm: &mut 
         CountZeros => math::count_zeros(a1),
         Real => math::get_real(a1),
         Imag => math::get_imag(a1),
+        Numer => math::get_numer(a1),
+        Denom => math::get_denom(a1),
 
         _ => panic!("core::invoke_arg1() not supported for {:?}", f),
     }

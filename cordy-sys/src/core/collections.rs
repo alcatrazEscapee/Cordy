@@ -6,8 +6,9 @@ use indexmap::{IndexMap, IndexSet};
 use itertools::Itertools;
 
 use crate::util;
-use crate::core::{InvokeArg0, InvokeArg1, InvokeArg2};
+use crate::core::{InvokeArg0, InvokeArg1, InvokeArg2, NativeFunction};
 use crate::vm::{AnyResult, ErrorResult, IntoDictValue, IntoIterableValue, IntoValue, Iterable, RuntimeError, Type, ValuePtr, ValueResult, VirtualInterface};
+use crate::core::NativeFunction::{Combinations, Max, MaxBy, Min, MinBy, Peek, Permutations, Pop, PopFront, Reduce, Zip};
 
 use RuntimeError::{*};
 
@@ -156,7 +157,7 @@ pub fn sum(args: impl Iterator<Item=ValuePtr>) -> ValueResult {
 }
 
 pub fn min(args: impl Iterator<Item=ValuePtr>) -> ValueResult {
-    non_empty(args.min())
+    non_empty(args.min(), Min)
 }
 
 pub fn min_by<VM: VirtualInterface>(vm: &mut VM, by: ValuePtr, args: ValuePtr) -> ValueResult {
@@ -168,7 +169,7 @@ pub fn min_by<VM: VirtualInterface>(vm: &mut VM, by: ValuePtr, args: ValuePtr) -
             let ret = iter.min_by(|a, b|
                 util::catch(&mut err, ||
                     Ok(by.invoke((*a).clone(), (*b).clone(), vm)?.as_int_checked()?.cmp(&0)), Ordering::Equal));
-            util::join(non_empty(ret)?, err)
+            util::join(non_empty(ret, MinBy)?, err)
         },
         Some(1) => {
             let by: InvokeArg1 = InvokeArg1::from(by)?;
@@ -176,7 +177,7 @@ pub fn min_by<VM: VirtualInterface>(vm: &mut VM, by: ValuePtr, args: ValuePtr) -
             let ret = iter.min_by_key(|u|
                 util::catch(&mut err, ||
                     by.invoke((*u).clone(), vm).as_result(), ValuePtr::nil()));
-            util::join(non_empty(ret)?, err)
+            util::join(non_empty(ret, MinBy)?, err)
         },
         Some(_) => TypeErrorArgMustBeCmpOrKeyFunction(by).err(),
         None => TypeErrorArgMustBeFunction(by).err(),
@@ -184,7 +185,7 @@ pub fn min_by<VM: VirtualInterface>(vm: &mut VM, by: ValuePtr, args: ValuePtr) -
 }
 
 pub fn max(args: impl Iterator<Item=ValuePtr>) -> ValueResult {
-    non_empty(args.max())
+    non_empty(args.max(), Max)
 }
 
 pub fn max_by<VM: VirtualInterface>(vm: &mut VM, by: ValuePtr, args: ValuePtr) -> ValueResult {
@@ -196,7 +197,7 @@ pub fn max_by<VM: VirtualInterface>(vm: &mut VM, by: ValuePtr, args: ValuePtr) -
             let ret = iter.max_by(|a, b|
                 util::catch(&mut err, ||
                     Ok(by.invoke((*a).clone(), (*b).clone(), vm)?.as_int_checked()?.cmp(&0)), Ordering::Equal));
-            util::join(non_empty(ret)?, err)
+            util::join(non_empty(ret, MaxBy)?, err)
         },
         Some(1) => {
             let by: InvokeArg1 = InvokeArg1::from(by)?;
@@ -204,7 +205,7 @@ pub fn max_by<VM: VirtualInterface>(vm: &mut VM, by: ValuePtr, args: ValuePtr) -
             let ret = iter.max_by_key(|u|
                 util::catch(&mut err, ||
                     by.invoke((*u).clone(), vm).as_result(), ValuePtr::nil()));
-            util::join(non_empty(ret)?, err)
+            util::join(non_empty(ret, MaxBy)?, err)
         },
         Some(_) => TypeErrorArgMustBeCmpOrKeyFunction(by).err(),
         None => TypeErrorArgMustBeFunction(by).err(),
@@ -248,10 +249,10 @@ pub fn sort_by<VM : VirtualInterface>(vm: &mut VM, by: ValuePtr, args: ValuePtr)
 }
 
 #[inline]
-fn non_empty(it: Option<ValuePtr>) -> ValueResult {
+fn non_empty(it: Option<ValuePtr>, f: NativeFunction) -> ValueResult {
     match it {
         Some(v) => v.ok(),
-        None => ValueErrorValueMustBeNonEmpty.err()
+        None => ValueErrorArgMustBeNonEmpty(f).err()
     }
 }
 
@@ -308,7 +309,7 @@ pub fn reverse(args: impl Iterator<Item=ValuePtr>) -> ValuePtr {
 pub fn permutations(n: ValuePtr, args: ValuePtr) -> ValueResult {
     let n = n.as_int_checked()?;
     if n <= 0 {
-        return ValueErrorValueMustBeNonNegative(n).err();
+        return ValueErrorArgMustBeNonNegativeInt(Permutations).err();
     }
     args.to_iter()?
         .permutations(n as usize)
@@ -320,7 +321,7 @@ pub fn permutations(n: ValuePtr, args: ValuePtr) -> ValueResult {
 pub fn combinations(n: ValuePtr, args: ValuePtr) -> ValueResult {
     let n = n.as_int_checked()?;
     if n <= 0 {
-        return ValueErrorValueMustBeNonNegative(n).err();
+        return ValueErrorArgMustBeNonNegativeInt(Combinations).err();
     }
     args.to_iter()?
         .combinations(n as usize)
@@ -398,7 +399,7 @@ pub fn zip(args: impl Iterator<Item=ValuePtr>) -> ValueResult {
         .map(|v| v.to_iter())
         .collect::<ErrorResult<Vec<Iterable>>>()?;
     if iters.is_empty() {
-        return ValueErrorValueMustBeNonEmpty.err()
+        return ValueErrorArgMustBeNonEmpty(Zip).err()
     }
     let size: usize = iters.iter()
         .map(|u| u.len())
@@ -421,7 +422,7 @@ pub fn reduce<VM: VirtualInterface>(vm: &mut VM, f: ValuePtr, args: ValuePtr) ->
     let mut iter = args.to_iter()?;
     let mut acc: ValuePtr = match iter.next() {
         Some(v) => v,
-        None => return ValueErrorValueMustBeNonEmpty.err()
+        None => return ValueErrorArgMustBeNonEmpty(Reduce).err()
     };
 
     let f: InvokeArg2 = InvokeArg2::from(f)?;
@@ -441,7 +442,7 @@ pub fn peek(target: ValuePtr) -> ValueResult {
         _ => return TypeErrorArgMustBeIterable(target).err(),
     } {
         Some(v) => v.ok(),
-        None => ValueErrorValueMustBeNonEmpty.err(),
+        None => ValueErrorArgMustBeNonEmpty(Peek).err(),
     }
 }
 
@@ -454,14 +455,14 @@ pub fn pop(target: ValuePtr) -> ValueResult {
         _ => return TypeErrorArgMustBeIterable(target).err()
     } {
         Some(v) => v.ok(),
-        None => ValueErrorValueMustBeNonEmpty.err()
+        None => ValueErrorArgMustBeNonEmpty(Pop).err()
     }
 }
 
 pub fn pop_front(target: ValuePtr) -> ValueResult {
     match target.as_list_checked()?.borrow_mut().pop_front() {
         Some(v) => v.ok(),
-        None => ValueErrorValueMustBeNonEmpty.err()
+        None => ValueErrorArgMustBeNonEmpty(PopFront).err()
     }
 }
 

@@ -1,7 +1,7 @@
 use crate::compiler::optimizer::Optimize;
 use crate::compiler::parser::{Expr, ExprType};
 use crate::core::NativeFunction;
-use crate::vm::{ErrorPtr, IntoValue, LiteralType, MAX_INT, MIN_INT, RuntimeError, ValuePtr};
+use crate::vm::{ErrorPtr, IntoValue, LiteralType, RuntimeError, ValuePtr};
 use crate::vm::operator::BinaryOp;
 
 
@@ -83,7 +83,7 @@ impl Optimize for Expr {
                     // This is a special case, for `min(int)` and `max(int)`, we can replace this with a compile time constant
                     Expr(_, ExprType::NativeFunction(native_f @ (NativeFunction::Min | NativeFunction::Max))) if nargs == Some(1) => {
                         if let Expr(_, ExprType::NativeFunction(NativeFunction::Int)) = args[0] {
-                            Expr::int(if native_f == NativeFunction::Min { MIN_INT } else { MAX_INT })
+                            Expr::int(if native_f == NativeFunction::Min { ValuePtr::MIN_INT } else { ValuePtr::MAX_INT })
                         } else {
                             f.eval(loc, args, any_unroll)
                         }

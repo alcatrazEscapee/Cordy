@@ -92,8 +92,6 @@ impl ValuePtr {
 /// `rational` in Cordy is an arbitrary precision, integer rational value. Unlike `complex`, which shares values with `int` and will
 /// convert down to `int`, `rational` will _pollute_ any expressions done in the rationals, and the resultant value must be converted,
 /// either via `int`, `numer`, or `denom`
-///
-/// todo: finalize names for `numer` and `denom`
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct Rational(RationalType);
 
