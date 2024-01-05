@@ -1,7 +1,0 @@
-let a
-for i in 'a' {
-    let b
-    for j in 'b' {
-        break
-    }
-}
