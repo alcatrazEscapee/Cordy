@@ -1,18 +1,7 @@
-=== Scan Tokens ===
-
-KeywordLet
-Identifier("x")
-Equals
-NewLine
-NewLine
-NewLine
-NewLine
-StringLiteral("... this doesn't end\n\nbut it continues...\n\n")
-
-=== Scan Errors ===
+KeywordLet Identifier(x) Equals NewLine NewLine NewLine NewLine StringLiteral('... this doesn\'t end\n\nbut it continues...\n\n')
 
 Unterminated string literal (missing a closing quote)
-  at: line 1 - 4 (unterminated_string_literal.cor)
+  at: line 1 - 4 (<test>)
 
 1 | let x = '... this doesn\'t end
 2 |

@@ -598,74 +598,72 @@ impl<'a> Scanner<'a> {
 
 #[cfg(test)]
 mod tests {
+    use itertools::Itertools;
+
     use crate::compiler::scanner;
-    use crate::compiler::scanner::{ScanResult, ScanToken};
+    use crate::compiler::scanner::ScanToken;
     use crate::reporting::SourceView;
-    use crate::util::Resource;
+    use crate::util;
 
     use ScanToken::{*};
 
-
-    #[test] fn test_empty() { run_str("", vec![]); }
-    #[test] fn test_keywords() { run_str("let fn return if elif else then loop while for in is not break continue do true false nil struct exit assert module self native", vec![KeywordLet, KeywordFn, KeywordReturn, KeywordIf, KeywordElif, KeywordElse, KeywordThen, KeywordLoop, KeywordWhile, KeywordFor, KeywordIn, KeywordIs, KeywordNot, KeywordBreak, KeywordContinue, KeywordDo, KeywordTrue, KeywordFalse, KeywordNil, KeywordStruct, KeywordExit, KeywordAssert, KeywordModule, KeywordSelf, KeywordNative]); }
-    #[test] fn test_identifiers() { run_str("foobar big_bad_wolf ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz", vec![Identifier(String::from("foobar")), Identifier(String::from("big_bad_wolf")), Identifier(String::from("ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz"))]); }
-    #[test] fn test_str_literals() { run_str("'abc' 'a \n 3' '\\''", vec![StringLiteral(String::from("abc")), NewLine, StringLiteral(String::from("a \n 3")), StringLiteral(String::from("'"))]); }
-    #[test] fn test_double_quote_str_literals() { run_str("\"abc\" '\"' \"'\"", vec![StringLiteral(String::from("abc")), StringLiteral(String::from("\"")), StringLiteral(String::from("'"))]); }
-    #[test] fn test_str_escaping() { run_str("'\\.' '\\\\.' '\\n' '\\\\n'", vec![StringLiteral(String::from("\\.")), StringLiteral(String::from("\\.")), StringLiteral(String::from("\n")), StringLiteral(String::from("\\n"))]); }
-    #[test] fn test_ints() { run_str("1234 654 10_00_00 0 1", vec![IntLiteral(1234), IntLiteral(654), IntLiteral(100000), IntLiteral(0), IntLiteral(1)]); }
-    #[test] fn test_binary_ints() { run_str("0b11011011 0b0 0b1 0b1_01", vec![IntLiteral(0b11011011), IntLiteral(0b0), IntLiteral(0b1), IntLiteral(0b101)]); }
-    #[test] fn test_hex_ints() { run_str("0x12345678 0xabcdef90 0xABCDEF 0xF_f", vec![IntLiteral(0x12345678), IntLiteral(0xabcdef90), IntLiteral(0xABCDEF), IntLiteral(0xFF)])}
-    #[test] fn test_complex_ints() { run_str("0i 0j 1i 1j 0b101i 0xfi 123i", vec![IntLiteral(0), IntLiteral(0), ComplexLiteral(1), ComplexLiteral(1), ComplexLiteral(5), ComplexLiteral(0xf), ComplexLiteral(123)]); }
-    #[test] fn test_unary_operators() { run_str("- !", vec![Minus, Not]); }
-    #[test] fn test_comparison_operators() { run_str("> < >= > = <= < =", vec![GreaterThan, LessThan, GreaterThanEquals, GreaterThan, Equals, LessThanEquals, LessThan, Equals]); }
-    #[test] fn test_equality_operators() { run_str("!= ! = == =", vec![NotEquals, Not, Equals, DoubleEquals, Equals]); }
-    #[test] fn test_binary_logical_operators() { run_str("and & or |", vec![LogicalAnd, BitwiseAnd, LogicalOr, BitwiseOr]); }
-    #[test] fn test_arithmetic_operators() { run_str("+ - += -= * = *= / = /=", vec![Plus, Minus, PlusEquals, MinusEquals, Mul, Equals, MulEquals, Div, Equals, DivEquals]); }
-    #[test] fn test_other_arithmetic_operators() { run_str("% %= ** *= **= * *=", vec![Mod, ModEquals, Pow, MulEquals, PowEquals, Mul, MulEquals]); }
-    #[test] fn test_bitwise_operators() { run_str("| ^ & &= |= ^=", vec![BitwiseOr, BitwiseXor, BitwiseAnd, AndEquals, OrEquals, XorEquals]); }
-    #[test] fn test_groupings() { run_str("( [ { } ] )", vec![OpenParen, OpenSquareBracket, OpenBrace, CloseBrace, CloseSquareBracket, CloseParen]); }
-    #[test] fn test_syntax() { run_str(". .. ... .= , -> - > : @", vec![Dot, Dot, Dot, Ellipsis, DotEquals, Comma, Arrow, Minus, GreaterThan, Colon, At]); }
-
-
-    #[test] fn test_hello_world() { run("hello_world"); }
-    #[test] fn test_invalid_character() { run("invalid_character"); }
-    #[test] fn test_invalid_numeric_prefix() { run("invalid_numeric_prefix"); }
-    #[test] fn test_invalid_numeric_value() { run("invalid_numeric_value"); }
-    #[test] fn test_string_with_newlines() { run("string_with_newlines"); }
-    #[test] fn test_unterminated_block_comment() { run("unterminated_block_comment"); }
-    #[test] fn test_unterminated_string_literal() { run("unterminated_string_literal"); }
-
-
-    fn run_str(text: &str, expected: Vec<ScanToken>) {
-        let view: SourceView = SourceView::new(String::new(), String::from(text));
-        let result: ScanResult = scanner::scan(&view);
-        let actual: Vec<ScanToken> = result.tokens
+    fn run(text: &str, expected: &'static str) {
+        let view = SourceView::new(String::from("<test>"), String::from(text));
+        let result = scanner::scan(&view);
+        let mut actual = result.tokens
             .into_iter()
-            .map(|c| c.1)
-            .collect();
+            .map(|(_, t)| match t {
+                StringLiteral(text) => format!("StringLiteral('{}')", text.escape_debug()),
+                Identifier(text) => format!("Identifier({})", text),
+                _ => format!("{:?}", t)
+            })
+            .join(" ");
 
-        assert!(result.errors.is_empty());
-        assert_eq!(expected, actual);
-    }
-
-    fn run(path: &'static str) {
-        let (resource, view) = Resource::new("scanner", path);
-        let result: ScanResult = scanner::scan(&view);
-
-        let mut actual: Vec<String> = Vec::new();
-        if !result.tokens.is_empty() {
-            actual.push(String::from("=== Scan Tokens ===\n"));
-            for token in result.tokens {
-                actual.push(format!("{:?}", token.1));
-            }
-        }
         if !result.errors.is_empty() {
-            actual.push(String::from("\n=== Scan Errors ===\n"));
+            actual.push('\n');
             for error in &result.errors {
-                actual.push(view.format(error))
+                actual.push('\n');
+                actual.push_str(view.format(error).as_str())
             }
         }
-
-        resource.assert_eq(actual);
+        util::assert_eq(actual, expected.replace("\r", ""))
     }
+
+    macro_rules! run {
+        ($path:literal) => {
+            run(
+                include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/test/scanner/", $path, ".cor")),
+                include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/test/scanner/", $path, ".cor.trace"))
+            )
+        };
+    }
+
+    #[test] fn test_empty() { run("", "") }
+    #[test] fn test_keywords() { run("let fn return if elif else then loop while for in is not break continue do true false nil struct exit assert module self native", "KeywordLet KeywordFn KeywordReturn KeywordIf KeywordElif KeywordElse KeywordThen KeywordLoop KeywordWhile KeywordFor KeywordIn KeywordIs KeywordNot KeywordBreak KeywordContinue KeywordDo KeywordTrue KeywordFalse KeywordNil KeywordStruct KeywordExit KeywordAssert KeywordModule KeywordSelf KeywordNative") }
+    #[test] fn test_identifiers() { run("foobar big_bad_wolf ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz", "Identifier(foobar) Identifier(big_bad_wolf) Identifier(ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz)") }
+    #[test] fn test_str_literals_single_quoted() { run("'abc' 'a \n 3' '\\''", "StringLiteral('abc') NewLine StringLiteral('a \\n 3') StringLiteral('\\'')") }
+    #[test] fn test_str_literals_double_quoted() { run("\"abc\" '\"' \"'\"", "StringLiteral('abc') StringLiteral('\\\"') StringLiteral('\\'')") }
+    #[test] fn test_str_literals_escaped_chars() { run("'\\.' '\\\\.' '\\n' '\\\\n'", "StringLiteral('\\\\.') StringLiteral('\\\\.') StringLiteral('\\n') StringLiteral('\\\\n')") }
+    #[test] fn test_ints() { run("1234 654 10_00_00 0 1", "IntLiteral(1234) IntLiteral(654) IntLiteral(100000) IntLiteral(0) IntLiteral(1)") }
+    #[test] fn test_ints_binary() { run("0b11011011 0b0 0b1 0b1_01", "IntLiteral(219) IntLiteral(0) IntLiteral(1) IntLiteral(5)") }
+    #[test] fn test_ints_hex() { run("0x12345678 0xabcdef90 0xABCDEF 0xF_f", "IntLiteral(305419896) IntLiteral(2882400144) IntLiteral(11259375) IntLiteral(255)") }
+    #[test] fn test_ints_complex() { run("0i 0j 1i 1j 0b101i 0xfi 123i", "IntLiteral(0) IntLiteral(0) ComplexLiteral(1) ComplexLiteral(1) ComplexLiteral(5) ComplexLiteral(15) ComplexLiteral(123)"); }
+    #[test] fn test_unary_operators() { run("- !", "Minus Not"); }
+    #[test] fn test_comparison_operators() { run("> < >= > = <= < =", "GreaterThan LessThan GreaterThanEquals GreaterThan Equals LessThanEquals LessThan Equals"); }
+    #[test] fn test_equality_operators() { run("!= ! = == =", "NotEquals Not Equals DoubleEquals Equals"); }
+    #[test] fn test_binary_logical_operators() { run("and & or |", "LogicalAnd BitwiseAnd LogicalOr BitwiseOr"); }
+    #[test] fn test_arithmetic_operators() { run("+ - += -= * = *= / = /=", "Plus Minus PlusEquals MinusEquals Mul Equals MulEquals Div Equals DivEquals"); }
+    #[test] fn test_other_arithmetic_operators() { run("% %= ** *= **= * *=", "Mod ModEquals Pow MulEquals PowEquals Mul MulEquals"); }
+    #[test] fn test_bitwise_operators() { run("| ^ & &= |= ^=", "BitwiseOr BitwiseXor BitwiseAnd AndEquals OrEquals XorEquals"); }
+    #[test] fn test_groupings() { run("( [ { } ] )", "OpenParen OpenSquareBracket OpenBrace CloseBrace CloseSquareBracket CloseParen"); }
+    #[test] fn test_syntax() { run(". .. ... .= , -> - > : @", "Dot Dot Dot Ellipsis DotEquals Comma Arrow Minus GreaterThan Colon At"); }
+    #[test] fn test_hello_world() { run("println('Hello World!')", "Identifier(println) OpenParen StringLiteral('Hello World!') CloseParen") }
+
+
+    #[test] fn test_invalid_character() { run!("invalid_character"); }
+    #[test] fn test_invalid_numeric_prefix() { run!("invalid_numeric_prefix"); }
+    #[test] fn test_invalid_numeric_value() { run!("invalid_numeric_value"); }
+    #[test] fn test_string_with_newlines() { run!("string_with_newlines"); }
+    #[test] fn test_unterminated_block_comment() { run!("unterminated_block_comment"); }
+    #[test] fn test_unterminated_string_literal() { run!("unterminated_string_literal"); }
 }

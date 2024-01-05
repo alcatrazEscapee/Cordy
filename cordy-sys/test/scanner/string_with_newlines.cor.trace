@@ -1,9 +1,1 @@
-=== Scan Tokens ===
-
-NewLine
-NewLine
-NewLine
-NewLine
-NewLine
-NewLine
-StringLiteral("this is a string\n\nthat\n\nhas\n\nnewlines!")
+NewLine NewLine NewLine NewLine NewLine NewLine StringLiteral('this is a string\n\nthat\n\nhas\n\nnewlines!')
