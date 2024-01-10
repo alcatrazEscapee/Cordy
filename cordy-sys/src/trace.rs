@@ -22,10 +22,10 @@ macro_rules! trace_interpreter {
     };
 }
 
-macro_rules! trace_interpreter_stack {
+macro_rules! trace_stack {
     ($($e:expr),+) => {
         {
-            #[cfg(feature = "trace_interpreter_stack")]
+            #[cfg(feature = "trace_stack")]
             {
                 print!("[stack] ");
                 println!($($e),+);
@@ -34,4 +34,4 @@ macro_rules! trace_interpreter_stack {
     };
 }
 
-pub(crate) use {trace_parser, trace_interpreter, trace_interpreter_stack};
+pub(crate) use {trace_parser, trace_interpreter, trace_stack};

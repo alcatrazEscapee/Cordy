@@ -303,7 +303,7 @@ impl<R : BufRead, W : Write, F : FunctionInterface> VirtualMachine<R, W, F> {
                     // [prev values ... function, local0, local1, ... localN, ret_val ]
                     //                            ^frame pointer
                     // So, we pop the return value, truncate the difference between the frame pointer and the top, then push the return value
-                    trace::trace_interpreter_stack!("drop frame {}", self.debug_stack());
+                    trace::trace_stack!("drop frame {}", self.debug_stack());
 
                     let frame: CallFrame = self.call_stack.pop().unwrap(); // Pop the call frame
 
@@ -323,12 +323,12 @@ impl<R : BufRead, W : Write, F : FunctionInterface> VirtualMachine<R, W, F> {
                 PopN(n) => {
                     let len: usize = self.stack.len();
                     self.stack.truncate(len - n as usize);
-                    trace::trace_interpreter_stack!("PopN {}", self.debug_stack());
+                    trace::trace_stack!("PopN {}", self.debug_stack());
                 },
                 Swap => {
                     let len: usize = self.stack.len();
                     self.stack.swap(len - 1, len - 2);
-                    trace::trace_interpreter_stack!("Swap {}", self.debug_stack());
+                    trace::trace_stack!("Swap {}", self.debug_stack());
                 },
 
                 PushLocal(local) => {
@@ -863,7 +863,7 @@ impl<R : BufRead, W : Write, F : FunctionInterface> VirtualMachine<R, W, F> {
     // ===== Debug Methods ===== //
 
     pub fn debug_stack(&self) -> String {
-        format!(": [{}]", self.stack.iter().rev().map(|t| t.as_debug_str()).collect::<Vec<String>>().join(", "))
+        format!(": [{}, ...]", self.stack.iter().rev().take(10).map(|t| t.as_debug_str()).collect::<Vec<String>>().join(", "))
     }
 
     pub fn debug_call_stack(&self) -> String {
@@ -974,32 +974,32 @@ impl <R : BufRead, W : Write, F : FunctionInterface> VirtualInterface for Virtua
 
     /// Peeks at the top element of the stack, or an element `offset` down from the top
     fn peek(&self, offset: usize) -> &ValuePtr {
-        trace::trace_interpreter_stack!("peek({}) -> {}", offset, self.stack[self.stack.len() - 1 - offset].as_debug_str());
+        trace::trace_stack!("peek({}) -> {}", offset, self.stack[self.stack.len() - 1 - offset].as_debug_str());
         let ret = self.stack.get(self.stack.len() - 1 - offset).unwrap();
-        trace::trace_interpreter_stack!("{}", self.debug_stack());
+        trace::trace_stack!("{}", self.debug_stack());
         ret
     }
 
     /// Pops the top of the stack
     fn pop(&mut self) -> ValuePtr {
-        trace::trace_interpreter_stack!("pop() -> {}", self.stack.last().unwrap().as_debug_str());
+        trace::trace_stack!("pop() -> {}", self.stack.last().unwrap().as_debug_str());
         let ret = self.stack.pop().unwrap();
-        trace::trace_interpreter_stack!("{}", self.debug_stack());
+        trace::trace_stack!("{}", self.debug_stack());
         ret
     }
 
     /// Pops the top N values off the stack, in order
     fn popn(&mut self, n: u32) -> Vec<ValuePtr> {
         let ret = splice(&mut self.stack, n).collect();
-        trace::trace_interpreter_stack!("{}", self.debug_stack());
+        trace::trace_stack!("{}", self.debug_stack());
         ret
     }
 
     /// Push a value onto the stack
     fn push(&mut self, value: ValuePtr) {
-        trace::trace_interpreter_stack!("push({})", value.as_debug_str());
+        trace::trace_stack!("push({})", value.as_debug_str());
         self.stack.push(value);
-        trace::trace_interpreter_stack!("{}", self.debug_stack());
+        trace::trace_stack!("{}", self.debug_stack());
     }
 }
 
