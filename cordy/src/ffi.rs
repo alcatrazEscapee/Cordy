@@ -281,13 +281,13 @@ mod tests {
     #[test] fn test_ffi_partial_sums_empty_list() { run_ffi(partial_sums, vec![VecDeque::new().to_value()], vec![].to_value()) }
     #[test] fn test_ffi_partial_sums_some() { run_ffi(partial_sums, vec![vec![10_i64.to_value(), 25_i64.to_value(), 3_i64.to_value()].to_value()], vec![10_i64.to_value(), 35_i64.to_value(), 38_i64.to_value()].to_value()) }
 
-    #[test] fn test_err_add2_too_few_args() { run_err(add2, vec![], "OsError: n == 2\n  at: line 11 (external: src/main.c)") }
-    #[test] fn test_err_add2_first_arg_not_int() { run_err(add2, vec![ValuePtr::nil(), 456_i64.to_value()], "OsError: args[0].ty == TY_INT\n  at: line 12 (external: src/main.c)") }
-    #[test] fn test_err_add2_second_arg_not_int() { run_err(add2, vec![123_i64.to_value(), false.to_value()], "OsError: args[1].ty == TY_INT\n  at: line 14 (external: src/main.c)") }
-    #[test] fn test_err_is_nil_too_few_args() { run_err(is_nil, vec![], "OsError: n == 1\n  at: line 19 (external: src/main.c)") }
-    #[test] fn test_err_partial_sums_no_args() { run_err(partial_sums, vec![], "OsError: n == 1\n  at: line 48 (external: src/main.c)") }
-    #[test] fn test_err_partial_sums_not_a_vector() { run_err(partial_sums, vec![123_i64.to_value()], "OsError: args[0].ty == TY_ARRAY\n  at: line 49 (external: src/main.c)") }
-    #[test] fn test_err_partial_sums_vector_contains_bool() { run_err(partial_sums, vec![vec![10_i64.to_value(), true.to_value()].to_value()], "OsError: vec.ptr[i].ty == TY_INT\n  at: line 55 (external: src/main.c)") }
+    #[test] fn test_err_add2_too_few_args() { run_err(add2, vec![], "OSError: n == 2\n  at: line 11 (external: src/main.c)") }
+    #[test] fn test_err_add2_first_arg_not_int() { run_err(add2, vec![ValuePtr::nil(), 456_i64.to_value()], "OSError: args[0].ty == TY_INT\n  at: line 12 (external: src/main.c)") }
+    #[test] fn test_err_add2_second_arg_not_int() { run_err(add2, vec![123_i64.to_value(), false.to_value()], "OSError: args[1].ty == TY_INT\n  at: line 14 (external: src/main.c)") }
+    #[test] fn test_err_is_nil_too_few_args() { run_err(is_nil, vec![], "OSError: n == 1\n  at: line 19 (external: src/main.c)") }
+    #[test] fn test_err_partial_sums_no_args() { run_err(partial_sums, vec![], "OSError: n == 1\n  at: line 48 (external: src/main.c)") }
+    #[test] fn test_err_partial_sums_not_a_vector() { run_err(partial_sums, vec![123_i64.to_value()], "OSError: args[0].ty == TY_ARRAY\n  at: line 49 (external: src/main.c)") }
+    #[test] fn test_err_partial_sums_vector_contains_bool() { run_err(partial_sums, vec![vec![10_i64.to_value(), true.to_value()].to_value()], "OSError: vec.ptr[i].ty == TY_INT\n  at: line 55 (external: src/main.c)") }
 
 
     fn run_ffi(f: ExternFunc, args: Vec<ValuePtr>, expected: ValuePtr) {

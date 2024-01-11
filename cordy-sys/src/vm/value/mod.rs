@@ -12,7 +12,7 @@ use range::Enumerate;
 use crate::compiler::Fields;
 use crate::core;
 use crate::core::NativeFunction;
-use crate::util::impl_partial_ord;
+use crate::util::{if_cfg, impl_partial_ord};
 use crate::vm::error::RuntimeError;
 use crate::vm::value::ptr::{RefMut, Prefix};
 use crate::vm::value::str::IterStr;
@@ -225,7 +225,11 @@ impl ValuePtr {
             Type::Bool => Cow::from(if self.is_true() { "true" } else { "false" }),
             Type::Int => Cow::from(self.as_int().to_string()),
             Type::Complex => Complex::to_repr_str(self.as_complex()),
-            Type::Rational => Rational::to_repr_str(&self.as_rational()),
+            Type::Rational => if_cfg!(
+                "rational",
+                Rational::to_repr_str(&self.as_rational()),
+                Cow::from("")
+            ),
             Type::ShortStr | Type::LongStr => {
                 let escaped = format!("{:?}", self.as_str_slice());
                 Cow::from(format!("'{}'", &escaped[1..escaped.len() - 1]))

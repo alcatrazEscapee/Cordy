@@ -7,6 +7,6 @@
     crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-    cordy-sys = { path = "../cordy-sys" }
+    cordy-sys = { path = "../cordy-sys", default-features = false }
     wasm-bindgen = "0.2.84"
     console_error_panic_hook = "0.1.7"

@@ -1,8 +1,11 @@
 use num_integer::Roots;
-use rug::integer::SmallInteger;
-use rug::{Complete, Rational};
 
-use crate::vm::{ComplexType, IntoValue, operator, RationalType, RuntimeError, Type, ValuePtr, ValueResult};
+#[cfg(feature = "rational")] use rug::integer::SmallInteger;
+#[cfg(feature = "rational")] use rug::{Complete, Rational};
+
+#[cfg(feature = "rational")] use crate::vm::RationalType;
+
+use crate::vm::{ComplexType, IntoValue, operator, RuntimeError, Type, ValuePtr, ValueResult};
 use crate::core::NativeFunction::{Gcd, Lcm};
 
 use RuntimeError::{*};
@@ -20,6 +23,7 @@ pub fn convert_to_int(target: ValuePtr, default: Option<ValuePtr>) -> ValueResul
                 None => ValueErrorCannotConvertStringToIntBadParse(target, err.to_string()).err(),
             },
         },
+        #[cfg(feature = "rational")]
         Type::Rational => match target.as_rational().denom() == &SmallInteger::from(1) {
             true => match target.as_rational().numer().to_i64() {
                 Some(value) if ValuePtr::MIN_INT <= value && value <= ValuePtr::MAX_INT => value.to_value().ok(),
@@ -31,6 +35,7 @@ pub fn convert_to_int(target: ValuePtr, default: Option<ValuePtr>) -> ValueResul
     }
 }
 
+#[cfg(feature = "rational")]
 pub fn convert_to_rational(numer: ValuePtr, denom: Option<ValuePtr>) -> ValueResult {
     match numer.ty() {
         Type::Bool | Type::Int | Type::Rational => match denom {
@@ -59,6 +64,7 @@ pub fn abs(value: ValuePtr) -> ValueResult {
             let c = value.as_complex();
             ComplexType::new(c.re.abs(), c.im.abs()).to_value().ok()
         },
+        #[cfg(feature = "rational")]
         Type::Rational => value.as_rational().clone().abs().to_value().ok(),
         Type::Vector => {
             operator::apply_vector_unary(value, abs)
@@ -77,6 +83,7 @@ pub fn sqrt(value: ValuePtr) -> ValueResult {
                 false => n.sqrt().to_value().ok()
             }
         },
+        #[cfg(feature = "rational")]
         Type::Rational => {
             let n = value.as_rational();
             match n.is_negative() {
@@ -142,6 +149,7 @@ pub fn get_imag(value: ValuePtr) -> ValueResult {
     }
 }
 
+#[cfg(feature = "rational")]
 pub fn get_numer(value: ValuePtr) -> ValueResult {
     match value.ty() {
         Type::Bool | Type::Int | Type::Rational => RationalType::from(value.to_rational().numer()).to_value().ok(),
@@ -149,6 +157,7 @@ pub fn get_numer(value: ValuePtr) -> ValueResult {
     }
 }
 
+#[cfg(feature = "rational")]
 pub fn get_denom(value: ValuePtr) -> ValueResult {
     match value.ty() {
         Type::Bool | Type::Int | Type::Rational => RationalType::from(value.to_rational().denom()).to_value().ok(),
