@@ -694,7 +694,7 @@ impl<R : BufRead, W : Write, F : FunctionInterface> VirtualMachine<R, W, F> {
         self.pop().ok()
     }
 
-    /// Invokes the action of an `OpFuncEval(nargs)` opcode.
+    /// # Function Calling
     ///
     /// The stack must be setup as `[..., f, arg1, arg2, ... argN ]`, where `f` is the function to be invoked with arguments `arg1, arg2, ... argN`.
     /// The arguments and function will be popped and the return value will be left on the top of the stack.

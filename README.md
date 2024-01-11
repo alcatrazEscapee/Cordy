@@ -85,19 +85,24 @@ This project requires a rust nightly toolchain due to use of two unstable featur
 - `try_trait_v2` : Used for the implementation of `?` for `ValueResult`, and is fairly critical to code clarity and avoiding overhead of `Result<ValuePtr, ErrorPtr>`
 - `variant_count` : Used for the automatic implementation of `NativeFunction::total()`, rather than supplying a constant.
 
-The `gmp-mpfr-sys` crate requires the `GMP` library, built from source. This requires [additional setup (Windows)](https://docs.rs/gmp-mpfr-sys/1.6.1/gmp_mpfr_sys/index.html#building-on-windows), and also seems to require a `nightly-gnu` toolchain (as opposed to the default `msvc`):
+Cordy has several optional features, which provide functionality, debugging, or verification:
+
+- (Default) `rational`: This enables usage of the `rational`, `imag`, and `numer` native functions, and the creation and usage of `rational` values in Cordy.
+
+This feature requires the `rug` and `gmp-mpfr-sys` crates, which rely on the `GMP` library, built from source. This, notably, cannot be cross-compiled to WASM, and requires [additional setup (Windows)](https://docs.rs/gmp-mpfr-sys/1.6.1/gmp_mpfr_sys/index.html#building-on-windows). It also requires a `nightly-gnu` toolchain (as opposed to the default `msvc` on Windows):
 
 ```bash
 $ rustup install nightly-gnu
 $ rustup default nightly-gnu
 ```
 
-Debug features can be enabled, which provide trace output, primarily intended for use during debugging tests:
+Attempting to use any of the above functions on a version of Cordy built without this feature will raise a `PlatformError`. 
+
+Debug features can be available, which provide trace output, primarily intended for use during debugging tests:
 
 - `trace_parser` traces the parser execution, logging tokens accepted, pushed, and rules entered.
 - `trace_interpreter` traces the virtual machine execution, logging instructions, and key events such as function invocations.
-- `trace_interpreter_stack` traces the virtual machine's stack, including a full view of the stack after every `pop` and `push`.
-  - Note that this will cause some tests to fail due to excessive output, only use on small, targeted tests.
+- `trace_stack` traces the virtual machine's stack after every `pop` and `push`.
 
 Verification features can be enabled to run a much wider suite of possible test cases:
 

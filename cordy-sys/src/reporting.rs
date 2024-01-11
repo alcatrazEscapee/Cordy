@@ -302,8 +302,9 @@ impl AsError for RuntimeError {
             IncorrectArgumentsStruct(s, n) => format!("Incorrect number of arguments for {}, got {}", s, n),
 
             IOError(e) => format!("IOError: {}", e),
-            OSError(e) => format!("OsError: {}", e),
+            OSError(e) => format!("OSError: {}", e),
             MonitorError(e) => format!("MonitorError: Illegal monitor command '{}'", e),
+            RationalNotImplementedError => String::from("PlatformError: Rationals are not implemented on this platform"),
 
             ValueErrorIndexOutOfBounds(i, ln) => format!("Index '{}' is out of bounds for list of length [0, {})", i, ln),
             ValueErrorStepCannotBeZero => String::from("ValueError: 'step' argument cannot be zero"),

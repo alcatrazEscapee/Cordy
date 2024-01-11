@@ -22,6 +22,7 @@ pub enum RuntimeError {
     OSError(String),
     IOError(String),
     MonitorError(String),
+    RationalNotImplementedError,
 
     ValueErrorIndexOutOfBounds(i64, usize),
     ValueErrorStepCannotBeZero,

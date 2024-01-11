@@ -8,6 +8,7 @@ use indexmap::{IndexMap, IndexSet};
 use crate::trace;
 use crate::vm::{ErrorResult, IntoIterableValue, IntoValue, operator, PartialNativeFunction, RuntimeError, Type, ValuePtr, ValueResult, VirtualInterface};
 use crate::vm::operator::BinaryOp;
+use crate::util::if_cfg;
 
 pub use crate::core::collections::{get_index, get_slice, set_index, to_index, copy};
 pub use crate::core::strings::format_string;
@@ -862,7 +863,11 @@ fn invoke_arg1<VM : VirtualInterface>(f: NativeFunction, a1: ValuePtr, vm: &mut 
         Bool => a1.to_bool().to_value().ok(),
         Int => math::convert_to_int(a1, None),
         Str => a1.to_str().to_value().ok(),
-        Rational => math::convert_to_rational(a1, None),
+        Rational => if_cfg!(
+            "rational",
+            math::convert_to_rational(a1, None),
+            RationalNotImplementedError.err()
+        ),
         Vector => if a1.is_complex() {  // Handle `a + bi . vector` as a special case here, along with all integral types
             let it = a1.to_complex(); // Must call `to_complex()` to handle `bool`, `int`
             (it.re.to_value(), it.im.to_value()).to_value().ok()
@@ -916,8 +921,16 @@ fn invoke_arg1<VM : VirtualInterface>(f: NativeFunction, a1: ValuePtr, vm: &mut 
         CountZeros => math::count_zeros(a1),
         Real => math::get_real(a1),
         Imag => math::get_imag(a1),
-        Numer => math::get_numer(a1),
-        Denom => math::get_denom(a1),
+        Numer => if_cfg!(
+            "rational",
+            math::get_numer(a1),
+            RationalNotImplementedError.err()
+        ),
+        Denom => if_cfg!(
+            "rational",
+            math::get_denom(a1),
+            RationalNotImplementedError.err()
+        ),
 
         _ => panic!("core::invoke_arg1() not supported for {:?}", f),
     }
@@ -930,8 +943,11 @@ fn invoke_arg2<VM : VirtualInterface>(f: NativeFunction, a1: ValuePtr, a2: Value
             Err(err) => IOError(err.to_string()).err(),
         },
         Int => math::convert_to_int(a1, Some(a2)),
-        Rational => math::convert_to_rational(a1, Some(a2)),
-
+        Rational => if_cfg!(
+            "rational",
+            math::convert_to_rational(a1, Some(a2)),
+            RationalNotImplementedError.err()
+        ),
         OperatorSub => operator::binary_sub(a1, a2),
         OperatorMul => operator::binary_mul(a1, a2),
         OperatorDiv => operator::binary_div(a1, a2),

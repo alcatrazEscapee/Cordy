@@ -1,5 +1,6 @@
 use std::collections::VecDeque;
-use rug::ops::Pow;
+
+#[cfg(feature = "rational")] use rug::ops::Pow;
 
 use crate::core;
 use crate::core::NativeFunction;
@@ -114,6 +115,7 @@ pub fn unary_sub(a1: ValuePtr) -> ValueResult {
     match a1.ty() {
         Bool | Int => (-a1.as_int()).to_value().ok(),
         Complex => (-a1.as_complex()).to_value().ok(),
+        #[cfg(feature = "rational")]
         Rational => (-a1.as_rational().clone()).to_value().ok(),
         Vector => apply_vector_unary(a1, unary_sub),
         _ => TypeErrorUnaryOp(UnaryOp::Neg, a1).err(),
@@ -139,6 +141,7 @@ pub fn binary_mul(lhs: ValuePtr, rhs: ValuePtr) -> ValueResult {
     match (lhs.ty(), rhs.ty()) {
         (Bool | Int, Bool | Int) => (lhs.as_int() * rhs.as_int()).to_value().ok(),
         (Bool | Int | Complex, Bool | Int | Complex) => (lhs.to_complex() * rhs.to_complex()).to_value().ok(),
+        #[cfg(feature = "rational")]
         (Bool | Int | Rational, Bool | Int | Rational) => (lhs.to_rational() * rhs.to_rational()).to_value().ok(),
         (ShortStr | LongStr, Int) => binary_str_repeat(lhs, rhs),
         (Int, ShortStr | LongStr) => binary_str_repeat(rhs, lhs),
@@ -193,6 +196,7 @@ pub fn binary_div(lhs: ValuePtr, rhs: ValuePtr) -> ValueResult {
                 false => c64_div_floor(lhs.to_complex(), rhs).to_value().ok()
             }
         },
+        #[cfg(feature = "rational")]
         (Bool | Int | Rational, Bool | Int | Rational) => {
             let rhs = rhs.to_rational();
             match rhs.is_zero() {
@@ -260,6 +264,7 @@ pub fn binary_pow(lhs: ValuePtr, rhs: ValuePtr) -> ValueResult {
                 false => ValueErrorPowerByNegative(rhs).err()
             }
         },
+        #[cfg(feature = "rational")]
         (Rational, Bool | Int) => {
             let lhs = lhs.to_rational();
             match i32::try_from(rhs.as_int()) {
@@ -319,6 +324,7 @@ pub fn binary_add(lhs: ValuePtr, rhs: ValuePtr) -> ValueResult {
     match (lhs.ty(), rhs.ty()) {
         (Bool | Int, Bool | Int) => (lhs.as_int() + rhs.as_int()).to_value().ok(),
         (Bool | Int | Complex, Bool | Int | Complex) => (lhs.to_complex() + rhs.to_complex()).to_value().ok(),
+        #[cfg(feature = "rational")]
         (Bool | Int | Rational, Bool | Int | Rational) => (lhs.to_rational() + rhs.to_rational()).to_value().ok(),
         (List, List) => {
             let lhs = lhs.as_list().borrow();
@@ -341,6 +347,7 @@ pub fn binary_sub(lhs: ValuePtr, rhs: ValuePtr) -> ValueResult {
     match (lhs.ty(), rhs.ty()) {
         (Bool | Int, Bool | Int) => (lhs.as_int() - rhs.as_int()).to_value().ok(),
         (Bool | Int | Complex, Bool | Int | Complex) => (lhs.to_complex() - rhs.to_complex()).to_value().ok(),
+        #[cfg(feature = "rational")]
         (Bool | Int | Rational, Bool | Int | Rational) => (lhs.to_rational() - rhs.to_rational()).to_value().ok(),
         (Set, Set) => {
             let lhs = lhs.as_set().borrow();

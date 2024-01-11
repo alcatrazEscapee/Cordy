@@ -4,6 +4,9 @@
     edition = "2021"
 
 [features]
+    default = ["rational"]
+    rational = ["dep:rug", "dep:gmp-mpfr-sys"]
+
     trace_parser = []
     trace_interpreter = []
     trace_stack = []
@@ -13,8 +16,8 @@
 [dependencies]
     num-integer = "0.1.45"
     num-complex = "0.4.3"
-    rug = { version = "1.22.0", default-features = false, features = ["rational"] }
-    gmp-mpfr-sys = { version = "1.6.1", default-features = false, features = [] }
+    rug = { version = "1.22.0", default-features = false, features = ["rational"], optional = true }
+    gmp-mpfr-sys = { version = "1.6.1", default-features = false, features = [], optional = true }
     itertools = "0.10.5"  # Criterion already depends on 0.10, and avoiding duplicate dependencies > bumping to >0.10
     indexmap = "2.0.0"
     fancy-regex = "0.11.0"

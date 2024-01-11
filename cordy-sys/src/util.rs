@@ -84,7 +84,22 @@ macro_rules! impl_deref {
     };
 }
 
-pub(crate) use {impl_partial_ord, impl_deref};
+macro_rules! if_cfg {
+    ($feature:literal, $if_true:expr, $if_false:expr) => {
+        {
+            #[cfg(feature = $feature)]
+            {
+                $if_true
+            }
+            #[cfg(not(feature = $feature))]
+            {
+                $if_false
+            }
+        }
+    };
+}
+
+pub(crate) use {impl_partial_ord, impl_deref, if_cfg};
 
 
 pub struct Noop;

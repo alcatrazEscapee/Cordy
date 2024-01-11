@@ -6,7 +6,9 @@ use crate::vm::value::ptr::Prefix;
 
 
 pub type ComplexType = num_complex::Complex<i64>;
-pub type RationalType = rug::Rational;
+
+#[cfg(feature = "rational")] pub type RationalType = rug::Rational;
+#[cfg(not(feature = "rational"))] pub type RationalType = ();
 
 
 
@@ -95,6 +97,7 @@ impl ValuePtr {
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct Rational(RationalType);
 
+#[cfg(feature = "rational")]
 impl Rational {
     const fn new(rational: RationalType) -> Rational {
         Rational(rational)
@@ -108,6 +111,7 @@ impl Rational {
 impl Value for Rational {}
 impl ConstValue for Rational {}
 
+#[cfg(feature = "rational")]
 impl_into!(RationalType, self, Rational::new(self).to_value());
 impl_into!(Rational, self, ptr::from_shared(Prefix::new(Type::Rational, self)));
 
@@ -125,6 +129,7 @@ impl ValuePtr {
     /// If the current type is real int-like, then automatically converts it to a rational number.
     ///
     /// **N.B.** The caller is responsible for first checking that this value is able to convert to a `rational`
+    #[cfg(feature = "rational")]
     pub fn to_rational(self) -> RationalType {
         debug_assert!(self.ty() == Type::Bool || self.ty() == Type::Int || self.ty() == Type::Rational);
         match self.ty() {

@@ -5,8 +5,9 @@ use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 use std::ptr::NonNull;
-use rug::integer::SmallInteger;
-use rug::rational::SmallRational;
+
+#[cfg(feature = "rational")] use rug::integer::SmallInteger;
+#[cfg(feature = "rational")] use rug::rational::SmallRational;
 
 use crate::core::NativeFunction;
 use crate::util::impl_partial_ord;
@@ -342,6 +343,7 @@ impl PartialEq for ValuePtr {
 
             Type::Int => match other_ty {
                 Type::Int => unsafe { self.long_tag == other.long_tag },
+                #[cfg(feature = "rational")]
                 Type::Rational => {
                     // Rational + Int have some overlap, and need to return equal
                     &SmallRational::from(self.as_precise_int()) == other.as_rational()
@@ -353,6 +355,7 @@ impl PartialEq for ValuePtr {
             Type::ShortStr => unsafe { self.long_tag == other.long_tag },
 
             Type::Complex => eq!(as_complex),
+            #[cfg(feature = "rational")]
             Type::Rational => match other_ty {
                 Type::Int => {
                     // Rational + Int have some overlap, and need to return equal
@@ -379,7 +382,7 @@ impl PartialEq for ValuePtr {
             Type::Closure => eq!(as_closure),
             Type::Error => eq!(as_err),
 
-            Type::Iter | Type::Never => false,
+            _ => false,
         }
     }
 }
@@ -427,6 +430,7 @@ impl Ord for ValuePtr {
                         // as it will never be equal to zero
                         0.cmp(&other.as_complex().im)
                     },
+                    #[cfg(feature = "rational")]
                     Type::Rational => {
                         // Comparing rational vs. non-rational integral, so compare the equivalent rational values
                         // Note that we cannot enforce any order on rationals that equal their integral counterparts, as we would
@@ -566,6 +570,7 @@ impl Hash for ValuePtr {
             Type::Int | Type::ShortStr => unsafe { self.long_tag }.hash(state),
 
             Type::Complex => hash!(as_complex),
+            #[cfg(feature = "rational")]
             Type::Rational => {
                 // If rationals are expressible as 64-bit integers, they must hash identical to those
                 let value = self.as_rational();
@@ -591,7 +596,7 @@ impl Hash for ValuePtr {
             Type::Function => hash!(as_function),
             Type::Closure => hash!(as_closure),
 
-            Type::Iter | Type::Error | Type::Never => {},
+            _ => {},
         }
     }
 }
