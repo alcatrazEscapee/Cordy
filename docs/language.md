@@ -113,9 +113,14 @@ Operators in Cordy are similar to procedural languages, with all operators being
 - `&`, `|`, and `^` are bitwise AND, OR, and XOR, respectively. `<<` and `>>` are bitwise arithmetic left and right shifts.
   - Shifts of negative values are shifts in reverse, so `(a << b) == (a >> (-b))` for all a, b.
 - `!` computes a logical not of boolean inputs, or a bitwise not of integer inputs.
-- `and` and `or` are short-circuiting, logical operators.
+  - `not` is a logical operator, which coerces arguments to `bool`, and then performs a logical not.
+- `and` and `or` are short-circuiting, `bool`-coercing, logical operators.
 - `<`, `>`, `>=`, `<=`, `==`, and `!=`: Comparison operators.
-  - Every value in Cordy can be compared for equality or ordering. However, objects of different type will always order as equal.
+  - For `nil`, `bool`, and `int`, the following inequalities hold: `/* negative integers */ < nil < false < 0 < true < 1 < /* positive integers */`
+  - For `complex`, they are ordered first by imaginary, then by real component. So `a - bi < /* any integers */ < a + bi`
+  - For `rational`, they are ordered with integers. So `1 / 1 == 1 < 1 / 2 < 2 / 1 == 2`
+  - Most collection types are compared elementwise and respect a lexicographical ordering.
+  - Objects of two different types are not ordered.
   - Chained comparison operators behave intuitively like in Python: `a < b < c` is equivalent to `(a < b) and (b < c)` (without evaluating `b` twice).
 - `if condition then value_if_true else value_if_false` is a short-circuiting ternary operator.
   - This can also be chained with `elif` in place of `else if`, i.e. `if condition1 then value1 elif condition2 then value2 else value3`
@@ -133,7 +138,7 @@ All operators are left associative (except `=` for assigning variables). Their p
 | Precedence | Operators                                                                                      | Description                                                                            |
 |------------|------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------|
 | 1          | `[]`, `()`, `if then else`                                                                     | Array Access, Function Evaluation, Ternary `if`                                        |
-| 2          | `-`, `!`, `~`, `->`                                                                            | Unary Negation, Logical Not, Bitwise Not, Struct Access                                |
+| 2          | `-`, `!`, `not`, `->`                                                                          | Unary Negation, Bitwise Not, Logical Not, Struct Access                                |
 | 3          | `*`, `/`, `%`, `**`, `is`, `is not`, `in`, `not in`                                            | Multiplication, Division, Modulo, Power, Is, Is Not, In, Not In                        |
 | 4          | `+`, `-`                                                                                       | Addition, Subtraction                                                                  |
 | 5          | `<<`, `>>`                                                                                     | Left Shift, Right Shift                                                                |
