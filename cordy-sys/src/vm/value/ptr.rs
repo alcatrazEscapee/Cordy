@@ -405,9 +405,6 @@ impl Ord for ValuePtr {
             // => negative integers < nil < false < 0 < true < 1 < positive integers
             //
             // Note that `nil` is special in this case, and *does* coerce to `0`
-            //
-            // Complex numbers compare with their real component first, then their imaginary part
-            // Note that complex numbers will always have im != 0, and thus don't need to additionally order by the type
             Type::Nil | Type::Bool | Type::Int => {
                 let lhs = match ty {
                     Type::Nil => 0,
