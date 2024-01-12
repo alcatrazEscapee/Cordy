@@ -1,0 +1,13 @@
+L1: 0000 InitGlobal
+    0001 Function(fn bomb(p) -> L[7, 12])
+L3: 0002 InitGlobal
+    0003 Nil
+    0004 Pop
+    0005 Pop
+    0006 Exit
+L1: 0007 PushLocal(0) -> p
+    0008 JumpIfFalsePop(11)
+    0009 PushGlobal(1)
+    0010 Jump(12)
+    0011 Nil
+    0012 Return

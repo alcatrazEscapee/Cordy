@@ -288,10 +288,16 @@ impl Block {
     }
 
     fn insert(&mut self, id: usize, loc: Location, opcode: Opcode) {
-        let code_id = self.code.iter()
-            .position(|(i, _, _)| i == &id)
-            .expect("OpcodeId referencing code that does not exist");
-        self.code.insert(code_id, (self.code.len(), loc, opcode));
+        match self.code.iter().position(|(i, _, _)| i == &id) {
+            // The target `OpcodeId` was found, so insert immediately after, and shift all opcodes to the right
+            Some(code_id) => self.code.insert(code_id, (self.code.len(), loc, opcode)),
+            // The target `OpcodeId` was not found, which means this was an empty block
+            // Just push into the empty block
+            None => {
+                debug_assert!(self.code.is_empty()); // This should always be true, if we cannot find a matching `OpcodeId`
+                self.code.push((0, loc, opcode))
+            }
+        }
     }
 
     fn end(&mut self, end: BlockEnd) {

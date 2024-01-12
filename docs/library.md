@@ -113,7 +113,7 @@ true
 false
 ```
 
-#### Complex
+#### Complex `complex`
 
 The keyword `complex` can be used in an `is` expression, to check if a value is of the type `complex` Note that due to subtype relationships, `bool` and `int` values are also considered to be `is complex`.
 
@@ -960,7 +960,7 @@ Computes a (non-symmetric) difference of `this` and `other`, mutating `this`. Th
 
 #### Counter `<T> counter(it: iterable<T>) -> dict<T, int>`
 
-Consumes the provided iterable in O(n) time, and produces a dictionary of elements of that iterable, to their number of occurrences in the iterable. The dictionary will be ordered as per 
+Consumes the provided iterable in O(n) time, and produces a dictionary of elements of that iterable, to their number of occurrences in the iterable. The dictionary will be ordered as per the order the elements are first encountered in the iterable.
 
 **Example**
 
