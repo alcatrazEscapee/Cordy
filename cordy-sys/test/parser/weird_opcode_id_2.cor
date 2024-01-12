@@ -1,0 +1,3 @@
+fn bomb(p) -> if p then global else nil
+
+let global
