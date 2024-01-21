@@ -55,7 +55,9 @@ impl ParserError {
 
             InvalidAssignmentTarget |
             MultipleVariadicTermsInPattern |
-            LetWithPatternBindingNoExpression |
+            LetWithNonTrivialPattern |
+            LetWithTrivialEmptyPattern |
+            LetWithTrivialVarNamed |
             BreakOutsideOfLoop |
             ContinueOutsideOfLoop |
             StructNotInGlobalScope |
@@ -113,7 +115,9 @@ pub enum ParserErrorType {
 
     InvalidAssignmentTarget,
     MultipleVariadicTermsInPattern,
-    LetWithPatternBindingNoExpression,
+    LetWithNonTrivialPattern,
+    LetWithTrivialEmptyPattern,
+    LetWithTrivialVarNamed,
     BreakOutsideOfLoop,
     ContinueOutsideOfLoop,
     StructNotInGlobalScope,

@@ -591,7 +591,7 @@ impl Parser<'_> {
                 },
                 Some(Equals) => {
                     self.skip(); // Consume `=`
-                    params.default_args.push(self.parse_expr_top_level()); // Parse an expression
+                    params.default_args.push(self.parse_expr()); // Parse an expression
                 },
                 _ => if !params.variadic && !params.default_args.is_empty() {
                     self.semantic_error(NonDefaultParameterAfterDefaultParameter);
@@ -755,7 +755,7 @@ impl Parser<'_> {
 
         // If we see a top-level `if <expression> then`, we want to consider this an expression, with a top level `if-then-else` statement
         // Note that unlike `if { }`, an `if then else` **does** count as an expression, and leaves a value on the stack, so we set the flag for delay pop = true
-        let condition: Expr = self.parse_expr_top_level();
+        let condition: Expr = self.parse_expr();
         if let Some(KeywordThen) = self.peek() {
             let expr = self.parse_expr_1_inline_then_else(loc, condition);
 
@@ -975,7 +975,7 @@ impl Parser<'_> {
         let mut loc = self.next_location();
 
         // If we parse an expression that has a top-level compare operation, we use AssertCompare, which performs the comparison (and thus can report both sides of the assert value)
-        let branch_type = match self.parse_expr_top_level() {
+        let branch_type = match self.parse_expr() {
             Expr(_, ExprType::Binary(op @ (BinaryOp::Equal | BinaryOp::NotEqual | BinaryOp::GreaterThan | BinaryOp::GreaterThanEqual | BinaryOp::LessThan | BinaryOp::LessThanEqual), lhs, rhs, swap)) => {
                 self.emit_binary_op_args(*lhs, *rhs, swap);
                 BranchType::AssertCompare(CompareOp::from(op))
@@ -1022,10 +1022,28 @@ impl Parser<'_> {
                     match self.peek() {
                         Some(Equals) => {
                             // `let` <lvalue> `=` <expression>
+                            // Note that the expression **cannot contain top-level assignment statements** -> we use `parse_expression_restricted()`
+                            //
+                            // Ex. 1: `let a = b = d `
+                            // -> This is illegal, as `b = d` is a top-level assignment statement. It can be written `let a = (b = d)`
+                            //
+                            // Ex. 2: `let a = b, c = d`
+                            // -> This is a case of ambiguity. In a `let` statement, we take priority and assume this is equivalent to `let a = b ; let c = d`
+                            //    Thus, we need to not allow the `=` or any other assignment statement in the expression of the `let` statement
+                            //
+                            // Finally, we also have to deny specifically, `let *x = <expr>`, because the expression does not make sense.
+                            // It is essentially an iterable check with bogus unpacking, which should not exist. Note that `let *_ = <expr>` is caught by the trivially empty check.
+                            if lvalue.is_trivially_empty() {
+                                self.semantic_error_at(loc_start | self.prev_location(), LetWithTrivialEmptyPattern);
+                            }
+                            if lvalue.is_named_variadic() {
+                                self.semantic_error_at(loc_start | self.prev_location(), LetWithTrivialVarNamed);
+                            }
+
                             self.advance(); // Consume `=`
                             lvalue.declare_locals(self); // Declare local variables first, so we prepare local indices
                             lvalue.emit_default_values(self, true); // Then emit `Nil`
-                            self.parse_expression(); // So the expression ends up on top of the stack
+                            self.parse_expression_restricted(); // So the expression ends up on top of the stack
                             lvalue.initialize_locals(self); // Initialize them, before we emit store opcodes, but after the expression is parsed.
                             lvalue.emit_destructuring(self, true, false); // Emit destructuring to assign to all locals
                         },
@@ -1035,7 +1053,7 @@ impl Parser<'_> {
                             // It makes no sense for them to be here, since everything gets initialized to null anyway
                             // Don't write `let a, _, *b`, just write `let a, b`
                             if lvalue.is_non_trivial() {
-                                self.semantic_error_at(loc_start | self.prev_location(), LetWithPatternBindingNoExpression);
+                                self.semantic_error_at(loc_start | self.prev_location(), LetWithNonTrivialPattern);
                             }
                             lvalue.declare_locals(self);
                             lvalue.initialize_locals(self);
@@ -1064,17 +1082,23 @@ impl Parser<'_> {
 
     fn parse_expression(&mut self) {
         trace::trace_parser!("rule <expression>");
-        let expr: Expr = self.parse_expr_top_level();
+        let expr: Expr = self.parse_expr();
+        self.emit_optimized_expr(expr);
+    }
+
+    fn parse_expression_restricted(&mut self) {
+        trace::trace_parser!("rule <expression-restricted>");
+        let expr: Expr = self.parse_expr_9();
         self.emit_optimized_expr(expr);
     }
 
     #[must_use = "For parsing expressions from non-expressions, use parse_expression()"]
-    fn parse_expr_top_level(&mut self) -> Expr {
+    fn parse_expr(&mut self) -> Expr {
         self.parse_expr_10()
     }
 
     #[must_use = "For parsing expressions from non-expressions, use parse_expression()"]
-    fn parse_expr_top_level_or_unrolled(&mut self, any_unroll: &mut bool) -> Expr {
+    fn parse_expr_unrolled(&mut self, any_unroll: &mut bool) -> Expr {
         let mut unroll = false;
         let first = !*any_unroll;
 
@@ -1085,7 +1109,7 @@ impl Parser<'_> {
         }
 
         let loc = self.prev_location();
-        let mut expr = self.parse_expr_top_level();
+        let mut expr = self.parse_expr();
         if unroll {
             expr = expr.unroll(loc, first);
         }
@@ -1174,7 +1198,7 @@ impl Parser<'_> {
         loop {
             match self.parse_lvalue() {
                 Some(lvalue) => {
-                    if lvalue.is_variadic_term() {
+                    if lvalue.is_variadic() {
                         if found_variadic_term {
                             self.semantic_error(MultipleVariadicTermsInPattern);
                         } else {
@@ -1224,10 +1248,10 @@ impl Parser<'_> {
                     return expr; // Looks ahead, and parses <op> <expr> `)`
                 }
                 if let Some(Ellipsis) = self.peek() { // Must be a vector
-                    let arg1 = self.parse_expr_top_level_or_unrolled(&mut false);
+                    let arg1 = self.parse_expr_unrolled(&mut false);
                     return self.parse_expr_1_vector_literal(loc_start, arg1, true);
                 }
-                let expr = self.parse_expr_top_level(); // Parse <expr>
+                let expr = self.parse_expr(); // Parse <expr>
                 let expr = match self.parse_expr_1_partial_operator_right(expr) {
                     Ok(expr) => return expr, // Looks ahead and parses <op> `)`
                     Err(expr) => expr,
@@ -1343,7 +1367,7 @@ impl Parser<'_> {
                     // Anything else, and we try and parse an expression and partially evaluate.
                     // Note that this is *right* partial evaluation, i.e. `(< 3)` -> we evaluate the *second* argument of `<`
                     // This actually means we need to transform the operator if it is asymmetric, to one which looks identical, but is actually the operator in reverse.
-                    let arg = self.parse_expr_top_level(); // Parse the expression following a binary prefix operator
+                    let arg = self.parse_expr(); // Parse the expression following a binary prefix operator
                     self.expect(CloseParen);
                     Some(Expr::native(loc, op.swap()).eval(loc, vec![arg], false))
                 }
@@ -1419,7 +1443,7 @@ impl Parser<'_> {
             if self.parse_optional_trailing_comma(CloseParen, ExpectedCommaOrEndOfVector) {
                 break
             }
-            args.push(self.parse_expr_top_level_or_unrolled(&mut any_unroll));
+            args.push(self.parse_expr_unrolled(&mut any_unroll));
         }
         self.expect_resync(CloseParen);
 
@@ -1444,7 +1468,7 @@ impl Parser<'_> {
         }
 
         // Unsure if a slice or a list so far, so we parse the first expression and check for a colon, square bracket, or comma
-        let arg = self.parse_expr_top_level_or_unrolled(&mut any_unroll);
+        let arg = self.parse_expr_unrolled(&mut any_unroll);
         match self.peek() {
             Some(CloseSquareBracket) => { // Single element list
                 let loc_end = self.advance_with(); // Consume `]`
@@ -1466,7 +1490,7 @@ impl Parser<'_> {
             if self.parse_optional_trailing_comma(CloseSquareBracket, ExpectedCommaOrEndOfList) {
                 break;
             }
-            args.push(self.parse_expr_top_level_or_unrolled(&mut any_unroll));
+            args.push(self.parse_expr_unrolled(&mut any_unroll));
         }
         self.expect(CloseSquareBracket);
 
@@ -1482,7 +1506,7 @@ impl Parser<'_> {
                 let loc_end = self.advance_with();
                 return Expr::raw_slice(loc_start | loc_end, arg1, Expr::nil(), None);
             }
-            _ => self.parse_expr_top_level(), // As we consumed `:`, we require a second expression
+            _ => self.parse_expr(), // As we consumed `:`, we require a second expression
         };
 
         // Consumed `[` <expression> `:` <expression> so far
@@ -1504,7 +1528,7 @@ impl Parser<'_> {
         // Consumed `[` <expression> `:` <expression> `:` so far
         let arg3: Expr = match self.peek() {
             Some(CloseSquareBracket) => Expr::nil(),
-            _ => self.parse_expr_top_level(),
+            _ => self.parse_expr(),
         };
 
         self.expect(CloseSquareBracket);
@@ -1527,7 +1551,7 @@ impl Parser<'_> {
         let mut args: Vec<Expr> = Vec::new();
 
         loop {
-            let arg = self.parse_expr_top_level_or_unrolled(&mut any_unroll);
+            let arg = self.parse_expr_unrolled(&mut any_unroll);
             let is_unroll = arg.is_unroll();
             args.push(arg);
 
@@ -1535,14 +1559,14 @@ impl Parser<'_> {
                 match is_dict {
                     Some(true) => {
                         self.expect(Colon);
-                        args.push(self.parse_expr_top_level());
+                        args.push(self.parse_expr());
                     },
                     Some(false) => {}, // Set does not have any `:` arguments
                     None => { // Still undetermined if it is a dict, or set -> based on this argument we can know definitively
                         is_dict = Some(match self.peek() { // Found a `:`, so we know this is now a dict
                             Some(Colon) => {
                                 self.skip();
-                                args.push(self.parse_expr_top_level());
+                                args.push(self.parse_expr());
                                 true
                             },
                             _ => false,
@@ -1565,7 +1589,7 @@ impl Parser<'_> {
         trace::trace_parser!("rule <expr-1-inline-if-then-else>");
 
         let loc = self.advance_with(); // Consume `if`
-        let condition = self.parse_expr_top_level(); // condition
+        let condition = self.parse_expr(); // condition
 
         self.parse_expr_1_inline_then_else(loc, condition)
     }
@@ -1575,16 +1599,16 @@ impl Parser<'_> {
 
         self.expect(KeywordThen);
 
-        let if_true = self.parse_expr_top_level(); // Value if true
+        let if_true = self.parse_expr(); // Value if true
         let if_false = match self.peek() {  // Value if false
             Some(KeywordElif) => {
                 self.advance(); // consume `elif`
-                let sub_condition = self.parse_expr_top_level();
+                let sub_condition = self.parse_expr();
                 self.parse_expr_1_inline_then_else(Location::empty(), sub_condition)
             }
             _ => {
                 self.expect(KeywordElse);
-                self.parse_expr_top_level()
+                self.parse_expr()
             }
         };
 
@@ -1663,7 +1687,7 @@ impl Parser<'_> {
                     // Consumed `[` so far
                     let arg1: Expr = match self.peek() {
                         Some(Colon) => Expr::nil(), // No first argument. Don't consume the colon as it's the seperator
-                        _ => self.parse_expr_top_level(), // Otherwise we require a first expression
+                        _ => self.parse_expr(), // Otherwise we require a first expression
                     };
 
                     // Consumed `[` <expression> so far
@@ -1690,7 +1714,7 @@ impl Parser<'_> {
                             expr = expr.slice(loc_start | loc_end, arg1, Expr::nil());
                             continue
                         }
-                        _ => self.parse_expr_top_level(), // As we consumed `:`, we require a second expression
+                        _ => self.parse_expr(), // As we consumed `:`, we require a second expression
                     };
 
                     // Consumed `[` <expression> `:` <expression> so far
@@ -1713,7 +1737,7 @@ impl Parser<'_> {
                     // Consumed `[` <expression> `:` <expression> `:` so far
                     let arg3: Expr = match self.peek() {
                         Some(CloseSquareBracket) => Expr::nil(),
-                        _ => self.parse_expr_top_level(),
+                        _ => self.parse_expr(),
                     };
 
                     self.expect(CloseSquareBracket);
@@ -1782,7 +1806,7 @@ impl Parser<'_> {
 
         loop {
             let loc_arg = self.next_location();
-            let arg = self.parse_expr_top_level_or_unrolled(&mut any_unroll);
+            let arg = self.parse_expr_unrolled(&mut any_unroll);
 
             // Check for a trailing operator followed by `)`
             // In that case, we have something like `map ( 3 + )`, which we treat as a shorthand for `map (( 3 + ))`
@@ -2164,15 +2188,15 @@ mod tests {
     use crate::reporting::SourceView;
 
 
-    fn run_expr(text: &'static str, expected: &'static str) {
-        run(text, format!("{}\nPop\nExit", expected.replace(" ", "\n")), false)
+    fn run(text: &'static str, expected: &'static str) {
+        run_internal(text, format!("{}\nPop\nExit", expected.replace(" ", "\n")), false)
     }
 
     fn run_err(text: &'static str, expected: &'static str) {
-        run(text, String::from(expected), false)
+        run_internal(text, String::from(expected), false)
     }
 
-    fn run(text: &'static str, expected: String, use_full_disassembly: bool) {
+    fn run_internal(text: &'static str, expected: String, use_full_disassembly: bool) {
         let view: SourceView = SourceView::new(String::from("<test>"), String::from(text));
         let actual = match compiler::compile(false, &view) {
             Ok(compile) if use_full_disassembly => compile.disassemble(&view, true).join("\n"),
@@ -2185,7 +2209,7 @@ mod tests {
 
     macro_rules! run {
         ($path:literal) => {
-            run(
+            run_internal(
                 include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/test/parser/", $path, ".cor")),
                 include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/test/parser/", $path, ".cor.trace")).replace("\r", ""),
                 true
@@ -2193,99 +2217,112 @@ mod tests {
         };
     }
 
-    #[test] fn test_nil() { run_expr("nil", "Nil") }
-    #[test] fn test_true() { run_expr("true", "True") }
-    #[test] fn test_false() { run_expr("false", "False") }
-    #[test] fn test_int() { run_expr("123", "Int(123)") }
-    #[test] fn test_imaginary() { run_expr("123i", "Complex(123i)") }
-    #[test] fn test_complex() { run_expr("123 + 456i", "Int(123) Complex(456i) Add") }
-    #[test] fn test_str() { run_expr("'abc'", "Str('abc')") }
-    #[test] fn test_print() { run_expr("print", "Print") }
-    #[test] fn test_unary_neg() { run_expr("-3", "Int(3) Neg") }
-    #[test] fn test_unary_not() { run_expr("!!3", "Int(3) Not Not") }
-    #[test] fn test_binary_mul() { run_expr("1 * 2", "Int(1) Int(2) Mul") }
-    #[test] fn test_binary_div() { run_expr("1 / 2 / 3", "Int(1) Int(2) Div Int(3) Div") }
-    #[test] fn test_binary_mul_div() { run_expr("1 * 2 / 3", "Int(1) Int(2) Mul Int(3) Div") }
-    #[test] fn test_binary_mul_add() { run_expr("1 * 2 + 3", "Int(1) Int(2) Mul Int(3) Add") }
-    #[test] fn test_binary_mul_add_left_parens() { run_expr("(1 * 2) + 3", "Int(1) Int(2) Mul Int(3) Add") }
-    #[test] fn test_binary_mul_add_right_parens() { run_expr("1 * (2 + 3)", "Int(1) Int(2) Int(3) Add Mul") }
-    #[test] fn test_binary_add_mul() { run_expr("1 + 2 * 3", "Int(1) Int(2) Int(3) Mul Add") }
-    #[test] fn test_binary_add_mul_left_parens() { run_expr("(1 + 2) * 3", "Int(1) Int(2) Add Int(3) Mul") }
-    #[test] fn test_binary_add_mul_right_parens() { run_expr("1 + (2 * 3)", "Int(1) Int(2) Int(3) Mul Add") }
-    #[test] fn test_binary_add_mod() { run_expr("1 + 2 % 3", "Int(1) Int(2) Int(3) Mod Add") }
-    #[test] fn test_binary_mod_add() { run_expr("1 % 2 + 3", "Int(1) Int(2) Mod Int(3) Add") }
-    #[test] fn test_binary_lsh_rhs_or() { run_expr("1 << 2 >> 3 | 4", "Int(1) Int(2) LeftShift Int(3) RightShift Int(4) Or") }
-    #[test] fn test_binary_rhs_lhs_and() { run_expr("1 >> 2 << 3 & 4", "Int(1) Int(2) RightShift Int(3) LeftShift Int(4) And") }
-    #[test] fn test_binary_is() { run_expr("1 is 2", "Int(1) Int(2) Is") }
-    #[test] fn test_binary_is_not() { run_expr("1 is not 2", "Int(1) Int(2) IsNot") }
-    #[test] fn test_binary_in() { run_expr("1 in 2", "Int(1) Int(2) In") }
-    #[test] fn test_binary_not_in() { run_expr("1 not in 2", "Int(1) Int(2) NotIn") }
-    #[test] fn test_binary_and() { run_expr("1 and 2", "Int(1) JumpIfFalse(4) Pop Int(2)"); }
-    #[test] fn test_binary_and_or() { run_expr("1 and (2 or 3)", "Int(1) JumpIfFalse(7) Pop Int(2) JumpIfTrue(7) Pop Int(3)"); }
-    #[test] fn test_binary_or() { run_expr("1 or 2", "Int(1) JumpIfTrue(4) Pop Int(2)"); }
-    #[test] fn test_binary_or_and() { run_expr("1 or (2 and 3)", "Int(1) JumpIfTrue(7) Pop Int(2) JumpIfFalse(7) Pop Int(3)"); }
-    #[test] fn test_binary_equal() { run_expr("1 == 2", "Int(1) Int(2) Equal") }
-    #[test] fn test_binary_equal_add() { run_expr("1 == 2 + 3", "Int(1) Int(2) Int(3) Add Equal") }
-    #[test] fn test_chained_binary_lt() { run_expr("1 < 2 < 3", "Int(1) Int(2) LessThanCompare(5) Int(3) LessThan") }
-    #[test] fn test_chained_binary_lt_gt() { run_expr("1 < 2 > 3 < 4", "Int(1) Int(2) LessThanCompare(7) Int(3) GreaterThanCompare(7) Int(4) LessThan") }
-    #[test] fn test_chained_binary_eq_ne() { run_expr("1 == 2 != 3", "Int(1) Int(2) EqualCompare(5) Int(3) NotEqual") }
-    #[test] fn test_chained_binary_with_left_parens() { run_expr("1 < (2 < 3)", "Int(1) Int(2) Int(3) LessThan LessThan") }
-    #[test] fn test_chained_binary_with_right_parens() { run_expr("(1 < 2) < 3", "Int(1) Int(2) LessThan Int(3) LessThan") }
-    #[test] fn test_function_call_no_args() { run_expr("print()", "Print Call(0)") }
-    #[test] fn test_function_call_one_arg() { run_expr("print(1)", "Print Int(1) Call(1)") }
-    #[test] fn test_function_call_many_args() { run_expr("print(1, 2, 3)", "Print Int(1) Int(2) Int(3) Call(3)") }
-    #[test] fn test_function_call_unroll() { run_expr("print(...1)", "Print Int(1) Unroll Call...(1)") }
-    #[test] fn test_function_call_many_unroll() { run_expr("print(...1, 2, ...3)", "Print Int(1) Unroll Int(2) Int(3) Unroll Call...(3)") }
-    #[test] fn test_function_call_bare() { run_expr("print 1", "Print Int(1) Call(1)") }
-    #[test] fn test_function_call_chained() { run_expr("print () ()", "Print Call(0) Call(0)") }
-    #[test] fn test_function_call_unary_op() { run_expr("! print ()", "Print Call(0) Not") }
-    #[test] fn test_function_call_unary_op_left_parens() { run_expr("(! print) ()", "Print Not Call(0)") }
-    #[test] fn test_function_call_unary_op_right_parens() { run_expr("! (print ())", "Print Call(0) Not") }
-    #[test] fn test_function_composition() { run_expr("1 . print", "Int(1) Print Swap Call(1)") }
-    #[test] fn test_function_composition_left_unary_op() { run_expr("! 1 . print", "Int(1) Not Print Swap Call(1)") }
-    #[test] fn test_function_composition_left_unary_op_left_parens() { run_expr("(! 1) . print", "Int(1) Not Print Swap Call(1)") }
-    #[test] fn test_function_composition_left_unary_op_right_parens() { run_expr("! (1 . print)", "Int(1) Print Swap Call(1) Not") }
-    #[test] fn test_function_composition_right_unary_op() { run_expr("1 . - print", "Int(1) Print Neg Swap Call(1)") }
-    #[test] fn test_function_composition_call() { run_expr("1 . 2 (3)", "Int(1) Int(2) Int(3) Call(1) Swap Call(1)") }
-    #[test] fn test_function_composition_call_left_parens() { run_expr("(1 . 2) (3)", "Int(1) Int(2) Swap Call(1) Int(3) Call(1)") }
-    #[test] fn test_function_composition_call_right_parens() { run_expr("1 . (2 (3))", "Int(1) Int(2) Int(3) Call(1) Swap Call(1)") }
-    #[test] fn test_slice_01() { run_expr("1 [::]", "Int(1) Nil Nil Nil OpSliceWithStep") }
-    #[test] fn test_slice_02() { run_expr("1 [2::]", "Int(1) Int(2) Nil Nil OpSliceWithStep") }
-    #[test] fn test_slice_03() { run_expr("1 [:3:]", "Int(1) Nil Int(3) Nil OpSliceWithStep") }
-    #[test] fn test_slice_04() { run_expr("1 [::4]", "Int(1) Nil Nil Int(4) OpSliceWithStep") }
-    #[test] fn test_slice_05() { run_expr("1 [2:3:]", "Int(1) Int(2) Int(3) Nil OpSliceWithStep") }
-    #[test] fn test_slice_06() { run_expr("1 [2::3]", "Int(1) Int(2) Nil Int(3) OpSliceWithStep") }
-    #[test] fn test_slice_07() { run_expr("1 [:3:4]", "Int(1) Nil Int(3) Int(4) OpSliceWithStep") }
-    #[test] fn test_slice_08() { run_expr("1 [2:3:4]", "Int(1) Int(2) Int(3) Int(4) OpSliceWithStep") }
-    #[test] fn test_slice_09() { run_expr("1 [:]", "Int(1) Nil Nil OpSlice") }
-    #[test] fn test_slice_10() { run_expr("1 [2:]", "Int(1) Int(2) Nil OpSlice") }
-    #[test] fn test_slice_11() { run_expr("1 [:3]", "Int(1) Nil Int(3) OpSlice") }
-    #[test] fn test_slice_12() { run_expr("1 [2:3]", "Int(1) Int(2) Int(3) OpSlice") }
-    #[test] fn test_partial_unary_ops() { run_expr("(-) (!)", "OperatorSub OperatorUnaryNot Call(1)") }
-    #[test] fn test_partial_binary_ops() { run_expr("(+) ((*)) (/)", "OperatorAdd OperatorMul Call(1) OperatorDiv Call(1)") }
-    #[test] fn test_partial_binary_op_left_eval() { run_expr("(+1)", "OperatorAddSwap Int(1) Call(1)"); }
-    #[test] fn test_partial_binary_op_right_eval() { run_expr("(1+)", "OperatorAdd Int(1) Call(1)"); }
-    #[test] fn test_partial_binary_op_long_left_eval() { run_expr("(not in 3)", "OperatorNotInSwap Int(3) Call(1)") }
-    #[test] fn test_partial_binary_op_long_right_eval() { run_expr("(3 not in)", "OperatorNotIn Int(3) Call(1)") }
-    #[test] fn test_partial_binary_op_in_call_left_eval() { run_expr("print ((+ 3))", "Print OperatorAddSwap Int(3) Call(1) Call(1)") }
-    #[test] fn test_partial_binary_op_in_call_right_eval() { run_expr("print ((3 +))", "Print OperatorAdd Int(3) Call(1) Call(1)") }
-    #[test] fn test_partial_binary_op_in_call_long_left_eval() { run_expr("print ((is not 3))", "Print OperatorIsNotSwap Int(3) Call(1) Call(1)") }
-    #[test] fn test_partial_binary_op_in_call_long_right_eval() { run_expr("print ((3 is not))", "Print OperatorIsNot Int(3) Call(1) Call(1)") }
-    #[test] fn test_partial_binary_op_in_implicit_call_left_eval() { run_expr("print (+ 3)", "Print OperatorAddSwap Int(3) Call(1) Call(1)") }
-    #[test] fn test_partial_binary_op_in_implicit_call_right_eval() { run_expr("print (3 +)", "Print OperatorAdd Int(3) Call(1) Call(1)") }
-    #[test] fn test_partial_binary_op_in_implicit_call_long_left_eval() { run_expr("print (is not 3)", "Print OperatorIsNotSwap Int(3) Call(1) Call(1)") }
-    #[test] fn test_partial_binary_op_in_implicit_call_long_right_eval() { run_expr("print (3 is not)", "Print OperatorIsNot Int(3) Call(1) Call(1)") }
-    #[test] fn test_if_then_else() { run_expr("if true then 1 else 2", "True JumpIfFalsePop(4) Int(1) Jump(5) Int(2)") }
-    #[test] fn test_nil_with_call() { run_expr("nil()", "Nil Call(0)") }
-    #[test] fn test_exit_with_call() { run_expr("exit()", "Exit Call(0)") }
+    #[test] fn test_nil() { run("nil", "Nil") }
+    #[test] fn test_true() { run("true", "True") }
+    #[test] fn test_false() { run("false", "False") }
+    #[test] fn test_int() { run("123", "Int(123)") }
+    #[test] fn test_imaginary() { run("123i", "Complex(123i)") }
+    #[test] fn test_complex() { run("123 + 456i", "Int(123) Complex(456i) Add") }
+    #[test] fn test_str() { run("'abc'", "Str('abc')") }
+    #[test] fn test_print() { run("print", "Print") }
+    #[test] fn test_unary_neg() { run("-3", "Int(3) Neg") }
+    #[test] fn test_unary_not() { run("!!3", "Int(3) Not Not") }
+    #[test] fn test_binary_mul() { run("1 * 2", "Int(1) Int(2) Mul") }
+    #[test] fn test_binary_div() { run("1 / 2 / 3", "Int(1) Int(2) Div Int(3) Div") }
+    #[test] fn test_binary_mul_div() { run("1 * 2 / 3", "Int(1) Int(2) Mul Int(3) Div") }
+    #[test] fn test_binary_mul_add() { run("1 * 2 + 3", "Int(1) Int(2) Mul Int(3) Add") }
+    #[test] fn test_binary_mul_add_left_parens() { run("(1 * 2) + 3", "Int(1) Int(2) Mul Int(3) Add") }
+    #[test] fn test_binary_mul_add_right_parens() { run("1 * (2 + 3)", "Int(1) Int(2) Int(3) Add Mul") }
+    #[test] fn test_binary_add_mul() { run("1 + 2 * 3", "Int(1) Int(2) Int(3) Mul Add") }
+    #[test] fn test_binary_add_mul_left_parens() { run("(1 + 2) * 3", "Int(1) Int(2) Add Int(3) Mul") }
+    #[test] fn test_binary_add_mul_right_parens() { run("1 + (2 * 3)", "Int(1) Int(2) Int(3) Mul Add") }
+    #[test] fn test_binary_add_mod() { run("1 + 2 % 3", "Int(1) Int(2) Int(3) Mod Add") }
+    #[test] fn test_binary_mod_add() { run("1 % 2 + 3", "Int(1) Int(2) Mod Int(3) Add") }
+    #[test] fn test_binary_lsh_rhs_or() { run("1 << 2 >> 3 | 4", "Int(1) Int(2) LeftShift Int(3) RightShift Int(4) Or") }
+    #[test] fn test_binary_rhs_lhs_and() { run("1 >> 2 << 3 & 4", "Int(1) Int(2) RightShift Int(3) LeftShift Int(4) And") }
+    #[test] fn test_binary_is() { run("1 is 2", "Int(1) Int(2) Is") }
+    #[test] fn test_binary_is_not() { run("1 is not 2", "Int(1) Int(2) IsNot") }
+    #[test] fn test_binary_in() { run("1 in 2", "Int(1) Int(2) In") }
+    #[test] fn test_binary_not_in() { run("1 not in 2", "Int(1) Int(2) NotIn") }
+    #[test] fn test_binary_and() { run("1 and 2", "Int(1) JumpIfFalse(4) Pop Int(2)"); }
+    #[test] fn test_binary_and_or() { run("1 and (2 or 3)", "Int(1) JumpIfFalse(7) Pop Int(2) JumpIfTrue(7) Pop Int(3)"); }
+    #[test] fn test_binary_or() { run("1 or 2", "Int(1) JumpIfTrue(4) Pop Int(2)"); }
+    #[test] fn test_binary_or_and() { run("1 or (2 and 3)", "Int(1) JumpIfTrue(7) Pop Int(2) JumpIfFalse(7) Pop Int(3)"); }
+    #[test] fn test_binary_equal() { run("1 == 2", "Int(1) Int(2) Equal") }
+    #[test] fn test_binary_equal_add() { run("1 == 2 + 3", "Int(1) Int(2) Int(3) Add Equal") }
+    #[test] fn test_chained_binary_lt() { run("1 < 2 < 3", "Int(1) Int(2) LessThanCompare(5) Int(3) LessThan") }
+    #[test] fn test_chained_binary_lt_gt() { run("1 < 2 > 3 < 4", "Int(1) Int(2) LessThanCompare(7) Int(3) GreaterThanCompare(7) Int(4) LessThan") }
+    #[test] fn test_chained_binary_eq_ne() { run("1 == 2 != 3", "Int(1) Int(2) EqualCompare(5) Int(3) NotEqual") }
+    #[test] fn test_chained_binary_with_left_parens() { run("1 < (2 < 3)", "Int(1) Int(2) Int(3) LessThan LessThan") }
+    #[test] fn test_chained_binary_with_right_parens() { run("(1 < 2) < 3", "Int(1) Int(2) LessThan Int(3) LessThan") }
+    #[test] fn test_function_call_no_args() { run("print()", "Print Call(0)") }
+    #[test] fn test_function_call_one_arg() { run("print(1)", "Print Int(1) Call(1)") }
+    #[test] fn test_function_call_many_args() { run("print(1, 2, 3)", "Print Int(1) Int(2) Int(3) Call(3)") }
+    #[test] fn test_function_call_unroll() { run("print(...1)", "Print Int(1) Unroll Call...(1)") }
+    #[test] fn test_function_call_many_unroll() { run("print(...1, 2, ...3)", "Print Int(1) Unroll Int(2) Int(3) Unroll Call...(3)") }
+    #[test] fn test_function_call_bare() { run("print 1", "Print Int(1) Call(1)") }
+    #[test] fn test_function_call_chained() { run("print () ()", "Print Call(0) Call(0)") }
+    #[test] fn test_function_call_unary_op() { run("! print ()", "Print Call(0) Not") }
+    #[test] fn test_function_call_unary_op_left_parens() { run("(! print) ()", "Print Not Call(0)") }
+    #[test] fn test_function_call_unary_op_right_parens() { run("! (print ())", "Print Call(0) Not") }
+    #[test] fn test_function_composition() { run("1 . print", "Int(1) Print Swap Call(1)") }
+    #[test] fn test_function_composition_left_unary_op() { run("! 1 . print", "Int(1) Not Print Swap Call(1)") }
+    #[test] fn test_function_composition_left_unary_op_left_parens() { run("(! 1) . print", "Int(1) Not Print Swap Call(1)") }
+    #[test] fn test_function_composition_left_unary_op_right_parens() { run("! (1 . print)", "Int(1) Print Swap Call(1) Not") }
+    #[test] fn test_function_composition_right_unary_op() { run("1 . - print", "Int(1) Print Neg Swap Call(1)") }
+    #[test] fn test_function_composition_call() { run("1 . 2 (3)", "Int(1) Int(2) Int(3) Call(1) Swap Call(1)") }
+    #[test] fn test_function_composition_call_left_parens() { run("(1 . 2) (3)", "Int(1) Int(2) Swap Call(1) Int(3) Call(1)") }
+    #[test] fn test_function_composition_call_right_parens() { run("1 . (2 (3))", "Int(1) Int(2) Int(3) Call(1) Swap Call(1)") }
+    #[test] fn test_slice_01() { run("1 [::]", "Int(1) Nil Nil Nil OpSliceWithStep") }
+    #[test] fn test_slice_02() { run("1 [2::]", "Int(1) Int(2) Nil Nil OpSliceWithStep") }
+    #[test] fn test_slice_03() { run("1 [:3:]", "Int(1) Nil Int(3) Nil OpSliceWithStep") }
+    #[test] fn test_slice_04() { run("1 [::4]", "Int(1) Nil Nil Int(4) OpSliceWithStep") }
+    #[test] fn test_slice_05() { run("1 [2:3:]", "Int(1) Int(2) Int(3) Nil OpSliceWithStep") }
+    #[test] fn test_slice_06() { run("1 [2::3]", "Int(1) Int(2) Nil Int(3) OpSliceWithStep") }
+    #[test] fn test_slice_07() { run("1 [:3:4]", "Int(1) Nil Int(3) Int(4) OpSliceWithStep") }
+    #[test] fn test_slice_08() { run("1 [2:3:4]", "Int(1) Int(2) Int(3) Int(4) OpSliceWithStep") }
+    #[test] fn test_slice_09() { run("1 [:]", "Int(1) Nil Nil OpSlice") }
+    #[test] fn test_slice_10() { run("1 [2:]", "Int(1) Int(2) Nil OpSlice") }
+    #[test] fn test_slice_11() { run("1 [:3]", "Int(1) Nil Int(3) OpSlice") }
+    #[test] fn test_slice_12() { run("1 [2:3]", "Int(1) Int(2) Int(3) OpSlice") }
+    #[test] fn test_partial_unary_ops() { run("(-) (!)", "OperatorSub OperatorUnaryNot Call(1)") }
+    #[test] fn test_partial_binary_ops() { run("(+) ((*)) (/)", "OperatorAdd OperatorMul Call(1) OperatorDiv Call(1)") }
+    #[test] fn test_partial_binary_op_left_eval() { run("(+1)", "OperatorAddSwap Int(1) Call(1)"); }
+    #[test] fn test_partial_binary_op_right_eval() { run("(1+)", "OperatorAdd Int(1) Call(1)"); }
+    #[test] fn test_partial_binary_op_long_left_eval() { run("(not in 3)", "OperatorNotInSwap Int(3) Call(1)") }
+    #[test] fn test_partial_binary_op_long_right_eval() { run("(3 not in)", "OperatorNotIn Int(3) Call(1)") }
+    #[test] fn test_partial_binary_op_in_call_left_eval() { run("print ((+ 3))", "Print OperatorAddSwap Int(3) Call(1) Call(1)") }
+    #[test] fn test_partial_binary_op_in_call_right_eval() { run("print ((3 +))", "Print OperatorAdd Int(3) Call(1) Call(1)") }
+    #[test] fn test_partial_binary_op_in_call_long_left_eval() { run("print ((is not 3))", "Print OperatorIsNotSwap Int(3) Call(1) Call(1)") }
+    #[test] fn test_partial_binary_op_in_call_long_right_eval() { run("print ((3 is not))", "Print OperatorIsNot Int(3) Call(1) Call(1)") }
+    #[test] fn test_partial_binary_op_in_implicit_call_left_eval() { run("print (+ 3)", "Print OperatorAddSwap Int(3) Call(1) Call(1)") }
+    #[test] fn test_partial_binary_op_in_implicit_call_right_eval() { run("print (3 +)", "Print OperatorAdd Int(3) Call(1) Call(1)") }
+    #[test] fn test_partial_binary_op_in_implicit_call_long_left_eval() { run("print (is not 3)", "Print OperatorIsNotSwap Int(3) Call(1) Call(1)") }
+    #[test] fn test_partial_binary_op_in_implicit_call_long_right_eval() { run("print (3 is not)", "Print OperatorIsNot Int(3) Call(1) Call(1)") }
+    #[test] fn test_if_then_else() { run("if true then 1 else 2", "True JumpIfFalsePop(4) Int(1) Jump(5) Int(2)") }
+    #[test] fn test_nil_with_call() { run("nil()", "Nil Call(0)") }
+    #[test] fn test_exit_with_call() { run("exit()", "Exit Call(0)") }
 
-    #[test] fn test_let_eof() { run_err("let", "Expected a variable binding, either a name, '_', or pattern, got end of input instead\n  at: line 1 (<test>)\n\n1 | let\n2 |    ^^^\n"); }
-    #[test] fn test_let_no_identifier() { run_err("let =", "Expected a variable binding, either a name, '_', or pattern, got '=' token instead\n  at: line 1 (<test>)\n\n1 | let =\n2 |     ^\n"); }
-    #[test] fn test_let_expression_eof() { run_err("let x =", "Expected an expression terminal, got end of input instead\n  at: line 1 (<test>)\n\n1 | let x =\n2 |        ^^^\n"); }
-    #[test] fn test_let_no_expression() { run_err("let x = &", "Expected an expression terminal, got '&' token instead\n  at: line 1 (<test>)\n\n1 | let x = &\n2 |         ^\n"); }
-    #[test] fn test_let_no_expression_with_empty() { run_err("let _ ;", "'let' with a pattern variable must be followed by an expression if the pattern contains nontrivial pattern elements\n  at: line 1 (<test>)\n\n1 | let _ ;\n2 |     ^\n") }
-    #[test] fn test_let_no_expression_with_variadic() { run_err("let a, *b ;", "'let' with a pattern variable must be followed by an expression if the pattern contains nontrivial pattern elements\n  at: line 1 (<test>)\n\n1 | let a, *b ;\n2 |     ^^^^^\n") }
-    #[test] fn test_let_no_expression_with_nested() { run_err("let (a, b) ;", "'let' with a pattern variable must be followed by an expression if the pattern contains nontrivial pattern elements\n  at: line 1 (<test>)\n\n1 | let (a, b) ;\n2 |     ^^^^^^\n") }
+
+    #[test] fn test_let_expect_lvalue_1() { run_err("let", "Expected a variable binding, either a name, '_', or pattern, got end of input instead\n  at: line 1 (<test>)\n\n1 | let\n2 |    ^^^\n"); }
+    #[test] fn test_let_expect_lvalue_2() { run_err("let =", "Expected a variable binding, either a name, '_', or pattern, got '=' token instead\n  at: line 1 (<test>)\n\n1 | let =\n2 |     ^\n"); }
+    #[test] fn test_let_expect_expr_1() { run_err("let x =", "Expected an expression terminal, got end of input instead\n  at: line 1 (<test>)\n\n1 | let x =\n2 |        ^^^\n"); }
+    #[test] fn test_let_expect_expr_2() { run_err("let x = &", "Expected an expression terminal, got '&' token instead\n  at: line 1 (<test>)\n\n1 | let x = &\n2 |         ^\n"); }
+    #[test] fn test_let_non_trivial_no_expr_1() { run_err("let _ ;", "'let' with a pattern variable must be followed by an expression if the pattern contains nontrivial pattern elements\n  at: line 1 (<test>)\n\n1 | let _ ;\n2 |     ^\n") }
+    #[test] fn test_let_non_trivial_no_expr_2() { run_err("let _, _ ;", "'let' with a pattern variable must be followed by an expression if the pattern contains nontrivial pattern elements\n  at: line 1 (<test>)\n\n1 | let _, _ ;\n2 |     ^^^^\n") }
+    #[test] fn test_let_non_trivial_no_expr_3() { run_err("let a, *b ;", "'let' with a pattern variable must be followed by an expression if the pattern contains nontrivial pattern elements\n  at: line 1 (<test>)\n\n1 | let a, *b ;\n2 |     ^^^^^\n") }
+    #[test] fn test_let_non_trivial_no_expr_4() { run_err("let (a, b) ;", "'let' with a pattern variable must be followed by an expression if the pattern contains nontrivial pattern elements\n  at: line 1 (<test>)\n\n1 | let (a, b) ;\n2 |     ^^^^^^\n") }
+    #[test] fn test_let_non_trivial_no_expr_5() { run_err("let *a ;", "'let' with a pattern variable must be followed by an expression if the pattern contains nontrivial pattern elements\n  at: line 1 (<test>)\n\n1 | let *a ;\n2 |     ^^\n"); }
+    #[test] fn test_let_empty_lvalue_with_expr_1() { run_err("let _ = 1", "'let' statement must declare at least one named variable\n  at: line 1 (<test>)\n\n1 | let _ = 1\n2 |     ^\n"); }
+    #[test] fn test_let_empty_lvalue_with_expr_2() { run_err("let *_ = 1", "'let' statement must declare at least one named variable\n  at: line 1 (<test>)\n\n1 | let *_ = 1\n2 |     ^^\n"); }
+    #[test] fn test_let_empty_lvalue_with_expr_3() { run_err("let _, _ = 1", "'let' statement must declare at least one named variable\n  at: line 1 (<test>)\n\n1 | let _, _ = 1\n2 |     ^^^^\n"); }
+    #[test] fn test_let_empty_lvalue_with_expr_4() { run_err("let (*_, _, (_, _)), _ = 'test'", "'let' statement must declare at least one named variable\n  at: line 1 (<test>)\n\n1 | let (*_, _, (_, _)), _ = 'test'\n2 |     ^^^^^^^^^^^^^^^^^^\n"); }
+    #[test] fn test_let_illegal_lvalue_with_expr() { run_err("let *a = 'test'", "'let' statement cannot consist of a single variadic named variable\n  at: line 1 (<test>)\n\n1 | let *a = 'test'\n2 |     ^^\n"); }
+    #[test] fn test_let_assignment_in_expr_1() { run_err("let b, c ; let a = b = c", "Expected an expression terminal, got '=' token instead\n  at: line 1 (<test>)\n\n1 | let b, c ; let a = b = c\n2 |                      ^\n"); }
+    #[test] fn test_let_assignment_in_expr_2() { run_err("let b, c, d ; let a = b, c = d", "Duplicate definition of variable 'c' in the same scope\n  at: line 1 (<test>)\n\n1 | let b, c, d ; let a = b, c = d\n2 |                            ^\n"); }
+    #[test] fn test_let_assignment_in_expr_3_legal() { run("let b, c ; let a = (b = c)", "InitGlobal InitGlobal Nil Nil PushGlobal(1)->c StoreGlobal(0)->b InitGlobal Pop Pop"); }
+    #[test] fn test_let_assignment_in_expr_4_legal() { run("let b, d ; let a = b, c = d", "InitGlobal InitGlobal Nil Nil PushGlobal(0)->b InitGlobal PushGlobal(1)->d InitGlobal Pop Pop Pop"); }
+
     #[test] fn test_expression_function_with_name() { run_err("(fn hello() {})", "Expected a '(' token, got identifier 'hello' instead\n  at: line 1 (<test>)\n\n1 | (fn hello() {})\n2 |     ^^^^^\n"); }
     #[test] fn test_top_level_function_in_error_recovery_mode() { run_err("+ fn hello() {}", "Expected an expression terminal, got '+' token instead\n  at: line 1 (<test>)\n\n1 | + fn hello() {}\n2 | ^\n"); }
     #[test] fn test_partial_binary_op_implicit_unroll_error_left() { run_err("print (... + 3)", "Expected an expression terminal, got '+' token instead\n  at: line 1 (<test>)\n\n1 | print (... + 3)\n2 |            ^\n") }
