@@ -22,7 +22,7 @@ pub fn scan(view: &SourceView) -> Vec<(Location, ScanTokenType)> {
         .collect()
 }
 
-#[cfg(feature = "test_parser_verification")]
+#[cfg(feature = "verify_parser")]
 pub fn compile(enable_optimization: bool, view: &SourceView) -> Result<CompileResult, Vec<String>> {
     let mut buffer = String::new();
     for c in view.text().chars() {
@@ -33,7 +33,7 @@ pub fn compile(enable_optimization: bool, view: &SourceView) -> Result<CompileRe
     compile_internal(enable_optimization, view)
 }
 
-#[cfg(not(feature = "test_parser_verification"))]
+#[cfg(not(feature = "verify_parser"))]
 pub fn compile(enable_optimization: bool, view: &SourceView) -> Result<CompileResult, Vec<String>> {
     compile_internal(enable_optimization, view)
 }
