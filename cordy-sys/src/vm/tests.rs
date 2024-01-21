@@ -377,28 +377,25 @@ fn run_with(opt: bool, text: &'static str, expected: &'static str) {
 #[test] fn pattern_in_let_with_var_one_len_at_end() { run("let x, *y = [1, 2] ; [x, y] . print", "[1, [2]]\n") }
 #[test] fn pattern_in_let_with_var_one_len_at_start() { run("let *x, y = [1, 2] ; [x, y] . print", "[[1], 2]\n") }
 #[test] fn pattern_in_let_with_var_one_len_at_middle() { run("let x, *y, z = [1, 2, 3] ; [x, y, z] . print", "[1, [2], 3]\n") }
-#[test] fn pattern_in_let_with_only_empty() { run("let _ = 'hello' . print", "hello\n") }
-#[test] fn pattern_in_let_empty_x3() { run("let _, _, _ = [1, 2, 3]", "") }
-#[test] fn pattern_in_let_empty_x3_too_long() { run("let _, _, _ = [1, 2, 3, 4]", "ValueError: Cannot unpack '[1, 2, 3, 4]' of type 'list' with length 4, expected exactly 3 elements\n  at: line 1 (<test>)\n\n1 | let _, _, _ = [1, 2, 3, 4]\n2 |                          ^\n") }
-#[test] fn pattern_in_let_empty_x3_too_short() { run("let _, _, _ = [1, 2]", "ValueError: Cannot unpack '[1, 2]' of type 'list' with length 2, expected exactly 3 elements\n  at: line 1 (<test>)\n\n1 | let _, _, _ = [1, 2]\n2 |                    ^\n") }
-#[test] fn pattern_in_let_empty_x2_at_end() { run("let _, _, x = [1, 2, 3] ; x . print", "3\n") }
-#[test] fn pattern_in_let_empty_x2_at_middle() { run("let _, x, _ = [1, 2, 3] ; x . print", "2\n") }
-#[test] fn pattern_in_let_empty_x2_at_start() { run("let x, _, _ = [1, 2, 3] ; x . print", "1\n") }
-#[test] fn pattern_in_let_empty_at_middle() { run("let x, _, y = [1, 2, 3] ; [x, y] . print", "[1, 3]\n") }
+#[test] fn pattern_in_let_with_empty() { run("let a, _, _ = [1, 2, 3] ; a . print", "1\n") }
+#[test] fn pattern_in_let_with_empty_too_long() { run("let _, b, _ = [1, 2, 3, 4]", "ValueError: Cannot unpack '[1, 2, 3, 4]' of type 'list' with length 4, expected exactly 3 elements\n  at: line 1 (<test>)\n\n1 | let _, b, _ = [1, 2, 3, 4]\n2 |                          ^\n") }
+#[test] fn pattern_in_let_with_empty_too_short() { run("let _, _, c = [1, 2]", "ValueError: Cannot unpack '[1, 2]' of type 'list' with length 2, expected exactly 3 elements\n  at: line 1 (<test>)\n\n1 | let _, _, c = [1, 2]\n2 |                    ^\n") }
+#[test] fn pattern_in_let_with_empty_at_end() { run("let _, _, x = [1, 2, 3] ; x . print", "3\n") }
+#[test] fn pattern_in_let_with_empty_at_both() { run("let _, x, _ = [1, 2, 3] ; x . print", "2\n") }
+#[test] fn pattern_in_let_with_empty_at_start() { run("let x, _, _ = [1, 2, 3] ; x . print", "1\n") }
+#[test] fn pattern_in_let_with_empty_at_middle() { run("let x, _, y = [1, 2, 3] ; [x, y] . print", "[1, 3]\n") }
 #[test] fn pattern_in_let_with_varargs_empty_at_end() { run("let x, *_ = [1, 2, 3, 4] ; x . print", "1\n") }
 #[test] fn pattern_in_let_with_varargs_empty_at_middle() { run("let x, *_, y = [1, 2, 3, 4] ; [x, y] . print", "[1, 4]\n") }
 #[test] fn pattern_in_let_with_varargs_empty_at_start() { run("let *_, x = [1, 2, 3, 4] ; x . print", "4\n") }
 #[test] fn pattern_in_let_with_varargs_var_at_end() { run("let _, *x = [1, 2, 3, 4] ; x . print", "[2, 3, 4]\n") }
 #[test] fn pattern_in_let_with_varargs_var_at_middle() { run("let _, *x, _ = [1, 2, 3, 4] ; x . print", "[2, 3]\n") }
 #[test] fn pattern_in_let_with_varargs_var_at_start() { run("let *x, _ = [1, 2, 3, 4] ; x . print", "[1, 2, 3]\n") }
-#[test] fn pattern_in_let_with_varargs_empty_to_empty() { run("let *_ = []", "") }
 #[test] fn pattern_in_let_with_varargs_empty_to_var_at_end_too_short() { run("let *_, x = []", "ValueError: Cannot unpack '[]' of type 'list' with length 0, expected at least 1 elements\n  at: line 1 (<test>)\n\n1 | let *_, x = []\n2 |              ^\n") }
 #[test] fn pattern_in_let_with_varargs_empty_to_var_at_start_too_short() { run("let x, *_ = []", "ValueError: Cannot unpack '[]' of type 'list' with length 0, expected at least 1 elements\n  at: line 1 (<test>)\n\n1 | let x, *_ = []\n2 |              ^\n") }
 #[test] fn pattern_in_let_with_varargs_empty_to_var_at_end() { run("let *_, x = [1] ; x . print", "1\n") }
 #[test] fn pattern_in_let_with_varargs_empty_to_var_at_start() { run("let x, *_ = [1] ; x . print", "1\n") }
 #[test] fn pattern_in_let_with_varargs_empty_to_var_at_middle() { run("let x, *_, y = [1, 2] ; [x, y] . print", "[1, 2]\n") }
 #[test] fn pattern_in_let_with_nested_pattern() { run("let x, (y, _) = [[1, 2], [3, 4]] ; [x, y] . print", "[[1, 2], 3]\n") }
-#[test] fn pattern_in_let_with_parens_on_one_empty() { run("let (_) = [[nil]]", "") }
 #[test] fn pattern_in_let_with_parens_on_one_empty_one_var() { run("let (_, x) = [[1, 2]] ; x . print", "2\n") }
 #[test] fn pattern_in_let_with_complex_patterns_1() { run("let *_, (_, x, _), _ = [[1, 2, 3], [4, 5, 6], [7, 8, 9]] ; x . print", "5\n") }
 #[test] fn pattern_in_let_with_complex_patterns_2() { run("let _, (_, (_, (_, (x, *_)))) = [1, [2, [3, [4, [5, [6, [7, [8, [9, nil]]]]]]]]] ; x . print", "5\n") }

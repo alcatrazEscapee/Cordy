@@ -354,17 +354,35 @@ pub enum ReferenceType {
 impl LValue {
 
     /// Returns `true` if the `LValue` is a top-level variadic, such as `* <name>` or `*_`
-    pub fn is_variadic_term(&self) -> bool { matches!(self, LValue::VarEmpty | LValue::VarNamed(_)) }
+    pub fn is_variadic(&self) -> bool {
+        matches!(self, LValue::VarEmpty | LValue::VarNamed(_))
+    }
 
     /// Returns `true` if the `LValue` is a top-level `LValue::Named`, i.e. `<name>`.
-    pub fn is_named(&self) -> bool { matches!(self, LValue::Named(_)) }
+    pub fn is_named(&self) -> bool {
+        matches!(self, LValue::Named(_))
+    }
 
-    /// Returns `true` if the `LValue` is non-trivial, i.e. it contains any of `_`, `*`, or nested elements.
+    /// Returns `true` if the `LValue` is a top-level `LValue::VarNamed`, i.e. `* <name>`
+    pub fn is_named_variadic(&self) -> bool {
+        matches!(self, LValue::VarNamed(_))
+    }
+
+    /// Returns `true` if the `LValue` is non-trivial, i.e. it contains any of `_`, `*`, or nested non-trivial `LValue`s.
     pub fn is_non_trivial(&self) -> bool {
         match self {
             LValue::Named(_) => false,
             LValue::Empty | LValue::VarEmpty | LValue::VarNamed(_) => true,
             LValue::Terms(terms) => terms.iter().any(|term| term.is_non_trivial() || matches!(term, LValue::Terms(_)))
+        }
+    }
+
+    /// Returns `true` if the `LValue` is trivially empty, i.e. it only contains `_`, `*_` or nested trivially empty `LValue`s.
+    pub fn is_trivially_empty(&self) -> bool {
+        match self {
+            LValue::Empty | LValue::VarEmpty => true,
+            LValue::Named(_) | LValue::VarNamed(_) => false,
+            LValue::Terms(terms) => terms.iter().all(|term| term.is_trivially_empty())
         }
     }
 
@@ -513,7 +531,7 @@ impl LValue {
 
     fn build_pattern(self, parser: &mut Parser, pattern_index: usize) -> Pattern<ParserStoreOp> {
         let terms = self.into_terms();
-        let is_variadic = terms.iter().any(|t| t.is_variadic_term());
+        let is_variadic = terms.iter().any(|t| t.is_variadic());
         let len = if is_variadic { terms.len() - 1 } else { terms.len() };
 
         let mut pattern: Pattern<ParserStoreOp> = Pattern::new(len, is_variadic);
