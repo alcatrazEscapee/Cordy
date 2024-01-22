@@ -307,57 +307,7 @@ impl Block {
 }
 
 
-
-/// A state to restore to while backtracking.
-/// Only stores enough state to be necessary, as we don't need to backtrack through output tokens.
-pub struct ParserState {
-    input: Vec<(Location, ScanToken)>,
-    errors: usize,
-}
-
-impl ParserState {
-    fn store(parser: &Parser) -> ParserState {
-        ParserState {
-            input: Vec::new(),
-            errors: parser.errors.len(),
-        }
-    }
-
-    fn restore(self, parser: &mut Parser) {
-        trace::trace_parser!("restoring input {:?} -> [{:?}, ...]", self.input, parser.input.front());
-
-        for token in self.input.into_iter().rev() {
-            parser.input.push_front(token);
-        }
-
-        parser.errors.truncate(self.errors);
-        parser.error_recovery = false;
-    }
-}
-
-
 impl<'a> Parser<'a> {
-
-    pub fn begin(&mut self) -> bool {
-        trace::trace_parser!("begin backtracking");
-        assert!(self.restore_state.is_none(), "Recursive backtracking attempt");
-
-        self.restore_state = Some(ParserState::store(self));
-        !self.error_recovery
-    }
-
-    pub fn accept(&mut self) {
-        trace::trace_parser!("accept backtracking");
-        self.restore_state = None;
-    }
-
-    pub fn reject(&mut self) {
-        trace::trace_parser!("reject backtracking");
-        match self.restore_state.take() {
-            Some(state) => state.restore(self),
-            _ => panic!("reject() without begin()"),
-        }
-    }
 
     /// Returns a unique identifier for the next opcode in the current function.
     ///
@@ -551,17 +501,9 @@ impl<'a> Parser<'a> {
         }
         while let Some((_, NewLine)) = self.input.front() {
             let token = self.input.pop_front().unwrap();
-            if let Some(state) = &mut self.restore_state {
-                state.input.push(token);
-            }
         }
         trace::trace_parser!("advance {:?}", self.input.front());
         let ret = self.input.pop_front();
-        if let Some(token) = &ret {
-            if let Some(state) = &mut self.restore_state {
-                state.input.push(token.clone());
-            }
-        }
         if let Some((loc, _)) = ret {
             self.last_location = Some(loc)
         }

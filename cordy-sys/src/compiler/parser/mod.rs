@@ -5,7 +5,7 @@ use indexmap::IndexSet;
 
 use crate::compiler::{CompileParameters, CompileResult};
 use crate::compiler::optimizer::Optimize;
-use crate::compiler::parser::core::{BranchType, ParserState};
+use crate::compiler::parser::core::BranchType;
 use crate::compiler::parser::semantic::{LateBinding, LValue, LValueReference, Module, ParserFunctionImpl, ParserFunctionParameters, ParserStoreOp, Reference};
 use crate::compiler::scanner::{ScanResult, ScanToken};
 use crate::core::{NativeFunction, Pattern};
@@ -103,9 +103,6 @@ pub(super) struct Parser<'a> {
     /// If this flag is `true`, then we need to emit a `Pop` or risk mangling the stack.
     delay_pop_from_expression_statement: bool,
 
-    /// A restore state for when backtracking rejects it's attempt.
-    restore_state: Option<ParserState>,
-
     /// A stack of nested functions, each of which have their own table of locals.
     /// While this mirrors the call stack it may not be representative. The only thing we can assume is that when a function is declared, all locals in the enclosing function are accessible.
     locals: &'a mut Vec<Locals>,
@@ -180,7 +177,6 @@ impl Parser<'_> {
 
             error_recovery: false,
             delay_pop_from_expression_statement: false,
-            restore_state: None,
 
             locals,
             fields,
@@ -2037,7 +2033,7 @@ impl Parser<'_> {
 
     fn parse_expr_10(&mut self) -> Expr {
         trace::trace_parser!("rule <expr-10>");
-        let mut expr: Expr = self.parse_expr_10_pattern_lvalue();
+        let mut expr: Expr = self.parse_expr_9();
         loop {
             let mut loc = self.next_location();
             let maybe_op: Option<BinaryOp> = match self.peek() {
@@ -2154,30 +2150,6 @@ impl Parser<'_> {
             }
         }
         expr
-    }
-
-    fn parse_expr_10_pattern_lvalue(&mut self) -> Expr {
-        // A subset of `<lvalue> = <rvalue>` get parsed as patterns. These are for non-trivial <lvalue>s, which cannot involve array or property access, and cannot involve operator-assignment statements.
-        // We use backtracking as for these cases, we want to parse the `lvalue` separately.
-
-        trace::trace_parser!("rule <expr-10-pattern-lvalue>");
-        if self.begin() {
-            if let Some(mut lvalue) = self.parse_bare_lvalue() {
-                if !lvalue.is_named() {
-                    if let Some(Equals) = self.peek() {
-                        // At this point, we know enough that this is the only possible parse
-                        // We have a nontrivial `<lvalue>`, followed by an assignment statement, so this must be a pattern assignment.
-                        let loc = self.advance_with(); // Accept `=`
-                        self.accept(); // First and foremost, accept the query.
-                        lvalue.resolve_locals(loc, self); // Resolve each local, raising an error if need be.
-                        let expr: Expr = self.parse_expr_10(); // Recursively parse, since this is left associative, call <expr-10>
-                        return Expr::assign_pattern(loc, lvalue, expr); // And exit this rule
-                    }
-                }
-            }
-        }
-        self.reject();
-        self.parse_expr_9()
     }
 }
 
