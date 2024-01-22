@@ -58,6 +58,8 @@ impl ParserError {
             LetWithNonTrivialPattern |
             LetWithTrivialEmptyPattern |
             LetWithTrivialVarNamed |
+            LValueEmptyUsedOutsideAssignment |
+            LValueVarEmptyUsedOutsideAssignment |
             BreakOutsideOfLoop |
             ContinueOutsideOfLoop |
             StructNotInGlobalScope |
@@ -118,6 +120,8 @@ pub enum ParserErrorType {
     LetWithNonTrivialPattern,
     LetWithTrivialEmptyPattern,
     LetWithTrivialVarNamed,
+    LValueEmptyUsedOutsideAssignment,
+    LValueVarEmptyUsedOutsideAssignment,
     BreakOutsideOfLoop,
     ContinueOutsideOfLoop,
     StructNotInGlobalScope,

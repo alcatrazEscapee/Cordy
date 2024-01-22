@@ -26,7 +26,7 @@ impl Optimize for Expr {
     fn optimize(self) -> Self {
         match self {
             // Terminals
-            e @ Expr(_, ExprType::Nil | ExprType::Exit | ExprType::Bool(_) | ExprType::Int(_) | ExprType::Str(_) | ExprType::LValue(_) | ExprType::Function(_, _) | ExprType::NativeFunction(_)) => e,
+            e @ Expr(_, ExprType::Nil | ExprType::Exit | ExprType::Bool(_) | ExprType::Int(_) | ExprType::Str(_) | ExprType::LValue(_) | ExprType::Function { .. } | ExprType::NativeFunction(_)) => e,
 
             // Unary Operators
             Expr(loc, ExprType::Unary(op, arg)) => {
@@ -44,7 +44,7 @@ impl Optimize for Expr {
                 match lhs.into_const() {
                     Ok(lhs) => match rhs.into_const() {
                         Ok(rhs) => Expr::value_result(loc, if swap { op.apply(rhs, lhs) } else { op.apply(lhs, rhs) }),
-                        Err(rhs) => Expr::value(lhs).binary(loc, op, rhs, swap),
+                        Err(rhs) => Expr::value(loc, lhs).binary(loc, op, rhs, swap),
                     },
                     Err(lhs) => lhs.binary(loc, op, rhs, swap),
                 }
@@ -81,9 +81,9 @@ impl Optimize for Expr {
                     },
 
                     // This is a special case, for `min(int)` and `max(int)`, we can replace this with a compile time constant
-                    Expr(_, ExprType::NativeFunction(native_f @ (NativeFunction::Min | NativeFunction::Max))) if nargs == Some(1) => {
+                    Expr(loc, ExprType::NativeFunction(native_f @ (NativeFunction::Min | NativeFunction::Max))) if nargs == Some(1) => {
                         if let Expr(_, ExprType::NativeFunction(NativeFunction::Int)) = args[0] {
-                            Expr::int(if native_f == NativeFunction::Min { ValuePtr::MIN_INT } else { ValuePtr::MAX_INT })
+                            Expr::int(loc, if native_f == NativeFunction::Min { ValuePtr::MIN_INT } else { ValuePtr::MAX_INT })
                         } else {
                             f.eval(loc, args, any_unroll)
                         }
@@ -209,7 +209,7 @@ impl Expr {
 
     fn purity(&self) -> Purity {
         match &self.1 {
-            ExprType::Nil | ExprType::Exit | ExprType::Bool(_) | ExprType::Int(_) | ExprType::Str(_) | ExprType::NativeFunction(_) | ExprType::Function(_, _) => Purity::Strong,
+            ExprType::Nil | ExprType::Exit | ExprType::Bool(_) | ExprType::Int(_) | ExprType::Str(_) | ExprType::NativeFunction(_) | ExprType::Function { .. } => Purity::Strong,
             ExprType::LValue(_) => Purity::Weak,
 
             ExprType::Unary(_, arg) => arg.purity(),

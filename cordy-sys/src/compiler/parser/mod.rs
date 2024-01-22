@@ -11,7 +11,7 @@ use crate::compiler::scanner::{ScanResult, ScanToken};
 use crate::core::{NativeFunction, Pattern};
 use crate::reporting::Location;
 use crate::trace;
-use crate::vm::{Opcode, StoreOp, ValuePtr};
+use crate::vm::{ComplexType, Opcode, StoreOp, ValuePtr};
 use crate::vm::operator::{BinaryOp, CompareOp, UnaryOp};
 
 pub use crate::compiler::parser::core::{Block, Code};
@@ -1219,13 +1219,35 @@ impl Parser<'_> {
     fn parse_expr_1_terminal(&mut self) -> Expr {
         trace::trace_parser!("rule <expr-1>");
         match self.peek() {
-            Some(KeywordNil) => { self.advance(); Expr::nil() },
-            Some(KeywordTrue) => { self.advance(); Expr::bool(true) },
-            Some(KeywordFalse) => { self.advance(); Expr::bool(false) },
-            Some(KeywordExit) => { self.advance(); Expr::exit() },
-            Some(IntLiteral(i)) => { let i = *i; self.advance(); Expr::int(i) },
-            Some(ComplexLiteral(i)) => { let i = *i; self.advance(); Expr::complex(i) },
-            Some(StringLiteral(_)) => Expr::str(self.advance_str()),
+            Some(KeywordNil) => {
+                self.advance();
+                Expr::nil()
+            },
+            Some(KeywordTrue) => Expr::bool(self.advance_with(), true),
+            Some(KeywordFalse) => Expr::bool(self.advance_with(), false),
+            Some(KeywordExit) => Expr::exit(self.advance_with()),
+            Some(IntLiteral(i)) => {
+                let value = *i;
+                let loc = self.advance_with();
+                Expr::int(loc, value)
+            },
+            Some(ComplexLiteral(i)) => {
+                let value = ComplexType::new(0, *i);
+                let loc = self.advance_with();
+                Expr::complex(loc, value)
+            },
+            Some(StringLiteral(_)) => match self.advance_both() {
+                Some((loc, StringLiteral(value))) => Expr::str(loc, value),
+                _ => panic!()
+            },
+            Some(Underscore) => Expr::empty(self.advance_with()),
+            Some(Mul) => match self.peek2() {
+                Some(Underscore) => Expr::var_empty(self.advance_with() | self.advance_with()),
+                _ => {
+                    self.error_with(ExpectedExpressionTerminal);
+                    Expr::nil()
+                }
+            },
             Some(Identifier(_)) => {
                 let name: String = self.advance_identifier();
                 let loc: Location = self.prev_location();
@@ -1332,7 +1354,7 @@ impl Parser<'_> {
             Some(Arrow) => {
                 let (loc, field_index) = self.parse_expr_2_field_access();
                 self.expect(CloseParen);
-                return Some(Expr::get_field_function(loc, field_index));
+                return Some(Expr::field(loc, field_index));
             },
 
             _ => {},

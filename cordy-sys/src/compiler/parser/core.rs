@@ -421,15 +421,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Like `advance()`, but returns the boxed `String` literal token.
-    /// **Important**: Must only be called once `peek()` has identified a `StringLiteral` token is present, as this will panic otherwise.
-    pub fn advance_str(&mut self) -> String {
-        match self.advance() {
-            Some(StringLiteral(s)) => s,
-            t => panic!("Token mismatch in advance_str() -> expected a Some(StringLiteral(String)), got a {:?} instead", t)
-        }
-    }
-
     /// Expects an identifier token, consumes it, and returns the name. If an identifier was not present, then raises the provided error, and returns a procedurally generated ID.
     pub fn expect_identifier<F : FnOnce(Option<ScanToken>) -> ParserErrorType>(&mut self, err: F) -> String {
         match self.peek() {
@@ -495,7 +486,7 @@ impl<'a> Parser<'a> {
 
     /// Advances and returns the next incoming token.
     /// Will also advance past any newline tokens, and so the advanced token will be the next token _after_ any newlines between the last token and the next.
-    fn advance_both(&mut self) -> Option<(Location, ScanToken)> {
+    pub fn advance_both(&mut self) -> Option<(Location, ScanToken)> {
         if self.error_recovery {
             return None
         }
