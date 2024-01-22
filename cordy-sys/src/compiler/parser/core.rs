@@ -500,7 +500,7 @@ impl<'a> Parser<'a> {
             return None
         }
         while let Some((_, NewLine)) = self.input.front() {
-            let token = self.input.pop_front().unwrap();
+            self.input.pop_front().unwrap();
         }
         trace::trace_parser!("advance {:?}", self.input.front());
         let ret = self.input.pop_front();

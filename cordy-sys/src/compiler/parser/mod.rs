@@ -1277,7 +1277,7 @@ impl Parser<'_> {
         // Open `(` usually resolves precedence, so it begins parsing an expression from the top again
         // However it *also* can be used to wrap around a partial evaluation of a literal operator, for example
         // (-)   => OperatorUnary(UnaryOp::Minus)
-        // (+ 3) => Int(3) OperatorAdd OpFuncEval
+        // (+ 3) => Int(3) OperatorAdd Call
         // (*)   => OperatorMul
         // So, if we peek ahead and see an operator, we know this is a expression of that sort and we need to handle accordingly
         // We *also* know that we will never see a binary operator begin an expression
@@ -1429,6 +1429,40 @@ impl Parser<'_> {
         }
     }
 
+    /// Parses a parenthesis expression. This can have **many** different interpretations, depending on context:
+    ///
+    /// - `(1)`, `(1 + 2)` are resolving precedence
+    /// - `(1,)`, `(1, 2)` are vector literals
+    /// - `(+1)`, `(1+)` are partially evaluated operators (right and left, respectively)
+    /// - `(x)`, `(x,)` are pattern literals when combined with an assignment statement, or resolving precedence / vector literals when not
+    /// - `(*x)` is an illegal pattern literal when combined with an assignment statement, and a partially evaluated operator if not
+    /// - `(*x, _)` is a pattern literal when combined with an assignment statement, and an error if not
+    ///
+    /// ### Explicit vs. Implicit Commas
+    ///
+    /// Note that due to how pattern assignments work, there is a difference between `(x) =` and `((x)) = `, which means for **arbitrary expressions**, we always have to wrap
+    /// the result in a `Comma(...)`, even if we think at this point, it is just resolving precedence. But, this means we have to distinguish between explicit and implicit commas,
+    /// if the resulting expressions is not used in an assignment statement:
+    ///
+    /// - `(x)` is an **implicit** comma expression, and should result in resolving precedence
+    /// - `(x,)` is an **explicit** comma expression, and should result in a vector literal
+    ///
+    /// Note that the **unroll** operator also is used to promote an implicit comma expression to an explicit one:
+    ///
+    /// - `(...x)` should be considered an **explicit** comma expression, and should result in an unrolled vector literal.
+    ///
+    /// ### Precedence
+    ///
+    /// Within a parenthesis expression, a specific order of precedence is followed. This is an expression which **assumes it is comma seperated,** and thus parses as such:
+    ///
+    /// - Commas `,` that separate multiple arguments
+    /// - Partial Operators (including `...` as a prefix operator), at most one per argument
+    /// - Assignment statements, then following expressions
+    ///
+    fn parse_expr_parens(&mut self) -> Expr {
+        Expr::nil()
+    }
+
     fn parse_expr_1_vector_literal(&mut self, loc: Location, arg1: Expr, arg_is_unroll: bool) -> Expr {
         trace::trace_parser!("rule <expr-1-vector-literal>");
 
@@ -1497,7 +1531,7 @@ impl Parser<'_> {
         self.advance(); // Consume `:`
 
         let arg2: Expr = match self.peek() {
-            Some(Colon) => Expr::nil(), // No second argument, but we have a third argument. Don't consume the colon as it's the seperator
+            Some(Colon) => Expr::nil(), // No second argument, but we have a third argument. Don't consume the colon as it's the separator
             Some(CloseSquareBracket) => { // No second argument, so a unbounded slice
                 let loc_end = self.advance_with();
                 return Expr::raw_slice(loc_start | loc_end, arg1, Expr::nil(), None);
@@ -2050,7 +2084,7 @@ impl Parser<'_> {
                 Some(ModEquals) => Some(BinaryOp::Mod),
                 Some(PowEquals) => Some(BinaryOp::Pow),
 
-                // `.=` is special, as it needs to emit `Swap`, then `OpFuncEval(1)`
+                // `.=` is special, as it needs to emit `Swap`, then `Call(1)`
                 Some(DotEquals) => Some(BinaryOp::NotEqual), // Marker
 
                 // Special assignment operators, use their own version of a binary operator
@@ -2294,6 +2328,27 @@ mod tests {
     #[test] fn test_let_assignment_in_expr_2() { run_err("let b, c, d ; let a = b, c = d", "Duplicate definition of variable 'c' in the same scope\n  at: line 1 (<test>)\n\n1 | let b, c, d ; let a = b, c = d\n2 |                            ^\n"); }
     #[test] fn test_let_assignment_in_expr_3_legal() { run("let b, c ; let a = (b = c)", "InitGlobal InitGlobal Nil Nil PushGlobal(1)->c StoreGlobal(0)->b InitGlobal Pop Pop"); }
     #[test] fn test_let_assignment_in_expr_4_legal() { run("let b, d ; let a = b, c = d", "InitGlobal InitGlobal Nil Nil PushGlobal(0)->b InitGlobal PushGlobal(1)->d InitGlobal Pop Pop Pop"); }
+
+    #[test] fn test_lvalue_in_expr_fragment_1() { run_err("_", "Expected an expression, got '_' instead\n  at: line 1 (<test>)\n\n1 | _\n2 | ^\n"); }
+    #[test] fn test_lvalue_in_expr_fragment_2() { run_err("*_", "Expected an expression, got '*_' instead\n  at: line 1 (<test>)\n\n1 | *_\n2 | ^^\n"); }
+    #[test] fn test_lvalue_in_expr_fragment_3() { run_err("let b ; *b", ""); }
+    #[test] fn test_lvalue_in_expr_fragment_4() { run_err("let a, b ; a, b", ""); }
+    #[test] fn test_lvalue_in_expr_fragment_5() { run_err("let a, b ; a, _, b", ""); }
+    #[test] fn test_lvalue_in_expr_fragment_6() { run_err("let a, b ; _, a, *b, _, _", ""); }
+    #[test] fn test_lvalue_in_expr_fragment_7() { run_err("let a, b ; (a, b), _", ""); }
+    #[test] fn test_lvalue_in_expr_fragment_8() { run_err("let a, b ; (a, _, b)", ""); }
+    #[test] fn test_lvalue_in_expr_fragment_9() { run_err("let a, b ; ((a, b), (_, *_))", ""); }
+    #[test] fn test_lvalue_in_expr_fragment_10_legal() { run("let a ; a", "InitGlobal Nil PushGlobal(0)->a Pop"); }
+    #[test] fn test_lvalue_in_expr_fragment_11_legal() { run("let a, b ; (a, b)", "InitGlobal InitGlobal Nil Nil LiteralBegin(Vector,2) PushGlobal(0)->a PushGlobal(1)->b LiteralAcc(2) LiteralEnd Pop Pop"); }
+    #[test] fn test_lvalue_assign_with_empty_1() { run_err("_ = 3", "The left hand side of an assignment must reference at least one named variable\n  at: line 1 (<test>)\n\n1 | _ = 3\n2 |   ^\n"); }
+    #[test] fn test_lvalue_assign_with_empty_2() { run_err("*_ = 3", "The left hand side of an assignment must reference at least one named variable\n  at: line 1 (<test>)\n\n1 | *_ = 3\n2 |    ^\n"); }
+    #[test] fn test_lvalue_assign_with_empty_3() { run_err("_, _, _ = 3", "The left hand side of an assignment must reference at least one named variable\n  at: line 1 (<test>)\n\n1 | _, _, _ = 3\n2 |         ^\n"); }
+    #[test] fn test_lvalue_assign_with_empty_4() { run_err("_, (_, _, *_), (_, _) = 3", "The left hand side of an assignment must reference at least one named variable\n  at: line 1 (<test>)\n\n1 | _, (_, _, *_), (_, _) = 3\n2 |                       ^\n"); }
+    #[test] fn test_lvalue_assign_with_invalid_1() { run_err("1 = 3", "The left hand side is not a valid assignment target\n  at: line 1 (<test>)\n\n1 | 1 = 3\n2 |   ^\n"); }
+    #[test] fn test_lvalue_assign_with_invalid_2() { run_err("1 + 2 = 3", "The left hand side is not a valid assignment target\n  at: line 1 (<test>)\n\n1 | 1 + 2 = 3\n2 |       ^\n"); }
+    #[test] fn test_lvalue_assign_with_invalid_3() { run_err("_ + 2 = 3", "The left hand side is not a valid assignment target\n  at: line 1 (<test>)\n\n1 | _ + 2 = 3\n2 |       ^\n"); }
+    #[test] fn test_lvalue_assign_with_invalid_4() { run_err("_ + _ = 3", "The left hand side is not a valid assignment target\n  at: line 1 (<test>)\n\n1 | _ + _ = 3\n2 |       ^\n"); }
+
 
     #[test] fn test_expression_function_with_name() { run_err("(fn hello() {})", "Expected a '(' token, got identifier 'hello' instead\n  at: line 1 (<test>)\n\n1 | (fn hello() {})\n2 |     ^^^^^\n"); }
     #[test] fn test_top_level_function_in_error_recovery_mode() { run_err("+ fn hello() {}", "Expected an expression terminal, got '+' token instead\n  at: line 1 (<test>)\n\n1 | + fn hello() {}\n2 | ^\n"); }
