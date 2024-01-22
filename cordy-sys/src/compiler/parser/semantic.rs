@@ -358,11 +358,6 @@ impl LValue {
         matches!(self, LValue::VarEmpty | LValue::VarNamed(_))
     }
 
-    /// Returns `true` if the `LValue` is a top-level `LValue::Named`, i.e. `<name>`.
-    pub fn is_named(&self) -> bool {
-        matches!(self, LValue::Named(_))
-    }
-
     /// Returns `true` if the `LValue` is a top-level `LValue::VarNamed`, i.e. `* <name>`
     pub fn is_named_variadic(&self) -> bool {
         matches!(self, LValue::VarNamed(_))
@@ -399,22 +394,6 @@ impl LValue {
             LValue::Terms(it) => format!("({})", it.iter().map(|u| u.to_code_str()).join(", ")),
             _ => panic!("Cannot convert a {:?} to a code string", self),
         }
-    }
-
-    /// Resolves each identifier as a local variable that is currently declared.
-    /// This will raise semantic errors for undeclared variables.
-    pub(super) fn resolve_locals(&mut self, loc: Location, parser: &mut Parser) {
-        match self {
-            LValue::Named(it) | LValue::VarNamed(it) => {
-                *it = parser.resolve_mutable_reference(loc, it.into_reference());
-            },
-            LValue::Terms(lvalue) => {
-                for term in lvalue {
-                    term.resolve_locals(loc, parser);
-                }
-            },
-            _ => {},
-        };
     }
 
     /// Declares all variables associated with this `LValue` as locals in the current scope.
@@ -574,15 +553,6 @@ impl LValueReference {
         match std::mem::take(self) {
             LValueReference::Named(it) => it,
             _ => panic!("at LValueReference::as_named()"),
-        }
-    }
-
-    /// Unwraps this `LValueReference` into a pure `Reference` which can then be resolved as a local variable.
-    fn into_reference(&mut self) -> Reference {
-        match std::mem::take(self) {
-            LValueReference::Named(it) => Reference::Named(it),
-            LValueReference::This => Reference::This,
-            _ => panic!("at LValueReference::into_reference()"),
         }
     }
 
@@ -1127,23 +1097,6 @@ impl<'a> Parser<'a> {
     pub fn current_function_mut(&mut self) -> &mut ParserFunctionImpl {
         let func: usize = self.current_locals().func.unwrap();
         &mut self.functions[func]
-    }
-
-    /// Resolves a reference like `resolve_reference()`, but requires that the reference returned be mutable (i.e. can be assigned to).
-    /// If the bound reference is not mutable, it will return `Invalid` instead.
-    ///
-    /// - Native Functions cannot be assigned to as they cannot be shadowed
-    /// - Methods in enclosing modules are not assignable
-    pub fn resolve_mutable_reference(&mut self, loc: Location, name: Reference) -> LValueReference {
-        match self.resolve_reference(name) {
-            LValueReference::NativeFunction(_) |
-            LValueReference::Method(_) |
-            LValueReference::LocalThis(_) => {
-                self.error_at(loc, InvalidAssignmentTarget);
-                LValueReference::Invalid
-            }
-            lvalue => lvalue
-        }
     }
 
     /// Resolve an identifier, which can be one of many things, each of which are tried in-order:
