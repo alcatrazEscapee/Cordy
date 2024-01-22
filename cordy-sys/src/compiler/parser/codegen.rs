@@ -39,10 +39,12 @@ impl<'a> Parser<'a> {
                 let id = self.declare_const(it);
                 self.push(Constant(id));
             },
-            Expr(loc, ExprType::LValue(lvalue)) => self.push_load_lvalue(loc, lvalue),
             Expr(_, ExprType::NativeFunction(native)) => self.push(NativeFunction(native)),
-            Expr(_, ExprType::Function(id, closed_locals)) => {
-                self.push(Constant(id));
+            Expr(loc, ExprType::Empty) => self.semantic_error_at(loc, ParserErrorType::LValueEmptyUsedOutsideAssignment),
+            Expr(loc, ExprType::VarEmpty) => self.semantic_error_at(loc, ParserErrorType::LValueVarEmptyUsedOutsideAssignment),
+            Expr(loc, ExprType::LValue(lvalue)) => self.push_load_lvalue(loc, lvalue),
+            Expr(_, ExprType::Function { function_id, closed_locals }) => {
+                self.push(Constant(function_id));
                 self.emit_closure_and_closed_locals(closed_locals)
             },
             Expr(loc, ExprType::SliceLiteral(arg1, arg2, arg3)) => {
@@ -195,7 +197,7 @@ impl<'a> Parser<'a> {
                 self.push_at(Binary(op), loc);
                 self.push_at(SetField(field_index), loc);
             },
-            Expr(loc, ExprType::GetFieldFunction(field_index)) => {
+            Expr(loc, ExprType::Field(field_index)) => {
                 self.push_at(GetFieldFunction(field_index), loc);
             },
             Expr(loc, ExprType::Assignment(lvalue, rhs)) => {
@@ -227,7 +229,7 @@ impl<'a> Parser<'a> {
                 self.emit_expr(*rhs);
                 lvalue.emit_destructuring(self, false, true);
             },
-            Expr(loc, ExprType::RuntimeError(e)) => {
+            Expr(loc, ExprType::Error(e)) => {
                 self.semantic_error_at(loc, ParserErrorType::Runtime(e));
             }
         }

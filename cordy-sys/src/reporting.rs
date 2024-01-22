@@ -457,6 +457,8 @@ impl AsError for ParserError {
             LetWithNonTrivialPattern => String::from("'let' with a pattern variable must be followed by an expression if the pattern contains nontrivial pattern elements"),
             LetWithTrivialEmptyPattern => String::from("'let' statement must declare at least one named variable"),
             LetWithTrivialVarNamed => String::from("'let' statement cannot consist of a single variadic named variable"),
+            LValueEmptyUsedOutsideAssignment => String::from("Expected an expression, got '_' instead"),
+            LValueVarEmptyUsedOutsideAssignment => String::from("Expected an expression, got '*_' instead"),
             BreakOutsideOfLoop => String::from("Invalid 'break' statement outside of an enclosing loop"),
             ContinueOutsideOfLoop => String::from("Invalid 'continue' statement outside of an enclosing loop"),
             StructNotInGlobalScope => String::from("'struct' statements can only be present in global scope"),
