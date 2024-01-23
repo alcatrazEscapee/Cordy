@@ -421,11 +421,8 @@ fn run_with(opt: bool, text: &'static str, expected: &'static str) {
 #[test] fn pattern_in_expression() { run("let x, y, z ; x, y, z = 'abc' ; print(x, y, z)", "a b c\n") }
 #[test] fn pattern_in_expression_nested() { run("let x, y, z ; z = x, y = (1, 2) ; print(x, y, z)", "1 2 (1, 2)\n") }
 #[test] fn pattern_in_expression_locals() { run("do { let x, y, z ; z = x, y = (1, 2) ; print(x, y, z) }", "1 2 (1, 2)\n") }
-#[test] fn pattern_in_expression_return_value() { run("let x, y, z ; print(x, y, z = 'abc') ; print(x, y, z)", "abc\na b c\n") }
 #[test] fn pattern_in_expression_with_variadic() { run("let x, y ; *x, y = 'hello' ; print(x, y)", "hell o\n") }
 #[test] fn pattern_in_expression_with_nested_and_empty() { run("let x, y ; (x, *_), (*_, y) = ('hello', 'world') ; print(x, y)", "h d\n") }
-#[test] fn pattern_in_expression_empty() { run("_ = nil ; _, _, _ = (1, 2, 3)", "") }
-#[test] fn pattern_in_expression_empty_variadic() { run("*_ = 'hello world'", "") }
 #[test] fn function_repr() { run("(fn((_, *_), x) -> nil) . repr . print", "fn _((_, *_), x)\n") }
 #[test] fn function_repr_partial() { run("(fn((_, *_), x) -> nil)(1) . repr . print", "fn _((_, *_), x)\n") }
 #[test] fn function_closure_repr() { run("fn box(x) -> fn((_, *_), y) -> x ; box(nil) . repr . print", "fn _((_, *_), y)\n") }

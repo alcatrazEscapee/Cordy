@@ -44,6 +44,37 @@ pub enum ExprType {
         closed_locals: Vec<Opcode>
     },
 
+    /// A comma expression represents a series of comma seperated expressions within parenthesis.
+    /// It may form one of multiple different expressions depending on context:
+    ///
+    /// - Resolving precedence
+    /// - Vector literals
+    /// - Pattern assignment statements
+    ///
+    /// ### Implicit vs. Explicit Commas
+    ///
+    /// Note that `(x,)` and `(x)` has a different semantic meaning in some contexts - the first implicitly
+    /// creates a vector literal, whereas the second is resolving precedence. Thus, comma expressions also identify
+    /// if the expression is _implicit_ (no trailing comma), or _explicit_ (trailing comma present)
+    ///
+    /// **Note** This is a **transient expression** and should be fully removed by the time `process_expr()` is called, prior to optimization.
+    Comma {
+        args: Vec<Expr>,
+        explicit: bool,
+    },
+
+    /// A `Call()` represents a function call with the function `ExprPtr` and arguments given in `args`.
+    ///
+    /// N.B. the `unroll` parameter is useful for the optimizer, and is populated based on the `args` during the `process_expr()` stage.
+    Call {
+        f: ExprPtr,
+        args: Vec<Expr>,
+        unroll: bool
+    },
+
+    /// Unary `...` applied to an expression as a prefix. It is parsed only from expressions that produce `Comma()` expressions.
+    Unroll(ExprPtr),
+
     LValue(LValueReference),
     SliceLiteral(ExprPtr, ExprPtr, Box<Option<Expr>>),
 
@@ -63,8 +94,6 @@ pub enum ExprType {
     /// Expression for chained comparison operators
     Compare(ExprPtr, Vec<(Location, CompareOp, Expr)>),
     Literal(LiteralType, Vec<Expr>),
-    Unroll(ExprPtr, bool), // first: bool
-    Eval(ExprPtr, Vec<Expr>, bool), // any_unroll: bool
     Compose(ExprPtr, ExprPtr),
     LogicalAnd(ExprPtr, ExprPtr),
     LogicalOr(ExprPtr, ExprPtr),
@@ -110,6 +139,23 @@ impl Expr {
     pub fn error(loc: Location, error: ErrorPtr) -> Expr { Error(error).at(loc) }
     pub fn function(function_id: u32, closed_locals: Vec<Opcode>) -> Expr { Expr(Location::empty(), Function { function_id, closed_locals }) }
 
+    pub fn comma(loc: Location, args: Vec<Expr>, explicit: bool) -> Expr { Comma { args, explicit }.at(loc) }
+    pub fn unroll(self, loc: Location) -> Expr { Unroll(Box::new(self)).at(loc) }
+
+    /// Given `comma` is a `Comma()` expression, this produces the expression of calling `self` with arguments given by `comma`
+    /// Note that for function calls, `explicit` does not matter
+    pub fn call(self, comma: Expr) -> Expr {
+        match comma {
+            Expr(loc, Comma { args, .. }) => Call { f: Box::new(self), args, unroll: false }.at(loc),
+            _ => panic!("call() argument must be a Comma() expression")
+        }
+    }
+
+    pub fn call_with(self, loc: Location, args: Vec<Expr>) -> Expr {
+        let unroll = args.iter().any(|u| u.is_unroll());
+        Call { f: Box::new(self), args, unroll }.at(loc)
+    }
+
     pub fn lvalue(loc: Location, lvalue: LValueReference) -> Expr {
         match lvalue {
             LValueReference::NativeFunction(native) => Expr::native(loc, native),
@@ -141,8 +187,7 @@ impl Expr {
             _ => Expr(Location::empty(), Compare(Box::new(self), ops))
         }
     }
-    pub fn unroll(self, loc: Location, first: bool) -> Expr { Expr(loc, Unroll(Box::new(self), first)) }
-    pub fn eval(self, loc: Location, args: Vec<Expr>, any_unroll: bool) -> Expr { Expr(loc, Eval(Box::new(self), args, any_unroll)) }
+    pub fn eval(self, loc: Location, args: Vec<Expr>, _: bool) -> Expr { self.call_with(loc, args) }
     pub fn compose(self, loc: Location, f: Expr) -> Expr { Expr(loc, Compose(Box::new(self), Box::new(f))) }
     pub fn index(self, loc: Location, index: Expr) -> Expr { Expr(loc, Index(Box::new(self), Box::new(index))) }
     pub fn slice(self, loc: Location, arg1: Expr, arg2: Expr) -> Expr { Expr(loc, Slice(Box::new(self), Box::new(arg1), Box::new(arg2))) }
@@ -178,5 +223,5 @@ impl Expr {
         }
     }
 
-    pub fn is_unroll(&self) -> bool { matches!(self, Expr(_, ExprType::Unroll(_, _))) }
+    pub fn is_unroll(&self) -> bool { matches!(self, Expr(_, ExprType::Unroll(_))) }
 }

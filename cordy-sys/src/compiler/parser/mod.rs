@@ -753,7 +753,7 @@ impl Parser<'_> {
         // Note that unlike `if { }`, an `if then else` **does** count as an expression, and leaves a value on the stack, so we set the flag for delay pop = true
         let condition: Expr = self.parse_expr();
         if let Some(KeywordThen) = self.peek() {
-            let expr = self.parse_expr_1_inline_then_else(loc, condition);
+            let expr = self.parse_inline_then_else(loc, condition);
 
             self.emit_optimized_expr(expr);
             self.delay_pop_from_expression_statement = true;
@@ -1096,7 +1096,6 @@ impl Parser<'_> {
     #[must_use = "For parsing expressions from non-expressions, use parse_expression()"]
     fn parse_expr_unrolled(&mut self, any_unroll: &mut bool) -> Expr {
         let mut unroll = false;
-        let first = !*any_unroll;
 
         if let Some(Ellipsis) = self.peek() {
             self.skip();
@@ -1107,7 +1106,7 @@ impl Parser<'_> {
         let loc = self.prev_location();
         let mut expr = self.parse_expr();
         if unroll {
-            expr = expr.unroll(loc, first);
+            expr = expr.unroll(loc);
         }
 
         expr
@@ -1286,7 +1285,7 @@ impl Parser<'_> {
             Some(OpenSquareBracket) => self.parse_expr_1_list_or_slice_literal(),
             Some(OpenBrace) => self.parse_expr_1_dict_or_set_literal(),
             Some(KeywordFn) => self.parse_expression_function(),
-            Some(KeywordIf) => self.parse_expr_1_inline_if_then_else(),
+            Some(KeywordIf) => self.parse_inline_if_then_else(),
             _ => {
                 self.error_with(ExpectedExpressionTerminal);
                 Expr::nil()
@@ -1481,8 +1480,173 @@ impl Parser<'_> {
     /// - Partial Operators (including `...` as a prefix operator), at most one per argument
     /// - Assignment statements, then following expressions
     ///
-    fn parse_expr_parens(&mut self) -> Expr {
-        Expr::nil()
+    fn parse_comma_expr(&mut self) -> Expr {
+        trace::trace_parser!("rule <expr-comma>");
+
+        let loc = self.advance_with(); // Consume `(`
+        let mut args: Vec<Expr> = vec![self.parse_comma_expr_arg()];
+        let mut explicit: bool;
+        loop {
+            // Check here for a comma, in order to differentiate between explicit and implicit parenthesis
+            explicit = matches!(self.peek(), Some(Comma));
+
+            // todo: better error message here that describes the parenthesis statement
+            if self.parse_optional_trailing_comma(CloseParen, ExpectedCommaOrEndOfVector) {
+                break
+            }
+            args.push(self.parse_comma_expr_arg());
+        }
+        self.expect_resync(CloseParen);
+
+        Expr::comma(loc | self.prev_location(), args, explicit)
+    }
+
+    fn parse_comma_expr_arg(&mut self) -> Expr {
+        trace::trace_parser!("rule <expr-comma-arg>");
+
+        // Unary operators can appear in expressions, but only when a terminal token is directly following it
+        // `(-)` can only appear as a unary operator, not partially evaluated (left)
+        if let Some(unary_op) = self.parse_unary_operator() {
+            if let Some(Comma | CloseParen | CloseBrace | CloseSquareBracket) = self.peek2() {
+                return Expr::native(self.advance_with(), unary_op)
+            }
+        }
+
+        // `(->x)` is unique, as it cannot be an operator unless followed by a field name, which is checked
+        // If we see it as the prefix of an expression, it cannot be anything other than a field access
+        if let Some(Arrow) = self.peek() {
+            let (loc, field_index) = self.parse_expr_2_field_access();
+            return Expr::field(loc, field_index);
+        }
+
+        // `...x` is another special case, which we want to evaluate as an `Unroll(x)`
+        if let Some(Ellipsis) = self.peek() {
+            let loc = self.advance_with(); // Consume `...`
+            return self.parse_expr().unroll(loc)
+        }
+
+        // Binary operators are checked next, which may be partially evaluated (left) first
+        let mut long: bool = false;
+        if let Some(binary_op) = self.parse_binary_operator_left(&mut long) {
+            let mut loc = self.advance_with(); // The binary operator
+            if long {
+                loc |= self.advance_with();
+            }
+            return match self.peek() {
+                // No expression follows this operator, so we have `(` <op> `)`, which just returns the operator itself
+                Some(Comma | CloseParen | CloseBrace | CloseSquareBracket) => Expr::native(loc, binary_op),
+                _ => {
+                    // Otherwise, we try and parse an expression and partially evaluate
+                    // Note that this is *right* partial evaluation, i.e. `(< 3)` -> we evaluate the *second* argument of `<`
+                    // This actually means we need to transform the operator if it is asymmetric, to one which looks identical, but is actually the operator in reverse
+                    Expr::native(loc, binary_op.swap()).eval(loc, vec![self.parse_expr()], false)
+                }
+            }
+        }
+
+        // If there are no prefix operators, we parse an expression, then consider suffix operators
+        let expr = self.parse_expr();
+        let mut long: bool = false;
+        if let Some(binary_op) = self.parse_binary_operator_right(&mut long) {
+            if let Some(Comma | CloseParen | CloseBrace | CloseSquareBracket) = if long { self.peek3() } else { self.peek2() } {
+                let mut loc = self.advance_with(); // The binary operator
+                if long {
+                    loc |= self.advance_with();
+                }
+                return Expr::native(loc, binary_op).eval(loc, vec![expr], false)
+            }
+        }
+
+        // Otherwise, return the expression unmodified
+        expr
+    }
+
+    fn parse_unary_operator(&mut self) -> Option<NativeFunction> {
+        match self.peek() {
+            Some(Minus) => Some(OperatorSub),
+            Some(Not) => Some(OperatorUnaryNot),
+            Some(KeywordNot) => match self.peek2() {
+                Some(KeywordIn) => None, // This is a `not in`, which is a unary operator
+                _ => Some(OperatorUnaryLogicalNot),
+            }
+            _ => None
+        }
+    }
+
+    fn parse_binary_operator_left(&mut self, long: &mut bool) -> Option<NativeFunction> {
+        match self.peek() {
+            Some(Mul) => Some(OperatorMul),
+            Some(Div) => Some(OperatorDiv),
+            Some(Pow) => Some(OperatorPow),
+            Some(Mod) => Some(OperatorMod),
+            Some(KeywordIn) => Some(OperatorIn),
+            Some(KeywordNot) => match self.peek2() { // Lookahead x2 for `not in` or `not`
+                Some(KeywordIn) => {
+                    *long = true;
+                    Some(OperatorNotIn)
+                },
+                _ => None
+            },
+            Some(KeywordIs) => match self.peek2() { // Lookahead x2 for `is not` or `is`
+                Some(KeywordNot) => {
+                    *long = true;
+                    Some(OperatorIsNot)
+                },
+                _ => Some(OperatorIs),
+            },
+            Some(Plus) => Some(OperatorAdd),
+            Some(LeftShift) => Some(OperatorLeftShift),
+            Some(RightShift) => Some(OperatorRightShift),
+            Some(BitwiseAnd) => Some(OperatorBitwiseAnd),
+            Some(BitwiseOr) => Some(OperatorBitwiseOr),
+            Some(BitwiseXor) => Some(OperatorBitwiseXor),
+            Some(LessThan) => Some(OperatorLessThan),
+            Some(LessThanEquals) => Some(OperatorLessThanEqual),
+            Some(GreaterThan) => Some(OperatorGreaterThan),
+            Some(GreaterThanEquals) => Some(OperatorGreaterThanEqual),
+            Some(DoubleEquals) => Some(OperatorEqual),
+            Some(NotEquals) => Some(OperatorNotEqual),
+            _ => None,
+        }
+    }
+
+    fn parse_binary_operator_right(&mut self, long: &mut bool) -> Option<NativeFunction> {
+        match self.peek() {
+            Some(Mul) => Some(OperatorMul),
+            Some(Div) => Some(OperatorDiv),
+            Some(Pow) => Some(OperatorPow),
+            Some(Mod) => Some(OperatorMod),
+            Some(KeywordIs) => match self.peek2() { // Lookahead for `is not`
+                Some(KeywordNot) => {
+                    *long = true;
+                    Some(OperatorIsNot)
+                },
+                _ => Some(OperatorIs)
+            },
+            Some(KeywordIn) => Some(OperatorIn),
+            Some(KeywordNot) => match self.peek2() { // Lookahead for `not in`
+                Some(KeywordIn) => {
+                    *long = true;
+                    Some(OperatorNotIn)
+                },
+                _ => None
+            },
+            Some(Plus) => Some(OperatorAdd),
+            // `-` *can* be partially evaluated from the right, as `x-` is not otherwise a legal expression
+            // todo: create a new operator specifically for _partially right evaluated operator_
+            Some(LeftShift) => Some(OperatorLeftShift),
+            Some(RightShift) => Some(OperatorRightShift),
+            Some(BitwiseAnd) => Some(OperatorBitwiseAnd),
+            Some(BitwiseOr) => Some(OperatorBitwiseOr),
+            Some(BitwiseXor) => Some(OperatorBitwiseXor),
+            Some(LessThan) => Some(OperatorLessThan),
+            Some(LessThanEquals) => Some(OperatorLessThanEqual),
+            Some(GreaterThan) => Some(OperatorGreaterThan),
+            Some(GreaterThanEquals) => Some(OperatorGreaterThanEqual),
+            Some(DoubleEquals) => Some(OperatorEqual),
+            Some(NotEquals) => Some(OperatorNotEqual),
+            _ => None,
+        }
     }
 
     fn parse_expr_1_vector_literal(&mut self, loc: Location, arg1: Expr, arg_is_unroll: bool) -> Expr {
@@ -1637,16 +1801,16 @@ impl Parser<'_> {
         if is_dict.unwrap_or(false) { Expr::dict(loc, args) } else { Expr::set(loc, args) }
     }
 
-    fn parse_expr_1_inline_if_then_else(&mut self) -> Expr {
+    fn parse_inline_if_then_else(&mut self) -> Expr {
         trace::trace_parser!("rule <expr-1-inline-if-then-else>");
 
         let loc = self.advance_with(); // Consume `if`
         let condition = self.parse_expr(); // condition
 
-        self.parse_expr_1_inline_then_else(loc, condition)
+        self.parse_inline_then_else(loc, condition)
     }
 
-    fn parse_expr_1_inline_then_else(&mut self, loc: Location, condition: Expr) -> Expr {
+    fn parse_inline_then_else(&mut self, loc: Location, condition: Expr) -> Expr {
         trace::trace_parser!("rule <expr-1-inline-then-else>");
 
         self.expect(KeywordThen);
@@ -1656,7 +1820,7 @@ impl Parser<'_> {
             Some(KeywordElif) => {
                 self.advance(); // consume `elif`
                 let sub_condition = self.parse_expr();
-                self.parse_expr_1_inline_then_else(Location::empty(), sub_condition)
+                self.parse_inline_then_else(Location::empty(), sub_condition)
             }
             _ => {
                 self.expect(KeywordElse);
@@ -1712,24 +1876,9 @@ impl Parser<'_> {
             // The opening token of a suffix operator must be on the same line
             match self.peek_no_newline() {
                 Some(OpenParen) => {
-                    let mut loc_start = self.advance_with();
-                    match self.peek() {
-                        Some(CloseParen) => {
-                            loc_start |= self.advance_with();
-                            expr = expr.eval(loc_start, vec![], false);
-                        },
-                        Some(_) => {
-                            // Special case: if we can parse a partially-evaluated operator expression, we do so
-                            // This means we can write `map (+3)` instead of `map ((+3))`
-                            // If we parse something here, this will have consumed everything, otherwise we parse an expression as per usual
-                            if let Some(partial_expr) = self.parse_expr_1_partial_operator_left() {
-                                // We still need to treat this as a function evaluation, however, because we pretended we didn't need to see the outer parenthesis
-                                expr = expr.eval(loc_start | self.prev_location(), vec![partial_expr], false);
-                                continue;
-                            } else {
-                                expr = self.parse_expr_2_unary_function_call(loc_start, expr)
-                            }
-                        }
+                    match self.peek2() {
+                        Some(CloseParen) => expr = expr.eval(self.advance_with() | self.advance_with(), vec![], false),
+                        Some(_) => expr = expr.call(self.parse_comma_expr()),
                         _ => self.error_with(ExpectedCommaOrEndOfArguments),
                     }
                 },
@@ -1847,47 +1996,6 @@ impl Parser<'_> {
         let loc_start = self.next_location();
         let arg = self.parse_expr_1_terminal();
         expr.eval(loc_start | self.prev_location(), vec![arg], false)
-    }
-
-    fn parse_expr_2_unary_function_call(&mut self, loc_start: Location, expr: Expr) -> Expr {
-        trace::trace_parser!("rule <expr-2-unary-function-call>");
-
-        // First argument
-        let mut any_unroll: bool = false;
-        let mut args: Vec<Expr> = Vec::new();
-
-        loop {
-            let loc_arg = self.next_location();
-            let arg = self.parse_expr_unrolled(&mut any_unroll);
-
-            // Check for a trailing operator followed by `)`
-            // In that case, we have something like `map ( 3 + )`, which we treat as a shorthand for `map (( 3 + ))`
-            // There's nothing else legal this could possibly be if we see operator and then end of parens
-            //
-            // N.B. This argument can't be unrolled, because there's no situation where a partially evaluated function is unroll-able.
-            // So we just deny it here rather than having a runtime error.
-            let was_unroll: bool = arg.is_unroll(); // Store here because `partial_arg` won't be an unroll
-            match self.parse_expr_1_partial_operator_right(arg) {
-                Ok(partial_arg) => {
-                    if was_unroll {
-                        self.semantic_error_at(loc_arg | self.prev_location(), UnrollNotAllowedInPartialOperator);
-                    }
-
-                    // In this case, we need to early exit since we won't expect a `CloseParen` nor a trailing comma
-                    args.push(partial_arg);
-                    return expr.eval(loc_start | self.prev_location(), args, any_unroll)
-                },
-                Err(arg) => args.push(arg), // No partial operator, proceed as usual
-            }
-
-            if self.parse_optional_trailing_comma(CloseParen, ExpectedCommaOrEndOfArguments) {
-                break;
-            }
-        }
-
-        self.expect_resync(CloseParen);
-
-        expr.eval(loc_start | self.prev_location(), args, any_unroll)
     }
 
     /// Parses a `-> <field>` - returns a `(Location, field_index: u32)`

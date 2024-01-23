@@ -1,6 +1,6 @@
 use crate::compiler::parser::expr::{Expr, ExprType};
 use crate::compiler::parser::Parser;
-use crate::vm::Opcode;
+use crate::vm::{LiteralType, Opcode};
 use crate::vm::operator::{BinaryOp, CompareOp};
 use crate::compiler::ParserErrorType;
 use crate::compiler::parser::core::{BranchType, ForwardBlockId};
@@ -13,10 +13,42 @@ impl<'a> Parser<'a> {
 
     /// Emits an expression, with optimizations (if enabled)
     pub fn emit_optimized_expr(&mut self, mut expr: Expr) {
+        expr = self.process_expr(expr);
         if self.enable_optimization {
             expr = expr.optimize();
         }
         self.emit_expr(expr);
+    }
+
+    /// Processes and transforms expressions _prior_ to optimizing and emitting them. This is mainly to allow for
+    /// transient expressions, like `Comma()`, to be transformed and validated into easier to work with expressions,
+    /// from the view of the optimizer.
+    ///
+    /// This will, for many expression fragments, emit semantic errors and return `Expr::nil()`, as the fragments do not
+    /// need to be visible to the optimizer in the event an error was raised.
+    fn process_expr(&mut self, expr: Expr) -> Expr {
+        match expr {
+            // Both `_` and `*_` are illegal transient fragments and emit errors directly
+            Expr(loc, ExprType::Empty) => {
+                self.semantic_error_at(loc, ParserErrorType::LValueEmptyUsedOutsideAssignment);
+                Expr::nil()
+            },
+            Expr(loc, ExprType::VarEmpty) => {
+                self.semantic_error_at(loc, ParserErrorType::LValueVarEmptyUsedOutsideAssignment);
+                Expr::nil()
+            },
+
+            // Comma expressions are either resolving precedence, or are converted to a vector literal
+            Expr(_, ExprType::Comma { mut args, explicit: false })
+                if args.len() == 1 && !matches!(args[0].1, ExprType::Unroll(_))
+                => args.pop().unwrap(),
+            Expr(loc, ExprType::Comma { args, ..}) => Expr(loc, ExprType::Literal(LiteralType::Vector, args)),
+
+            // Populate the `unroll` field of `Call()` expressions
+            Expr(loc, ExprType::Call { f, args, ..} ) => f.call_with(loc, args),
+
+            _ => expr,
+        }
     }
 
     /// Recursive version of the above.
@@ -24,29 +56,49 @@ impl<'a> Parser<'a> {
     fn emit_expr(&mut self, expr: Expr) {
         match expr {
             Expr(_, ExprType::Nil) => self.push(Nil),
-            Expr(_, ExprType::Exit) => self.push(Exit),
-            Expr(_, ExprType::Bool(true)) => self.push(True),
-            Expr(_, ExprType::Bool(false)) => self.push(False),
-            Expr(_, ExprType::Int(it)) => {
+            Expr(loc, ExprType::Exit) => self.push_at(Exit, loc),
+            Expr(loc, ExprType::Bool(true)) => self.push_at(True, loc),
+            Expr(loc, ExprType::Bool(false)) => self.push_at(False, loc),
+            Expr(loc, ExprType::Int(it)) => {
                 let id = self.declare_const(it);
-                self.push(Constant(id));
-            },
-            Expr(_, ExprType::Complex(it)) => {
-                let id = self.declare_const(it);
-                self.push(Constant(id))
+                self.push_at(Constant(id), loc);
             }
-            Expr(_, ExprType::Str(it)) => {
+            Expr(loc, ExprType::Complex(it)) => {
                 let id = self.declare_const(it);
-                self.push(Constant(id));
-            },
-            Expr(_, ExprType::NativeFunction(native)) => self.push(NativeFunction(native)),
-            Expr(loc, ExprType::Empty) => self.semantic_error_at(loc, ParserErrorType::LValueEmptyUsedOutsideAssignment),
-            Expr(loc, ExprType::VarEmpty) => self.semantic_error_at(loc, ParserErrorType::LValueVarEmptyUsedOutsideAssignment),
-            Expr(loc, ExprType::LValue(lvalue)) => self.push_load_lvalue(loc, lvalue),
-            Expr(_, ExprType::Function { function_id, closed_locals }) => {
-                self.push(Constant(function_id));
+                self.push_at(Constant(id), loc)
+            }
+            Expr(loc, ExprType::Str(it)) => {
+                let id = self.declare_const(it);
+                self.push_at(Constant(id), loc);
+            }
+            Expr(loc, ExprType::NativeFunction(native)) => self.push_at(NativeFunction(native), loc),
+            Expr(loc, ExprType::Field(field_index)) => self.push_at(GetFieldFunction(field_index), loc),
+
+            Expr(loc, ExprType::Error(e)) => self.semantic_error_at(loc, ParserErrorType::Runtime(e)),
+            Expr(loc, ExprType::Function { function_id, closed_locals }) => {
+                self.push_at(Constant(function_id), loc);
                 self.emit_closure_and_closed_locals(closed_locals)
-            },
+            }
+
+            Expr(loc, ExprType::Call { f, args, .. }) => {
+                let nargs: u32 = args.len() as u32;
+                let mut unroll: bool = false;
+
+                self.emit_expr(*f);
+                for arg in args {
+                    match arg {
+                        Expr(loc, ExprType::Unroll(arg)) => {
+                            self.emit_expr(*arg);
+                            self.push_at(Unroll(!unroll), loc);
+                            unroll = true;
+                        }
+                        _ => self.emit_expr(arg)
+                    }
+                }
+                self.push_at(Call(nargs, unroll), loc);
+            }
+
+            Expr(loc, ExprType::LValue(lvalue)) => self.push_load_lvalue(loc, lvalue),
             Expr(loc, ExprType::SliceLiteral(arg1, arg2, arg3)) => {
                 self.emit_expr(*arg1);
                 self.emit_expr(*arg2);
@@ -95,45 +147,33 @@ impl<'a> Parser<'a> {
                     self.join_forward(cmp, BranchType::Compare(op));
                 }
             },
-            Expr(loc, ExprType::Literal(op, args)) => {
-                self.push(LiteralBegin(op, args.len() as u32));
+            Expr(loc, ExprType::Literal(ty, args)) => {
+                self.push_at(LiteralBegin(ty, args.len() as u32), loc);
 
-                let mut acc_args: u32 = 0;
+                let mut acc: u32 = 0;
                 for arg in args {
                     match arg {
-                        Expr(arg_loc, ExprType::Unroll(unroll_arg, _)) => {
-                            if acc_args > 0 {
-                                self.push(LiteralAcc(acc_args));
-                                acc_args = 0;
+                        Expr(loc, ExprType::Unroll(arg)) => {
+                            if acc > 0 {
+                                self.push_at(LiteralAcc(acc), loc);
+                                acc = 0;
                             }
-                            self.emit_expr(*unroll_arg);
-                            self.push_at(LiteralUnroll, arg_loc);
-                        },
+                            self.emit_expr(*arg);
+                            self.push_at(LiteralUnroll, loc);
+                        }
                         _ => {
                             self.emit_expr(arg);
-                            acc_args += 1
+                            acc += 1
                         },
                     }
                 }
 
-                if acc_args > 0 {
-                    self.push(LiteralAcc(acc_args));
+                if acc > 0 {
+                    self.push(LiteralAcc(acc));
                 }
 
                 self.push_at(LiteralEnd, loc);
-            },
-            Expr(loc, ExprType::Unroll(arg, first)) => {
-                self.emit_expr(*arg);
-                self.push_at(Unroll(first), loc);
-            },
-            Expr(loc, ExprType::Eval(f, args, any_unroll)) => {
-                let nargs: u32 = args.len() as u32;
-                self.emit_expr(*f);
-                for arg in args {
-                    self.emit_expr(arg);
-                }
-                self.push_at(Call(nargs, any_unroll), loc);
-            },
+            }
             Expr(loc, ExprType::Compose(arg, f)) => {
                 self.emit_expr(*arg);
                 self.emit_expr(*f);
@@ -197,9 +237,6 @@ impl<'a> Parser<'a> {
                 self.push_at(Binary(op), loc);
                 self.push_at(SetField(field_index), loc);
             },
-            Expr(loc, ExprType::Field(field_index)) => {
-                self.push_at(GetFieldFunction(field_index), loc);
-            },
             Expr(loc, ExprType::Assignment(lvalue, rhs)) => {
                 self.push_store_lvalue_prefix(&lvalue, loc);
                 self.emit_expr(*rhs);
@@ -229,9 +266,8 @@ impl<'a> Parser<'a> {
                 self.emit_expr(*rhs);
                 lvalue.emit_destructuring(self, false, true);
             },
-            Expr(loc, ExprType::Error(e)) => {
-                self.semantic_error_at(loc, ParserErrorType::Runtime(e));
-            }
+
+            _ => panic!("emit_expr() not implemented for {:?}", expr)
         }
     }
 
