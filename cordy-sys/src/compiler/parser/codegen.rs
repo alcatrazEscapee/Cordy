@@ -1,12 +1,40 @@
-use crate::compiler::parser::expr::{Expr, ExprType};
+use crate::compiler::parser::expr::{Expr, ExprType, Visitable, Visitor};
 use crate::compiler::parser::Parser;
 use crate::vm::{LiteralType, Opcode};
 use crate::vm::operator::{BinaryOp, CompareOp};
 use crate::compiler::ParserErrorType;
 use crate::compiler::parser::core::{BranchType, ForwardBlockId};
-use crate::compiler::optimizer::Optimize;
+
 
 use Opcode::{*};
+
+
+struct Process<'a, 'b : 'a>(&'a mut Parser<'b>);
+
+impl<'a, 'b> Visitor for Process<'a, 'b> {
+    fn visit(&mut self, expr: Expr) -> Expr {
+        dbg!(&expr);
+        match expr {
+            // Both `_` and `*_` are illegal transient fragments and emit errors directly
+            Expr(loc, ExprType::Empty) => {
+                self.0.semantic_error_at(loc, ParserErrorType::LValueEmptyUsedOutsideAssignment);
+                Expr::nil()
+            },
+            Expr(loc, ExprType::VarEmpty) => {
+                self.0.semantic_error_at(loc, ParserErrorType::LValueVarEmptyUsedOutsideAssignment);
+                Expr::nil()
+            },
+
+            // Comma expressions are either resolving precedence, or are converted to a vector literal
+            Expr(_, ExprType::Comma { mut args, explicit: false })
+                if args.len() == 1 && !matches!(args[0].1, ExprType::Unroll(_))
+                => args.pop().unwrap(),
+            Expr(loc, ExprType::Comma { args, ..}) => Expr(loc, ExprType::Literal(LiteralType::Vector, args)),
+
+            _ => expr,
+        }
+    }
+}
 
 
 impl<'a> Parser<'a> {
@@ -15,7 +43,7 @@ impl<'a> Parser<'a> {
     pub fn emit_optimized_expr(&mut self, mut expr: Expr) {
         expr = self.process_expr(expr);
         if self.enable_optimization {
-            expr = expr.optimize();
+            expr = self.optimize_expr(expr)
         }
         self.emit_expr(expr);
     }
@@ -27,28 +55,7 @@ impl<'a> Parser<'a> {
     /// This will, for many expression fragments, emit semantic errors and return `Expr::nil()`, as the fragments do not
     /// need to be visible to the optimizer in the event an error was raised.
     fn process_expr(&mut self, expr: Expr) -> Expr {
-        match expr {
-            // Both `_` and `*_` are illegal transient fragments and emit errors directly
-            Expr(loc, ExprType::Empty) => {
-                self.semantic_error_at(loc, ParserErrorType::LValueEmptyUsedOutsideAssignment);
-                Expr::nil()
-            },
-            Expr(loc, ExprType::VarEmpty) => {
-                self.semantic_error_at(loc, ParserErrorType::LValueVarEmptyUsedOutsideAssignment);
-                Expr::nil()
-            },
-
-            // Comma expressions are either resolving precedence, or are converted to a vector literal
-            Expr(_, ExprType::Comma { mut args, explicit: false })
-                if args.len() == 1 && !matches!(args[0].1, ExprType::Unroll(_))
-                => args.pop().unwrap(),
-            Expr(loc, ExprType::Comma { args, ..}) => Expr(loc, ExprType::Literal(LiteralType::Vector, args)),
-
-            // Populate the `unroll` field of `Call()` expressions
-            Expr(loc, ExprType::Call { f, args, ..} ) => f.call_with(loc, args),
-
-            _ => expr,
-        }
+        expr.visit(&mut Process(self))
     }
 
     /// Recursive version of the above.
@@ -97,18 +104,17 @@ impl<'a> Parser<'a> {
                 }
                 self.push_at(Call(nargs, unroll), loc);
             }
+            Expr(loc, ExprType::Compose(arg, f)) => {
+                self.emit_expr(*arg);
+                self.emit_expr(*f);
+                self.push(Swap);
+                self.push_at(Call(1, false), loc);
+            }
 
             Expr(loc, ExprType::LValue(lvalue)) => self.push_load_lvalue(loc, lvalue),
-            Expr(loc, ExprType::SliceLiteral(arg1, arg2, arg3)) => {
-                self.emit_expr(*arg1);
-                self.emit_expr(*arg2);
-                if let Some(arg3) = *arg3 {
-                    self.emit_expr(arg3);
-                    self.push_at(SliceWithStep, loc);
-                } else {
-                    self.push_at(Slice, loc);
-                }
-            },
+
+
+
             Expr(loc, ExprType::Unary(op, arg)) => {
                 self.emit_expr(*arg);
                 self.push_at(Unary(op), loc);
@@ -174,11 +180,15 @@ impl<'a> Parser<'a> {
 
                 self.push_at(LiteralEnd, loc);
             }
-            Expr(loc, ExprType::Compose(arg, f)) => {
-                self.emit_expr(*arg);
-                self.emit_expr(*f);
-                self.push(Swap);
-                self.push_at(Call(1, false), loc);
+            Expr(loc, ExprType::SliceLiteral(arg1, arg2, arg3)) => {
+                self.emit_expr(*arg1);
+                self.emit_expr(*arg2);
+                if let Some(arg3) = *arg3 {
+                    self.emit_expr(arg3);
+                    self.push_at(SliceWithStep, loc);
+                } else {
+                    self.push_at(Slice, loc);
+                }
             },
             Expr(_, ExprType::LogicalAnd(lhs, rhs)) => {
                 self.emit_expr(*lhs);
@@ -261,10 +271,6 @@ impl<'a> Parser<'a> {
                     op => self.push_at(Binary(op), loc),
                 }
                 self.push_at(StoreArray, loc);
-            },
-            Expr(_, ExprType::PatternAssignment(lvalue, rhs)) => {
-                self.emit_expr(*rhs);
-                lvalue.emit_destructuring(self, false, true);
             },
 
             _ => panic!("emit_expr() not implemented for {:?}", expr)

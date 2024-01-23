@@ -4,7 +4,6 @@ use fxhash::FxBuildHasher;
 use indexmap::IndexSet;
 
 use crate::compiler::{CompileParameters, CompileResult};
-use crate::compiler::optimizer::Optimize;
 use crate::compiler::parser::core::BranchType;
 use crate::compiler::parser::semantic::{LateBinding, LValue, LValueReference, Module, ParserFunctionImpl, ParserFunctionParameters, ParserStoreOp, Reference};
 use crate::compiler::scanner::{ScanResult, ScanToken};
@@ -17,7 +16,7 @@ use crate::vm::operator::{BinaryOp, CompareOp, UnaryOp};
 pub use crate::compiler::parser::core::{Block, Code};
 pub use crate::compiler::parser::errors::{ParserError, ParserErrorType};
 pub use crate::compiler::parser::semantic::{Fields, Locals, FunctionLibrary};
-pub use crate::compiler::parser::expr::{Expr, ExprType};
+pub use crate::compiler::parser::expr::{Expr, ExprType, Visitor, Visitable};
 
 use NativeFunction::{*};
 use Opcode::{*};
@@ -1259,29 +1258,7 @@ impl Parser<'_> {
                 let lvalue: LValueReference = self.resolve_reference(Reference::This);
                 Expr::lvalue(loc, lvalue)
             }
-            Some(OpenParen) => {
-                let loc_start = self.advance_with(); // Consume the `(`
-                if let Some(expr) = self.parse_expr_1_partial_operator_left() {
-                    return expr; // Looks ahead, and parses <op> <expr> `)`
-                }
-                if let Some(Ellipsis) = self.peek() { // Must be a vector
-                    let arg1 = self.parse_expr_unrolled(&mut false);
-                    return self.parse_expr_1_vector_literal(loc_start, arg1, true);
-                }
-                let expr = self.parse_expr(); // Parse <expr>
-                let expr = match self.parse_expr_1_partial_operator_right(expr) {
-                    Ok(expr) => return expr, // Looks ahead and parses <op> `)`
-                    Err(expr) => expr,
-                };
-                match self.peek() {
-                    Some(Comma) => self.parse_expr_1_vector_literal(loc_start, expr, false),
-                    _ => {
-                        // Simple expression
-                        self.expect(CloseParen);
-                        expr
-                    },
-                }
-            },
+            Some(OpenParen) => self.parse_comma_expr(),
             Some(OpenSquareBracket) => self.parse_expr_1_list_or_slice_literal(),
             Some(OpenBrace) => self.parse_expr_1_dict_or_set_literal(),
             Some(KeywordFn) => self.parse_expression_function(),
@@ -1290,163 +1267,6 @@ impl Parser<'_> {
                 self.error_with(ExpectedExpressionTerminal);
                 Expr::nil()
             },
-        }
-    }
-
-    fn parse_expr_1_partial_operator_left(&mut self) -> Option<Expr> {
-        trace::trace_parser!("rule <expr-1-partial-operator-left>");
-        // Open `(` usually resolves precedence, so it begins parsing an expression from the top again
-        // However it *also* can be used to wrap around a partial evaluation of a literal operator, for example
-        // (-)   => OperatorUnary(UnaryOp::Minus)
-        // (+ 3) => Int(3) OperatorAdd Call
-        // (*)   => OperatorMul
-        // So, if we peek ahead and see an operator, we know this is a expression of that sort and we need to handle accordingly
-        // We *also* know that we will never see a binary operator begin an expression
-        let mut unary: Option<NativeFunction> = None;
-        let mut binary: Option<NativeFunction> = None;
-        let mut long: bool = false;
-        match self.peek() {
-            // Unary operators *can* be present at the start of an expression, but we would see something after
-            // So, we peek ahead again and see if the next token is a `)` - that's the only way you evaluate unary operators as functions
-            Some(Minus) => unary = Some(OperatorSub),
-            Some(Not) => unary = Some(OperatorUnaryNot),
-
-            Some(Mul) => binary = Some(OperatorMul),
-            Some(Div) => binary = Some(OperatorDiv),
-            Some(Pow) => binary = Some(OperatorPow),
-            Some(Mod) => binary = Some(OperatorMod),
-            Some(KeywordIn) => binary = Some(OperatorIn),
-            Some(KeywordNot) => match self.peek2() { // Lookahead two for `not in` or `not`
-                Some(KeywordIn) => {
-                    binary = Some(OperatorNotIn);
-                    long = true;
-                },
-                Some(_) => {
-                    unary = Some(OperatorUnaryLogicalNot)
-                },
-                None => {},
-            },
-            Some(KeywordIs) => match self.peek2() { // Lookahead two for `is not` or `is`
-                Some(KeywordNot) => {
-                    binary = Some(OperatorIsNot);
-                    long = true;
-                },
-                _ => binary = Some(OperatorIs),
-            },
-            Some(Plus) => binary = Some(OperatorAdd),
-            // `-` cannot be a binary operator as it's ambiguous from a unary expression
-            Some(LeftShift) => binary = Some(OperatorLeftShift),
-            Some(RightShift) => binary = Some(OperatorRightShift),
-            Some(BitwiseAnd) => binary = Some(OperatorBitwiseAnd),
-            Some(BitwiseOr) => binary = Some(OperatorBitwiseOr),
-            Some(BitwiseXor) => binary = Some(OperatorBitwiseXor),
-            Some(LessThan) => binary = Some(OperatorLessThan),
-            Some(LessThanEquals) => binary = Some(OperatorLessThanEqual),
-            Some(GreaterThan) => binary = Some(OperatorGreaterThan),
-            Some(GreaterThanEquals) => binary = Some(OperatorGreaterThanEqual),
-            Some(DoubleEquals) => binary = Some(OperatorEqual),
-            Some(NotEquals) => binary = Some(OperatorNotEqual),
-
-            // This is a unique case, as we can only partially evaluate this with an identifier, not an expression.
-            // It also involves a unique operator, as it cannot be evaluated as a normal native operator (since again, it takes a field index, not a expression)
-            // This operator also cannot stand alone: `(->)` is not valid, but `(->x)` is, presuming a field `x` exists.
-            Some(Arrow) => {
-                let (loc, field_index) = self.parse_expr_2_field_access();
-                self.expect(CloseParen);
-                return Some(Expr::field(loc, field_index));
-            },
-
-            _ => {},
-        }
-
-        if let Some(op) = unary {
-            match self.peek2() {
-                Some(CloseParen) => {
-                    // A bare `( <unary op> )`, which requires no partial evaluation
-                    let loc = self.advance_with(); // The unary operator
-                    self.advance(); // The close paren
-                    Some(Expr::native(loc, op))
-                },
-                _ => None
-            }
-        } else if let Some(op) = binary {
-            let mut loc = self.advance_with(); // The binary operator
-            if long { // `not in` or `is not`, so we need to consume two tokens
-                loc |= self.advance_with();
-            }
-            match self.peek() {
-                Some(CloseParen) => {
-                    // No expression follows this operator, so we have `(` <op> `)`, which just returns the operator itself
-                    self.advance();
-                    Some(Expr::native(loc, op))
-                },
-                _ => {
-                    // Anything else, and we try and parse an expression and partially evaluate.
-                    // Note that this is *right* partial evaluation, i.e. `(< 3)` -> we evaluate the *second* argument of `<`
-                    // This actually means we need to transform the operator if it is asymmetric, to one which looks identical, but is actually the operator in reverse.
-                    let arg = self.parse_expr(); // Parse the expression following a binary prefix operator
-                    self.expect(CloseParen);
-                    Some(Expr::native(loc, op.swap()).eval(loc, vec![arg], false))
-                }
-            }
-        } else {
-            None
-        }
-    }
-
-    fn parse_expr_1_partial_operator_right(&mut self, expr: Expr) -> Result<Expr, Expr> {
-        trace::trace_parser!("rule <expr-1-partial-operator-right>");
-        // If we see the pattern of BinaryOp `)`, then we recognize this as a partial operator, but evaluated from the left hand side instead.
-        // For non-symmetric operators, this means we use the normal operator as we partial evaluate the left hand argument (by having the operator on the right)
-        let mut long: bool = false;
-        let op = match self.peek() {
-            Some(Mul) => OperatorMul,
-            Some(Div) => OperatorDiv,
-            Some(Pow) => OperatorPow,
-            Some(Mod) => OperatorMod,
-            Some(KeywordIs) => match self.peek2() { // Lookahead for `is not`
-                Some(KeywordNot) => {
-                    long = true;
-                    OperatorIsNot
-                },
-                _ => OperatorIs
-            },
-            Some(KeywordIn) => OperatorIn,
-            Some(KeywordNot) => match self.peek2() { // Lookahead for `not in`
-                Some(KeywordIn) => {
-                    long = true;
-                    OperatorNotIn
-                },
-                _ => return Err(expr)
-            },
-            Some(Plus) => OperatorAdd,
-            // `-` cannot be a binary operator as it's ambiguous from a unary expression
-            Some(LeftShift) => OperatorLeftShift,
-            Some(RightShift) => OperatorRightShift,
-            Some(BitwiseAnd) => OperatorBitwiseAnd,
-            Some(BitwiseOr) => OperatorBitwiseOr,
-            Some(BitwiseXor) => OperatorBitwiseXor,
-            Some(LessThan) => OperatorLessThan,
-            Some(LessThanEquals) => OperatorLessThanEqual,
-            Some(GreaterThan) => OperatorGreaterThan,
-            Some(GreaterThanEquals) => OperatorGreaterThanEqual,
-            Some(DoubleEquals) => OperatorEqual,
-            Some(NotEquals) => OperatorNotEqual,
-
-            _ => return Err(expr),
-        };
-
-        // Based on either having a long, or short operator, peek two or three ahead, to see if this is a close paren
-        let is_partial: bool = if long { self.peek3() } else { self.peek2() } == Some(&CloseParen);
-        if is_partial {
-            let mut loc = self.advance_with(); // The operator
-            if long {
-                loc |= self.advance_with(); // For two token operators
-            }
-            self.expect(CloseParen);
-            Ok(Expr::native(loc, op).eval(loc, vec![expr], false)) // Return Ok(), with our new expression
-        } else {
-            Err(expr)
         }
     }
 
@@ -1539,7 +1359,7 @@ impl Parser<'_> {
                     // Otherwise, we try and parse an expression and partially evaluate
                     // Note that this is *right* partial evaluation, i.e. `(< 3)` -> we evaluate the *second* argument of `<`
                     // This actually means we need to transform the operator if it is asymmetric, to one which looks identical, but is actually the operator in reverse
-                    Expr::native(loc, binary_op.swap()).eval(loc, vec![self.parse_expr()], false)
+                    Expr::native(loc, binary_op.swap()).call_with(loc, vec![self.parse_expr()])
                 }
             }
         }
@@ -1553,7 +1373,7 @@ impl Parser<'_> {
                 if long {
                     loc |= self.advance_with();
                 }
-                return Expr::native(loc, binary_op).eval(loc, vec![expr], false)
+                return Expr::native(loc, binary_op).call_with(loc, vec![expr])
             }
         }
 
@@ -1649,23 +1469,6 @@ impl Parser<'_> {
         }
     }
 
-    fn parse_expr_1_vector_literal(&mut self, loc: Location, arg1: Expr, arg_is_unroll: bool) -> Expr {
-        trace::trace_parser!("rule <expr-1-vector-literal>");
-
-        let mut args: Vec<Expr> = vec![arg1];
-        let mut any_unroll = arg_is_unroll;
-
-        loop {
-            if self.parse_optional_trailing_comma(CloseParen, ExpectedCommaOrEndOfVector) {
-                break
-            }
-            args.push(self.parse_expr_unrolled(&mut any_unroll));
-        }
-        self.expect_resync(CloseParen);
-
-        Expr::vector(loc | self.prev_location(), args)
-    }
-
     fn parse_expr_1_list_or_slice_literal(&mut self) -> Expr {
         trace::trace_parser!("rule <expr-1-list-or-slice-literal>");
 
@@ -1720,7 +1523,7 @@ impl Parser<'_> {
             Some(Colon) => Expr::nil(), // No second argument, but we have a third argument. Don't consume the colon as it's the separator
             Some(CloseSquareBracket) => { // No second argument, so a unbounded slice
                 let loc_end = self.advance_with();
-                return Expr::raw_slice(loc_start | loc_end, arg1, Expr::nil(), None);
+                return Expr::slice_literal(loc_start | loc_end, arg1, Expr::nil(), None);
             }
             _ => self.parse_expr(), // As we consumed `:`, we require a second expression
         };
@@ -1729,7 +1532,7 @@ impl Parser<'_> {
         match self.peek() {
             Some(CloseSquareBracket) => { // Two argument slice
                 let loc_end = self.advance_with();
-                return Expr::raw_slice(loc_start | loc_end, arg1, arg2, None);
+                return Expr::slice_literal(loc_start | loc_end, arg1, arg2, None);
             },
             Some(Colon) => {
                 // Three arguments, so continue parsing
@@ -1748,7 +1551,7 @@ impl Parser<'_> {
         };
 
         self.expect(CloseSquareBracket);
-        Expr::raw_slice(loc_start | self.prev_location(), arg1, arg2, Some(arg3))
+        Expr::slice_literal(loc_start | self.prev_location(), arg1, arg2, Some(arg3))
     }
 
     /// Parses either a `dict` or `set` literal.
@@ -1877,7 +1680,7 @@ impl Parser<'_> {
             match self.peek_no_newline() {
                 Some(OpenParen) => {
                     match self.peek2() {
-                        Some(CloseParen) => expr = expr.eval(self.advance_with() | self.advance_with(), vec![], false),
+                        Some(CloseParen) => expr = expr.call_with(self.advance_with() | self.advance_with(), vec![]),
                         Some(_) => expr = expr.call(self.parse_comma_expr()),
                         _ => self.error_with(ExpectedCommaOrEndOfArguments),
                     }
@@ -1887,7 +1690,7 @@ impl Parser<'_> {
 
                     // Consumed `[` so far
                     let arg1: Expr = match self.peek() {
-                        Some(Colon) => Expr::nil(), // No first argument. Don't consume the colon as it's the seperator
+                        Some(Colon) => Expr::nil(), // No first argument. Don't consume the colon as it's the separator
                         _ => self.parse_expr(), // Otherwise we require a first expression
                     };
 
@@ -1995,7 +1798,7 @@ impl Parser<'_> {
         trace::trace_parser!("rule <expr-2-bare-suffix>");
         let loc_start = self.next_location();
         let arg = self.parse_expr_1_terminal();
-        expr.eval(loc_start | self.prev_location(), vec![arg], false)
+        expr.call_with(loc_start | self.prev_location(), vec![arg])
     }
 
     /// Parses a `-> <field>` - returns a `(Location, field_index: u32)`

@@ -1,10 +1,12 @@
-use crate::compiler::parser::semantic::{LValue, LValueReference};
+use crate::compiler::parser::semantic::LValueReference;
 use crate::core::NativeFunction;
 use crate::reporting::Location;
 use crate::vm::{ComplexType, ErrorPtr, LiteralType, Opcode, Type, ValuePtr, ValueResult};
 use crate::vm::operator::{BinaryOp, CompareOp, UnaryOp};
 
 use ExprType::{*};
+
+mod optimizer;
 
 #[derive(Debug, Clone)]
 pub struct Expr(pub Location, pub ExprType);
@@ -64,21 +66,19 @@ pub enum ExprType {
     },
 
     /// A `Call()` represents a function call with the function `ExprPtr` and arguments given in `args`.
-    ///
-    /// N.B. the `unroll` parameter is useful for the optimizer, and is populated based on the `args` during the `process_expr()` stage.
     Call {
         f: ExprPtr,
         args: Vec<Expr>,
         unroll: bool
     },
 
+    /// A `Compose()` represents a binary `.` operation, with arguments `lhs . rhs` or `arg . f`
+    Compose(ExprPtr, ExprPtr),
+
     /// Unary `...` applied to an expression as a prefix. It is parsed only from expressions that produce `Comma()` expressions.
     Unroll(ExprPtr),
 
-    LValue(LValueReference),
-    SliceLiteral(ExprPtr, ExprPtr, Box<Option<Expr>>),
-
-    // Operators + Functions
+    /// Unary operator `<op> <expr>`
     Unary(UnaryOp, ExprPtr),
 
     /// Arguments are `op, lhs, rhs, swap`
@@ -91,32 +91,113 @@ pub enum ExprType {
     ///
     /// **The side (right vs left) of each argument is still correct!!!**
     Binary(BinaryOp, ExprPtr, ExprPtr, bool),
+
     /// Expression for chained comparison operators
     Compare(ExprPtr, Vec<(Location, CompareOp, Expr)>),
-    Literal(LiteralType, Vec<Expr>),
-    Compose(ExprPtr, ExprPtr),
+
     LogicalAnd(ExprPtr, ExprPtr),
     LogicalOr(ExprPtr, ExprPtr),
     Index(ExprPtr, ExprPtr),
     Slice(ExprPtr, ExprPtr, ExprPtr),
     SliceWithStep(ExprPtr, ExprPtr, ExprPtr, ExprPtr),
     IfThenElse(ExprPtr, ExprPtr, ExprPtr),
+
     GetField(ExprPtr, u32),
     SetField(ExprPtr, u32, ExprPtr),
     SwapField(ExprPtr, u32, ExprPtr, BinaryOp),
 
-    // Assignments
+    Literal(LiteralType, Vec<Expr>),
+    SliceLiteral(ExprPtr, ExprPtr, Box<Option<Expr>>),
+
+    LValue(LValueReference),
+
     Assignment(LValueReference, ExprPtr),
     ArrayAssignment(ExprPtr, ExprPtr, ExprPtr),
 
     /// Note that `BinaryOp::NotEqual` is used to indicate this is a `Compose()` operation under the hood
     ArrayOpAssignment(ExprPtr, ExprPtr, BinaryOp, ExprPtr),
-    PatternAssignment(LValue, ExprPtr),
+}
+
+pub trait Visitor {
+    fn visit(&mut self, expr: Expr) -> Expr;
 }
 
 impl ExprType {
     fn at(self, loc: Location) -> Expr {
         Expr(loc, self)
+    }
+}
+
+pub trait Visitable<V : Visitor> {
+    type Output;
+
+    fn visit(self, visitor: &mut V) -> Self::Output;
+}
+
+impl<V : Visitor> Visitable<V> for Expr {
+    type Output = Self;
+
+    fn visit(self, v: &mut V) -> Self {
+        dbg!(&self);
+        let expr = match self {
+            Expr(loc, Comma { args, explicit}) => Expr::comma(loc, args.visit(v), explicit),
+            Expr(loc, Call { f, args, .. }) => f.visit(v).call_with(loc, args.visit(v)),
+            Expr(loc, Compose(arg, f)) => arg.visit(v).compose(loc, f.visit(v)),
+            Expr(loc, Unroll(arg)) => arg.visit(v).unroll(loc),
+
+            Expr(loc, Unary(op, arg)) => arg.visit(v).unary(loc, op),
+            Expr(loc, Binary(op, lhs, rhs, swap)) => lhs.visit(v).binary(loc, op, rhs.visit(v), swap),
+            Expr(_, Compare(arg, ops)) => arg.visit(v).compare(ops.visit(v)),
+            Expr(loc, LogicalAnd(lhs, rhs)) => lhs.visit(v).logical(loc, BinaryOp::And, rhs.visit(v)),
+            Expr(loc, LogicalOr(lhs, rhs)) => lhs.visit(v).logical(loc, BinaryOp::Or, rhs.visit(v)),
+            Expr(loc, Index(array, index)) => array.visit(v).index(loc, index.visit(v)),
+            Expr(loc, Slice(array, arg1, arg2)) => array.visit(v).slice(loc, arg1.visit(v), arg2.visit(v)),
+            Expr(loc, SliceWithStep(array, arg1, arg2, arg3)) => array.visit(v).slice_step(loc, arg1.visit(v), arg2.visit(v), arg3.visit(v)),
+            Expr(loc, IfThenElse(condition, if_true, if_false)) => condition.visit(v).if_then_else(loc, if_true.visit(v), if_false.visit(v)),
+
+            Expr(loc, GetField(arg, field_index)) => arg.visit(v).get_field(loc, field_index),
+            Expr(loc, SetField(arg, field_index, value)) => arg.visit(v).set_field(loc, field_index, value.visit(v)),
+            Expr(loc, SwapField(arg, field_index, value, op)) => arg.visit(v).swap_field(loc, field_index, value.visit(v), op),
+
+            Expr(loc, Literal(ty, args)) => Expr::literal(loc, ty, args.visit(v)),
+            Expr(loc, SliceLiteral(arg1, arg2, arg3)) => Expr::slice_literal(loc, arg1.visit(v), arg2.visit(v), arg3.visit(v)),
+
+            Expr(loc, Assignment(lvalue, arg)) => Expr::assign_lvalue(loc, lvalue, arg.visit(v)),
+            Expr(loc, ArrayAssignment(array, index, value)) => Expr::assign_array(loc, array.visit(v), index.visit(v), value.visit(v)),
+            Expr(loc, ArrayOpAssignment(array, index, op, value)) => Expr::assign_op_array(loc, array.visit(v), index.visit(v), op, value.visit(v)),
+
+            _ => self,
+        };
+        v.visit(expr)
+    }
+}
+
+impl<V : Visitor> Visitable<V> for ExprPtr {
+    type Output = Expr;
+
+    fn visit(self, visitor: &mut V) -> Expr {
+        (*self).visit(visitor)
+    }
+}
+
+impl<V : Visitor> Visitable<V> for Box<Option<Expr>> {
+    type Output = Option<Expr>;
+    fn visit(self, visitor: &mut V) -> Self::Output {
+        self.map(|expr| expr.visit(visitor))
+    }
+}
+
+impl<V : Visitor> Visitable<V> for Vec<Expr> {
+    type Output = Self;
+    fn visit(self, visitor: &mut V) -> Self {
+        self.into_iter().map(|expr| expr.visit(visitor)).collect()
+    }
+}
+
+impl<T1, T2, V : Visitor> Visitable<V> for Vec<(T1, T2, Expr)> {
+    type Output = Self;
+    fn visit(self, visitor: &mut V) -> Self::Output {
+        self.into_iter().map(|(t1, t2, expr)| (t1, t2, expr.visit(visitor))).collect()
     }
 }
 
@@ -140,13 +221,11 @@ impl Expr {
     pub fn function(function_id: u32, closed_locals: Vec<Opcode>) -> Expr { Expr(Location::empty(), Function { function_id, closed_locals }) }
 
     pub fn comma(loc: Location, args: Vec<Expr>, explicit: bool) -> Expr { Comma { args, explicit }.at(loc) }
-    pub fn unroll(self, loc: Location) -> Expr { Unroll(Box::new(self)).at(loc) }
 
     /// Given `comma` is a `Comma()` expression, this produces the expression of calling `self` with arguments given by `comma`
-    /// Note that for function calls, `explicit` does not matter
     pub fn call(self, comma: Expr) -> Expr {
         match comma {
-            Expr(loc, Comma { args, .. }) => Call { f: Box::new(self), args, unroll: false }.at(loc),
+            Expr(loc, Comma { args, .. }) => self.call_with(loc, args),
             _ => panic!("call() argument must be a Comma() expression")
         }
     }
@@ -156,6 +235,11 @@ impl Expr {
         Call { f: Box::new(self), args, unroll }.at(loc)
     }
 
+    pub fn compose(self, loc: Location, f: Expr) -> Expr { Compose(Box::new(self), Box::new(f)).at(loc) }
+    pub fn unroll(self, loc: Location) -> Expr { Unroll(Box::new(self)).at(loc) }
+
+
+
     pub fn lvalue(loc: Location, lvalue: LValueReference) -> Expr {
         match lvalue {
             LValueReference::NativeFunction(native) => Expr::native(loc, native),
@@ -164,16 +248,16 @@ impl Expr {
     }
 
     pub fn assign_lvalue(loc: Location, lvalue: LValueReference, expr: Expr) -> Expr { Expr(loc, Assignment(lvalue, Box::new(expr))) }
-    pub fn assign_pattern(loc: Location, lvalue: LValue, expr: Expr) -> Expr { Expr(loc, PatternAssignment(lvalue, Box::new(expr))) }
     pub fn assign_array(loc: Location, array: Expr, index: Expr, rhs: Expr) -> Expr { Expr(loc, ArrayAssignment(Box::new(array), Box::new(index), Box::new(rhs))) }
     pub fn assign_op_array(loc: Location, array: Expr, index: Expr, op: BinaryOp, rhs: Expr) -> Expr { Expr(loc, ArrayOpAssignment(Box::new(array), Box::new(index), op, Box::new(rhs))) }
 
-    pub fn list(loc: Location, args: Vec<Expr>) -> Expr { Expr(loc, Literal(LiteralType::List, args)) }
-    pub fn vector(loc: Location, args: Vec<Expr>) -> Expr { Expr(loc, Literal(LiteralType::Vector, args)) }
-    pub fn set(loc: Location, args: Vec<Expr>) -> Expr { Expr(loc, Literal(LiteralType::Set, args)) }
-    pub fn dict(loc: Location, args: Vec<Expr>) -> Expr { Expr(loc, Literal(LiteralType::Dict, args)) }
+    pub fn list(loc: Location, args: Vec<Expr>) -> Expr { Expr::literal(loc, LiteralType::List, args) }
+    pub fn vector(loc: Location, args: Vec<Expr>) -> Expr { Expr::literal(loc, LiteralType::Vector, args) }
+    pub fn set(loc: Location, args: Vec<Expr>) -> Expr { Expr::literal(loc, LiteralType::Set, args) }
+    pub fn dict(loc: Location, args: Vec<Expr>) -> Expr { Expr::literal(loc, LiteralType::Dict, args) }
 
-    pub fn raw_slice(loc: Location, arg1: Expr, arg2: Expr, arg3: Option<Expr>) -> Expr { Expr(loc, SliceLiteral(Box::new(arg1), Box::new(arg2), Box::new(arg3))) }
+    pub fn literal(loc: Location, ty: LiteralType, args: Vec<Expr>) -> Expr { Literal(ty, args).at(loc) }
+    pub fn slice_literal(loc: Location, arg1: Expr, arg2: Expr, arg3: Option<Expr>) -> Expr { SliceLiteral(Box::new(arg1), Box::new(arg2), Box::new(arg3)).at(loc) }
 
     pub fn unary(self, loc: Location, op: UnaryOp) -> Expr { Expr(loc, Unary(op, Box::new(self))) }
     pub fn binary(self, loc: Location, op: BinaryOp, rhs: Expr, swap: bool) -> Expr { Expr(loc, Binary(op, Box::new(self), Box::new(rhs), swap)) }
@@ -187,8 +271,6 @@ impl Expr {
             _ => Expr(Location::empty(), Compare(Box::new(self), ops))
         }
     }
-    pub fn eval(self, loc: Location, args: Vec<Expr>, _: bool) -> Expr { self.call_with(loc, args) }
-    pub fn compose(self, loc: Location, f: Expr) -> Expr { Expr(loc, Compose(Box::new(self), Box::new(f))) }
     pub fn index(self, loc: Location, index: Expr) -> Expr { Expr(loc, Index(Box::new(self), Box::new(index))) }
     pub fn slice(self, loc: Location, arg1: Expr, arg2: Expr) -> Expr { Expr(loc, Slice(Box::new(self), Box::new(arg1), Box::new(arg2))) }
     pub fn slice_step(self, loc: Location, arg1: Expr, arg2: Expr, arg3: Expr) -> Expr { Expr(loc, SliceWithStep(Box::new(self), Box::new(arg1), Box::new(arg2), Box::new(arg3))) }

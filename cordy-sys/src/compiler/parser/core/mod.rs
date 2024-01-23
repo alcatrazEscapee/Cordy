@@ -21,6 +21,9 @@ use ParserErrorType::{*};
 use ScanToken::{*};
 
 
+mod optimizer;
+
+
 /// A series of code blocks representing the control flow graph.
 /// - Each `Block` is uniquely identifiable by its index within `blocks`, meaning unique and persistent IDs may be taken
 /// - Blocks can form references to other blocks via these IDs in the form of `BlockEnd`
@@ -732,7 +735,7 @@ mod tests {
         let branch1 = code.branch_reverse();
         // ... start of loop ...
         let branch2 = code.branch_forward();
-         // ... body of loop if true ...
+        // ... body of loop if true ...
         code.join_reverse(branch1, BranchType::Jump);
         // ... empty block ...
         code.join_forward(branch2, BranchType::JumpIfFalse);
