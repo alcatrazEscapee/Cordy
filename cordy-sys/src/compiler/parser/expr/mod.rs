@@ -138,7 +138,6 @@ impl<V : Visitor> Visitable<V> for Expr {
     type Output = Self;
 
     fn visit(self, v: &mut V) -> Self {
-        dbg!(&self);
         let expr = match self {
             Expr(loc, Comma { args, explicit}) => Expr::comma(loc, args.visit(v), explicit),
             Expr(loc, Call { f, args, .. }) => f.visit(v).call_with(loc, args.visit(v)),
