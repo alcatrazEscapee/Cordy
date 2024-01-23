@@ -1,18 +1,15 @@
-use crate::compiler::optimizer::Optimize;
 use crate::compiler::parser::{Block, Code};
 use crate::vm::Opcode;
 
 use Opcode::{*};
 
-
-impl<'a> Optimize for &'a mut Code {
-
+impl Code {
     /// Optimizes the code control flow graph using a number of techniques. It currently implements:
     ///
     /// - `Pop` merging into `PopN`
     /// - `StoreGlobal, Pop` merge into `StoreGlobalPop`
     ///
-    fn optimize(self) -> Self {
+    pub fn optimize(&mut self) {
         for block in &mut self.blocks {
             let cursor = &mut BlockCursor::new(block);
 
@@ -32,8 +29,6 @@ impl<'a> Optimize for &'a mut Code {
             merge_store_global_pop(cursor);
             merge_pops(cursor);
         }
-
-        self
     }
 }
 

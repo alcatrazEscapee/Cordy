@@ -12,7 +12,6 @@ pub use crate::compiler::scanner::{ScanError, ScanErrorType, ScanToken, ScanToke
 
 mod parser;
 mod scanner;
-mod optimizer;
 
 
 pub fn scan(view: &SourceView) -> Vec<(Location, ScanTokenType)> {
