@@ -13,7 +13,6 @@ struct Process<'a, 'b : 'a>(&'a mut Parser<'b>);
 
 impl<'a, 'b> Visitor for Process<'a, 'b> {
     fn visit(&mut self, expr: Expr) -> Expr {
-        dbg!(&expr);
         match expr {
             // Both `_` and `*_` are illegal transient fragments and emit errors directly
             Expr(loc, ExprType::Empty) => {

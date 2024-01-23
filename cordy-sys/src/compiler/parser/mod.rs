@@ -1092,25 +1092,6 @@ impl Parser<'_> {
         self.parse_expr_10()
     }
 
-    #[must_use = "For parsing expressions from non-expressions, use parse_expression()"]
-    fn parse_expr_unrolled(&mut self, any_unroll: &mut bool) -> Expr {
-        let mut unroll = false;
-
-        if let Some(Ellipsis) = self.peek() {
-            self.skip();
-            unroll = true;
-            *any_unroll = true;
-        }
-
-        let loc = self.prev_location();
-        let mut expr = self.parse_expr();
-        if unroll {
-            expr = expr.unroll(loc);
-        }
-
-        expr
-    }
-
     /// Parses an `LValue` - the left-hand side of an assignment or pattern assignment statement. This may consist of:
     ///
     /// - A single `_` or named term `x`
@@ -1473,7 +1454,6 @@ impl Parser<'_> {
         trace::trace_parser!("rule <expr-1-list-or-slice-literal>");
 
         let loc_start = self.advance_with(); // Consume `[`
-        let mut any_unroll = false;
 
         match self.peek() {
             Some(CloseSquareBracket) => { // Empty list
@@ -1487,16 +1467,13 @@ impl Parser<'_> {
         }
 
         // Unsure if a slice or a list so far, so we parse the first expression and check for a colon, square bracket, or comma
-        let arg = self.parse_expr_unrolled(&mut any_unroll);
+        let arg = self.parse_comma_expr_arg();
         match self.peek() {
             Some(CloseSquareBracket) => { // Single element list
                 let loc_end = self.advance_with(); // Consume `]`
                 return Expr::list(loc_start | loc_end, vec![arg]);
             },
             Some(Colon) => { // Slice with a first argument
-                if any_unroll {
-                    self.semantic_error(UnrollNotAllowedInSlice);
-                }
                 return self.parse_expr_1_slice_literal(loc_start, arg);
             },
             Some(Comma) => {}, // Don't consume the comma just yet
@@ -1509,7 +1486,7 @@ impl Parser<'_> {
             if self.parse_optional_trailing_comma(CloseSquareBracket, ExpectedCommaOrEndOfList) {
                 break;
             }
-            args.push(self.parse_expr_unrolled(&mut any_unroll));
+            args.push(self.parse_comma_expr_arg());
         }
         self.expect(CloseSquareBracket);
 
@@ -1525,7 +1502,7 @@ impl Parser<'_> {
                 let loc_end = self.advance_with();
                 return Expr::slice_literal(loc_start | loc_end, arg1, Expr::nil(), None);
             }
-            _ => self.parse_expr(), // As we consumed `:`, we require a second expression
+            _ => self.parse_comma_expr_arg(), // As we consumed `:`, we require a second expression
         };
 
         // Consumed `[` <expression> `:` <expression> so far
@@ -1547,7 +1524,7 @@ impl Parser<'_> {
         // Consumed `[` <expression> `:` <expression> `:` so far
         let arg3: Expr = match self.peek() {
             Some(CloseSquareBracket) => Expr::nil(),
-            _ => self.parse_expr(),
+            _ => self.parse_comma_expr_arg(),
         };
 
         self.expect(CloseSquareBracket);
@@ -1565,12 +1542,11 @@ impl Parser<'_> {
             return Expr::set(loc | self.advance_with(), Vec::new())
         }
 
-        let mut any_unroll = false;
         let mut is_dict: Option<bool> = None; // None = could be both, vs. Some(is_dict)
         let mut args: Vec<Expr> = Vec::new();
 
         loop {
-            let arg = self.parse_expr_unrolled(&mut any_unroll);
+            let arg = self.parse_comma_expr_arg();
             let is_unroll = arg.is_unroll();
             args.push(arg);
 
@@ -1578,14 +1554,14 @@ impl Parser<'_> {
                 match is_dict {
                     Some(true) => {
                         self.expect(Colon);
-                        args.push(self.parse_expr());
+                        args.push(self.parse_comma_expr_arg());
                     },
                     Some(false) => {}, // Set does not have any `:` arguments
                     None => { // Still undetermined if it is a dict, or set -> based on this argument we can know definitively
                         is_dict = Some(match self.peek() { // Found a `:`, so we know this is now a dict
                             Some(Colon) => {
                                 self.skip();
-                                args.push(self.parse_expr());
+                                args.push(self.parse_comma_expr_arg());
                                 true
                             },
                             _ => false,
