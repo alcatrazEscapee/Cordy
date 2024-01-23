@@ -51,12 +51,12 @@ impl Optimize for Expr {
             },
 
             Expr(loc, ExprType::Literal(op, args)) => Expr(loc, ExprType::Literal(op, args.optimize())),
-            Expr(loc, ExprType::Unroll(arg, first)) => arg.optimize().unroll(loc, first),
+            Expr(loc, ExprType::Unroll(arg)) => arg.optimize().unroll(loc),
 
-            Expr(loc, ExprType::Eval(f, args, any_unroll)) => {
+            Expr(loc, ExprType::Call { f, args, unroll }) => {
                 let f: Expr = f.optimize();
                 let mut args: Vec<Expr> = args.optimize();
-                let nargs: Option<usize> = if any_unroll { None } else { Some(args.len()) }; // nargs is only valid if no unrolls are present
+                let nargs: Option<usize> = if unroll { None } else { Some(args.len()) }; // nargs is only valid if no unrolls are present
 
                 match f {
                     // Replace invokes on a binary operator with the operator itself
@@ -85,7 +85,7 @@ impl Optimize for Expr {
                         if let Expr(_, ExprType::NativeFunction(NativeFunction::Int)) = args[0] {
                             Expr::int(loc, if native_f == NativeFunction::Min { ValuePtr::MIN_INT } else { ValuePtr::MAX_INT })
                         } else {
-                            f.eval(loc, args, any_unroll)
+                            f.eval(loc, args, unroll)
                         }
                     },
 
@@ -95,14 +95,14 @@ impl Optimize for Expr {
                     //
                     // Note this does not require any reordering of the arguments
                     // This re-calls `.optimize()` as we might be able to replace the operator on the constant-eval'd function
-                    Expr(_, ExprType::Eval(f_inner, mut args_inner, false)) if f_inner.is_partial(args_inner.len()) => {
+                    Expr(_, ExprType::Call { f: f_inner, args: mut args_inner, unroll: false }) if f_inner.is_partial(args_inner.len()) => {
                         args_inner.append(&mut args);
-                        f_inner.eval(loc, args_inner, any_unroll).optimize()
+                        f_inner.eval(loc, args_inner, unroll).optimize()
                     },
 
-                    f => f.eval(loc, args, any_unroll)
+                    f => f.eval(loc, args, unroll)
                 }
-            },
+            }
 
             Expr(loc, ExprType::Compose(arg, f)) => {
                 let arg: Expr = arg.optimize();
@@ -135,7 +135,7 @@ impl Optimize for Expr {
                     // If we can't reorder, then we won't fall into optimization cases for binary operators
                     // This hits cases such as `a . (<op> b)` where a and b cannot be re-ordered
                     // We can replace this with `a b <op>`, or in the case of the opposite partial, with a `Swap` opcode as well, in both cases avoiding the function call
-                    Expr(_, ExprType::Eval(f_inner, mut args, false)) if is_native_operator(&f_inner) && args.len() == 1 => {
+                    Expr(_, ExprType::Call { f: f_inner, mut args, unroll: false }) if is_native_operator(&f_inner) && args.len() == 1 => {
                         let native_f = match *f_inner {
                             Expr(_, ExprType::NativeFunction(f)) => f,
                             _ => panic!()
@@ -215,10 +215,11 @@ impl Expr {
             ExprType::Unary(_, arg) => arg.purity(),
             ExprType::Binary(_, lhs, rhs, _) | ExprType::LogicalOr(lhs, rhs) | ExprType::LogicalAnd(lhs, rhs) => lhs.purity().min(rhs.purity()),
             ExprType::Literal(_, args) => args.iter().map(|u| u.purity()).min().unwrap_or(Purity::Strong),
-            ExprType::Unroll(arg, _) => arg.purity(),
+            ExprType::Unroll(arg) => arg.purity(),
             ExprType::IfThenElse(condition, if_true, if_false) => condition.purity().min(if_true.purity()).min(if_false.purity()),
 
-            ExprType::Eval(f, args, any_unroll) => match !*any_unroll && f.is_partial(args.len()) {
+            ExprType::Call { unroll: true, .. } => Purity::None,
+            ExprType::Call { f, args, ..} => match f.is_partial(args.len()) {
                 true => f.purity().min(args.iter().map(|u| u.purity()).min().unwrap_or(Purity::Strong)),
                 false => Purity::None,
             },
