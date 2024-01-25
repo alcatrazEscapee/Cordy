@@ -452,7 +452,8 @@ impl AsError for ParserError {
             InvalidFieldName(e) => format!("Invalid or unknown field name: '{}'", e),
             InvalidLValue(e, native) => format!("Invalid value used as a {}function parameter: '{}'", if *native { "native " } else { "" }, e),
 
-            InvalidAssignmentTarget => String::from("The left hand side is not a valid assignment target"),
+            AssignmentTargetInvalid => String::from("The left hand side is not a valid assignment target"),
+            AssignmentTargetTrivialEmptyLValue => String::from("The left hand side of an assignment must reference at least one named variable"),
             MultipleVariadicTermsInPattern => String::from("Pattern is not allowed to have more than one variadic ('*') term"),
             LetWithNonTrivialPattern => String::from("'let' with a pattern variable must be followed by an expression if the pattern contains nontrivial pattern elements"),
             LetWithTrivialEmptyPattern => String::from("'let' statement must declare at least one named variable"),

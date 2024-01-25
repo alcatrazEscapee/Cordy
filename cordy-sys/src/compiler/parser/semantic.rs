@@ -989,7 +989,7 @@ impl<'a> Parser<'a> {
                             self.insert(at, binding.loc, Constant(*function_id));
                         }
                     },
-                    (ReferenceType::Store(_), LateBound::Method { .. }) => self.error_at(binding.loc, InvalidAssignmentTarget),
+                    (ReferenceType::Store(_), LateBound::Method { .. }) => self.error_at(binding.loc, AssignmentTargetInvalid),
                     (_, _) => panic!("Invalid reference type set!"),
                 }
                 continue; // Skip the below i += 1, since this binding got swap-removed

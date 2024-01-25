@@ -1077,7 +1077,7 @@ impl Parser<'_> {
 
     fn parse_expression(&mut self) {
         trace::trace_parser!("rule <expression>");
-        let expr: Expr = self.parse_expr();
+        let expr: Expr = self.parse_expr_11(false);
         self.emit_optimized_expr(expr);
     }
 
@@ -1089,7 +1089,7 @@ impl Parser<'_> {
 
     #[must_use = "For parsing expressions from non-expressions, use parse_expression()"]
     fn parse_expr(&mut self) -> Expr {
-        self.parse_expr_10()
+        self.parse_expr_11(true)
     }
 
     /// Parses an `LValue` - the left-hand side of an assignment or pattern assignment statement. This may consist of:
@@ -1299,7 +1299,7 @@ impl Parser<'_> {
         }
         self.expect_resync(CloseParen);
 
-        Expr::comma(loc | self.prev_location(), args, explicit)
+        Expr::comma(loc | self.prev_location(), args, explicit, false)
     }
 
     fn parse_comma_expr_arg(&mut self) -> Expr {
@@ -1340,7 +1340,7 @@ impl Parser<'_> {
                     // Otherwise, we try and parse an expression and partially evaluate
                     // Note that this is *right* partial evaluation, i.e. `(< 3)` -> we evaluate the *second* argument of `<`
                     // This actually means we need to transform the operator if it is asymmetric, to one which looks identical, but is actually the operator in reverse
-                    Expr::native(loc, binary_op.swap()).call_with(loc, vec![self.parse_expr()])
+                    Expr::native(loc, binary_op.swap()).call(loc, vec![self.parse_expr()])
                 }
             }
         }
@@ -1354,7 +1354,7 @@ impl Parser<'_> {
                 if long {
                     loc |= self.advance_with();
                 }
-                return Expr::native(loc, binary_op).call_with(loc, vec![expr])
+                return Expr::native(loc, binary_op).call(loc, vec![expr])
             }
         }
 
@@ -1656,8 +1656,8 @@ impl Parser<'_> {
             match self.peek_no_newline() {
                 Some(OpenParen) => {
                     match self.peek2() {
-                        Some(CloseParen) => expr = expr.call_with(self.advance_with() | self.advance_with(), vec![]),
-                        Some(_) => expr = expr.call(self.parse_comma_expr()),
+                        Some(CloseParen) => expr = expr.call(self.advance_with() | self.advance_with(), vec![]),
+                        Some(_) => expr = expr.call_with(self.parse_comma_expr()),
                         _ => self.error_with(ExpectedCommaOrEndOfArguments),
                     }
                 },
@@ -1774,7 +1774,7 @@ impl Parser<'_> {
         trace::trace_parser!("rule <expr-2-bare-suffix>");
         let loc_start = self.next_location();
         let arg = self.parse_expr_1_terminal();
-        expr.call_with(loc_start | self.prev_location(), vec![arg])
+        expr.call(loc_start | self.prev_location(), vec![arg])
     }
 
     /// Parses a `-> <field>` - returns a `(Location, field_index: u32)`
@@ -1976,123 +1976,108 @@ impl Parser<'_> {
 
     fn parse_expr_10(&mut self) -> Expr {
         trace::trace_parser!("rule <expr-10>");
-        let mut expr: Expr = self.parse_expr_9();
+        let mut args: Vec<Expr> = vec![self.parse_expr_9()];
         loop {
-            let mut loc = self.next_location();
-            let maybe_op: Option<BinaryOp> = match self.peek() {
-                Some(Equals) => Some(BinaryOp::Equal), // Fake operator
-                Some(PlusEquals) => Some(BinaryOp::Add), // Assignment Operators
-                Some(MinusEquals) => Some(BinaryOp::Sub),
-                Some(MulEquals) => Some(BinaryOp::Mul),
-                Some(DivEquals) => Some(BinaryOp::Div),
-                Some(AndEquals) => Some(BinaryOp::And),
-                Some(OrEquals) => Some(BinaryOp::Or),
-                Some(XorEquals) => Some(BinaryOp::Xor),
-                Some(LeftShiftEquals) => Some(BinaryOp::LeftShift),
-                Some(RightShiftEquals) => Some(BinaryOp::RightShift),
-                Some(ModEquals) => Some(BinaryOp::Mod),
-                Some(PowEquals) => Some(BinaryOp::Pow),
+            match self.peek() {
+                Some(Comma) => {
+                    // Comma expressions parsed in this way are only ever used as pattern assignments, so they only need to be followed by `)` or `=` to accept a trailing comma
+                    if let Some(CloseParen | Equals) = self.peek2() {
+                        break
+                    }
 
-                // `.=` is special, as it needs to emit `Swap`, then `Call(1)`
-                Some(DotEquals) => Some(BinaryOp::NotEqual), // Marker
-
-                // Special assignment operators, use their own version of a binary operator
-                // Also need to consume the extra token
-                Some(Identifier(it)) if it == "max" => match self.peek2() {
-                    Some(Equals) => {
-                        self.advance();
-                        loc |= self.next_location();
-                        Some(BinaryOp::Max)
-                    },
-                    _ => None,
-                },
-                Some(Identifier(it)) if it == "min" => match self.peek2() {
-                    Some(Equals) => {
-                        self.advance();
-                        loc |= self.next_location();
-                        Some(BinaryOp::Min)
-                    },
-                    _ => None,
-                },
-                _ => None
-            };
-
-            // We have to handle the left hand side, as we may need to rewrite the left hand side based on what we just parsed.
-            // Valid LHS expressions for a direct assignment, and their translations are:
-            //
-            // PushLocal(a)    => StoreLocal(a, <expr>) -> also works the same for globals, upvalues, and late bound globals
-            // Index(a, b)     => StoreArray(a, b, <expr>)
-            // GetField(a, b)  => SetField(a, b, <expr>)
-            //
-            // If we have a assignment-expression operator, like `+=`, then we need to do it slightly differently:
-            //
-            // PushLocal(a)    => StoreLocal(Op(PushLocal(a), <expr>)) -> also works the same for globals, upvalues, and late bound globals
-            // Index(a, b)     => SwapArray(a, b, Op, <expr>) -> this is special as it needs to use `OpIndexPeek` for the read, then `StoreArray` for the write
-            // GetField(a, b)  => SwapField(a, b, Op, <expr>) -> this is special as it needs to use `GetFieldPeek` for the read, then `SetField` for the write
-            //
-            // **Note**: Assignments are right-associative, so call <expr-10> recursively instead of <expr-9>
-            if let Some(BinaryOp::Equal) = maybe_op { // // Direct assignment statement
-                self.advance();
-                expr = match expr {
-                    Expr(_, ExprType::LValue(lvalue @ (
-                        LValueReference::Local(_) |
-                        LValueReference::UpValue(_) |
-                        LValueReference::Global(_) |
-                        LValueReference::LateBinding(_) |
-                        LValueReference::ThisField { .. }
-                    ))) => {
-                        let rhs = self.parse_expr_10();
-                        Expr::assign_lvalue(loc, lvalue, rhs)
-                    },
-                    Expr(_, ExprType::Index(array, index)) => {
-                        let rhs = self.parse_expr_10();
-                        Expr::assign_array(loc, *array, *index, rhs)
-                    },
-                    Expr(_, ExprType::GetField(lhs, field_index)) => {
-                        let rhs = self.parse_expr_10();
-                        lhs.set_field(loc, field_index, rhs)
-                    },
-                    _ => {
-                        self.error_at(loc, InvalidAssignmentTarget);
-                        Expr::nil()
-                    },
+                    self.advance(); // Consume `,`
+                    args.push(self.parse_expr_7());
                 }
-            } else if let Some(op) = maybe_op {
-                self.advance();
-                expr = match expr {
-                    Expr(lvalue_loc, ExprType::LValue(lvalue @ (
-                        LValueReference::Local(_) |
-                        LValueReference::UpValue(_) |
-                        LValueReference::Global(_) |
-                        LValueReference::LateBinding(_) |
-                        LValueReference::ThisField { .. }
-                    ))) => {
-                        let lhs = Expr::lvalue(lvalue_loc, lvalue.clone());
-                        let rhs = self.parse_expr_10();
-                        Expr::assign_lvalue(loc, lvalue, match op {
-                            BinaryOp::NotEqual => lhs.compose(loc, rhs),
-                            op => lhs.binary(loc, op, rhs, false),
-                        })
-                    },
-                    Expr(_, ExprType::Index(array, index)) => {
-                        let rhs = self.parse_expr_10();
-                        Expr::assign_op_array(loc, *array, *index, op, rhs)
-                    },
-                    Expr(_, ExprType::GetField(lhs, field_index)) => {
-                        let rhs = self.parse_expr_10();
-                        lhs.swap_field(loc, field_index, rhs, op)
-                    },
-                    _ => {
-                        self.error_at(loc, InvalidAssignmentTarget);
-                        Expr::nil()
-                    },
-                }
-            } else {
-                // Not any kind of assignment statement
-                break
+                _ => break
             }
         }
-        expr
+        match args.len() {
+            1 => args.pop().unwrap(),
+            _ => Expr::comma(Location::empty(), args, true, true)
+        }
+    }
+
+    /// Parse an assignment expression
+    ///
+    /// `comma` determines the context where this is called from:
+    /// - If `true` if this was called through an expression type which assumes comma seperated values,
+    ///   and as such, has already handled commas as a lower precedence token.
+    /// - If `false`, it was called through a top-level expression, which handles commas as higher precedence
+    ///   than assignment statements.
+    fn parse_expr_11(&mut self, comma: bool) -> Expr {
+        trace::trace_parser!("rule <expr-11>");
+
+        // N.B. As this is right-associative,
+        // - The rhs call is to parse_expr_10(), calling this recursively, and
+        // - As a result, we don't need a loop here
+        //
+        // If the expression is called through a comma expression, we shortcut to `parse_expr_9()`,
+        // as we avoid parsing comma expressions at a higher precedence.
+        let expr: Expr = match comma {
+            true => self.parse_expr_9(),
+            false => self.parse_expr_10(),
+        };
+
+        let mut loc = self.next_location();
+        let maybe_op: Option<BinaryOp> = match self.peek() {
+            Some(Equals) => Some(BinaryOp::Equal), // Fake operator
+            Some(PlusEquals) => Some(BinaryOp::Add), // Assignment Operators
+            Some(MinusEquals) => Some(BinaryOp::Sub),
+            Some(MulEquals) => Some(BinaryOp::Mul),
+            Some(DivEquals) => Some(BinaryOp::Div),
+            Some(AndEquals) => Some(BinaryOp::And),
+            Some(OrEquals) => Some(BinaryOp::Or),
+            Some(XorEquals) => Some(BinaryOp::Xor),
+            Some(LeftShiftEquals) => Some(BinaryOp::LeftShift),
+            Some(RightShiftEquals) => Some(BinaryOp::RightShift),
+            Some(ModEquals) => Some(BinaryOp::Mod),
+            Some(PowEquals) => Some(BinaryOp::Pow),
+
+            // `.=` is special, as it needs to emit `Swap`, then `Call(1)`
+            Some(DotEquals) => Some(BinaryOp::NotEqual), // Marker
+
+            // Special assignment operators, use their own version of a binary operator
+            // Also need to consume the extra token
+            Some(Identifier(it)) if it == "max" => match self.peek2() {
+                Some(Equals) => {
+                    self.advance();
+                    loc |= self.next_location();
+                    Some(BinaryOp::Max)
+                },
+                _ => None,
+            },
+            Some(Identifier(it)) if it == "min" => match self.peek2() {
+                Some(Equals) => {
+                    self.advance();
+                    loc |= self.next_location();
+                    Some(BinaryOp::Min)
+                },
+                _ => None,
+            },
+            _ => None
+        };
+
+        if let Some(BinaryOp::Equal) = maybe_op { // // Direct assignment statement
+            self.advance(); // Consume `=`
+            match expr.assign(loc, self.parse_expr_11(comma)) {
+                Ok(e) => e,
+                Err(e) => {
+                    self.semantic_error_at(loc, e);
+                    Expr::nil()
+                }
+            }
+        } else if let Some(op) = maybe_op {
+            self.advance(); // Consume `+=`
+            match expr.op_assign(loc, op, self.parse_expr_11(comma)) {
+                Ok(e) => e,
+                Err(e) => {
+                    self.semantic_error_at(loc, e);
+                    Expr::nil()
+                }
+            }
+        } else {
+            expr
+        }
     }
 }
 
@@ -2245,8 +2230,8 @@ mod tests {
     #[test] fn test_lvalue_in_expr_fragment_5() { run_err("let a, b ; a, _, b", ""); }
     #[test] fn test_lvalue_in_expr_fragment_6() { run_err("let a, b ; _, a, *b, _, _", ""); }
     #[test] fn test_lvalue_in_expr_fragment_7() { run_err("let a, b ; (a, b), _", ""); }
-    #[test] fn test_lvalue_in_expr_fragment_8() { run_err("let a, b ; (a, _, b)", ""); }
-    #[test] fn test_lvalue_in_expr_fragment_9() { run_err("let a, b ; ((a, b), (_, *_))", ""); }
+    #[test] fn test_lvalue_in_expr_fragment_8() { run_err("let a, b ; (a, _, b)", "Expected an expression, got '_' instead\n  at: line 1 (<test>)\n\n1 | let a, b ; (a, _, b)\n2 |                ^\n"); }
+    #[test] fn test_lvalue_in_expr_fragment_9() { run_err("let a, b ; ((a, b), (_, *_))", "Expected an expression, got '_' instead\n  at: line 1 (<test>)\n\n1 | let a, b ; ((a, b), (_, *_))\n2 |                      ^\n\nExpected an expression, got '_' instead\n  at: line 1 (<test>)\n\n1 | let a, b ; ((a, b), (_, *_))\n2 |                          ^\n"); }
     #[test] fn test_lvalue_in_expr_fragment_10_legal() { run("let a ; a", "InitGlobal Nil PushGlobal(0)->a Pop"); }
     #[test] fn test_lvalue_in_expr_fragment_11_legal() { run("let a, b ; (a, b)", "InitGlobal InitGlobal Nil Nil LiteralBegin(Vector,2) PushGlobal(0)->a PushGlobal(1)->b LiteralAcc(2) LiteralEnd Pop Pop"); }
     #[test] fn test_lvalue_assign_with_empty_1() { run_err("_ = 3", "The left hand side of an assignment must reference at least one named variable\n  at: line 1 (<test>)\n\n1 | _ = 3\n2 |   ^\n"); }

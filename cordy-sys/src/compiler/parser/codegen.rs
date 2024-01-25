@@ -25,7 +25,7 @@ impl<'a, 'b> Visitor for Process<'a, 'b> {
             },
 
             // Comma expressions are either resolving precedence, or are converted to a vector literal
-            Expr(_, ExprType::Comma { mut args, explicit: false })
+            Expr(_, ExprType::Comma { mut args, explicit: false, .. })
                 if args.len() == 1 && !matches!(args[0].1, ExprType::Unroll(_))
                 => args.pop().unwrap(),
             Expr(loc, ExprType::Comma { args, ..}) => Expr(loc, ExprType::Literal(LiteralType::Vector, args)),
