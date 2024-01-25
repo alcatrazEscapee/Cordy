@@ -3,7 +3,7 @@ use crate::core::NativeFunction;
 use crate::reporting::Location;
 use crate::vm::{ComplexType, ErrorPtr, LiteralType, Opcode, Type, ValuePtr, ValueResult};
 use crate::vm::operator::{BinaryOp, CompareOp, UnaryOp};
-use crate::compiler::ParserErrorType;
+use crate::compiler::{parser, ParserErrorType};
 
 use ExprType::{*};
 use ParserErrorType::{*};
@@ -117,8 +117,10 @@ pub enum ExprType {
     SliceLiteral(ExprPtr, ExprPtr, Box<Option<Expr>>),
 
     LValue(LValueReference),
+    VarLValue(LValueReference),
 
     Assignment(LValueReference, ExprPtr),
+    PatternAssignment(parser::LValue, ExprPtr),
     ArrayAssignment(ExprPtr, ExprPtr, ExprPtr),
 
     /// Note that `BinaryOp::NotEqual` is used to indicate this is a `Compose()` operation under the hood
@@ -195,8 +197,9 @@ impl<V : Visitor> Visitable<V> for Expr {
             Expr(loc, Literal(ty, args)) => Expr::literal(loc, ty, args.visit(v)),
             Expr(loc, SliceLiteral(arg1, arg2, arg3)) => Expr::slice_literal(loc, arg1.visit(v), arg2.visit(v), arg3.visit(v)),
 
-            Expr(loc, Assignment(lvalue, arg)) => Assignment(lvalue, Box::new(arg.visit(v))).at(loc),
-            Expr(loc, ArrayAssignment(array, index, value)) => ArrayAssignment(Box::new(array.visit(v)), Box::new(index.visit(v)), Box::new(value.visit(v))).at(loc),
+            Expr(loc, Assignment(lvalue, rhs)) => Assignment(lvalue, Box::new(rhs.visit(v))).at(loc),
+            Expr(loc, PatternAssignment(lvalue, rhs)) => PatternAssignment(lvalue, Box::new(rhs.visit(v))).at(loc),
+                Expr(loc, ArrayAssignment(array, index, value)) => ArrayAssignment(Box::new(array.visit(v)), Box::new(index.visit(v)), Box::new(value.visit(v))).at(loc),
             Expr(loc, ArrayOpAssignment(array, index, op, value)) => ArrayOpAssignment(Box::new(array.visit(v)), Box::new(index.visit(v)), op, Box::new(value.visit(v))).at(loc),
 
             _ => self,
@@ -288,8 +291,18 @@ impl Expr {
             Expr(_, Index(array, index)) => Ok(ArrayAssignment(array, index, Box::new(rhs)).at(loc)),
             Expr(_, GetField(lhs, field_index)) => Ok(SetField(lhs, field_index, Box::new(rhs)).at(loc)),
             Expr(_, Empty | VarEmpty) => Err(AssignmentTargetTrivialEmptyLValue),
-            // todo: try and convert to an lvalue pattern expression
-            _ => Err(AssignmentTargetInvalid),
+            _ => match self.as_lvalue() {
+                (_, Some(lvalue)) => {
+                    if lvalue.is_trivially_empty() {
+                        return Err(AssignmentTargetTrivialEmptyLValue)
+                    }
+                    if lvalue.is_named_variadic() {
+                        return Err(AssignmentTargetInvalid)
+                    }
+                    Ok(PatternAssignment(lvalue, Box::new(rhs)).at(loc))
+                },
+                _ => Err(AssignmentTargetInvalid)
+            }
         }
     }
 
@@ -321,6 +334,14 @@ impl Expr {
         match lvalue {
             LValueReference::NativeFunction(native) => Expr::native(loc, native),
             lvalue => Expr(loc, LValue(lvalue))
+        }
+    }
+
+    pub fn var_lvalue(loc: Location, lvalue: LValueReference) -> Expr { VarLValue(lvalue).at(loc) }
+
+    fn as_lvalue(self) -> (Location, Option<parser::LValue>) {
+        match self {
+            Expr(loc, expr) => (loc, parser::LValue::from(expr, true))
         }
     }
 

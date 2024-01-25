@@ -2,11 +2,12 @@ use crate::compiler::parser::expr::{Expr, ExprType, Visitable, Visitor};
 use crate::compiler::parser::Parser;
 use crate::vm::{LiteralType, Opcode};
 use crate::vm::operator::{BinaryOp, CompareOp};
-use crate::compiler::ParserErrorType;
+use crate::compiler::{ParserErrorType, ScanToken};
 use crate::compiler::parser::core::{BranchType, ForwardBlockId};
 
 
 use Opcode::{*};
+use ParserErrorType::{*};
 
 
 struct Process<'a, 'b : 'a>(&'a mut Parser<'b>);
@@ -16,11 +17,17 @@ impl<'a, 'b> Visitor for Process<'a, 'b> {
         match expr {
             // Both `_` and `*_` are illegal transient fragments and emit errors directly
             Expr(loc, ExprType::Empty) => {
-                self.0.semantic_error_at(loc, ParserErrorType::LValueEmptyUsedOutsideAssignment);
+                self.0.semantic_error_at(loc, LValueEmptyUsedOutsideAssignment);
                 Expr::nil()
             },
             Expr(loc, ExprType::VarEmpty) => {
-                self.0.semantic_error_at(loc, ParserErrorType::LValueVarEmptyUsedOutsideAssignment);
+                self.0.semantic_error_at(loc, LValueVarEmptyUsedOutsideAssignment);
+                Expr::nil()
+            },
+
+            // As well as `*<name>`
+            Expr(loc, ExprType::VarLValue(_)) => {
+                self.0.semantic_error_at(loc, ExpectedExpressionTerminal(Some(ScanToken::Mul)));
                 Expr::nil()
             },
 
@@ -80,7 +87,7 @@ impl<'a> Parser<'a> {
             Expr(loc, ExprType::NativeFunction(native)) => self.push_at(NativeFunction(native), loc),
             Expr(loc, ExprType::Field(field_index)) => self.push_at(GetFieldFunction(field_index), loc),
 
-            Expr(loc, ExprType::Error(e)) => self.semantic_error_at(loc, ParserErrorType::Runtime(e)),
+            Expr(loc, ExprType::Error(e)) => self.semantic_error_at(loc, Runtime(e)),
             Expr(loc, ExprType::Function { function_id, closed_locals }) => {
                 self.push_at(Constant(function_id), loc);
                 self.emit_closure_and_closed_locals(closed_locals)
@@ -111,8 +118,6 @@ impl<'a> Parser<'a> {
             }
 
             Expr(loc, ExprType::LValue(lvalue)) => self.push_load_lvalue(loc, lvalue),
-
-
 
             Expr(loc, ExprType::Unary(op, arg)) => {
                 self.emit_expr(*arg);
@@ -251,6 +256,10 @@ impl<'a> Parser<'a> {
                 self.emit_expr(*rhs);
                 self.push_store_lvalue(lvalue, loc, true);
             },
+            Expr(_, ExprType::PatternAssignment(lvalue, rhs)) => {
+                self.emit_expr(*rhs);
+                lvalue.emit_destructuring(self, false, true);
+            }
             Expr(loc, ExprType::ArrayAssignment(array, index, rhs)) => {
                 self.emit_expr(*array);
                 self.emit_expr(*index);
