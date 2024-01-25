@@ -309,9 +309,10 @@ pub enum LValueReference {
     #[default]
     Invalid,
 
-    /// `This` and `Named` are used when parsing `LValue`s that are resolved later due to backtracking.
-    /// This is used, for example in function parameters, or in pattern assignment statements.
-    This, // The `self` type in instance methods
+    /// `This` and `Named` are used when parsing `LValue`s that are not resolved as existing identifiers.
+    /// This occurs, for example, in `let` statements, `for` statements, and function parameters, which all parse raw identifiers,
+    /// and declare them rather than resolving them.
+    This,
     Named(String),
 
     /// The below cases are _assignable_ `LValueReference`s. These are used when an `LValue` is directly constructed, i.e. within an expression.
@@ -368,7 +369,7 @@ impl LValue {
             ExprType::Comma { args, .. } => args.into_iter()
                 .map(|Expr(_, expr)| LValue::from(expr, false))
                 .collect::<Option<Vec<LValue>>>()
-                .map(|args| LValue::Terms(args)),
+                .map(LValue::Terms),
 
 
             // todo: support more types of lvalue like array access or field set
@@ -1047,7 +1048,7 @@ impl<'a> Parser<'a> {
         // Also emit errors for any missing used-but-not-declared fields
         for (field_name, field) in &self.fields.fields {
             if let Some(loc) = field.loc {
-                Parser::do_error(loc, InvalidFieldName(field_name.clone()), false, &mut self.errors, &mut self.error_recovery);
+                Parser::do_error(loc, InvalidFieldName(field_name.clone()), false, self.errors, &mut self.error_recovery);
             }
         }
     }

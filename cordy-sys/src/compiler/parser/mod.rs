@@ -16,7 +16,7 @@ use crate::vm::operator::{BinaryOp, CompareOp, UnaryOp};
 pub use crate::compiler::parser::core::{Block, Code};
 pub use crate::compiler::parser::errors::{ParserError, ParserErrorType};
 pub use crate::compiler::parser::semantic::{Fields, Locals, FunctionLibrary};
-pub use crate::compiler::parser::expr::{Expr, ExprType, Visitor, Visitable};
+pub use crate::compiler::parser::expr::{Expr, ExprType, Visitor, Traversable};
 
 use NativeFunction::{*};
 use Opcode::{*};
@@ -232,7 +232,7 @@ impl Parser<'_> {
         if self.enable_optimization {
             self.output.optimize();
         }
-        self.output.emit(&mut self.raw_output, &mut self.locations, &mut self.local_references);
+        self.output.emit(self.raw_output, self.locations, self.local_references);
 
         // Resolve late bindings, which may emit code to functions (fallbacks)
         self.resolve_remaining_late_bindings();
@@ -244,7 +244,7 @@ impl Parser<'_> {
             }
 
             let head: usize = self.raw_output.len();
-            let starts = func.code.emit(&mut self.raw_output, &mut self.locations, &mut self.local_references);
+            let starts = func.code.emit(self.raw_output, self.locations, self.local_references);
             let default_args = func.default_args.iter()
                 .map(|block_id| starts[block_id.0] - head)
                 .collect::<Vec<usize>>();
@@ -338,7 +338,7 @@ impl Parser<'_> {
 
                         // Consume `,` and allow trailing comma
                         if let Some(Comma) = self.peek() {
-                            self.skip();
+                            self.advance();
                         }
                     }
                     Some(CloseParen) => break,
@@ -581,11 +581,11 @@ impl Parser<'_> {
             match self.peek() {
                 // Sugar for `= nil`, so mark this as a default argument
                 Some(QuestionMark) => {
-                    self.skip(); // Consume `?`
+                    self.advance(); // Consume `?`
                     params.default_args.push(Expr(Location::empty(), ExprType::Nil));
                 },
                 Some(Equals) => {
-                    self.skip(); // Consume `=`
+                    self.advance(); // Consume `=`
                     params.default_args.push(self.parse_expr()); // Parse an expression
                 },
                 _ => if !params.variadic && !params.default_args.is_empty() {
@@ -1186,7 +1186,10 @@ impl Parser<'_> {
             }
 
             match self.peek() {
-                Some(Comma) => self.skip(), // Expect more terms
+                Some(Comma) => {
+                    // Expect more terms
+                    self.advance();
+                },
                 _ => return Some(terms),
             }
         }
@@ -1566,7 +1569,7 @@ impl Parser<'_> {
                     None => { // Still undetermined if it is a dict, or set -> based on this argument we can know definitively
                         is_dict = Some(match self.peek() { // Found a `:`, so we know this is now a dict
                             Some(Colon) => {
-                                self.skip();
+                                self.advance();
                                 args.push(self.parse_comma_expr_arg());
                                 true
                             },

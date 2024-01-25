@@ -76,7 +76,7 @@ impl ValuePtr {
         match self.ty() {
             Type::Bool => ComplexType::new(self.is_true() as i64, 0),
             Type::Int => ComplexType::new(self.as_precise_int(), 0),
-            Type::Complex => self.as_complex().clone(),
+            Type::Complex => *self.as_complex(),
             _ => unreachable!(),
         }
     }

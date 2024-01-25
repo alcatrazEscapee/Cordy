@@ -181,7 +181,7 @@ impl ValuePtr {
             Type::Function => self.as_function().to_str(),
             Type::PartialFunction => self.as_partial_function().to_str(rc),
             Type::NativeFunction => Cow::from(self.as_native().name()),
-            Type::PartialNativeFunction => Cow::from(self.as_partial_native().to_str()),
+            Type::PartialNativeFunction => self.as_partial_native().to_str(),
             Type::Closure => self.as_closure().borrow_func().to_str(),
             _ => self.safe_to_repr_str(rc),
         }
@@ -210,7 +210,7 @@ impl ValuePtr {
                     let mut result = String::with_capacity(lower * (sep.len() + 2));
                     result.push(prefix);
                     result.push_str(&first.safe_to_repr_str(rc));
-                    while let Some(next) = iter.next() {
+                    for next in iter {
                         result.push_str(sep);
                         result.push_str(&next.safe_to_repr_str(rc));
                     }
@@ -284,7 +284,7 @@ impl ValuePtr {
             Type::Function => Cow::from(self.as_function().to_repr_str()),
             Type::PartialFunction => self.as_partial_function().to_repr_str(rc),
             Type::NativeFunction => Cow::from(self.as_native().to_repr_str()),
-            Type::PartialNativeFunction => Cow::from(self.as_partial_native().to_repr_str()),
+            Type::PartialNativeFunction => self.as_partial_native().to_repr_str(),
             Type::Closure => Cow::from(self.as_closure().borrow_func().to_repr_str()),
 
             Type::Error | Type::Never => unreachable!(),

@@ -44,7 +44,7 @@ impl<'a> Parser<'a> {
         trace::trace_parser!("rule <csv-term-suffix>");
         match self.peek() {
             Some(Comma) => {
-                self.skip(); // Consume `,`
+                self.advance(); // Consume `,`
                 if Some(&close_token) == self.peek() { // Check again, if this is a trailing comma and close token
                     return true; // Don't consume the close token, as it's used as a resync point
                 }
@@ -159,17 +159,10 @@ impl<'a> Parser<'a> {
                         return Some(token)
                     }
                     lookahead -= 1;
-                } else {
-                    //self.prevent_expression_statement = false;
                 }
             }
         }
         None
-    }
-
-    /// Like `advance()` but discards the result.
-    pub fn skip(&mut self) {
-        self.advance_both();
     }
 
     /// Like `advance()` but returns the location of the advanced-by token.
@@ -311,23 +304,23 @@ impl<'a> Parser<'a> {
     /// A specialization of `error()` which provides the last token (the result of `peek()`) to the provided error function
     /// This avoids ugly borrow checker issues where `match self.peek() { ... t => self.error(Error(t)) }` does not work, despite the semantics being identical.
     pub fn error_with<F : FnOnce(Option<ScanToken>) -> ParserErrorType>(&mut self, error: F) {
-        Parser::do_error(self.next_location(), error(self.peek().cloned()), true, &mut self.errors, &mut self.error_recovery)
+        Parser::do_error(self.next_location(), error(self.peek().cloned()), true, self.errors, &mut self.error_recovery)
     }
 
     pub fn error(&mut self, error: ParserErrorType) {
-        Parser::do_error(self.next_location(), error, true, &mut self.errors, &mut self.error_recovery)
+        Parser::do_error(self.next_location(), error, true, self.errors, &mut self.error_recovery)
     }
 
     pub fn error_at(&mut self, loc: Location, error: ParserErrorType) {
-        Parser::do_error(loc, error, true, &mut self.errors, &mut self.error_recovery)
+        Parser::do_error(loc, error, true, self.errors, &mut self.error_recovery)
     }
 
     pub fn semantic_error(&mut self, error: ParserErrorType) {
-        Parser::do_error(self.prev_location(), error, false, &mut self.errors, &mut self.error_recovery)
+        Parser::do_error(self.prev_location(), error, false, self.errors, &mut self.error_recovery)
     }
 
     pub fn semantic_error_at(&mut self, loc: Location, error: ParserErrorType) {
-        Parser::do_error(loc, error, false, &mut self.errors, &mut self.error_recovery)
+        Parser::do_error(loc, error, false, self.errors, &mut self.error_recovery)
     }
 
     /// Pushes an error into the output. If error recovery mode was active, no error is emitted.

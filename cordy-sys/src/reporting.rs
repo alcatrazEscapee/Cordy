@@ -336,7 +336,7 @@ impl AsError for RuntimeError {
             ValueErrorInvalidCharacterOrdinal(i) => format!("ValueError: Cannot convert int {} to a character", i),
             ValueErrorInvalidFormatCharacter(c) => match c {
                 Some(c) => format!("ValueError: Invalid format character '{}' in format string", c),
-                None => format!("ValueError: Expected format character after '%', got end of string")
+                None => String::from("ValueError: Expected format character after '%', got end of string")
             }
             ValueErrorNotAllArgumentsUsedInStringFormatting(v) => format!("ValueError: Not all arguments consumed in format string, next: {}", v.as_error()),
             ValueErrorMissingRequiredArgumentInStringFormatting => String::from("ValueError: Not enough arguments for format string"),

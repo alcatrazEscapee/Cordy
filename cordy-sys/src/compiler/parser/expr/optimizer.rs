@@ -1,4 +1,4 @@
-use crate::compiler::parser::{Expr, ExprType, Parser, Visitable, Visitor};
+use crate::compiler::parser::{Expr, ExprType, Parser, Traversable, Visitor};
 use crate::core::NativeFunction;
 use crate::vm::{ErrorPtr, IntoValue, LiteralType, RuntimeError, ValuePtr};
 
@@ -8,7 +8,7 @@ struct Optimizer;
 
 impl<'a> Parser<'a> {
     pub fn optimize_expr(&mut self, expr: Expr) -> Expr {
-        expr.visit(&mut Optimizer)
+        expr.walk(&mut Optimizer)
     }
 }
 
