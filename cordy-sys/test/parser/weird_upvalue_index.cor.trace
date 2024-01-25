@@ -6,12 +6,12 @@ L6: 0002 PushGlobal(0) -> problem
     0005 Pop
     0006 Exit
 L2: 0007 Nil
-L3: 0008 Function(fn _() -> L[18, 19])
-    0009 Closure
+    0008 Function(fn _() -> L[18, 19])
+L3: 0009 Closure
     0010 CloseLocal(0)
     0011 Pop
-L4: 0012 Function(fn _() -> L[20, 21])
-    0013 Closure
+    0012 Function(fn _() -> L[20, 21])
+L4: 0013 Closure
     0014 CloseLocal(0)
     0015 Call(0)
 L5: 0016 LiftUpValue(0)

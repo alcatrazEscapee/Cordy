@@ -1222,6 +1222,12 @@ impl Parser<'_> {
             Some(Underscore) => Expr::empty(self.advance_with()),
             Some(Mul) => match self.peek2() {
                 Some(Underscore) => Expr::var_empty(self.advance_with() | self.advance_with()),
+                Some(Identifier(_)) => {
+                    let loc = self.advance_with(); // Consume `,`
+                    let name: String = self.advance_identifier();
+                    let lvalue: LValueReference = self.resolve_reference(Reference::Named(name));
+                    Expr::var_lvalue(loc | self.prev_location(), lvalue)
+                }
                 _ => {
                     self.error_with(ExpectedExpressionTerminal);
                     Expr::nil()
@@ -2225,15 +2231,17 @@ mod tests {
 
     #[test] fn test_lvalue_in_expr_fragment_1() { run_err("_", "Expected an expression, got '_' instead\n  at: line 1 (<test>)\n\n1 | _\n2 | ^\n"); }
     #[test] fn test_lvalue_in_expr_fragment_2() { run_err("*_", "Expected an expression, got '*_' instead\n  at: line 1 (<test>)\n\n1 | *_\n2 | ^^\n"); }
-    #[test] fn test_lvalue_in_expr_fragment_3() { run_err("let b ; *b", ""); }
-    #[test] fn test_lvalue_in_expr_fragment_4() { run_err("let a, b ; a, b", ""); }
-    #[test] fn test_lvalue_in_expr_fragment_5() { run_err("let a, b ; a, _, b", ""); }
-    #[test] fn test_lvalue_in_expr_fragment_6() { run_err("let a, b ; _, a, *b, _, _", ""); }
-    #[test] fn test_lvalue_in_expr_fragment_7() { run_err("let a, b ; (a, b), _", ""); }
-    #[test] fn test_lvalue_in_expr_fragment_8() { run_err("let a, b ; (a, _, b)", "Expected an expression, got '_' instead\n  at: line 1 (<test>)\n\n1 | let a, b ; (a, _, b)\n2 |                ^\n"); }
-    #[test] fn test_lvalue_in_expr_fragment_9() { run_err("let a, b ; ((a, b), (_, *_))", "Expected an expression, got '_' instead\n  at: line 1 (<test>)\n\n1 | let a, b ; ((a, b), (_, *_))\n2 |                      ^\n\nExpected an expression, got '_' instead\n  at: line 1 (<test>)\n\n1 | let a, b ; ((a, b), (_, *_))\n2 |                          ^\n"); }
-    #[test] fn test_lvalue_in_expr_fragment_10_legal() { run("let a ; a", "InitGlobal Nil PushGlobal(0)->a Pop"); }
-    #[test] fn test_lvalue_in_expr_fragment_11_legal() { run("let a, b ; (a, b)", "InitGlobal InitGlobal Nil Nil LiteralBegin(Vector,2) PushGlobal(0)->a PushGlobal(1)->b LiteralAcc(2) LiteralEnd Pop Pop"); }
+    #[test] fn test_lvalue_in_expr_fragment_3() { run_err("let b ; *b", "Expected an expression terminal, got '*' token instead\n  at: line 1 (<test>)\n\n1 | let b ; *b\n2 |         ^^\n"); }
+    #[test] fn test_lvalue_in_expr_fragment_4() { run_err("*map", "Expected an expression terminal, got '*' token instead\n  at: line 1 (<test>)\n\n1 | *map\n2 | ^^^^\n"); }
+    #[test] fn test_lvalue_in_expr_fragment_5() { run_err("let b ; b, *map", "Expected an expression terminal, got '*' token instead\n  at: line 1 (<test>)\n\n1 | let b ; b, *map\n2 |            ^^^^\n"); }
+    #[test] fn test_lvalue_in_expr_fragment_6() { run_err("let a, b ; a, _, b", "Expected an expression, got '_' instead\n  at: line 1 (<test>)\n\n1 | let a, b ; a, _, b\n2 |               ^\n"); }
+    #[test] fn test_lvalue_in_expr_fragment_7() { run_err("let a, b ; _, a, *b, _, _", "Expected an expression, got '_' instead\n  at: line 1 (<test>)\n\n1 | let a, b ; _, a, *b, _, _\n2 |            ^\n\nExpected an expression terminal, got '*' token instead\n  at: line 1 (<test>)\n\n1 | let a, b ; _, a, *b, _, _\n2 |                  ^^\n\nExpected an expression, got '_' instead\n  at: line 1 (<test>)\n\n1 | let a, b ; _, a, *b, _, _\n2 |                      ^\n\nExpected an expression, got '_' instead\n  at: line 1 (<test>)\n\n1 | let a, b ; _, a, *b, _, _\n2 |                         ^\n"); }
+    #[test] fn test_lvalue_in_expr_fragment_8() { run_err("let a, b ; (a, b), _", "Expected an expression, got '_' instead\n  at: line 1 (<test>)\n\n1 | let a, b ; (a, b), _\n2 |                    ^\n"); }
+    #[test] fn test_lvalue_in_expr_fragment_9() { run_err("let a, b ; (a, _, b)", "Expected an expression, got '_' instead\n  at: line 1 (<test>)\n\n1 | let a, b ; (a, _, b)\n2 |                ^\n"); }
+    #[test] fn test_lvalue_in_expr_fragment_10() { run_err("let a, b ; ((a, b), (_, *_))", "Expected an expression, got '_' instead\n  at: line 1 (<test>)\n\n1 | let a, b ; ((a, b), (_, *_))\n2 |                      ^\n\nExpected an expression, got '_' instead\n  at: line 1 (<test>)\n\n1 | let a, b ; ((a, b), (_, *_))\n2 |                          ^\n"); }
+    #[test] fn test_lvalue_in_expr_fragment_11_legal() { run("let a, b ; a, b", "InitGlobal InitGlobal Nil Nil LiteralBegin(Vector,2) PushGlobal(0)->a PushGlobal(1)->b LiteralAcc(2) LiteralEnd Pop Pop"); }
+    #[test] fn test_lvalue_in_expr_fragment_12_legal() { run("let a ; a", "InitGlobal Nil PushGlobal(0)->a Pop"); }
+    #[test] fn test_lvalue_in_expr_fragment_13_legal() { run("let a, b ; (a, b)", "InitGlobal InitGlobal Nil Nil LiteralBegin(Vector,2) PushGlobal(0)->a PushGlobal(1)->b LiteralAcc(2) LiteralEnd Pop Pop"); }
     #[test] fn test_lvalue_assign_with_empty_1() { run_err("_ = 3", "The left hand side of an assignment must reference at least one named variable\n  at: line 1 (<test>)\n\n1 | _ = 3\n2 |   ^\n"); }
     #[test] fn test_lvalue_assign_with_empty_2() { run_err("*_ = 3", "The left hand side of an assignment must reference at least one named variable\n  at: line 1 (<test>)\n\n1 | *_ = 3\n2 |    ^\n"); }
     #[test] fn test_lvalue_assign_with_empty_3() { run_err("_, _, _ = 3", "The left hand side of an assignment must reference at least one named variable\n  at: line 1 (<test>)\n\n1 | _, _, _ = 3\n2 |         ^\n"); }
@@ -2242,6 +2250,12 @@ mod tests {
     #[test] fn test_lvalue_assign_with_invalid_2() { run_err("1 + 2 = 3", "The left hand side is not a valid assignment target\n  at: line 1 (<test>)\n\n1 | 1 + 2 = 3\n2 |       ^\n"); }
     #[test] fn test_lvalue_assign_with_invalid_3() { run_err("_ + 2 = 3", "The left hand side is not a valid assignment target\n  at: line 1 (<test>)\n\n1 | _ + 2 = 3\n2 |       ^\n"); }
     #[test] fn test_lvalue_assign_with_invalid_4() { run_err("_ + _ = 3", "The left hand side is not a valid assignment target\n  at: line 1 (<test>)\n\n1 | _ + _ = 3\n2 |       ^\n"); }
+    #[test] fn test_lvalue_assign_with_invalid_5() { run_err("let x ; *x = 3", "The left hand side is not a valid assignment target\n  at: line 1 (<test>)\n\n1 | let x ; *x = 3\n2 |            ^\n"); }
+    #[test] fn test_lvalue_assign_with_invalid_6() { run_err("let x ; (*x) = 3", "The left hand side is not a valid assignment target\n  at: line 1 (<test>)\n\n1 | let x ; (*x) = 3\n2 |              ^\n"); }
+    #[test] fn test_lvalue_assign_with_invalid_7() { run_err("*map = 3", "The left hand side is not a valid assignment target\n  at: line 1 (<test>)\n\n1 | *map = 3\n2 |      ^\n"); }
+    #[test] fn test_lvalue_assign_with_invalid_8() { run_err("(*map) = 3", "The left hand side is not a valid assignment target\n  at: line 1 (<test>)\n\n1 | (*map) = 3\n2 |        ^\n"); }
+    #[test] fn test_lvalue_assign_with_invalid_9() { run_err("_, (*map, _) = 3", "The left hand side is not a valid assignment target\n  at: line 1 (<test>)\n\n1 | _, (*map, _) = 3\n2 |              ^\n"); }
+    #[test] fn test_lvalue_assign_with_invalid_10() { run_err("let b ; b, (_, *map, b) = 3", "The left hand side is not a valid assignment target\n  at: line 1 (<test>)\n\n1 | let b ; b, (_, *map, b) = 3\n2 |                         ^\n"); }
 
 
     #[test] fn test_expression_function_with_name() { run_err("(fn hello() {})", "Expected a '(' token, got identifier 'hello' instead\n  at: line 1 (<test>)\n\n1 | (fn hello() {})\n2 |     ^^^^^\n"); }

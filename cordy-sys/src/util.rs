@@ -2,6 +2,8 @@ use std::io;
 use std::io::{BufRead, Read};
 use std::ops::{ControlFlow, Try};
 
+#[cfg(test)] use pretty_assertions::{assert_eq};
+
 use crate::vm::{ErrorPtr, ErrorResult};
 
 
@@ -115,5 +117,5 @@ impl BufRead for Noop {
 
 /// Version of `assert_eq` with explicit actual and expected parameters, that prints the entire thing including newlines.
 pub fn assert_eq(actual: String, expected: String) {
-    assert_eq!(actual, expected, "\n=== Expected ===\n{}\n=== Actual ===\n{}\n", expected, actual);
+    assert_eq!(actual, expected, "\n=== (Left) Actual ===\n\n{}\n\n=== (Right) Expected ===\n\n{}\n\nActual: {:?}", actual, expected, actual);
 }

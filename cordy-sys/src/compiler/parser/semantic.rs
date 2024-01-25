@@ -11,7 +11,7 @@ use fxhash::FxBuildHasher;
 use indexmap::IndexMap;
 use itertools::Itertools;
 
-use crate::compiler::parser::{Parser, ParserError, ParserErrorType};
+use crate::compiler::parser::{ExprType, Parser, ParserError, ParserErrorType};
 use crate::core;
 use crate::core::Pattern;
 use crate::reporting::Location;
@@ -350,8 +350,39 @@ pub enum ReferenceType {
 }
 
 
-
 impl LValue {
+
+    pub fn from(expr: ExprType, top: bool) -> Option<LValue> {
+        match expr {
+            ExprType::Empty => Some(LValue::Empty),
+            ExprType::VarEmpty => Some(LValue::VarEmpty),
+            ExprType::LValue(lvalue) => Some(LValue::Named(lvalue)),
+            ExprType::VarLValue(lvalue) => Some(LValue::VarNamed(lvalue)),
+
+            // If we encounter a top-level, non-bare expression, we need to surround it with an additional `Terms()`
+            // As `x, y = 3` and `(x, y) = 3` should represent two different levels of pattern matching
+            ExprType::Comma { args, bare: false, .. } if top => LValue::from(ExprType::Comma { args, explicit: true, bare: true }, false)
+                .map(|lvalue| LValue::Terms(vec![lvalue])),
+
+            // Otherwise, all comma expressions produce the same level of indirection
+            ExprType::Comma { args, .. } => args.into_iter()
+                .map(|Expr(_, expr)| LValue::from(expr, false))
+                .collect::<Option<Vec<LValue>>>()
+                .map(|args| LValue::Terms(args)),
+
+
+            // todo: support more types of lvalue like array access or field set
+
+            // These are produced by the parser in some situations, so we have to handle them,
+            // as at the time the parse was ambiguous
+            ExprType::Call { f, args, unroll: false }
+                if matches!(*f, Expr(_, ExprType::NativeFunction(core::NativeFunction::OperatorMul)))
+                && args.len() == 1 && matches!(args[0], Expr(_, ExprType::Empty))
+                => Some(LValue::VarEmpty),
+
+            _ => None
+        }
+    }
 
     /// Returns `true` if the `LValue` is a top-level variadic, such as `* <name>` or `*_`
     pub fn is_variadic(&self) -> bool {

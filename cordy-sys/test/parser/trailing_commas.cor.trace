@@ -114,16 +114,16 @@ L34: 0108 LiteralBegin(Dict, 4)
      0113 LiteralAcc(4)
      0114 LiteralEnd
      0115 Pop
-L37: 0116 Function(fn _() -> L[127, 128])
-     0117 Pop
-L38: 0118 Function(fn _(a) -> L[129, 130])
-     0119 Pop
-L39: 0120 Function(fn _(a) -> L[131, 132])
-     0121 Pop
-L40: 0122 Function(fn _(a, b) -> L[133, 134])
-     0123 Pop
-L41: 0124 Function(fn _(a, b) -> L[135, 136])
-     0125 Pop
+     0116 Function(fn _() -> L[127, 128])
+L37: 0117 Pop
+     0118 Function(fn _(a) -> L[129, 130])
+L38: 0119 Pop
+     0120 Function(fn _(a) -> L[131, 132])
+L39: 0121 Pop
+     0122 Function(fn _(a, b) -> L[133, 134])
+L40: 0123 Pop
+     0124 Function(fn _(a, b) -> L[135, 136])
+L41: 0125 Pop
      0126 Exit
 L37: 0127 Nil
      0128 Return

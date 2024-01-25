@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 use std::cell::{Ref, RefCell};
+use std::fmt::{Debug, Formatter};
 use std::ops::{BitOr, BitOrAssign};
 
 use crate::compiler::{ParserError, ParserErrorType, ScanError, ScanErrorType, ScanToken};
@@ -8,7 +9,7 @@ use crate::vm::operator::{BinaryOp, UnaryOp};
 
 
 /// `Location` represents a position in the source code.
-#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
+#[derive(Clone, Copy, Hash, Eq, PartialEq)]
 pub struct Location {
     /// Start character index, inclusive
     start: usize,
@@ -61,6 +62,12 @@ impl BitOrAssign for Location {
 
         self.start = start;
         self.width = (end - start + 1) as u32;
+    }
+}
+
+impl Debug for Location {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Location[{}, {}]", self.start, self.start + self.width as usize)
     }
 }
 
