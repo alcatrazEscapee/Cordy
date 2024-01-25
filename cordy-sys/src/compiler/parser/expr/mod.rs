@@ -282,18 +282,13 @@ impl Expr {
 
     pub fn assign(self, loc: Location, rhs: Expr) -> Result<Expr, ParserErrorType> {
         match self {
-            Expr(_, LValue(lvalue @ (
-                LValueReference::Local(_) |
-                LValueReference::UpValue(_) |
-                LValueReference::Global(_) |
-                LValueReference::LateBinding(_) |
-                LValueReference::ThisField { .. }
-            ))) => Ok(Assignment(lvalue, Box::new(rhs)).at(loc)),
+            Expr(_, LValue(lvalue)) if lvalue.is_assignable() => Ok(Assignment(lvalue, Box::new(rhs)).at(loc)),
             Expr(_, Index(array, index)) => Ok(ArrayAssignment(array, index, Box::new(rhs)).at(loc)),
             Expr(_, GetField(lhs, field_index)) => Ok(SetField(lhs, field_index, Box::new(rhs)).at(loc)),
             Expr(_, Empty | VarEmpty) => Err(AssignmentTargetTrivialEmptyLValue),
-            _ => match self.as_lvalue() {
-                (_, Some(lvalue)) => {
+
+            Expr(loc, expr) => match parser::LValue::from(expr, true) {
+                Ok(lvalue) => {
                     if lvalue.is_trivially_empty() {
                         return Err(AssignmentTargetTrivialEmptyLValue)
                     }
@@ -302,27 +297,22 @@ impl Expr {
                     }
                     Ok(PatternAssignment(lvalue, Box::new(rhs)).at(loc))
                 },
-                _ => Err(AssignmentTargetInvalid)
+                Err(e) => Err(e),
             }
         }
     }
 
     pub fn op_assign(self, loc: Location, op: BinaryOp, rhs: Expr) -> Result<Expr, ParserErrorType> {
         match self {
-            lhs @ Expr(_, LValue(
-                LValueReference::Local(_) |
-                LValueReference::UpValue(_) |
-                LValueReference::Global(_) |
-                LValueReference::LateBinding(_) |
-                LValueReference::ThisField { .. }
-            )) => {
-                let lvalue = match &lhs { Expr(_, LValue(lv)) => lv.clone(), _ => unreachable!() };
+            Expr(_, LValue(ref lvalue)) if lvalue.is_assignable() => {
+                let lvalue = lvalue.clone();
                 let assign = match op {
-                    BinaryOp::NotEqual => lhs.compose(loc, rhs),
-                    op => lhs.binary(loc, op, rhs, false),
+                    BinaryOp::NotEqual => self.compose(loc, rhs),
+                    op => self.binary(loc, op, rhs, false),
                 };
                 Ok(Assignment(lvalue, Box::new(assign)).at(loc))
             },
+            Expr(_, LValue(LValueReference::Invalid)) => Ok(self),
             Expr(_, Index(array, index)) => Ok(ArrayOpAssignment(array, index, op, Box::new(rhs)).at(loc)),
             Expr(_, GetField(lhs, field_index)) => Ok(SwapField(lhs, field_index, Box::new(rhs), op).at(loc)),
             Expr(_, Empty | VarEmpty) => Err(AssignmentTargetTrivialEmptyLValue),
@@ -339,12 +329,6 @@ impl Expr {
     }
 
     pub fn var_lvalue(loc: Location, lvalue: LValueReference) -> Expr { VarLValue(lvalue).at(loc) }
-
-    fn as_lvalue(self) -> (Location, Option<parser::LValue>) {
-        match self {
-            Expr(loc, expr) => (loc, parser::LValue::from(expr, true))
-        }
-    }
 
     pub fn list(loc: Location, args: Vec<Expr>) -> Expr { Expr::literal(loc, LiteralType::List, args) }
     pub fn vector(loc: Location, args: Vec<Expr>) -> Expr { Expr::literal(loc, LiteralType::Vector, args) }
