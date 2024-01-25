@@ -172,7 +172,7 @@ pub fn join(joiner: ValuePtr, it: ValuePtr) -> ValueResult {
 }
 
 
-fn map_join<'a, I : Iterator<Item=ValuePtr>>(mut iter: I, sep: &str) -> ValuePtr {
+fn map_join<I : Iterator<Item=ValuePtr>>(mut iter: I, sep: &str) -> ValuePtr {
     // Avoids issues with `.map().join()` that create temporaries in the `map()` and then destroy them
     match iter.next() {
         None => ValuePtr::str(),
@@ -180,7 +180,7 @@ fn map_join<'a, I : Iterator<Item=ValuePtr>>(mut iter: I, sep: &str) -> ValuePtr
             let (lower, _) = iter.size_hint();
             let mut result = String::with_capacity(lower * sep.len());
             result.push_str(&first.to_str());
-            while let Some(next) = iter.next() {
+            for next in iter {
                 result.push_str(sep);
                 result.push_str(&next.to_str());
             }

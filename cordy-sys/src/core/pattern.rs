@@ -37,7 +37,7 @@ impl<OpType> Pattern<OpType> {
         self.terms.push(Term::Pattern(index, pattern))
     }
 
-    pub fn visit<Visitor : FnMut(&mut OpType) -> ()>(&mut self, visitor: &mut Visitor) {
+    pub fn visit<Visitor : FnMut(&mut OpType)>(&mut self, visitor: &mut Visitor) {
         for term in &mut self.terms {
             match term {
                 Term::Index(_, op) => visitor(op),

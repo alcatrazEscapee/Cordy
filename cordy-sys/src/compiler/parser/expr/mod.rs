@@ -127,6 +127,7 @@ pub enum ExprType {
     ArrayOpAssignment(ExprPtr, ExprPtr, BinaryOp, ExprPtr),
 }
 
+
 /// # Expression Visitor
 ///
 /// This trait can be implemented by a type to provide a visitor, which receives every `Expr` in a nested expression
@@ -134,7 +135,7 @@ pub enum ExprType {
 ///
 /// Implementing the visitor is done simply, where the visitor may or may not have persistent state to the visitor:
 /// ```rust,ignore
-/// use crate::compiler::parser::{Visitor, Visitable};
+/// use crate::compiler::parser::{Visitor, Traversable};
 ///
 /// struct MyVisitor;
 ///
@@ -145,62 +146,62 @@ pub enum ExprType {
 /// }
 /// ```
 ///
-/// In order to use the visitor and visit all elements, the `Visitable` trait must be used,
-/// and the visitor must be passed to a call of `Expr::visit()`
+/// In order to use the visitor and visit all elements, the `Traversable` trait must be used,
+/// and the visitor must be passed to a call of `Expr::walk()`
 ///
 /// ```rust,ignore
-/// expr.visit(&mut MyVisitor)
+/// expr.walk(&mut MyVisitor)
 /// ```
 ///
-/// **Note:** Calling `Visitor::visit(Expr)` will **not** traverse the entire expression tree, use `Expr::visit(&mut Visitor)` instead.
+/// **Note:** Calling `Visitor::visit(Expr)` will **not** traverse the entire expression tree, use `Expr::walk(&mut Visitor)` instead.
 pub trait Visitor {
     fn visit(&mut self, expr: Expr) -> Expr;
 }
 
-/// # Expression Visitable
+/// # Expression Traversable
 ///
 /// This is the trait used to implement the post-order traversal using a `Visitor`. `Expr::visit(&mut Visitor)` is the recursive call, which then recursively traverses through the entire
 /// expression tree, calling the same `visit()` method on sub-expressions. After each expression is constructed, each expression is passed through `Visitor::visit(Expr)`, which is the
 /// user-visible API which interacts with each expression.
 ///
-/// - `type Output` is intended for types like `ExprPtr`, which is convenient to provide a `Visitable` implementation for, however the output is easier to use as an `Expr`
-pub trait Visitable<V : Visitor> {
+/// - `type Output` is intended for types like `ExprPtr`, which is convenient to provide a `Traversable` implementation for, however the output is easier to use as an `Expr`
+pub trait Traversable<V : Visitor> {
     type Output;
 
-    fn visit(self, visitor: &mut V) -> Self::Output;
+    fn walk(self, visitor: &mut V) -> Self::Output;
 }
 
-impl<V : Visitor> Visitable<V> for Expr {
+impl<V : Visitor> Traversable<V> for Expr {
     type Output = Self;
 
-    fn visit(self, v: &mut V) -> Self {
+    fn walk(self, v: &mut V) -> Self {
         let expr = match self {
-            Expr(loc, Comma { args, explicit, bare }) => Expr::comma(loc, args.visit(v), explicit, bare),
-            Expr(loc, Call { f, args, .. }) => f.visit(v).call(loc, args.visit(v)),
-            Expr(loc, Compose(arg, f)) => arg.visit(v).compose(loc, f.visit(v)),
-            Expr(loc, Unroll(arg)) => arg.visit(v).unroll(loc),
+            Expr(loc, Comma { args, explicit, bare }) => Expr::comma(loc, args.walk(v), explicit, bare),
+            Expr(loc, Call { f, args, .. }) => f.walk(v).call(loc, args.walk(v)),
+            Expr(loc, Compose(arg, f)) => arg.walk(v).compose(loc, f.walk(v)),
+            Expr(loc, Unroll(arg)) => arg.walk(v).unroll(loc),
 
-            Expr(loc, Unary(op, arg)) => arg.visit(v).unary(loc, op),
-            Expr(loc, Binary(op, lhs, rhs, swap)) => lhs.visit(v).binary(loc, op, rhs.visit(v), swap),
-            Expr(_, Compare(arg, ops)) => arg.visit(v).compare(ops.visit(v)),
-            Expr(loc, LogicalAnd(lhs, rhs)) => lhs.visit(v).logical(loc, BinaryOp::And, rhs.visit(v)),
-            Expr(loc, LogicalOr(lhs, rhs)) => lhs.visit(v).logical(loc, BinaryOp::Or, rhs.visit(v)),
-            Expr(loc, Index(array, index)) => array.visit(v).index(loc, index.visit(v)),
-            Expr(loc, Slice(array, arg1, arg2)) => array.visit(v).slice(loc, arg1.visit(v), arg2.visit(v)),
-            Expr(loc, SliceWithStep(array, arg1, arg2, arg3)) => array.visit(v).slice_step(loc, arg1.visit(v), arg2.visit(v), arg3.visit(v)),
-            Expr(loc, IfThenElse(condition, if_true, if_false)) => condition.visit(v).if_then_else(loc, if_true.visit(v), if_false.visit(v)),
+            Expr(loc, Unary(op, arg)) => arg.walk(v).unary(loc, op),
+            Expr(loc, Binary(op, lhs, rhs, swap)) => lhs.walk(v).binary(loc, op, rhs.walk(v), swap),
+            Expr(_, Compare(arg, ops)) => arg.walk(v).compare(ops.walk(v)),
+            Expr(loc, LogicalAnd(lhs, rhs)) => lhs.walk(v).logical(loc, BinaryOp::And, rhs.walk(v)),
+            Expr(loc, LogicalOr(lhs, rhs)) => lhs.walk(v).logical(loc, BinaryOp::Or, rhs.walk(v)),
+            Expr(loc, Index(array, index)) => array.walk(v).index(loc, index.walk(v)),
+            Expr(loc, Slice(array, arg1, arg2)) => array.walk(v).slice(loc, arg1.walk(v), arg2.walk(v)),
+            Expr(loc, SliceWithStep(array, arg1, arg2, arg3)) => array.walk(v).slice_step(loc, arg1.walk(v), arg2.walk(v), arg3.walk(v)),
+            Expr(loc, IfThenElse(condition, if_true, if_false)) => condition.walk(v).if_then_else(loc, if_true.walk(v), if_false.walk(v)),
 
-            Expr(loc, GetField(arg, field_index)) => arg.visit(v).get_field(loc, field_index),
-            Expr(loc, SetField(arg, field_index, value)) => arg.visit(v).set_field(loc, field_index, value.visit(v)),
-            Expr(loc, SwapField(arg, field_index, value, op)) => arg.visit(v).swap_field(loc, field_index, value.visit(v), op),
+            Expr(loc, GetField(arg, field_index)) => arg.walk(v).get_field(loc, field_index),
+            Expr(loc, SetField(arg, field_index, value)) => arg.walk(v).set_field(loc, field_index, value.walk(v)),
+            Expr(loc, SwapField(arg, field_index, value, op)) => arg.walk(v).swap_field(loc, field_index, value.walk(v), op),
 
-            Expr(loc, Literal(ty, args)) => Expr::literal(loc, ty, args.visit(v)),
-            Expr(loc, SliceLiteral(arg1, arg2, arg3)) => Expr::slice_literal(loc, arg1.visit(v), arg2.visit(v), arg3.visit(v)),
+            Expr(loc, Literal(ty, args)) => Expr::literal(loc, ty, args.walk(v)),
+            Expr(loc, SliceLiteral(arg1, arg2, arg3)) => Expr::slice_literal(loc, arg1.walk(v), arg2.walk(v), arg3.walk(v)),
 
-            Expr(loc, Assignment(lvalue, rhs)) => Assignment(lvalue, Box::new(rhs.visit(v))).at(loc),
-            Expr(loc, PatternAssignment(lvalue, rhs)) => PatternAssignment(lvalue, Box::new(rhs.visit(v))).at(loc),
-                Expr(loc, ArrayAssignment(array, index, value)) => ArrayAssignment(Box::new(array.visit(v)), Box::new(index.visit(v)), Box::new(value.visit(v))).at(loc),
-            Expr(loc, ArrayOpAssignment(array, index, op, value)) => ArrayOpAssignment(Box::new(array.visit(v)), Box::new(index.visit(v)), op, Box::new(value.visit(v))).at(loc),
+            Expr(loc, Assignment(lvalue, rhs)) => Assignment(lvalue, Box::new(rhs.walk(v))).at(loc),
+            Expr(loc, PatternAssignment(lvalue, rhs)) => PatternAssignment(lvalue, Box::new(rhs.walk(v))).at(loc),
+                Expr(loc, ArrayAssignment(array, index, value)) => ArrayAssignment(Box::new(array.walk(v)), Box::new(index.walk(v)), Box::new(value.walk(v))).at(loc),
+            Expr(loc, ArrayOpAssignment(array, index, op, value)) => ArrayOpAssignment(Box::new(array.walk(v)), Box::new(index.walk(v)), op, Box::new(value.walk(v))).at(loc),
 
             _ => self,
         };
@@ -208,31 +209,31 @@ impl<V : Visitor> Visitable<V> for Expr {
     }
 }
 
-impl<V : Visitor> Visitable<V> for ExprPtr {
+impl<V : Visitor> Traversable<V> for ExprPtr {
     type Output = Expr;
-    fn visit(self, visitor: &mut V) -> Expr {
-        (*self).visit(visitor)
+    fn walk(self, visitor: &mut V) -> Expr {
+        (*self).walk(visitor)
     }
 }
 
-impl<V : Visitor> Visitable<V> for Box<Option<Expr>> {
+impl<V : Visitor> Traversable<V> for Box<Option<Expr>> {
     type Output = Option<Expr>;
-    fn visit(self, visitor: &mut V) -> Self::Output {
-        self.map(|expr| expr.visit(visitor))
+    fn walk(self, visitor: &mut V) -> Self::Output {
+        self.map(|expr| expr.walk(visitor))
     }
 }
 
-impl<V : Visitor> Visitable<V> for Vec<Expr> {
+impl<V : Visitor> Traversable<V> for Vec<Expr> {
     type Output = Self;
-    fn visit(self, visitor: &mut V) -> Self {
-        self.into_iter().map(|expr| expr.visit(visitor)).collect()
+    fn walk(self, visitor: &mut V) -> Self {
+        self.into_iter().map(|expr| expr.walk(visitor)).collect()
     }
 }
 
-impl<T1, T2, V : Visitor> Visitable<V> for Vec<(T1, T2, Expr)> {
+impl<T1, T2, V : Visitor> Traversable<V> for Vec<(T1, T2, Expr)> {
     type Output = Self;
-    fn visit(self, visitor: &mut V) -> Self::Output {
-        self.into_iter().map(|(t1, t2, expr)| (t1, t2, expr.visit(visitor))).collect()
+    fn walk(self, visitor: &mut V) -> Self::Output {
+        self.into_iter().map(|(t1, t2, expr)| (t1, t2, expr.walk(visitor))).collect()
     }
 }
 

@@ -1,4 +1,4 @@
-use crate::compiler::parser::expr::{Expr, ExprType, Visitable, Visitor};
+use crate::compiler::parser::expr::{Expr, ExprType, Traversable, Visitor};
 use crate::compiler::parser::Parser;
 use crate::vm::{LiteralType, Opcode};
 use crate::vm::operator::{BinaryOp, CompareOp};
@@ -61,7 +61,7 @@ impl<'a> Parser<'a> {
     /// This will, for many expression fragments, emit semantic errors and return `Expr::nil()`, as the fragments do not
     /// need to be visible to the optimizer in the event an error was raised.
     fn process_expr(&mut self, expr: Expr) -> Expr {
-        expr.visit(&mut Process(self))
+        expr.walk(&mut Process(self))
     }
 
     /// Recursive version of the above.

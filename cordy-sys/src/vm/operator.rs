@@ -175,7 +175,7 @@ fn binary_list_repeat(list: ValuePtr, repeat: ValuePtr, deep: bool) -> ValueResu
             .cloned();
 
         match deep {
-            true => iter.map(|e| core::copy(e)).to_list(),
+            true => iter.map(core::copy).to_list(),
             false => iter.to_list()
         }.ok()
     }
