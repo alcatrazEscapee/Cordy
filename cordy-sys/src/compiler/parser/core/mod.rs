@@ -272,7 +272,7 @@ impl<'a> Parser<'a> {
             LValueReference::UpValueThis(_) |
             LValueReference::Method(_) |
             LValueReference::ThisMethod { .. } |
-            LValueReference::NativeFunction(_) => self.error(InvalidAssignmentTarget),
+            LValueReference::NativeFunction(_) => self.error(AssignmentTargetInvalid),
 
             LValueReference::LateBinding(mut binding) => {
                 binding.update(ReferenceType::Store(self.next_opcode()));

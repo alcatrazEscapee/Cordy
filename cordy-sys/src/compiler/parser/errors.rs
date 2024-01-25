@@ -53,7 +53,8 @@ impl ParserError {
             InvalidFieldName(_) |
             InvalidLValue(_, _) => false,
 
-            InvalidAssignmentTarget |
+            AssignmentTargetInvalid |
+            AssignmentTargetTrivialEmptyLValue |
             MultipleVariadicTermsInPattern |
             LetWithNonTrivialPattern |
             LetWithTrivialEmptyPattern |
@@ -115,7 +116,8 @@ pub enum ParserErrorType {
     InvalidFieldName(String),
     InvalidLValue(String, bool), // parameter, native
 
-    InvalidAssignmentTarget,
+    AssignmentTargetInvalid,
+    AssignmentTargetTrivialEmptyLValue,
     MultipleVariadicTermsInPattern,
     LetWithNonTrivialPattern,
     LetWithTrivialEmptyPattern,

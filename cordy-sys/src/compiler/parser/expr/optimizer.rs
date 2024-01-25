@@ -27,13 +27,13 @@ impl Visitor for Optimizer {
         match expr {
             // Constant Folding
             Expr(loc, ExprType::Unary(op, arg)) => match arg.into_const() {
-                Ok(arg) => Expr::value_result(loc, op.apply(arg)),
+                Ok(arg) => Expr::result(loc, op.apply(arg)),
                 Err(arg) => arg.unary(loc, op)
             }
 
             Expr(loc, ExprType::Binary(op, lhs, rhs, swap)) => match lhs.into_const() {
                 Ok(lhs) => match rhs.into_const() {
-                    Ok(rhs) => Expr::value_result(loc, if swap { op.apply(rhs, lhs) } else { op.apply(lhs, rhs) }),
+                    Ok(rhs) => Expr::result(loc, if swap { op.apply(rhs, lhs) } else { op.apply(lhs, rhs) }),
                     Err(rhs) => Expr::value(loc, lhs).binary(loc, op, rhs, swap),
                 },
                 Err(lhs) => lhs.binary(loc, op, *rhs, swap),
@@ -69,7 +69,7 @@ impl Visitor for Optimizer {
                         if let Expr(_, ExprType::NativeFunction(NativeFunction::Int)) = args[0] {
                             Expr::int(loc, if native_f == NativeFunction::Min { ValuePtr::MIN_INT } else { ValuePtr::MAX_INT })
                         } else {
-                            f.call_with(loc, args)
+                            f.call(loc, args)
                         }
                     },
 
@@ -81,10 +81,10 @@ impl Visitor for Optimizer {
                     // This re-calls `visit` as we might be able to replace the operator on the constant-eval'd function
                     Expr(_, ExprType::Call { f: f_inner, args: mut args_inner, unroll: false }) if f_inner.is_partial(args_inner.len()) => {
                         args_inner.append(&mut args);
-                        self.visit(f_inner.call_with(loc, args_inner))
+                        self.visit(f_inner.call(loc, args_inner))
                     },
 
-                    f => f.call_with(loc, args)
+                    f => f.call(loc, args)
                 }
             }
 
@@ -110,7 +110,7 @@ impl Visitor for Optimizer {
                 },
                 // If possible, replace `arg . f` with `f(arg)`
                 // Then re-optimize the new `eval` expression
-                f if f.can_reorder(&arg) => self.visit(f.call_with(loc, vec![*arg])),
+                f if f.can_reorder(&arg) => self.visit(f.call(loc, vec![*arg])),
 
                 // If we can't reorder, then we won't fall into optimization cases for binary operators
                 // This hits cases such as `a . (<op> b)` where a and b cannot be re-ordered
