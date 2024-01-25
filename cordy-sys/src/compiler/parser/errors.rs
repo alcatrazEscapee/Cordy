@@ -26,7 +26,7 @@ impl ParserError {
             ExpectedExpressionTerminal(it) |
             ExpectedCommaOrEndOfArguments(it) |
             ExpectedCommaOrEndOfList(it) |
-            ExpectedCommaOrEndOfVector(it) |
+            ExpectedCommaOrEndOfComma(it) |
             ExpectedCommaOrEndOfDict(it) |
             ExpectedCommaOrEndOfSet(it) |
             ExpectedColonOrEndOfSlice(it) |
@@ -49,12 +49,14 @@ impl ParserError {
             LocalVariableConflict(_) |
             LocalVariableConflictWithNativeFunction(_) |
             UndeclaredIdentifier(_) |
+            UndeclaredSelf |
             DuplicateFieldName(_) |
             InvalidFieldName(_) |
             InvalidLValue(_, _) => false,
 
             AssignmentTargetInvalid |
             AssignmentTargetTrivialEmptyLValue |
+            AssignmentTargetNotAssignable |
             MultipleVariadicTermsInPattern |
             LetWithNonTrivialPattern |
             LetWithTrivialEmptyPattern |
@@ -89,7 +91,7 @@ pub enum ParserErrorType {
     ExpectedExpressionTerminal(Option<ScanToken>),
     ExpectedCommaOrEndOfArguments(Option<ScanToken>),
     ExpectedCommaOrEndOfList(Option<ScanToken>),
-    ExpectedCommaOrEndOfVector(Option<ScanToken>),
+    ExpectedCommaOrEndOfComma(Option<ScanToken>),
     ExpectedCommaOrEndOfDict(Option<ScanToken>),
     ExpectedCommaOrEndOfSet(Option<ScanToken>),
     ExpectedColonOrEndOfSlice(Option<ScanToken>),
@@ -112,12 +114,14 @@ pub enum ParserErrorType {
     LocalVariableConflict(String),
     LocalVariableConflictWithNativeFunction(String),
     UndeclaredIdentifier(String),
+    UndeclaredSelf,
     DuplicateFieldName(String),
     InvalidFieldName(String),
     InvalidLValue(String, bool), // parameter, native
 
     AssignmentTargetInvalid,
     AssignmentTargetTrivialEmptyLValue,
+    AssignmentTargetNotAssignable,
     MultipleVariadicTermsInPattern,
     LetWithNonTrivialPattern,
     LetWithTrivialEmptyPattern,

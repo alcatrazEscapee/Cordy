@@ -353,12 +353,17 @@ pub enum ReferenceType {
 
 impl LValue {
 
-    pub fn from(expr: ExprType, top: bool) -> Option<LValue> {
+    pub fn from(expr: ExprType, top: bool) -> Result<LValue, ParserErrorType> {
         match expr {
-            ExprType::Empty => Some(LValue::Empty),
-            ExprType::VarEmpty => Some(LValue::VarEmpty),
-            ExprType::LValue(lvalue) => Some(LValue::Named(lvalue)),
-            ExprType::VarLValue(lvalue) => Some(LValue::VarNamed(lvalue)),
+            ExprType::Empty => Ok(LValue::Empty),
+            ExprType::VarEmpty => Ok(LValue::VarEmpty),
+
+            // Note that for both 'Invalid' reference types, we avoid raising a second error
+            ExprType::LValue(lvalue) if lvalue.is_assignable() => Ok(LValue::Named(lvalue)),
+            ExprType::LValue(LValueReference::Invalid) => Ok(LValue::Named(LValueReference::Invalid)),
+
+            ExprType::VarLValue(lvalue) if lvalue.is_assignable() => Ok(LValue::VarNamed(lvalue)),
+            ExprType::VarLValue(LValueReference::Invalid) => Ok(LValue::VarNamed(LValueReference::Invalid)),
 
             // If we encounter a top-level, non-bare expression, we need to surround it with an additional `Terms()`
             // As `x, y = 3` and `(x, y) = 3` should represent two different levels of pattern matching
@@ -368,7 +373,7 @@ impl LValue {
             // Otherwise, all comma expressions produce the same level of indirection
             ExprType::Comma { args, .. } => args.into_iter()
                 .map(|Expr(_, expr)| LValue::from(expr, false))
-                .collect::<Option<Vec<LValue>>>()
+                .collect::<Result<Vec<LValue>, ParserErrorType>>()
                 .map(LValue::Terms),
 
 
@@ -379,9 +384,9 @@ impl LValue {
             ExprType::Call { f, args, unroll: false }
                 if matches!(*f, Expr(_, ExprType::NativeFunction(core::NativeFunction::OperatorMul)))
                 && args.len() == 1 && matches!(args[0], Expr(_, ExprType::Empty))
-                => Some(LValue::VarEmpty),
+                => Ok(LValue::VarEmpty),
 
-            _ => None
+            _ => Err(AssignmentTargetInvalid)
         }
     }
 
@@ -580,6 +585,11 @@ impl LValue {
 }
 
 impl LValueReference {
+
+    /// Returns `true` if this `LValue` can be assigned to.
+    pub fn is_assignable(&self) -> bool {
+        matches!(self, LValueReference::Local(_) |LValueReference::UpValue(_) |LValueReference::Global(_) |LValueReference::LateBinding(_) | LValueReference::ThisField { .. })
+    }
 
     fn as_named(&mut self) -> String {
         match std::mem::take(self) {
@@ -1000,7 +1010,7 @@ impl<'a> Parser<'a> {
                             // If the current method is a self method, it can only be called through other self methods, and they need to do a `GetMethod` to do so
                             // Otherwise, it needs to raise a parser error
                             match binding.this {
-                                LValueReference::Invalid => self.error_at(binding.loc, UndeclaredIdentifier(String::from("self"))),
+                                LValueReference::Invalid => self.error_at(binding.loc, UndeclaredSelf),
 
                                 // Since we have a single reference point for insert, we need to insert in reverse order from the same point
                                 // Slightly different opcodes for `LocalThis` vs. `UpValueThis`
@@ -1194,7 +1204,7 @@ impl<'a> Parser<'a> {
         let name = match name {
             Reference::Named(name) => name,
             Reference::This => {
-                self.semantic_error(UndeclaredIdentifier(String::from("self")));
+                self.semantic_error(UndeclaredSelf);
                 return LValueReference::Invalid
             }
             // Return `Invalid` without raising an error
