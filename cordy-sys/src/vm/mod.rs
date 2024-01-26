@@ -340,7 +340,7 @@ impl<R : BufRead, W : Write, F : FunctionInterface> VirtualMachine<R, W, F> {
                 StoreLocal(local, pop) => {
                     trace::trace_interpreter!("vm::run StoreLocal index={}, value={}, prev={}", local, self.stack.last().unwrap().as_debug_str(), self.stack[local as usize].as_debug_str());
                     let value = if pop { self.pop() } else { self.peek(0).clone() };
-                    self.store_local(local, value);
+                    self.store_local(local, value)?;
                 },
                 PushGlobal(local) => {
                     // Globals are absolute offsets, and allow late binding, which means we have to check the global count before referencing.
@@ -374,7 +374,7 @@ impl<R : BufRead, W : Write, F : FunctionInterface> VirtualMachine<R, W, F> {
                 StoreUpValue(index) => {
                     trace::trace_interpreter!("vm::run StoreUpValue index={}, value={}, prev={}", index, self.stack.last().unwrap().as_debug_str(), self.stack[index as usize].as_debug_str());
                     let value = self.peek(0).clone();
-                    self.store_upvalue(index, value);
+                    self.store_upvalue(index, value)?;
                 },
 
                 StoreArray => {
@@ -649,9 +649,10 @@ impl<R : BufRead, W : Write, F : FunctionInterface> VirtualMachine<R, W, F> {
 
     // ===== Store Implementations ===== //
 
-    fn store_local(&mut self, index: u32, value: ValuePtr) {
+    fn store_local(&mut self, index: u32, value: ValuePtr) -> AnyResult {
         let local: usize = self.frame_pointer() + index as usize;
         self.stack[local] = value;
+        Ok(())
     }
 
     fn store_global(&mut self, index: u32, value: ValuePtr) -> AnyResult {
@@ -664,7 +665,7 @@ impl<R : BufRead, W : Write, F : FunctionInterface> VirtualMachine<R, W, F> {
         }
     }
 
-    fn store_upvalue(&mut self, index: u32, value: ValuePtr) {
+    fn store_upvalue(&mut self, index: u32, value: ValuePtr) -> AnyResult {
         let fp = self.frame_pointer() - 1;
         let upvalue: Rc<Cell<UpValue>> = self.stack[fp].as_closure().borrow().get(index as usize);
 
@@ -681,12 +682,19 @@ impl<R : BufRead, W : Write, F : FunctionInterface> VirtualMachine<R, W, F> {
             UpValue::Closed(_) => UpValue::Closed(value), // Mutate on the heap
         };
         (*upvalue).set(modified);
+        Ok(())
     }
 
     fn store_array(&mut self, value: ValuePtr) -> AnyResult {
         let index = self.pop();
         let array = self.pop();
         core::set_index(&array, index, value)
+    }
+
+    fn store_field(&mut self, field_index: u32, value: ValuePtr) -> AnyResult {
+        let lhs = self.pop();
+        lhs.set_field(&self.fields, field_index, value)?;
+        Ok(())
     }
 
 
@@ -943,11 +951,11 @@ impl <R : BufRead, W : Write, F : FunctionInterface> VirtualInterface for Virtua
     fn store(&mut self, op: StoreOp, value: ValuePtr) -> AnyResult {
         match op {
             StoreOp::Local(index) => self.store_local(index, value),
-            StoreOp::Global(index) => self.store_global(index, value)?,
+            StoreOp::Global(index) => self.store_global(index, value),
             StoreOp::UpValue(index) => self.store_upvalue(index, value),
-            StoreOp::Array => self.store_array(value)?,
+            StoreOp::Array => self.store_array(value),
+            StoreOp::Field(field_index) => self.store_field(field_index, value),
         }
-        Ok(())
     }
 
     // ===== IO Methods ===== //

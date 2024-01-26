@@ -3,6 +3,7 @@ use crate::vm::{AnyResult, IntoValue, StoreOp, ValuePtr, VirtualInterface};
 use crate::vm::RuntimeError;
 
 use RuntimeError::{*};
+use Term::{*};
 
 
 #[derive(Debug, Clone)]
@@ -16,6 +17,7 @@ pub struct Pattern<OpType> {
 enum Term<OpType> {
     Index(i64, OpType),
     Array(i64),
+    Field(i64, u32),
     Slice(i64, i64, OpType),
     Pattern(i64, Pattern<OpType>),
 }
@@ -26,29 +28,23 @@ impl<OpType> Pattern<OpType> {
         Pattern { len, variadic, terms: Vec::new() }
     }
 
-    pub fn push_index(&mut self, index: i64, op: OpType) {
-        self.terms.push(Term::Index(index, op));
-    }
+    pub fn push_index(&mut self, index: i64, op: OpType) { self.push(Index(index, op)) }
+    pub fn push_array(&mut self, index: i64) { self.push(Array(index)) }
+    pub fn push_field(&mut self, index: i64, field_index: u32) { self.push(Field(index, field_index)) }
+    pub fn push_slice(&mut self, low: i64, high: i64, op: OpType) { self.push(Slice(low, high, op)) }
+    pub fn push_pattern(&mut self, index: i64, pattern: Pattern<OpType>) { self.push(Pattern(index, pattern)) }
 
-    pub fn push_array(&mut self, index: i64) {
-        self.terms.push(Term::Array(index));
-    }
-
-    pub fn push_slice(&mut self, low: i64, high: i64, op: OpType) {
-        self.terms.push(Term::Slice(low, high, op));
-    }
-
-    pub fn push_pattern(&mut self, index: i64, pattern: Pattern<OpType>) {
-        self.terms.push(Term::Pattern(index, pattern))
+    fn push(&mut self, term: Term<OpType>) {
+        self.terms.push(term);
     }
 
     pub fn visit<Visitor : FnMut(&mut OpType)>(&mut self, visitor: &mut Visitor) {
         for term in &mut self.terms {
             match term {
-                Term::Index(_, op) => visitor(op),
-                Term::Array(_) => {},
-                Term::Slice(_, _, op) => visitor(op),
-                Term::Pattern(_, pattern) => pattern.visit(visitor),
+                Index(_, op) => visitor(op),
+                Slice(_, _, op) => visitor(op),
+                Pattern(_, pattern) => pattern.visit(visitor),
+                Array(_) | Field(_, _) => {},
             }
         }
     }
@@ -59,10 +55,11 @@ impl<OpType> Pattern<OpType> {
             variadic: self.variadic,
             terms: self.terms.into_iter().map(|term| {
                 match term {
-                    Term::Index(index, op) => Term::Index(index, visitor(op)),
-                    Term::Array(index) => Term::Array(index),
-                    Term::Slice(lo, hi, op) => Term::Slice(lo, hi, visitor(op)),
-                    Term::Pattern(index, pattern) => Term::Pattern(index, pattern.map(visitor)),
+                    Index(index, op) => Index(index, visitor(op)),
+                    Slice(lo, hi, op) => Slice(lo, hi, visitor(op)),
+                    Pattern(index, pattern) => Term::Pattern(index, pattern.map(visitor)),
+                    Array(index) => Array(index),
+                    Field(index, field_index) => Field(index, field_index),
                 }
             }).collect()
         }
@@ -83,20 +80,24 @@ impl Pattern<StoreOp> {
         // Reverse order as some terms are stack sensitive (like array store)
         for term in self.terms.iter().rev() {
             match term {
-                Term::Index(index, op) => {
+                Index(index, op) => {
                     let ret = core::get_index(vm, ptr, index.to_value())?;
                     vm.store(*op, ret)?;
-                },
-                Term::Array(index) => {
+                }
+                Array(index) => {
                     let ret = core::get_index(vm, ptr, index.to_value())?;
                     vm.store(StoreOp::Array, ret)?;
                 }
-                Term::Slice(low, high, op) => {
+                Field(index, field_index) => {
+                    let ret = core::get_index(vm, ptr, index.to_value())?;
+                    vm.store(StoreOp::Field(*field_index), ret)?;
+                }
+                Slice(low, high, op) => {
                     let high = if high == &0 { ValuePtr::nil() } else { high.to_value() };
                     let ret = core::get_slice(ptr, low.to_value(), high, 1i64.to_value())?;
                     vm.store(*op, ret)?;
-                },
-                Term::Pattern(index, next) => {
+                }
+                Pattern(index, next) => {
                     let ret = core::get_index(vm, ptr, index.to_value())?;
                     next.apply(vm, &ret)?;
                 }
