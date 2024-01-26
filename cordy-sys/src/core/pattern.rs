@@ -15,6 +15,7 @@ pub struct Pattern<OpType> {
 #[derive(Debug, Clone)]
 enum Term<OpType> {
     Index(i64, OpType),
+    Array(i64),
     Slice(i64, i64, OpType),
     Pattern(i64, Pattern<OpType>),
 }
@@ -29,6 +30,10 @@ impl<OpType> Pattern<OpType> {
         self.terms.push(Term::Index(index, op));
     }
 
+    pub fn push_array(&mut self, index: i64) {
+        self.terms.push(Term::Array(index));
+    }
+
     pub fn push_slice(&mut self, low: i64, high: i64, op: OpType) {
         self.terms.push(Term::Slice(low, high, op));
     }
@@ -41,6 +46,7 @@ impl<OpType> Pattern<OpType> {
         for term in &mut self.terms {
             match term {
                 Term::Index(_, op) => visitor(op),
+                Term::Array(_) => {},
                 Term::Slice(_, _, op) => visitor(op),
                 Term::Pattern(_, pattern) => pattern.visit(visitor),
             }
@@ -54,6 +60,7 @@ impl<OpType> Pattern<OpType> {
             terms: self.terms.into_iter().map(|term| {
                 match term {
                     Term::Index(index, op) => Term::Index(index, visitor(op)),
+                    Term::Array(index) => Term::Array(index),
                     Term::Slice(lo, hi, op) => Term::Slice(lo, hi, visitor(op)),
                     Term::Pattern(index, pattern) => Term::Pattern(index, pattern.map(visitor)),
                 }
@@ -73,12 +80,17 @@ impl Pattern<StoreOp> {
     pub fn apply<VM : VirtualInterface>(&self, vm: &mut VM, ptr: &ValuePtr) -> AnyResult {
         self.check_length(ptr)?;
 
-        for term in &self.terms {
+        // Reverse order as some terms are stack sensitive (like array store)
+        for term in self.terms.iter().rev() {
             match term {
                 Term::Index(index, op) => {
                     let ret = core::get_index(vm, ptr, index.to_value())?;
                     vm.store(*op, ret)?;
                 },
+                Term::Array(index) => {
+                    let ret = core::get_index(vm, ptr, index.to_value())?;
+                    vm.store(StoreOp::Array, ret)?;
+                }
                 Term::Slice(low, high, op) => {
                     let high = if high == &0 { ValuePtr::nil() } else { high.to_value() };
                     let ret = core::get_slice(ptr, low.to_value(), high, 1i64.to_value())?;

@@ -325,6 +325,9 @@ pub enum LValueReference {
     /// - The field is accessed via a `GetField(field_index)` or `SetField(field_index)`
     ThisField { upvalue: bool, index: u32, field_index: u32 },
 
+    /// `Array(array, index)` is the counterpart for an array assignment operation, i.e. `a[i] = b`
+    Array(Box<Expr>, Box<Expr>),
+
     /// The below cases are _not assignable_ `LValueReference`s. These are used similarly in expressions, but forbid themselves from being used as an assignment target.
     /// `LocalThis` and `UpValueThis` are variants of `Local` and `UpValue` respectively, which are not assignable, as they represent `self`
     LocalThis(u32),
@@ -376,15 +379,14 @@ impl LValue {
                 .collect::<Result<Vec<LValue>, ParserErrorType>>()
                 .map(LValue::Terms),
 
-
-            // todo: support more types of lvalue like array access or field set
-
             // These are produced by the parser in some situations, so we have to handle them,
             // as at the time the parse was ambiguous
             ExprType::Call { f, args, unroll: false }
                 if matches!(*f, Expr(_, ExprType::NativeFunction(core::NativeFunction::OperatorMul)))
                 && args.len() == 1 && matches!(args[0], Expr(_, ExprType::Empty))
                 => Ok(LValue::VarEmpty),
+
+            ExprType::Index(array, index) => Ok(LValue::Named(LValueReference::Array(array, index))),
 
             _ => Err(AssignmentTargetInvalid)
         }
@@ -512,19 +514,26 @@ impl LValue {
         }
     }
 
-    /// Emits destructuring code for this `LValue`. Assumes the `RValue` is present on top of the stack, and all variables
+    /// Emits destructuring code for this `LValue`. Assumes the `RValue` is present on top of the stack, and all variables are resolved. This performs
+    /// several different functions depending on the parameters:
     ///
-    /// If `in_place` is `true`, this will use an optimized destructuring for specific `LValue`s:
-    ///   - `<name>` `LValue`s will assume their value is constructed in place, and not emit any destructuring code.
+    /// 1. `in_place` indicates this destructuring is to be done in-place, i.e. the top of the stack is the target of a single named local variable.
+    ///    This is used as an optimization for `let <name> = <expr>` statements, where the construction of `<expr>` does not need any destructuring,
+    ///    as it will already be in the correct lvt slot.
     ///
-    /// If `in_expr` is `true`, this will assume the top level destructuring is part of an expression, and the last `Pop` token won't be emitted.
-    /// This leaves the stack untouched after destructuring, with the iterable still on top.
-    pub(super) fn emit_destructuring(self, parser: &mut Parser, in_place: bool, in_expression: bool) {
+    /// 2. `in_expr` indicates this destructuring is part of an expression, and the last `Pop` token won't be emitted. In this case, the top of the stack
+    ///    will remain as the variable to be destructured.
+    ///
+    ///    This also is used where the destructuring may contain stack-modifying operations (such as `Array`), as it will avoid emitting any `ExecPattern` opcodes,
+    ///    as it is assuming the stack is not yet set up with the value to be destructured. Instead, it will return the `pattern_index` for the caller to populate
+    ///    the top of the stack, and then emit `ExecPattern(pattern_index)` accordingly.
+    pub(super) fn emit_destructuring(self, parser: &mut Parser, in_place: bool, in_expression: bool) -> Option<u32> {
         match self {
             LValue::Empty | LValue::VarEmpty => {
                 if !in_expression {
                     parser.push(Pop)
                 }
+                None
             },
             LValue::Named(local) | LValue::VarNamed(local) => {
                 if !in_place {
@@ -533,14 +542,18 @@ impl LValue {
                         parser.push(Pop);
                     }
                 }
+                None
             }
             LValue::Terms(_) => {
                 let index = parser.patterns.len();
                 let pattern = self.build_pattern(parser, index);
-                parser.declare_pattern(pattern);
+                let pattern_id = parser.declare_pattern(pattern);
+
                 if !in_expression {
+                    parser.push(ExecPattern(pattern_id));
                     parser.push(Pop); // Push the final pop
                 }
+                Some(pattern_id)
             },
         }
     }
@@ -563,6 +576,12 @@ impl LValue {
                     // Advance the index by the missing elements (start indexing in reverse)
                     index = -(len as i64 - index);
                 },
+                LValue::Named(LValueReference::Array(array, array_index)) => {
+                    parser.emit_optimized_expr(*array);
+                    parser.emit_optimized_expr(*array_index);
+                    pattern.push_array(index);
+                    index += 1;
+                }
                 LValue::Named(lvalue) => {
                     pattern.push_index(index, lvalue.as_store_op(parser, pattern_index));
                     index += 1;
@@ -588,7 +607,10 @@ impl LValueReference {
 
     /// Returns `true` if this `LValue` can be assigned to.
     pub fn is_assignable(&self) -> bool {
-        matches!(self, LValueReference::Local(_) |LValueReference::UpValue(_) |LValueReference::Global(_) |LValueReference::LateBinding(_) | LValueReference::ThisField { .. })
+        match self {
+            LValueReference::Local(_) | LValueReference::UpValue(_) | LValueReference::Global(_) | LValueReference::LateBinding(_) | LValueReference::ThisField { .. } => true,
+            _ => false
+        }
     }
 
     fn as_named(&mut self) -> String {
@@ -909,11 +931,10 @@ impl<'a> Parser<'a> {
     }
 
     /// Declares a `Pattern`, stores the pattern, and then emits a `ExecPattern` opcode for it
-    fn declare_pattern(&mut self, pattern: Pattern<ParserStoreOp>) {
+    fn declare_pattern(&mut self, pattern: Pattern<ParserStoreOp>) -> u32 {
         let pattern_id: u32 = (self.patterns.len() + self.baked_patterns.len()) as u32;
-
         self.patterns.push(pattern);
-        self.push(ExecPattern(pattern_id));
+        pattern_id
     }
 
     /// After a `let <name>`, `fn <name>`, or `struct <name>` declaration, tries to declare this as a local variable in the current scope.

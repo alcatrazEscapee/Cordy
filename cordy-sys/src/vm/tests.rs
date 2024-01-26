@@ -423,6 +423,26 @@ fn run_with(opt: bool, text: &'static str, expected: &'static str) {
 #[test] fn pattern_in_expression_locals() { run("do { let x, y, z ; z = x, y = (1, 2) ; print(x, y, z) }", "1 2 (1, 2)\n") }
 #[test] fn pattern_in_expression_with_variadic() { run("let x, y ; *x, y = 'hello' ; print(x, y)", "hell o\n") }
 #[test] fn pattern_in_expression_with_nested_and_empty() { run("let x, y ; (x, *_), (*_, y) = ('hello', 'world') ; print(x, y)", "h d\n") }
+#[test] fn pattern_in_expr_with_array_1() { run("let a = [1, 2] ; a[0], a[1] = 'ab' ; a . print", "['a', 'b']\n") }
+#[test] fn pattern_in_expr_with_array_2() { run("let a = [1, 2, 3] ; a[0], a[-1] = 'ab' ; a . print", "['a', 2, 'b']\n") }
+#[test] fn pattern_in_expr_with_array_3() { run("let a = [1, 2] ; a[0], _, a[-1] = 'abc' ; a . print", "['a', 'c']\n") }
+#[test] fn pattern_in_expr_with_array_4() { run("let a = [1, 2, 3] ; a[0], _, a[1], *_, a[2], _ = 'abc123456' ; a . print", "['a', 'c', '5']\n") }
+#[test] fn pattern_in_expr_with_array_and_computed_index() { run("let a = [1, 2, 3, 4] ; _, *_, a[1 + a[-1] * 2 - 7], _ = 'abc123' ; a . print", "[1, 2, '2', 4]\n") }
+#[test] fn pattern_in_expr_with_array_and_dependence_1() { run("let a = [1, 2] ; a[1], a[0] = a ; a . print", "[2, 2]\n") }
+#[test] fn pattern_in_expr_with_array_and_dependence_2() { run("let a = [1, 2] ; a[0], a[1] = a ; a . print", "[1, 2]\n") }
+#[test] fn pattern_in_expr_with_array_and_dependence_3() { run("let a = [1, 2] ; a[2 - a[0]], a[0] = a ; a . print", "[2, 2]\n") }
+#[test] fn pattern_in_expr_with_array_and_dependence_4() { run("let a = [1, 2] ; a[2 - a[1]], a[1] = a ; a . print", "[1, 2]\n") }
+#[test] fn pattern_in_expr_with_array_and_dependence_5() { run("let a = [2, 1] ; a[2 - a[0]], a[0] = a ; a . print", "[1, 1]\n") }
+#[test] fn pattern_in_expr_with_array_and_dependence_6() { run("let a = [2, 1] ; a[2 - a[1]], a[1] = a ; a . print", "[2, 2]\n") }
+#[test] fn pattern_in_expr_with_array_and_raw_vector_1() { run("let a = [1, 2] ; a[0], a[1] = a[0], a[1] ; a . print", "[1, 2]\n") }
+#[test] fn pattern_in_expr_with_array_and_raw_vector_2() { run("let a = [1, 2] ; a[0], a[1] = a[1], a[0] ; a . print", "[2, 1]\n") }
+#[test] fn pattern_in_expr_with_array_and_raw_vector_3() { run("let a = [1, 2] ; a[1], _, a[0] = a[1], a[1], a[0] ; a . print", "[1, 2]\n") }
+#[test] fn pattern_in_expr_with_array_and_raw_vector_4() { run("let a = [1, 2] ; a[1], a[0], _ = a[0], 3, a[0] ; a . print", "[3, 1]\n") }
+#[test] fn pattern_in_expr_with_bare_vector_1() { run("let a, b = 'xy' ; a, b = a, b ; print(a, b)", "x y\n") }
+#[test] fn pattern_in_expr_with_bare_vector_2() { run("let a, b = 'xy' ; a, b = b, a ; print(a, b)", "y x\n") }
+#[test] fn pattern_in_expr_with_bare_vector_3() { run("let a, b = 'xy' ; b, a = a, b ; print(a, b)", "y x\n") }
+#[test] fn pattern_in_expr_with_bare_vector_4() { run("let a, b = 'xy' ; _, a, b = a, 'z', b ; print(a, b)", "z y\n") }
+#[test] fn pattern_in_expr_with_bare_vector_5() { run("let a, b = 'xy' ; _, b, *_, a = a, 'z', b, 'w', 'g' ; print(a, b)", "g z\n") }
 #[test] fn function_repr() { run("(fn((_, *_), x) -> nil) . repr . print", "fn _((_, *_), x)\n") }
 #[test] fn function_repr_partial() { run("(fn((_, *_), x) -> nil)(1) . repr . print", "fn _((_, *_), x)\n") }
 #[test] fn function_closure_repr() { run("fn box(x) -> fn((_, *_), y) -> x ; box(nil) . repr . print", "fn _((_, *_), y)\n") }
@@ -1186,7 +1206,7 @@ fn run_with(opt: bool, text: &'static str, expected: &'static str) {
 #[test] fn late_bound_global() { run!("late_bound_global", "hello\n") }
 #[test] fn late_bound_global_assignment() { run!("late_bound_global_assignment", "hello\n") }
 #[test] fn late_bound_global_in_pattern() { run!("late_bound_global_in_pattern", "1 2\n") }
-#[test] fn late_bound_global_in_pattern_invalid() { run!("late_bound_global_in_pattern_invalid") }
-#[test] fn late_bound_global_invalid() { run!("late_bound_global_invalid") }
+#[test] fn late_bound_global_in_pattern_invalid() { run!("late_bound_global_in_pattern_invalid", "ValueError: 'y' was referenced but has not been declared yet\n  at: line 2 (<test>)\n  at: `fn foo()` (line 5)\n\n2 |     x, y = (1, 2)\n3 |                 ^\n") }
+#[test] fn late_bound_global_invalid() { run!("late_bound_global_invalid", "ValueError: 'bar' was referenced but has not been declared yet\n  at: line 3 (<test>)\n  at: `fn foo()` (line 6)\n\n3 |     bar . print\n4 |     ^^^\n") }
 #[test] fn map_loop_with_multiple_references() { run!("map_loop_with_multiple_references", "[1, 2, 3, 4]\n") }
 #[test] fn runtime_error_with_trace() { run!("runtime_error_with_trace") }
