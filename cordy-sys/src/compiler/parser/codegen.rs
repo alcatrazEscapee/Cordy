@@ -257,8 +257,11 @@ impl<'a> Parser<'a> {
                 self.push_store_lvalue(lvalue, loc, true);
             },
             Expr(_, ExprType::PatternAssignment(lvalue, rhs)) => {
+                let pattern_index = lvalue.emit_destructuring(self, false, true);
                 self.emit_expr(*rhs);
-                lvalue.emit_destructuring(self, false, true);
+                if let Some(pattern_index) = pattern_index {
+                    self.push(ExecPattern(pattern_index));
+                }
             }
             Expr(loc, ExprType::ArrayAssignment(array, index, rhs)) => {
                 self.emit_expr(*array);

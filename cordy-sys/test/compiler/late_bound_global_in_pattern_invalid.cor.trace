@@ -1,6 +1,0 @@
-ValueError: 'x' was referenced but has not been declared yet
-  at: line 2 (<test>)
-  at: `fn foo()` (line 5)
-
-2 |     x, y = (1, 2)
-3 |                 ^

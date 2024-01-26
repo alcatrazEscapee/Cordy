@@ -149,7 +149,8 @@ pub enum Opcode {
 pub enum StoreOp {
     Local(u32),
     Global(u32),
-    UpValue(u32)
+    UpValue(u32),
+    Array,
 }
 
 

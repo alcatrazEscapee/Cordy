@@ -449,7 +449,9 @@ impl<R : BufRead, W : Write, F : FunctionInterface> VirtualMachine<R, W, F> {
                 },
 
                 ExecPattern(index) => {
-                    let top = self.peek(0).clone();
+                    // Pop the value to be assigned, as the pattern may need to access stack variables under it (which it should then pop)
+                    // However, we keep this around and push it back after the pattern deconstruction, so this does not modify the top of the stack.
+                    let top = self.pop();
 
                     // Here, we would like to split the VM struct into a `& self.patterns` and a `&mut self.<everything else>`
                     // But, there's no mechanism for the compiler to understand that this is legal
@@ -459,6 +461,9 @@ impl<R : BufRead, W : Write, F : FunctionInterface> VirtualMachine<R, W, F> {
                         std::mem::transmute_copy::<&Pattern<StoreOp>, &Pattern<StoreOp>>(&&self.patterns[index as usize])
                     };
                     pattern.apply(self, &top)?;
+
+                    // Repair the top of the stack
+                    self.push(top);
                 },
 
                 // Push Operations
@@ -676,6 +681,12 @@ impl<R : BufRead, W : Write, F : FunctionInterface> VirtualMachine<R, W, F> {
             UpValue::Closed(_) => UpValue::Closed(value), // Mutate on the heap
         };
         (*upvalue).set(modified);
+    }
+
+    fn store_array(&mut self, value: ValuePtr) -> AnyResult {
+        let index = self.pop();
+        let array = self.pop();
+        core::set_index(&array, index, value)
     }
 
 
@@ -934,6 +945,7 @@ impl <R : BufRead, W : Write, F : FunctionInterface> VirtualInterface for Virtua
             StoreOp::Local(index) => self.store_local(index, value),
             StoreOp::Global(index) => self.store_global(index, value)?,
             StoreOp::UpValue(index) => self.store_upvalue(index, value),
+            StoreOp::Array => self.store_array(value)?,
         }
         Ok(())
     }

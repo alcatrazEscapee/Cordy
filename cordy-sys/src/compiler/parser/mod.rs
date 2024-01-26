@@ -2259,6 +2259,10 @@ mod tests {
     #[test] fn test_lvalue_assign_with_invalid_9() { run_err("_, (*map, _) = 3", "The left hand side is not a valid assignment target\n  at: line 1 (<test>)\n\n1 | _, (*map, _) = 3\n2 |              ^\n"); }
     #[test] fn test_lvalue_assign_with_invalid_10() { run_err("let b ; b, (_, *map, b) = 3", "The left hand side is not a valid assignment target\n  at: line 1 (<test>)\n\n1 | let b ; b, (_, *map, b) = 3\n2 |                         ^\n"); }
 
+    #[test] fn test_lvalue_assign_array_1() { run("let a, i ; _, (a[i], _), *_, _ = 3", "InitGlobal InitGlobal Nil Nil PushGlobal(0)->a PushGlobal(1)->i Int(3) ExecPattern(0) Pop Pop"); }
+    #[test] fn test_lvalue_assign_array_2() { run("let a, i ; (a[i]) = 3", "InitGlobal InitGlobal Nil Nil PushGlobal(0)->a PushGlobal(1)->i Int(3) ExecPattern(0) Pop Pop"); }
+    #[test] fn test_lvalue_assign_array_3() { run("let a, i ; (a[i], a) = 3", "InitGlobal InitGlobal Nil Nil PushGlobal(0)->a PushGlobal(1)->i Int(3) ExecPattern(0) Pop Pop"); }
+    #[test] fn test_lvalue_assign_array_4() { run("let a, i ; a, a[i][i], _ = 3", "InitGlobal InitGlobal Nil Nil PushGlobal(0)->a PushGlobal(1)->i OpIndex PushGlobal(1)->i Int(3) ExecPattern(0) Pop Pop"); }
 
     #[test] fn test_expression_function_with_name() { run_err("(fn hello() {})", "Expected a '(' token, got identifier 'hello' instead\n  at: line 1 (<test>)\n\n1 | (fn hello() {})\n2 |     ^^^^^\n"); }
     #[test] fn test_top_level_function_in_error_recovery_mode() { run_err("+ fn hello() {}", "Expected an expression terminal, got '+' token instead\n  at: line 1 (<test>)\n\n1 | + fn hello() {}\n2 | ^\n"); }
