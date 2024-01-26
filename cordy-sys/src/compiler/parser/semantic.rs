@@ -325,8 +325,13 @@ pub enum LValueReference {
     /// - The field is accessed via a `GetField(field_index)` or `SetField(field_index)`
     ThisField { upvalue: bool, index: u32, field_index: u32 },
 
-    /// `Array(array, index)` is the counterpart for an array assignment operation, i.e. `a[i] = b`
+    /// `Array(array, index)` is the counterpart for an array assignment operation, i.e. `a[i] = b`,
+    /// which is only present within pattern destructuring expressions.
     Array(Box<Expr>, Box<Expr>),
+
+    /// `Field(expr, field_index)` is the counterpart for a field assignment operation, i.e. `a->f = b`
+    /// which is only present within pattern destructuring expressions.
+    Field(Box<Expr>, u32),
 
     /// The below cases are _not assignable_ `LValueReference`s. These are used similarly in expressions, but forbid themselves from being used as an assignment target.
     /// `LocalThis` and `UpValueThis` are variants of `Local` and `UpValue` respectively, which are not assignable, as they represent `self`
@@ -387,6 +392,7 @@ impl LValue {
                 => Ok(LValue::VarEmpty),
 
             ExprType::Index(array, index) => Ok(LValue::Named(LValueReference::Array(array, index))),
+            ExprType::GetField(expr, field_index) => Ok(LValue::Named(LValueReference::Field(expr, field_index))),
 
             _ => Err(AssignmentTargetInvalid)
         }
@@ -571,32 +577,37 @@ impl LValue {
                 LValue::Empty => {
                     // Just advance the index
                     index += 1;
-                },
+                }
                 LValue::VarEmpty => {
                     // Advance the index by the missing elements (start indexing in reverse)
                     index = -(len as i64 - index);
-                },
+                }
                 LValue::Named(LValueReference::Array(array, array_index)) => {
                     parser.emit_optimized_expr(*array);
                     parser.emit_optimized_expr(*array_index);
                     pattern.push_array(index);
                     index += 1;
                 }
+                LValue::Named(LValueReference::Field(lhs, field_index)) => {
+                    parser.emit_optimized_expr(*lhs);
+                    pattern.push_field(index, field_index);
+                    index += 1;
+                }
                 LValue::Named(lvalue) => {
                     pattern.push_index(index, lvalue.as_store_op(parser, pattern_index));
                     index += 1;
-                },
+                }
                 LValue::VarNamed(lvalue) => {
                     let low = index;
                     index = -(len as i64 - index);
                     let high = index;
 
                     pattern.push_slice(low, high, lvalue.as_store_op(parser, pattern_index));
-                },
+                }
                 terms @ LValue::Terms(_) => {
                     pattern.push_pattern(index, terms.build_pattern(parser, pattern_index));
                     index += 1;
-                },
+                }
             }
         }
         pattern

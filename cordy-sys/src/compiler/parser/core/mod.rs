@@ -233,7 +233,7 @@ impl<'a> Parser<'a> {
             }
 
             LValueReference::Invalid => {},
-            LValueReference::Named(_) | LValueReference::This | LValueReference::Array(_, _) => panic!("Invalid load"),
+            LValueReference::Named(_) | LValueReference::This | LValueReference::Array(_, _) | LValueReference::Field(_, _) => panic!("Invalid load"),
         }
     }
 
@@ -273,7 +273,7 @@ impl<'a> Parser<'a> {
             }
 
             LValueReference::Invalid => {},
-            LValueReference::Named(_) | LValueReference::This | LValueReference::Array(_, _) => panic!("Invalid store"),
+            LValueReference::Named(_) | LValueReference::This | LValueReference::Array(_, _) | LValueReference::Field(_, _) => panic!("Invalid store"),
         }
     }
 

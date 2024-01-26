@@ -443,6 +443,12 @@ fn run_with(opt: bool, text: &'static str, expected: &'static str) {
 #[test] fn pattern_in_expr_with_bare_vector_3() { run("let a, b = 'xy' ; b, a = a, b ; print(a, b)", "y x\n") }
 #[test] fn pattern_in_expr_with_bare_vector_4() { run("let a, b = 'xy' ; _, a, b = a, 'z', b ; print(a, b)", "z y\n") }
 #[test] fn pattern_in_expr_with_bare_vector_5() { run("let a, b = 'xy' ; _, b, *_, a = a, 'z', b, 'w', 'g' ; print(a, b)", "g z\n") }
+#[test] fn pattern_in_expr_with_field_1() { run("struct A(a, b, c) ; let x = A(1, 2, 3) ; x->a, x->b = [5, 6] ; print x", "A(a=5, b=6, c=3)\n") }
+#[test] fn pattern_in_expr_with_field_2() { run("struct A(a, b, c) ; let x = A(1, 2, 3) ; x->a, _, x->c = [5, 6, 7] ; print x", "A(a=5, b=2, c=7)\n") }
+#[test] fn pattern_in_expr_with_field_3() { run("struct A(a, b, c) ; let x = A(1, 2, 3) ; _, x->a, *_, x->c = [5, 6, 7, 8, 9, 10] ; print x", "A(a=6, b=2, c=10)\n") }
+#[test] fn pattern_in_expr_with_field_and_raw_vector_1() { run("struct A(a, b, c) ; let x = A(1, 2, 3) ; x->a, x->b = x->b, x->a ; print x", "A(a=2, b=1, c=3)\n") }
+#[test] fn pattern_in_expr_with_field_and_raw_vector_2() { run("struct A(a, b, c) ; let x = A(1, 2, 3) ; x->a, x->c = x->b, x->a ; print x", "A(a=2, b=2, c=1)\n") }
+#[test] fn pattern_in_expr_with_field_and_array() { run("struct A(a, b, c) ; let x = A(1, 2, [3, 4]), y = 5 ; _, x->b, y, x->a, _, x->c[0] = [5, 6, 7, 8, 9, 10] ; print(x, y)", "A(a=8, b=6, c=[10, 4]) 7\n") }
 #[test] fn function_repr() { run("(fn((_, *_), x) -> nil) . repr . print", "fn _((_, *_), x)\n") }
 #[test] fn function_repr_partial() { run("(fn((_, *_), x) -> nil)(1) . repr . print", "fn _((_, *_), x)\n") }
 #[test] fn function_closure_repr() { run("fn box(x) -> fn((_, *_), y) -> x ; box(nil) . repr . print", "fn _((_, *_), y)\n") }

@@ -151,6 +151,7 @@ pub enum StoreOp {
     Global(u32),
     UpValue(u32),
     Array,
+    Field(u32),
 }
 
 
