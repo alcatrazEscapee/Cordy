@@ -550,45 +550,57 @@ Lists, vectors, and strings can also be _sliced_ like in Python. A slice takes t
 
 #### Pattern Matching
 
-Variable declarations support pattern matching / destructuring. This takes the form of mirroring the iterable-like structure, like Python.
+Values can be _destructured_ into multiple variables, like in Python or Rust:
 
 ```rust
-// multiple variables 'unpack' the list
-let x, y, z = [1, 2, 3]
-
-// using '*' indicates it should collect the remaining items
-let first, *rest = [1, 2, 3, 4]
-
-// '*' can be used in the middle too!
-let front, *middle, back = [1, 2, 3, 4]
-
-// Patterns can be nested using `(` parenthesis `)`
-let a, (b, c), d = [[1, 2], [3, 4], [5, 6]]
-
-// Any values which wish to be ignored can be replaced with `_`
-let _, _, x, _ = [1, 2, 3, 4]
+x, y, z = [1, 2, 3] // Assigns x = 1, y = 2, and z = 3
 ```
 
-Pattern matching is supported in:
-
-- Variable declarations (`let` statements)
-- Expressions, if all the variables are already declared
-- The variable declaration in a `for` loop
-- Function arguments (when surrounded with parenthesis)
-
+A _pattern lvalue_ is supported in the declaration of `let` statements and `for` statements. This consists of a comma-seperated sequence of _pattern elements_. Pattern elements may be named variables, `_` (which discards a value), or nested patterns with `(` parenthesis `)`. One element in a pattern may be prefixed with `*`, which indicates it collects all elements in the iterable over the length of the pattern. When assigning to a pattern, the iterable must be the same length (or longer, if any `*` terms are present) as the pattern.
 
 ```rust
-// In expressions
-let a, b, c
-
-a = b, c = (1, 2) // assigns a = (1, 2), b = 1, c = 2
-
-// In 'for' loops
-for x, y in 'hello' . enumerate {}
-
-// In function arguments
-fn flip((x, y)) -> (y, x)
+let x, y, z = [1, 2, 3] // Assigns x = 1, y = 2, and z = 3
+let first, *rest = [1, 2, 3, 4] // Assigns first = 1, rest = [2, 3, 4]
+let a, (b, c), d = [[1, 2], [3, 4], [5, 6]] // Assigns a = [1, 2], b = 3, c = 4, and d = [5, 6]
+let _, _, three, _ = [1, 2, 3, 4] // Assigns three = 3 and discards the other values
 ```
+
+Patterns can also be used in the declaration of function parameters. When used this way, they must be surrounded by an additional set of `(` parenthesis `)`. These are then treated as if the pattern destructuring happened in a `let` statement immediately within the function:
+
+```rust
+fn foo(a, (b, (c, _), _)) { ... }
+
+// The above function takes two arguments, and is identical to:
+fn foo(a, x) {
+    let b, (c, _), _ = x
+    ...
+}
+```
+
+Patterns can also be used in assignment statements within expressions. When used this way:
+
+- All variables used in the pattern must be a priori declared.
+- Trivially empty patterns are not allowed (Patterns that don't assign to any variables).
+- The left hand side of the pattern can also contain array access or field access expressions.
+
+```rust
+x, y = y, x // Swaps the values of x and y, by constructing the vector (x, y), and assigning each part to the opposite variable
+a[i], a[j] = a[j], a[i] // Swaps the values of `a` at index i and j.
+```
+
+Note that patterns are evaluated right-to-left. This doesn't matter unless the pattern and right hand side value reference the same mutable object(s):
+
+```rust
+let A = [1, 2, 3]
+
+// First,  A[0] = A[2], so A = [3, 2, 3]
+// Second, A[2] = A[1], so A = [3, 2, 2]
+// Third,  A[1] = A[0], so A = [3, 3, 2]
+A[1], A[2], A[0] = A
+
+print A // prints [3, 3, 2]
+```
+
 
 #### Decorators
 

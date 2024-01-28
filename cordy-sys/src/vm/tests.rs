@@ -402,27 +402,29 @@ fn run_with(opt: bool, text: &'static str, expected: &'static str) {
 #[test] fn pattern_in_let_with_complex_patterns_3() { run("let ((*x, _), (_, (*y, _), _), *_) = [[[1, 2, 3], [[1, 2, 3], [2, 3, 4], [3, 4, 5]], [[1], [2], [3]]]] ; [x, y] . print", "[[1, 2], [2, 3]]\n") }
 #[test] fn pattern_in_let_with_1x_nested_lvalue() { run("let (a) = [[1]] ; a . print", "1\n") }
 #[test] fn pattern_in_let_with_2x_nested_lvalue() { run("let ((a)) = [[[1]]] ; a . print", "1\n") }
-#[test] fn pattern_in_function() { run("fn f((a, b)) -> [b, a] . print ; f([1, 2])", "[2, 1]\n") }
-#[test] fn pattern_in_function_multiple() { run("fn f((a, b), (c, d)) -> [a, b, c, d] . print ; f([1, 2], [3, 4])", "[1, 2, 3, 4]\n") }
-#[test] fn pattern_in_function_before_args() { run("fn f((a, b, c), d, e) -> [a, b, c, d, e] . print ; f([1, 2, 3], 4, 5)", "[1, 2, 3, 4, 5]\n") }
-#[test] fn pattern_in_function_between_args() { run("fn f(a, (b, c, d), e) -> [a, b, c, d, e] . print ; f(1, [2, 3, 4], 5)", "[1, 2, 3, 4, 5]\n") }
-#[test] fn pattern_in_function_after_args() { run("fn f(a, b, (c, d, e)) -> [a, b, c, d, e] . print ; f(1, 2, [3, 4, 5])", "[1, 2, 3, 4, 5]\n") }
-#[test] fn pattern_in_function_with_empty_before_args() { run("fn f((_, b, _), d, e) -> [1, b, 3, d, e] . print ; f([1, 2, 3], 4, 5)", "[1, 2, 3, 4, 5]\n") }
-#[test] fn pattern_in_function_with_empty_between_args() { run("fn f(a, (_, _, d), e) -> [a, 2, 3, d, e] . print ; f(1, [2, 3, 4], 5)", "[1, 2, 3, 4, 5]\n") }
-#[test] fn pattern_in_function_with_empty_after_args() { run("fn f(a, b, (c, _, _)) -> [a, b, c, 4, 5] . print ; f(1, 2, [3, 4, 5])", "[1, 2, 3, 4, 5]\n") }
-#[test] fn pattern_in_function_with_var_before_args() { run("fn f((a, *_), d, e) -> [a, d, e] . print ; f([1, 2, 3], 4, 5)", "[1, 4, 5]\n") }
-#[test] fn pattern_in_function_with_var_between_args() { run("fn f(a, (*_, d), e) -> [a, d, e] . print ; f(1, [2, 3, 4], 5)", "[1, 4, 5]\n") }
-#[test] fn pattern_in_function_with_var_after_args() { run("fn f(a, b, (*c, _, _)) -> [a, b, c] . print ; f(1, 2, [3, 4, 5])", "[1, 2, [3]]\n") }
-#[test] fn pattern_in_function_with_1x_nested_lvalue() { run("fn f((a)) -> a ; f([1]) . print", "1\n") }
-#[test] fn pattern_in_function_with_2x_nested_lvalue() { run("fn f(((a))) -> a ; f([[1]]) . print", "1\n") }
-#[test] fn pattern_in_for_with_enumerate() { run("for i, x in 'hello' . enumerate { [i, x] . print }", "[0, 'h']\n[1, 'e']\n[2, 'l']\n[3, 'l']\n[4, 'o']\n")}
-#[test] fn pattern_in_for_with_empty() { run("for _ in range(5) { 'hello' . print }", "hello\nhello\nhello\nhello\nhello\n") }
-#[test] fn pattern_in_for_with_strings() { run("for a, *_, b in ['hello', 'world'] { print(a + b) }", "ho\nwd\n") }
-#[test] fn pattern_in_expression() { run("let x, y, z ; x, y, z = 'abc' ; print(x, y, z)", "a b c\n") }
-#[test] fn pattern_in_expression_nested() { run("let x, y, z ; z = x, y = (1, 2) ; print(x, y, z)", "1 2 (1, 2)\n") }
-#[test] fn pattern_in_expression_locals() { run("do { let x, y, z ; z = x, y = (1, 2) ; print(x, y, z) }", "1 2 (1, 2)\n") }
-#[test] fn pattern_in_expression_with_variadic() { run("let x, y ; *x, y = 'hello' ; print(x, y)", "hell o\n") }
-#[test] fn pattern_in_expression_with_nested_and_empty() { run("let x, y ; (x, *_), (*_, y) = ('hello', 'world') ; print(x, y)", "h d\n") }
+#[test] fn pattern_in_function_1() { run("fn f((a)) -> a ; f([1]) . print", "1\n") }
+#[test] fn pattern_in_function_2() { run("fn f((*a)) -> a ; f('hello') . print", "hello\n") }
+#[test] fn pattern_in_function_3() { run("fn f((*a, _, b)) -> [a, b] ; f('hello !') . print", "['hello', '!']\n") }
+#[test] fn pattern_in_function_4() { run("fn f((a, b)) -> [b, a] . print ; f([1, 2])", "[2, 1]\n") }
+#[test] fn pattern_in_function_5() { run("fn f((a, b), (c, d)) -> [a, b, c, d] . print ; f([1, 2], [3, 4])", "[1, 2, 3, 4]\n") }
+#[test] fn pattern_in_function_6() { run("fn f(((a))) -> a ; f([[1]]) . print", "1\n") }
+#[test] fn pattern_in_function_with_other_args_1() { run("fn f((a, b, c), d, e) -> [a, b, c, d, e] . print ; f([1, 2, 3], 4, 5)", "[1, 2, 3, 4, 5]\n") }
+#[test] fn pattern_in_function_with_other_args_2() { run("fn f(a, (b, c, d), e) -> [a, b, c, d, e] . print ; f(1, [2, 3, 4], 5)", "[1, 2, 3, 4, 5]\n") }
+#[test] fn pattern_in_function_with_other_args_3() { run("fn f(a, b, (c, d, e)) -> [a, b, c, d, e] . print ; f(1, 2, [3, 4, 5])", "[1, 2, 3, 4, 5]\n") }
+#[test] fn pattern_in_function_with_other_args_and_empty_1() { run("fn f((_, b, _), d, e) -> [1, b, 3, d, e] . print ; f([1, 2, 3], 4, 5)", "[1, 2, 3, 4, 5]\n") }
+#[test] fn pattern_in_function_with_other_args_and_empty_2() { run("fn f(a, (_, _, d), e) -> [a, 2, 3, d, e] . print ; f(1, [2, 3, 4], 5)", "[1, 2, 3, 4, 5]\n") }
+#[test] fn pattern_in_function_with_other_args_and_empty_3() { run("fn f(a, b, (c, _, _)) -> [a, b, c, 4, 5] . print ; f(1, 2, [3, 4, 5])", "[1, 2, 3, 4, 5]\n") }
+#[test] fn pattern_in_function_with_other_args_and_var_1() { run("fn f((a, *_), d, e) -> [a, d, e] . print ; f([1, 2, 3], 4, 5)", "[1, 4, 5]\n") }
+#[test] fn pattern_in_function_with_other_args_and_var_2() { run("fn f(a, (*_, d), e) -> [a, d, e] . print ; f(1, [2, 3, 4], 5)", "[1, 4, 5]\n") }
+#[test] fn pattern_in_function_with_other_args_and_var_3() { run("fn f(a, b, (*c, _, _)) -> [a, b, c] . print ; f(1, 2, [3, 4, 5])", "[1, 2, [3]]\n") }
+#[test] fn pattern_in_for_1() { run("for i, x in 'hello' . enumerate { [i, x] . print }", "[0, 'h']\n[1, 'e']\n[2, 'l']\n[3, 'l']\n[4, 'o']\n")}
+#[test] fn pattern_in_for_2() { run("for _ in range(5) { 'hello' . print }", "hello\nhello\nhello\nhello\nhello\n") }
+#[test] fn pattern_in_for_3() { run("for a, *_, b in ['hello', 'world'] { print(a + b) }", "ho\nwd\n") }
+#[test] fn pattern_in_expression_1() { run("let x, y, z ; x, y, z = 'abc' ; print(x, y, z)", "a b c\n") }
+#[test] fn pattern_in_expression_2() { run("let x, y, z ; z = x, y = (1, 2) ; print(x, y, z)", "1 2 (1, 2)\n") }
+#[test] fn pattern_in_expression_3() { run("do { let x, y, z ; z = x, y = (1, 2) ; print(x, y, z) }", "1 2 (1, 2)\n") }
+#[test] fn pattern_in_expression_4() { run("let x, y ; *x, y = 'hello' ; print(x, y)", "hell o\n") }
+#[test] fn pattern_in_expression_5() { run("let x, y ; (x, *_), (*_, y) = ('hello', 'world') ; print(x, y)", "h d\n") }
 #[test] fn pattern_in_expr_with_array_1() { run("let a = [1, 2] ; a[0], a[1] = 'ab' ; a . print", "['a', 'b']\n") }
 #[test] fn pattern_in_expr_with_array_2() { run("let a = [1, 2, 3] ; a[0], a[-1] = 'ab' ; a . print", "['a', 2, 'b']\n") }
 #[test] fn pattern_in_expr_with_array_3() { run("let a = [1, 2] ; a[0], _, a[-1] = 'abc' ; a . print", "['a', 'c']\n") }
