@@ -4,6 +4,7 @@ use crate::vm::{LiteralType, Opcode};
 use crate::vm::operator::{BinaryOp, CompareOp};
 use crate::compiler::{ParserErrorType, ScanToken};
 use crate::compiler::parser::core::{BranchType, ForwardBlockId};
+use crate::compiler::parser::semantic::LValue;
 
 
 use Opcode::{*};
@@ -257,11 +258,9 @@ impl<'a> Parser<'a> {
                 self.push_store_lvalue(lvalue, loc, true);
             },
             Expr(_, ExprType::PatternAssignment(lvalue, rhs)) => {
-                let pattern_index = lvalue.emit_destructuring(self, false, true);
+                let pattern_index = LValue::emit_expression_destructuring(lvalue, self);
                 self.emit_expr(*rhs);
-                if let Some(pattern_index) = pattern_index {
-                    self.push(ExecPattern(pattern_index));
-                }
+                self.push(ExecPattern(pattern_index));
             }
             Expr(loc, ExprType::ArrayAssignment(array, index, rhs)) => {
                 self.emit_expr(*array);

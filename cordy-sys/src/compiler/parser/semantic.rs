@@ -361,6 +361,7 @@ pub enum ReferenceType {
 
 impl LValue {
 
+    /// Converts a parsed expression, which may be arbitrary, into a possible `LValue`, or parser error.
     pub fn from(expr: ExprType, top: bool) -> Result<LValue, ParserErrorType> {
         match expr {
             ExprType::Empty => Ok(LValue::Empty),
@@ -426,7 +427,13 @@ impl LValue {
         }
     }
 
-    fn into_terms(self) -> Vec<LValue> { match self { LValue::Terms(it) => it, _ => panic!("Expected LValue::Terms") } }
+    /// Returns this `LValue::Terms` as a `Vec<LValue>`. Panics if the `LValue` is not a `LValue::Terms`
+    pub fn into_terms(self) -> Vec<LValue> {
+        match self {
+            LValue::Terms(it) => it,
+            _ => panic!("Expected LValue::Terms")
+        }
+    }
 
     /// Converts this `LValue` into a code-representation string.
     pub fn to_code_str(&self) -> String {
@@ -520,33 +527,22 @@ impl LValue {
         }
     }
 
-    /// Emits destructuring code for this `LValue`. Assumes the `RValue` is present on top of the stack, and all variables are resolved. This performs
-    /// several different functions depending on the parameters:
+    /// Emits destructuring code for this `LValue`. Assumes the value to be used is present on top of the stack, and all variables are resolved.
+    /// This will emit code to assign to the given `LValue`, and pop the assigned value off the stack.
     ///
-    /// 1. `in_place` indicates this destructuring is to be done in-place, i.e. the top of the stack is the target of a single named local variable.
-    ///    This is used as an optimization for `let <name> = <expr>` statements, where the construction of `<expr>` does not need any destructuring,
-    ///    as it will already be in the correct lvt slot.
-    ///
-    /// 2. `in_expr` indicates this destructuring is part of an expression, and the last `Pop` token won't be emitted. In this case, the top of the stack
-    ///    will remain as the variable to be destructured.
-    ///
-    ///    This also is used where the destructuring may contain stack-modifying operations (such as `Array`), as it will avoid emitting any `ExecPattern` opcodes,
-    ///    as it is assuming the stack is not yet set up with the value to be destructured. Instead, it will return the `pattern_index` for the caller to populate
-    ///    the top of the stack, and then emit `ExecPattern(pattern_index)` accordingly.
-    pub(super) fn emit_destructuring(self, parser: &mut Parser, in_place: bool, in_expression: bool) -> Option<u32> {
+    /// If `in_place` is `true`, this indicates this destructuring is to be done in-place, i.e. the top of the stack is the target of a single
+    /// named local variable. This is used as an optimization for `let <name> = <expr>` statements, where the construction of `<expr>` does not
+    /// need any destructuring, as it will already be in the correct lvt slot.
+    pub(super) fn emit_destructuring(self, parser: &mut Parser, in_place: bool) -> Option<u32> {
         match self {
             LValue::Empty | LValue::VarEmpty => {
-                if !in_expression {
-                    parser.push(Pop)
-                }
+                parser.push(Pop);
                 None
-            },
+            }
             LValue::Named(local) | LValue::VarNamed(local) => {
                 if !in_place {
                     parser.push_store_lvalue(local, parser.prev_location(), false);
-                    if !in_expression {
-                        parser.push(Pop);
-                    }
+                    parser.push(Pop);
                 }
                 None
             }
@@ -555,17 +551,29 @@ impl LValue {
                 let pattern = self.build_pattern(parser, index);
                 let pattern_id = parser.declare_pattern(pattern);
 
-                if !in_expression {
-                    parser.push(ExecPattern(pattern_id));
-                    parser.push(Pop); // Push the final pop
-                }
+                parser.push(ExecPattern(pattern_id));
+                parser.push(Pop); // Push the final pop
                 Some(pattern_id)
-            },
+            }
         }
     }
 
+    /// Similar to `self.emit_destructuring()`, but for a special case where:
+    ///
+    /// 1. We know that the provided pattern is a `LValue::Terms`
+    /// 2. The output will be handled as part of codegen, and thus does not need to emit code
+    /// 3. This always returns the pattern index
+    pub(super) fn emit_expression_destructuring(terms: Vec<LValue>, parser: &mut Parser) -> u32 {
+        let index = parser.patterns.len();
+        let pattern = LValue::do_build_pattern(terms, parser, index);
+        parser.declare_pattern(pattern)
+    }
+
     fn build_pattern(self, parser: &mut Parser, pattern_index: usize) -> Pattern<ParserStoreOp> {
-        let terms = self.into_terms();
+        LValue::do_build_pattern(self.into_terms(), parser, pattern_index)
+    }
+
+    fn do_build_pattern(terms: Vec<LValue>, parser: &mut Parser, pattern_index: usize) -> Pattern<ParserStoreOp> {
         let is_variadic = terms.iter().any(|t| t.is_variadic());
         let len = if is_variadic { terms.len() - 1 } else { terms.len() };
 

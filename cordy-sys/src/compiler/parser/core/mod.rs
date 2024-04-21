@@ -208,6 +208,11 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Pushes the opcode(s) required to load the given `lvalue` onto the stack. This handles a couple of special cases:
+    ///
+    /// - `Invalid` is a no-op, and considered that an error has already been raised
+    /// - `LateBinding`s are updated with a `Load` reference type, and the opcode location stored
+    /// - `Named`, `This`, `Array`, and `Field` are considered illegal lvalue types and will panic
     pub fn push_load_lvalue(&mut self, loc: Location, lvalue: LValueReference) {
         match lvalue {
             LValueReference::Local(index) |
@@ -238,14 +243,12 @@ impl<'a> Parser<'a> {
     }
 
     pub fn push_store_lvalue_prefix(&mut self, lvalue: &LValueReference, loc: Location) {
-        match lvalue {
-            LValueReference::ThisField { upvalue, index, .. } => {
-                self.push_at(if *upvalue { PushUpValue(*index) } else { PushLocal(*index) }, loc);
-            },
-            _ => {}, // No-op
+        if let LValueReference::ThisField { upvalue, index, .. } = lvalue {
+            self.push_at(if *upvalue { PushUpValue(*index) } else { PushLocal(*index) }, loc);
         }
     }
 
+    /// Pushes the opcode(s) required to store the given `lvalue`
     pub fn push_store_lvalue(&mut self, lvalue: LValueReference, loc: Location, prefix: bool) {
         match lvalue {
             LValueReference::Local(index) => self.push_at(StoreLocal(index, false), loc),
