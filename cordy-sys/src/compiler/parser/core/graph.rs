@@ -122,7 +122,7 @@ impl<'a> Parser<'a> {
     /// Inserts the provided instruction at the `OpcodeId`, and shifts all other code forward.
     ///
     /// **Implementation Note:** This does not take `&mut self` to allow the flexibility of partial borrows.
-    pub fn do_insert(at: OpcodeId, loc: Location, opcode: Opcode, functions: &mut Vec<ParserFunctionImpl>) {
+    pub fn do_insert(at: OpcodeId, loc: Location, opcode: Opcode, functions: &mut [ParserFunctionImpl]) {
         functions[at.function_id].code.blocks[at.code_id.block_id].insert(at.code_id.opcode_id, loc, opcode);
     }
 }

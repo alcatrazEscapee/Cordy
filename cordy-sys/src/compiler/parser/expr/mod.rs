@@ -120,7 +120,7 @@ pub enum ExprType {
     VarLValue(LValueReference),
 
     Assignment(LValueReference, ExprPtr),
-    PatternAssignment(parser::LValue, ExprPtr),
+    PatternAssignment(Vec<parser::LValue>, ExprPtr),
     ArrayAssignment(ExprPtr, ExprPtr, ExprPtr),
 
     /// Note that `BinaryOp::NotEqual` is used to indicate this is a `Compose()` operation under the hood
@@ -281,24 +281,32 @@ impl Expr {
     pub fn unroll(self, loc: Location) -> Expr { Unroll(Box::new(self)).at(loc) }
 
     pub fn assign(self, loc: Location, rhs: Expr) -> Result<Expr, ParserErrorType> {
-        match self {
-            Expr(_, LValue(lvalue)) if lvalue.is_assignable() => Ok(Assignment(lvalue, Box::new(rhs)).at(loc)),
-            Expr(_, Index(array, index)) => Ok(ArrayAssignment(array, index, Box::new(rhs)).at(loc)),
-            Expr(_, GetField(lhs, field_index)) => Ok(SetField(lhs, field_index, Box::new(rhs)).at(loc)),
-            Expr(_, Empty | VarEmpty) => Err(AssignmentTargetTrivialEmptyLValue),
+        let Expr(_, expr) = self;
+        let lvalue = parser::LValue::from(expr, true)?;
 
-            Expr(loc, expr) => match parser::LValue::from(expr, true) {
-                Ok(lvalue) => {
-                    if lvalue.is_trivially_empty() {
-                        return Err(AssignmentTargetTrivialEmptyLValue)
-                    }
-                    if lvalue.is_named_variadic() {
-                        return Err(AssignmentTargetInvalid)
-                    }
-                    Ok(PatternAssignment(lvalue, Box::new(rhs)).at(loc))
-                },
-                Err(e) => Err(e),
+        // Handle error cases:
+        // - Empty patterns (including raw `_` and `*_`, as well as empty nested patterns)
+        // - `*<name>` pattern
+        if lvalue.is_trivially_empty() {
+            return Err(AssignmentTargetTrivialEmptyLValue)
+        }
+        if lvalue.is_named_variadic() {
+            return Err(AssignmentTargetInvalid)
+        }
+
+        // `LValue` should now be a `Terms` or a `Named`
+        // Handle the top-level `Named`, which must be one of a few variants
+        if let parser::LValue::Named(lvalue) = lvalue {
+            match lvalue {
+                lvalue if lvalue.is_assignable() => Ok(Assignment(lvalue, Box::new(rhs)).at(loc)),
+                LValueReference::Field(lhs, field_index) => Ok(SetField(lhs, field_index, Box::new(rhs)).at(loc)),
+                LValueReference::Array(array, index) => Ok(ArrayAssignment(array, index, Box::new(rhs)).at(loc)),
+                LValueReference::Invalid => Ok(Expr::nil()),
+                _ => panic!("Illegal LValueReference obtained from LValue::parse()")
             }
+        } else {
+            // `lvalue` must be a `Terms`
+            Ok(PatternAssignment(lvalue.into_terms(), Box::new(rhs)).at(loc))
         }
     }
 

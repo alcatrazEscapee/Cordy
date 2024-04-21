@@ -67,7 +67,7 @@ impl BitOrAssign for Location {
 
 impl Debug for Location {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Location[{}, {}]", self.start, self.start + self.width as usize)
+        write!(f, "Location[{}, {}]", self.start(), self.end())
     }
 }
 

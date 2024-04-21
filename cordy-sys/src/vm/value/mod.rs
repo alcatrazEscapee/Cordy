@@ -227,7 +227,7 @@ impl ValuePtr {
             Type::Complex => Complex::to_repr_str(self.as_complex()),
             Type::Rational => if_cfg!(
                 "rational",
-                Rational::to_repr_str(&self.as_rational()),
+                Rational::to_repr_str(self.as_rational()),
                 Cow::from("")
             ),
             Type::ShortStr | Type::LongStr => {
@@ -770,7 +770,7 @@ impl StructTypeImpl {
     }
 
     /// Returns the method associated with this constructor / owner type.
-    fn get_method(&self, method_offset: usize, constants: &Vec<ValuePtr>) -> ValuePtr {
+    fn get_method(&self, method_offset: usize, constants: &[ValuePtr]) -> ValuePtr {
         constants[self.methods[method_offset].function_id() as usize].clone()
     }
 

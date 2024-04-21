@@ -408,7 +408,7 @@ impl Parser<'_> {
         self.end_module(u32::MAX, constructor_type);
     }
 
-    fn parse_native_module_function(&mut self, constructor_type: u32, module_name: &String) {
+    fn parse_native_module_function(&mut self, constructor_type: u32, module_name: &str) {
         let loc_start = self.prev_location();
         let method_name = self.expect_identifier(ExpectedFunctionNameAfterFn);
 
@@ -418,7 +418,7 @@ impl Parser<'_> {
         self.declare_method(constructor_type, method_name.clone(), loc, &params);
 
         let function_id = self.functions.len() - 1;
-        let handle_id = self.declare_native(module_name.clone(), method_name, params.args.len());
+        let handle_id = self.declare_native(module_name.to_owned(), method_name, params.args.len());
 
         self.locals.push(Locals::new(Some(function_id)));
         self.function_depth += 1;
@@ -527,23 +527,20 @@ impl Parser<'_> {
 
         // `self` may be the first parameter provided, and only the first
         if allow_self {
-            match self.peek() {
-                Some(KeywordSelf) => {
-                    self.advance(); // Consume `self`
+            if let Some(KeywordSelf) = self.peek() {
+                self.advance(); // Consume `self`
 
-                    // This counts as a real function for argument purposes
-                    // It only is used separately when the field access is made through an instance
-                    params.instance = true;
-                    params.args.push(LValue::Named(LValueReference::This));
+                // This counts as a real function for argument purposes
+                // It only is used separately when the field access is made through an instance
+                params.instance = true;
+                params.args.push(LValue::Named(LValueReference::This));
 
-                    // Handle `( self )` and `( self , )` case
-                    if self.parse_optional_trailing_comma(CloseParen, ExpectedCommaOrEndOfParameters) {
-                        self.advance(); // Consume `)`
-                        return params;
-                    }
-                },
-                _ => {}
-            };
+                // Handle `( self )` and `( self , )` case
+                if self.parse_optional_trailing_comma(CloseParen, ExpectedCommaOrEndOfParameters) {
+                    self.advance(); // Consume `)`
+                    return params;
+                }
+            }
         }
 
         loop {
@@ -652,7 +649,7 @@ impl Parser<'_> {
         for (arg, synthetic) in args_with_synthetics {
             if let Some(local) = synthetic {
                 self.push(PushLocal(local as u32)); // Push the iterable to be destructured onto the stack
-                arg.emit_destructuring(self, false, false); // Emit destructuring
+                arg.emit_destructuring(self, false); // Emit destructuring
             }
         }
 
@@ -902,7 +899,7 @@ impl Parser<'_> {
         let test = self.branch_forward();
 
         // Initialize locals
-        lvalue.emit_destructuring(self, false, false);
+        lvalue.emit_destructuring(self, false);
 
         // Parse the body of the loop, and emit the delayed pop - the stack is restored to the same state as the top of the loop.
         // So, we jump to the top of the loop, where we test/increment
@@ -1040,7 +1037,7 @@ impl Parser<'_> {
                             lvalue.emit_default_values(self, true); // Then emit `Nil`
                             self.parse_expression_restricted(); // So the expression ends up on top of the stack
                             lvalue.initialize_locals(self); // Initialize them, before we emit store opcodes, but after the expression is parsed.
-                            lvalue.emit_destructuring(self, true, false); // Emit destructuring to assign to all locals
+                            lvalue.emit_destructuring(self, true); // Emit destructuring to assign to all locals
                         },
                         _ => {
                             // `let` <lvalue>
