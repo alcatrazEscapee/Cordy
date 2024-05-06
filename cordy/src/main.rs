@@ -196,7 +196,7 @@ fn run_vm(compiled: CompileResult, links: HashMap<String, String, FxBuildHasher>
 
 fn run_repl(options: Options) -> Result<(), String> {
     println!("Welcome to Cordy v{}! (exit with 'exit' or Ctrl-C)", SYS_VERSION);
-    repl::run(EditorRepl { editor: Editor::new().unwrap() }, io::stdout(), ExternalLibraryInterface::new(options.links), false)
+    repl::run(EditorRepl { editor: Editor::new().unwrap() }, io::stdout(), ExternalLibraryInterface::new(options.links))
 }
 
 

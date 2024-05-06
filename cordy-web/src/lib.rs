@@ -8,6 +8,7 @@ use cordy_sys::{ScanTokenType, syntax, SYS_VERSION};
 use cordy_sys::compiler::FunctionLibrary;
 use cordy_sys::repl::{ReadResult, Repl, RunResult};
 use cordy_sys::syntax::{BlockingFormatter, Formatter};
+use cordy_sys::util::SharedWrite;
 use cordy_sys::vm::{FunctionInterface, IntoValue, ValuePtr, ValueResult};
 
 
@@ -66,10 +67,9 @@ pub fn exec(input: String) -> RunResultJs {
         RunResult::Error(e) => panic!("No read error, so should never receive a run error, {}", e)
     }
 
-    let mut buffer = manager.writer.0.borrow_mut();
     let mut lines = unsafe {
         // Safe, because we know that the only thing that can be written via the VM is UTF-8
-        String::from_utf8_unchecked(buffer.drain(..).collect())
+        String::from_utf8_unchecked(manager.writer.inner().borrow_mut().drain(..).collect())
     };
 
     // Strip the trailing newline from the output, because of how the terminal renders, it will always expect to be there
@@ -158,15 +158,15 @@ impl FunctionInterface for JsInterface {
 
 
 struct Manager {
-    repl: Repl<SharedBufWriter, JsInterface>,
-    writer: SharedBufWriter
+    repl: Repl<SharedWrite, JsInterface>,
+    writer: SharedWrite
 }
 
 impl Manager {
     fn new() -> Manager {
-        let writer: SharedBufWriter = SharedBufWriter(Rc::new(RefCell::new(Vec::new())));
+        let writer: SharedWrite = SharedWrite::new();
         Manager {
-            repl: Repl::new(writer.clone(), JsInterface, false),
+            repl: Repl::new(writer.clone(), JsInterface),
             writer,
         }
     }
