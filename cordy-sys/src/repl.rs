@@ -18,9 +18,6 @@ pub trait Reader {
 }
 
 pub struct Repl<W: Write, F : FunctionInterface> {
-    /// If `repeat_input` is true, everything written to input will be written directly back to output via the VM's `println` functions
-    /// This is used for testing purposes, as the `writer` must be given solely to the VM for output purposes.
-    repeat_input: bool,
     continuation: bool,
     locals: Vec<Locals>,
     vm: VirtualMachine<Noop, W, F>
@@ -46,8 +43,8 @@ pub enum RunResult {
 }
 
 /// Create a new REPL, and invoke it in a loop with the given `Reader` until it is exhausted.
-pub fn run<R : Reader, W: Write, F: FunctionInterface>(mut reader: R, writer: W, ffi: F, repeat_input: bool) -> Result<(), String> {
-    let mut repl: Repl<W, F> = Repl::new(writer, ffi, repeat_input);
+pub fn run<R : Reader, W: Write, F: FunctionInterface>(mut reader: R, writer: W, ffi: F) -> Result<(), String> {
+    let mut repl: Repl<W, F> = Repl::new(writer, ffi);
     loop {
         let read = reader.read(repl.prompt());
         match repl.run(read) {
@@ -60,12 +57,11 @@ pub fn run<R : Reader, W: Write, F: FunctionInterface>(mut reader: R, writer: W,
 
 impl<W: Write, F : FunctionInterface> Repl<W, F> {
 
-    pub fn new(writer: W, ffi: F, repeat_input: bool) -> Repl<W, F> {
+    pub fn new(writer: W, ffi: F) -> Repl<W, F> {
         let compile = compiler::default();
         let view = SourceView::new(String::from("<stdin>"), String::new());
 
         Repl {
-            repeat_input,
             continuation: false,
             locals: Locals::empty(),
             vm: VirtualMachine::new(compile, view, Noop, writer, ffi)
@@ -82,13 +78,7 @@ impl<W: Write, F : FunctionInterface> Repl<W, F> {
 
     pub fn run(&mut self, input: ReadResult) -> RunResult {
         let line: String = match input {
-            ReadResult::Ok(line) => {
-                if self.repeat_input {
-                    self.vm.print(self.prompt());
-                    self.vm.println(line.as_str())
-                }
-                line
-            },
+            ReadResult::Ok(line) => line,
             ReadResult::Error(e) => return RunResult::Error(e),
             ReadResult::Exit => return RunResult::Exit,
         };
@@ -133,18 +123,10 @@ impl<W: Write, F : FunctionInterface> Repl<W, F> {
 
 #[cfg(test)]
 mod tests {
+    use std::io::{Write};
     use crate::{repl, util};
     use crate::repl::{Reader, ReadResult};
-    use crate::util::Noop;
-
-    impl Reader for Vec<String> {
-        fn read(self: &mut Self, _: &'static str) -> ReadResult {
-            match self.pop() {
-                None => ReadResult::Exit,
-                Some(line) => ReadResult::Ok(line)
-            }
-        }
-    }
+    use crate::util::{Noop, SharedWrite};
 
     #[test] fn test_hello_world() { run("\
 let text = 'hello world'
@@ -291,15 +273,32 @@ string
 '\\n\\n\\n'
 ")}
 
+    struct MockReader(Vec<String>, SharedWrite);
+
+    impl Reader for MockReader {
+        fn read(self: &mut Self, prompt: &'static str) -> ReadResult {
+            match self.0.pop() {
+                None => ReadResult::Exit,
+                Some(line) => {
+                    writeln!(self.1, "{}{}", prompt, line.as_str()).unwrap();
+                    ReadResult::Ok(line)
+                }
+            }
+        }
+    }
+
     fn run(inputs: &'static str, outputs: &'static str) {
-        let repl: Vec<String> = inputs.lines()
-            .rev() // rev() because we pop from the end, but list them sequentially.
-            .map(String::from)
-            .collect();
-        let mut buf: Vec<u8> = Vec::new();
-        let result = repl::run(repl, &mut buf, Noop, true);
+        let writer: SharedWrite = SharedWrite::new();
+        let reader: MockReader = MockReader(
+            inputs.lines()
+                .rev() // rev() because we pop from the end, but list them sequentially.
+                .map(String::from)
+                .collect(),
+            writer.clone()
+        );
+        let result = repl::run(reader, writer.clone(), Noop);
 
         assert!(result.is_ok());
-        util::assert_eq(String::from_utf8(buf).unwrap(), String::from(outputs));
+        util::assert_eq(String::from_utf8(writer.inner().borrow().clone()).unwrap(), String::from(outputs));
     }
 }
