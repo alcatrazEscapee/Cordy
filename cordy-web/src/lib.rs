@@ -88,28 +88,6 @@ static mut INSTANCE: Option<Manager> = None;
 /// Note that this is **not** safe, since we could just create multiple locks, but it's sane enough for our use cases.
 struct Lock;
 
-/// A `Write` implementor that can be shared between the VM, and then drained/cleared when we want to pass on the written output to JS
-/// The VM needs to own an instance, therefor we need `Rc<RefCell<>>` for interior mutability. The `Manager` owns a second instance it uses to move
-/// the written text to the output.
-#[derive(Debug, Clone)]
-struct SharedBufWriter(Rc<RefCell<Vec<u8>>>);
-
-impl Write for SharedBufWriter {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.0.borrow_mut().extend_from_slice(buf);
-        Ok(buf.len())
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
-    }
-
-    fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
-        self.0.borrow_mut().extend_from_slice(buf);
-        Ok(())
-    }
-}
-
 
 struct TerminalFormatter(String);
 
